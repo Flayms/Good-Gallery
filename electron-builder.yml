@@ -1,0 +1,15 @@
+appId: com.goodgallery.app
+productName: Good Gallery
+directories:
+  buildResources: build
+  output: release/${version}
+files:
+  - out/**
+  - package.json
+win:
+  target: nsis
+  executableName: good-gallery
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${name}-${version}-setup.${ext}

@@ -1,0 +1,7 @@
+nodeLinker: hoisted
+
+allowBuilds:
+  esbuild: true
+  '@biomejs/biome': true
+  '@tailwindcss/oxide': true
+  electron-winstaller: false
