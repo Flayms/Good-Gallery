@@ -6,6 +6,12 @@ directories:
 files:
   - out/**
   - package.json
+extraResources:
+  - from: drizzle
+    to: migrations
+    filter: ['**/*']
+# Native deps ship N-API prebuilds; no Electron ABI rebuild needed.
+npmRebuild: false
 win:
   target: nsis
   executableName: good-gallery

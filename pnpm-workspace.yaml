@@ -5,3 +5,5 @@ allowBuilds:
   '@biomejs/biome': true
   '@tailwindcss/oxide': true
   electron-winstaller: false
+  # Ships N-API prebuilds; the implicit node-gyp build would need Visual Studio.
+  better-sqlite3: false
