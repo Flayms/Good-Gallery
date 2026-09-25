@@ -111,7 +111,13 @@ Notes from implementation:
  1. TanStack Router, file-based routes, **hash history**: `/`, `/settings`, `/media/$id` (viewer overlay).
  2. Search state in Zod-validated URL search params (tags include/exclude, root, kind, sort).
  3. `useInfiniteQuery` via `trpc.media.search.infiniteQueryOptions`, cursor pagination (~200/page).
- 4. Virtualized masonry: `useVirtualizer` with `lanes`, heights from stored width/height, thumbhash placeholder → fade-in, zoom slider controls column count.
+20. Virtualized masonry (`components/masonry-grid.tsx`, no masonry library): `@tanstack/react-virtual` `useVirtualizer` with `lanes` = column count (shortest-lane placement).
+    - Heights computed up front from stored width/height (`lib/masonry.ts`) → no DOM measuring; aspect clamped to 0.3–3, square fallback for unknown dimensions.
+    - Container width via `ResizeObserver`; whole-pixel column width; absolute positioning via `translate(lane * (colWidth + gap), start)`.
+    - Zoom slider sets column count; on zoom/resize `measure()` + `scrollToIndex(firstVisible)` to keep scroll position.
+    - Infinite loading: `fetchNextPage()` when the last rendered index nears `items.length`.
+    - Pick 400w vs 800w thumb by `colWidth * devicePixelRatio`; thumbhash background → CSS opacity fade-in on `onLoad` (no `motion` per tile).
+    - Alternatives rejected: CSS columns / `react-masonry-css` (not virtualized, column-major order), CSS `grid-lanes` (not virtualized), `masonic` (unmaintained). Possible later second view mode: justified rows (exact chronological order).
  5. Layout: shadcn Sidebar (libraries, folders, popular tags), top search bar, Skeleton, Sonner toasts, indexer progress, offline badges.
 
 ### Phase 5 – Tag search

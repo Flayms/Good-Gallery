@@ -1,0 +1,55 @@
+# AGENTS.md
+
+* See [docs/PLAN.md](docs/PLAN.md) for scope, tech stack, architecture, phases and per-phase implementation notes.
+
+The role of this file is to describe common mistakes and confusion points that agents might encounter as they work in this project. If you ever encounter something in this project that surprises you, please alert the developer working with you and indicate that this is the case in the AGENTS.md file to help prevent future agents from having the same issue.
+
+## General
+
+Be brief in your responses.
+
+## Planning Phase Guidelines
+
+> [!NOTE]
+> These are no absolutes, just guidelines where you need to decide if it's appropriate to apply them based on the specific situation.
+
+* **Follow SOLID principles:** Single Responsibility, Open/Closed, Liskov Substitution, Interface Segregation, Dependency Inversion.
+* Decide when it's appropriate to apply DRY, YAGNI and KISS.
+* Follow the tech stack instead of rolling your own implementations.
+* Keep [docs/PLAN.md](docs/PLAN.md) up to date when finishing a phase or deviating from the plan.
+
+## Linting
+
+After applying your changes, you **MUST** run the following commands, fix errors even if they are pre-existing:
+1. `pnpm format` - auto format & lint (Biome), resolve remaining issues manually.
+2. `pnpm typecheck` - check for type errors (TS 7, node + web projects) and fix them.
+3. `pnpm test` - decide if test errors are caused by logic changes or test issues and fix either the logic or the tests.
+
+When resolving linting / typechecking errors, do not go the lazy route that makes the linter happy. Instead explain why the linter is complaining and fix the underlying issue. Prefer type guards, early returns and descriptive errors over type casts and generics fallbacks. If it's not that easy to fix, explain the issue and your proposed solution before implementing it.
+
+## Dependency Placement (`dependencies` vs `devDependencies`)
+
+This is an **Electron app** built with `electron-vite`, which bundles renderer/preload and **externalizes `dependencies`** in the main process.
+
+* `dependencies` - only packages loaded at runtime by main / indexer: native addons (`better-sqlite3`, later `sharp`, `exiftool-vendored`, `ffmpeg-static`) and main-process libs (`@trpc/server`, `drizzle-orm`, `zod`, `superjson`).
+* `devDependencies` - everything else (React, UI libs, tooling). `shadcn add` puts renderer deps into `dependencies` - move them.
+
+Only add a package if you import it directly; don't list transitive deps.
+
+## Test Guidelines
+
+* Test behaviour, not implementation.
+* Follow the test pyramid.
+* Tests live next to the code as `*.test.ts(x)`.
+
+## Known Pitfalls
+
+* **pnpm `minimumReleaseAge`** blocks very new versions (and the non-TTY prompt fails). Pick an older patch, don't bypass it.
+* **pnpm settings** live in `pnpm-workspace.yaml`. pnpm adds placeholder `"set this to true or false"` entries on ignored builds - remove duplicates.
+* **Native builds:** `better-sqlite3` 13 uses N-API prebuilds; `allowBuilds` is false because node-gyp / Visual Studio isn't installed. Don't add `electron-builder install-app-deps`.
+* **`postinstall` runs `install-electron`** - electron-vite needs `node_modules/electron/path.txt`.
+* **Preload must be CJS** (`index.cjs`) for the sandbox; main is ESM.
+* **drizzle-kit breaks expression indexes** - use generated columns instead. Generate migrations with `pnpm db:generate`, don't hand-write them.
+* **shadcn:** the framework isn't auto-detected; `pnpm dlx shadcn@latest add <comp>` works with the existing `components.json`.
+* **Biome:** `biome migrate` may set the linter preset to `"none"` - keep `"recommended"`.
+* **Runtime verification of the renderer:** `pnpm dev -- --remote-debugging-port=9333`, then use CDP `Runtime.evaluate` from a temporary `.mjs` script (inline `node -e` quoting breaks in pwsh).
