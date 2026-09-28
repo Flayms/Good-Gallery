@@ -37,7 +37,7 @@ const STAT_BATCH = 256
  */
 export class ThumbCache {
   readonly dir: string
-  readonly #maxBytes: number
+  #maxBytes: number
   #bytes = 0
   #evicting: Promise<void> | undefined
   /** Resolves once the current cache size is known. */
@@ -58,6 +58,17 @@ export class ThumbCache {
     return this.#measured && this.#bytes < this.#maxBytes
   }
 
+  /** Total size of the cached thumbnails in bytes. */
+  async usage(): Promise<number> {
+    await this.ready
+    return this.#bytes
+  }
+
+  setMaxBytes(maxBytes: number): void {
+    this.#maxBytes = maxBytes
+    if (this.#measured && this.#bytes > maxBytes) void this.evict()
+  }
+
   /** Writes atomically, so main never serves a partial file. */
   async write(path: string, data: Uint8Array): Promise<void> {
     await mkdir(dirname(path), { recursive: true })
@@ -75,20 +86,29 @@ export class ThumbCache {
 
   /** Deletes least recently used thumbnails until the cache is below its cap. */
   evict(): Promise<void> {
-    this.#evicting ??= this.#evict().finally(() => {
+    this.#evicting ??= this.#evictTo(() => this.#maxBytes * EVICT_TO).finally(() => {
       this.#evicting = undefined
     })
     return this.#evicting
   }
 
-  async #evict(): Promise<void> {
+  /** Deletes all thumbnails; files main is reading right now stay. */
+  async clear(): Promise<void> {
+    await this.#evicting
+    const clearing = this.#evictTo(() => 0).finally(() => {
+      if (this.#evicting === clearing) this.#evicting = undefined
+    })
+    this.#evicting = clearing
+    await clearing
+  }
+
+  async #evictTo(target: () => number): Promise<void> {
     await this.ready
     const files = await this.#list(false)
     let bytes = files.reduce((sum, file) => sum + file.size, 0)
-    const target = this.#maxBytes * EVICT_TO
     files.sort((a, b) => a.mtimeMs - b.mtimeMs)
     for (const file of files) {
-      if (bytes <= target) break
+      if (bytes <= target()) break
       try {
         await unlink(file.path)
         bytes -= file.size

@@ -81,4 +81,29 @@ describe('ThumbCache', () => {
     expect((await stat(path)).size).toBe(40)
     expect(cache.hasRoom()).toBe(true)
   })
+
+  it('evicts down to a lowered cap', async () => {
+    await seed('aaaa.webp', 40, new Date(2020, 0, 1))
+    await seed('bbbb.webp', 40, new Date(2021, 0, 1))
+    const cache = new ThumbCache(dir, 100)
+    await cache.ready
+
+    cache.setMaxBytes(50)
+    await cache.evict()
+
+    expect(await files()).toEqual(['bbbb.webp'])
+    expect(await cache.usage()).toBe(40)
+  })
+
+  it('clears all thumbnails', async () => {
+    await seed('aaaa.webp', 40, new Date())
+    await seed('bbbb.webp', 40, new Date())
+    const cache = new ThumbCache(dir, 100)
+    expect(await cache.usage()).toBe(80)
+
+    await cache.clear()
+
+    expect(await files()).toEqual([])
+    expect(await cache.usage()).toBe(0)
+  })
 })

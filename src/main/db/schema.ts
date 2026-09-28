@@ -87,6 +87,12 @@ export const mediaTags = sqliteTable(
   (t) => [primaryKey({ columns: [t.mediaId, t.tagId] }), index('media_tags_tag_idx').on(t.tagId, t.mediaId)],
 )
 
+/** User settings as JSON values, validated on read (`main/settings.ts`). */
+export const settings = sqliteTable('settings', {
+  key: text('key').primaryKey(),
+  value: text('value', { mode: 'json' }).notNull(),
+})
+
 export type LibraryRoot = typeof libraryRoots.$inferSelect
 export type Media = typeof media.$inferSelect
 export type Tag = typeof tags.$inferSelect

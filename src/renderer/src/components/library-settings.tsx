@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { FolderPlusIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react'
+import { FolderOpenIcon, FolderPlusIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -10,7 +10,7 @@ import { trpc } from '@/lib/trpc'
 
 const STATUS_VARIANT = { online: 'secondary', offline: 'destructive', unknown: 'outline' } as const
 
-/** Library roots management; the native folder picker comes with the full settings page (Phase 6). */
+/** Library roots management: pick a folder, or type a path (e.g. a UNC share not mapped in Explorer). */
 export function LibrarySettings() {
   const queryClient = useQueryClient()
   const libraries = useQuery(trpc.libraries.list.queryOptions())
@@ -41,6 +41,14 @@ export function LibrarySettings() {
   const rescan = useMutation(
     trpc.libraries.rescan.mutationOptions({ onSuccess: () => toast.success('Rescan queued'), onError }),
   )
+  const pickFolder = useMutation(
+    trpc.libraries.pickFolder.mutationOptions({
+      onSuccess: (folder) => {
+        if (folder) add.mutate({ path: folder })
+      },
+      onError,
+    }),
+  )
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
@@ -64,6 +72,14 @@ export function LibrarySettings() {
         />
         <Button type="submit" disabled={!path.trim() || add.isPending}>
           <FolderPlusIcon /> Add
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={pickFolder.isPending || add.isPending}
+          onClick={() => pickFolder.mutate()}
+        >
+          <FolderOpenIcon /> Browse…
         </Button>
       </form>
 

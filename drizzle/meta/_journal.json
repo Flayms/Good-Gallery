@@ -36,6 +36,13 @@
       "when": 1790612917169,
       "tag": "0004_tag_media_count",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790622069243,
+      "tag": "0005_settings",
+      "breakpoints": true
     }
   ]
 }

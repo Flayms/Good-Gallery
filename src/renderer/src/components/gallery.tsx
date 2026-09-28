@@ -1,15 +1,13 @@
-import { useInfiniteQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
+import { Link, useParams } from '@tanstack/react-router'
 import { FolderPlusIcon, ImagesIcon, TriangleAlertIcon } from 'lucide-react'
-import { type ReactNode, useCallback, useMemo } from 'react'
+import { type ReactNode, useCallback } from 'react'
 import { MasonryGrid } from '@/components/masonry-grid'
 import { MediaTile } from '@/components/media-tile'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { type GallerySearch, mediaSearchInput } from '@/lib/search'
-import { trpc } from '@/lib/trpc'
+import { useGalleryMedia } from '@/hooks/use-gallery-media'
+import type { GallerySearch } from '@/lib/search'
 
-const PAGE_SIZE = 200
 const GAP = 8
 const SKELETON_HEIGHTS = [220, 160, 280, 190, 240, 150, 260, 200, 170, 230, 180, 250]
 
@@ -49,13 +47,13 @@ export function Gallery({
   columns: number
   hasLibraries: boolean
 }) {
-  const { data, error, isPending, hasNextPage, isFetchingNextPage, fetchNextPage } = useInfiniteQuery(
-    trpc.media.search.infiniteQueryOptions(
-      { ...mediaSearchInput(search), limit: PAGE_SIZE },
-      { getNextPageParam: (page) => page.nextCursor },
-    ),
-  )
-  const items = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data])
+  const {
+    query: { error, isPending, hasNextPage, isFetchingNextPage, fetchNextPage },
+    items,
+  } = useGalleryMedia(search)
+  // The viewer navigates through the same items; keep the one it shows in view behind it.
+  const viewedId = useParams({ strict: false, select: (params) => params.id })
+  const viewedIndex = viewedId === undefined ? undefined : items.findIndex((item) => item.id === viewedId)
   const loadMore = useCallback(() => {
     if (!isFetchingNextPage) void fetchNextPage()
   }, [isFetchingNextPage, fetchNextPage])
@@ -89,6 +87,7 @@ export function Gallery({
       gap={GAP}
       hasMore={hasNextPage}
       onLoadMore={loadMore}
+      scrollToIndex={viewedIndex}
       className="p-3"
       renderItem={(item, size) => <MediaTile item={item} width={size.width} />}
     />

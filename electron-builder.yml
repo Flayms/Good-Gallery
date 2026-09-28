@@ -10,6 +10,12 @@ extraResources:
   - from: drizzle
     to: migrations
     filter: ['**/*']
+# Native addons with their DLLs and the executables spawned by the indexer can't run from inside the asar.
+asarUnpack:
+  - node_modules/@img/**
+  - node_modules/better-sqlite3/**
+  - node_modules/exiftool-vendored.exe/**
+  - node_modules/ffmpeg-static/**
 # Native deps ship N-API prebuilds; no Electron ABI rebuild needed.
 npmRebuild: false
 win:

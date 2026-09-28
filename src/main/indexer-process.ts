@@ -3,9 +3,9 @@ import indexerPath from '../indexer/index?modulePath'
 import { type IndexerRequest, indexerEvent } from '../indexer/protocol'
 import type { IndexerWorker } from './indexer'
 
-export type IndexerConfig = Omit<Extract<IndexerRequest, { type: 'init' }>, 'type'>
+export type IndexerInit = Omit<Extract<IndexerRequest, { type: 'init' }>, 'type'>
 
-export function forkIndexer(config: IndexerConfig): IndexerWorker {
+export function forkIndexer(config: IndexerInit): IndexerWorker {
   const child = utilityProcess.fork(indexerPath, [], { serviceName: 'Good Gallery Indexer' })
   child.postMessage({ type: 'init', ...config })
   return {

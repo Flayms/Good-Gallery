@@ -1,12 +1,14 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { DEFAULT_SETTINGS } from '@shared/settings'
 import { TRPCError } from '@trpc/server'
 import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type Db, openDatabase } from '../db'
-import { libraryRoots, media, mediaTags, tags } from '../db/schema'
+import { libraryRoots, media, mediaTags, settings as settingsTable, tags } from '../db/schema'
 import { IndexerController } from '../indexer'
+import { SettingsStore } from '../settings'
 import { appRouter } from './router'
 import { createCallerFactory } from './trpc'
 
@@ -17,6 +19,8 @@ let db: Db
 let indexer: IndexerController
 let caller: ReturnType<typeof createCaller>
 let tempDir: string
+let shownInFolder: string[]
+let pickedFolder: string | undefined
 
 beforeAll(async () => {
   tempDir = await mkdtemp(join(tmpdir(), 'gg-test-'))
@@ -29,7 +33,13 @@ afterAll(async () => {
 beforeEach(() => {
   db = openDatabase(':memory:', migrationsFolder)
   indexer = new IndexerController(() => ({ send() {}, onEvent() {}, onExit() {}, kill() {} }))
-  caller = createCaller({ db, indexer })
+  shownInFolder = []
+  pickedFolder = undefined
+  const desktop = {
+    showItemInFolder: (path: string) => void shownInFolder.push(path),
+    pickFolder: async () => pickedFolder,
+  }
+  caller = createCaller({ db, indexer, settings: new SettingsStore(db), desktop })
 })
 
 function insertRoot(path = 'C:\\Photos') {
@@ -204,6 +214,68 @@ describe('media.byId', () => {
 
     expect(await caller.media.byId({ id: item.id })).toMatchObject({ fileName: 'a.jpg', width: 3, height: 2 })
     await expectTrpcError(caller.media.byId({ id: item.id + 1 }), 'NOT_FOUND')
+  })
+
+  it('includes the file path, library and tags', async () => {
+    const root = insertRoot()
+    const item = insertMedia(root.id, 'b.jpg', { relPath: 'trip/b.jpg' })
+    const tagIds = ['Zoo', 'Cat'].map(
+      (name) => db.insert(tags).values({ name, nameNorm: name.toLowerCase() }).returning().get().id,
+    )
+    db.insert(mediaTags)
+      .values(tagIds.map((tagId) => ({ mediaId: item.id, tagId })))
+      .run()
+
+    expect(await caller.media.byId({ id: item.id })).toMatchObject({
+      path: join('C:\\Photos', 'trip', 'b.jpg'),
+      rootLabel: 'Photos',
+      tags: [
+        { id: tagIds[1], name: 'Cat' },
+        { id: tagIds[0], name: 'Zoo' },
+      ],
+    })
+  })
+})
+
+describe('media.showInFolder', () => {
+  it('reveals the file resolved from the index', async () => {
+    const root = insertRoot()
+    const item = insertMedia(root.id, 'b.jpg', { relPath: 'trip/b.jpg' })
+
+    await caller.media.showInFolder({ id: item.id })
+
+    expect(shownInFolder).toEqual([join('C:\\Photos', 'trip', 'b.jpg')])
+    await expectTrpcError(caller.media.showInFolder({ id: item.id + 1 }), 'NOT_FOUND')
+  })
+})
+
+describe('libraries.pickFolder', () => {
+  it('returns the chosen folder or null when cancelled', async () => {
+    expect(await caller.libraries.pickFolder()).toBeNull()
+    pickedFolder = 'D:\\Pictures'
+    expect(await caller.libraries.pickFolder()).toBe('D:\\Pictures')
+  })
+})
+
+describe('settings', () => {
+  it('starts with defaults and persists updates', async () => {
+    expect(await caller.settings.get()).toEqual(DEFAULT_SETTINGS)
+
+    const updated = await caller.settings.update({ ioConcurrency: 8 })
+
+    expect(updated).toEqual({ ...DEFAULT_SETTINGS, ioConcurrency: 8 })
+    expect(new SettingsStore(db).get()).toEqual(updated)
+  })
+
+  it('rejects out-of-range values', async () => {
+    await expectTrpcError(caller.settings.update({ ioConcurrency: 0 }), 'BAD_REQUEST')
+    await expectTrpcError(caller.settings.update({ thumbCacheGiB: -1 }), 'BAD_REQUEST')
+  })
+
+  it('falls back to defaults for stored values that no longer validate', () => {
+    db.insert(settingsTable).values({ key: 'ioConcurrency', value: 'many' }).run()
+
+    expect(new SettingsStore(db).get()).toEqual(DEFAULT_SETTINGS)
   })
 })
 

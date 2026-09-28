@@ -116,4 +116,31 @@ describe('IndexerController', () => {
 
     expect(await pending).toBe(false)
   })
+
+  it('forwards settings only to a running worker', () => {
+    const { controller, workers } = setup()
+    controller.configure({ thumbCacheBytes: 100, concurrency: 2 })
+    expect(workers).toHaveLength(0)
+
+    controller.requestScan(1)
+    controller.configure({ thumbCacheBytes: 100, concurrency: 2 })
+
+    expect(workers[0]?.sent.at(-1)).toEqual({ type: 'configure', thumbCacheBytes: 100, concurrency: 2 })
+  })
+
+  it('answers cache requests by id and fails them when the worker exits', async () => {
+    const { controller, workers } = setup()
+    const usage = controller.thumbnailCache('usage')
+    const clear = controller.thumbnailCache('clear')
+    const [usageRequest, clearRequest] = workers[0]?.sent ?? []
+    if (usageRequest?.type !== 'cache' || clearRequest?.type !== 'cache') throw new Error('Expected cache requests')
+
+    workers[0]?.emit({ type: 'cache', requestId: clearRequest.requestId, bytes: 0 })
+    workers[0]?.emit({ type: 'cache', requestId: usageRequest.requestId, bytes: 42 })
+    expect(await Promise.all([usage, clear])).toEqual([42, 0])
+
+    const failed = controller.thumbnailCache('usage')
+    workers[0]?.exit()
+    await expect(failed).rejects.toThrow('exited')
+  })
 })

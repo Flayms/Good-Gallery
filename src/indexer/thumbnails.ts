@@ -21,7 +21,7 @@ const BACKGROUND_PRIORITY = 0
 export class ThumbnailService {
   readonly #deps: ThumbnailDeps
   readonly #queue: PQueue
-  readonly #concurrency: number
+  #concurrency: number
   readonly #jobs = new Map<number, Promise<boolean>>()
   readonly #requested = new Set<number>()
   #priority = BACKGROUND_PRIORITY
@@ -54,6 +54,11 @@ export class ThumbnailService {
       .finally(() => {
         this.#background = undefined
       })
+  }
+
+  setConcurrency(concurrency: number): void {
+    this.#concurrency = concurrency
+    this.#queue.concurrency = concurrency
   }
 
   /** Resolves when all queued work is done. */

@@ -1,10 +1,12 @@
+import { join } from 'node:path'
 import { TRPCError } from '@trpc/server'
 import { and, asc, desc, eq, gte, lt, type SQL, sql } from 'drizzle-orm'
 import { z } from 'zod'
-import { media } from '../../db/schema'
+import { libraryRoots, media, mediaTags, tags } from '../../db/schema'
 import { tagConditions } from '../../db/tag-search'
 import { publicProcedure, router } from '../trpc'
 
+const idInput = z.object({ id: z.int().positive() })
 const tagList = z.array(z.string().max(200)).max(20).default([])
 
 const searchInput = z
@@ -32,12 +34,19 @@ const searchInput = z
 
 export type MediaCursor = NonNullable<z.infer<typeof searchInput>['cursor']>
 
+function absolutePath(rootPath: string, relPath: string): string {
+  return join(rootPath, ...relPath.split('/'))
+}
+
 export const mediaRouter = router({
-  byId: publicProcedure.input(z.object({ id: z.int().positive() })).query(({ ctx, input }) => {
+  /** Media details for the viewer, with the absolute file path and direct tags. */
+  byId: publicProcedure.input(idInput).query(({ ctx, input }) => {
     const item = ctx.db
       .select({
         id: media.id,
         rootId: media.rootId,
+        rootLabel: libraryRoots.label,
+        rootPath: libraryRoots.path,
         relPath: media.relPath,
         fileName: media.fileName,
         kind: media.kind,
@@ -50,10 +59,30 @@ export const mediaRouter = router({
         thumbhash: media.thumbhash,
       })
       .from(media)
+      .innerJoin(libraryRoots, eq(libraryRoots.id, media.rootId))
       .where(eq(media.id, input.id))
       .get()
     if (!item) throw new TRPCError({ code: 'NOT_FOUND', message: 'Media not found' })
-    return item
+    const itemTags = ctx.db
+      .select({ id: tags.id, name: tags.name })
+      .from(mediaTags)
+      .innerJoin(tags, eq(tags.id, mediaTags.tagId))
+      .where(eq(mediaTags.mediaId, input.id))
+      .orderBy(asc(tags.nameNorm))
+      .all()
+    const { rootPath, ...rest } = item
+    return { ...rest, path: absolutePath(rootPath, item.relPath), tags: itemTags }
+  }),
+
+  showInFolder: publicProcedure.input(idInput).mutation(({ ctx, input }) => {
+    const row = ctx.db
+      .select({ rootPath: libraryRoots.path, relPath: media.relPath })
+      .from(media)
+      .innerJoin(libraryRoots, eq(libraryRoots.id, media.rootId))
+      .where(eq(media.id, input.id))
+      .get()
+    if (!row) throw new TRPCError({ code: 'NOT_FOUND', message: 'Media not found' })
+    ctx.desktop.showItemInFolder(absolutePath(row.rootPath, row.relPath))
   }),
 
   search: publicProcedure.input(searchInput).query(({ ctx, input }) => {

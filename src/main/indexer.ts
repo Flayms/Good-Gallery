@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import type { IndexerEvent, IndexerRequest, ScanProgress } from '../indexer/protocol'
+import type { IndexerConfig, IndexerEvent, IndexerRequest, ScanProgress } from '../indexer/protocol'
 
 export interface IndexerStatus {
   state: 'idle' | 'scanning'
@@ -24,6 +24,8 @@ export class IndexerController extends EventEmitter<{ status: [IndexerStatus] }>
   #status: IndexerStatus = { state: 'idle', queue: [], current: null }
   /** Resolvers of in-flight thumbnail requests by media id. */
   readonly #thumbnails = new Map<number, { promise: Promise<boolean>; resolve: (ok: boolean) => void }>()
+  readonly #cacheRequests = new Map<number, PromiseWithResolvers<number>>()
+  #nextRequestId = 0
 
   constructor(spawn: () => IndexerWorker) {
     super()
@@ -52,7 +54,22 @@ export class IndexerController extends EventEmitter<{ status: [IndexerStatus] }>
     this.#disposed = true
     this.#worker?.kill()
     this.#worker = undefined
-    this.#failThumbnails()
+    this.#failPending()
+  }
+
+  /** Applies changed settings to a running worker; a newly spawned one reads them at spawn time. */
+  configure(config: IndexerConfig): void {
+    this.#worker?.send({ type: 'configure', ...config })
+  }
+
+  /** Resolves with the thumbnail cache size in bytes, after emptying it for `clear`. */
+  thumbnailCache(action: 'usage' | 'clear'): Promise<number> {
+    if (this.#disposed) return Promise.reject(new Error('Indexer is shut down'))
+    const requestId = this.#nextRequestId++
+    const request = Promise.withResolvers<number>()
+    this.#cacheRequests.set(requestId, request)
+    this.#ensureWorker().send({ type: 'cache', requestId, action })
+    return request.promise
   }
 
   /** Renders a thumbnail ahead of background work. Resolves true once its files are in the cache. */
@@ -80,7 +97,7 @@ export class IndexerController extends EventEmitter<{ status: [IndexerStatus] }>
     worker.onExit(() => {
       if (this.#worker !== worker) return
       this.#worker = undefined
-      this.#failThumbnails()
+      this.#failPending()
       const rootId = this.#status.current?.rootId
       if (rootId !== undefined) {
         console.error(`Indexer process exited while scanning root ${rootId}`)
@@ -95,6 +112,13 @@ export class IndexerController extends EventEmitter<{ status: [IndexerStatus] }>
     if (event.type === 'thumbnail') {
       this.#thumbnails.get(event.mediaId)?.resolve(event.ok)
       this.#thumbnails.delete(event.mediaId)
+      return
+    }
+    if (event.type === 'cache') {
+      const request = this.#cacheRequests.get(event.requestId)
+      this.#cacheRequests.delete(event.requestId)
+      if (event.bytes === undefined) request?.reject(new Error('Thumbnail cache request failed'))
+      else request?.resolve(event.bytes)
       return
     }
     if (event.rootId !== this.#status.current?.rootId) return
@@ -112,9 +136,11 @@ export class IndexerController extends EventEmitter<{ status: [IndexerStatus] }>
     this.#dispatch()
   }
 
-  #failThumbnails(): void {
+  #failPending(): void {
     for (const { resolve } of this.#thumbnails.values()) resolve(false)
     this.#thumbnails.clear()
+    for (const { reject } of this.#cacheRequests.values()) reject(new Error('Indexer process exited'))
+    this.#cacheRequests.clear()
   }
 
   #update(patch: Partial<IndexerStatus>): void {

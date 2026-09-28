@@ -4,18 +4,28 @@ import { z } from 'zod'
 
 const rootId = z.int().positive()
 const mediaId = z.int().positive()
+const requestId = z.int().nonnegative()
+
+const indexerConfig = z.object({
+  thumbCacheBytes: z.int().positive(),
+  concurrency: z.int().min(1).max(32),
+})
+
+export type IndexerConfig = z.infer<typeof indexerConfig>
 
 export const indexerRequest = z.discriminatedUnion('type', [
-  z.object({
+  indexerConfig.extend({
     type: z.literal('init'),
     dbPath: z.string().min(1),
     thumbDir: z.string().min(1),
-    thumbCacheBytes: z.int().positive(),
-    concurrency: z.int().min(1).max(32),
   }),
+  /** Applies changed settings to the running process. */
+  indexerConfig.extend({ type: z.literal('configure') }),
   z.object({ type: z.literal('scan'), rootId }),
   z.object({ type: z.literal('cancel'), rootId }),
   z.object({ type: z.literal('thumbnail'), mediaId }),
+  /** Reports (`usage`) or empties (`clear`) the thumbnail cache; answered with its size afterwards. */
+  z.object({ type: z.literal('cache'), requestId, action: z.enum(['usage', 'clear']) }),
 ])
 
 export type IndexerRequest = z.infer<typeof indexerRequest>
@@ -39,6 +49,8 @@ export const indexerEvent = z.discriminatedUnion('type', [
   z.object({ type: z.literal('done'), rootId, outcome: scanOutcome, error: z.string().optional() }),
   /** `ok` means the thumbnail files are in the cache. */
   z.object({ type: z.literal('thumbnail'), mediaId, ok: z.boolean() }),
+  /** `bytes` is undefined if the request failed. */
+  z.object({ type: z.literal('cache'), requestId, bytes: z.int().nonnegative().optional() }),
 ])
 
 export type IndexerEvent = z.infer<typeof indexerEvent>

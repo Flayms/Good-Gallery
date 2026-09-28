@@ -11,7 +11,15 @@ import { IndexWriter } from './writer'
 // Entry point of the indexer utilityProcess. Main serializes scans; this process just runs what it is told.
 
 const port = process.parentPort
-let config: { deps: ScanDeps; thumbnails: ThumbnailService; concurrency: number } | undefined
+let config:
+  | {
+      deps: ScanDeps
+      metadata: ExifToolMetadataSource
+      cache: ThumbCache
+      thumbnails: ThumbnailService
+      concurrency: number
+    }
+  | undefined
 const scans = new Map<number, AbortController>()
 
 function send(event: IndexerEvent): void {
@@ -53,24 +61,45 @@ async function thumbnail(mediaId: number): Promise<void> {
   send({ type: 'thumbnail', mediaId, ok })
 }
 
+async function cacheRequest(requestId: number, action: 'usage' | 'clear'): Promise<void> {
+  try {
+    const { cache } = initialized()
+    if (action === 'clear') await cache.clear()
+    send({ type: 'cache', requestId, bytes: await cache.usage() })
+  } catch (error) {
+    console.error(`Indexer: thumbnail cache ${action} failed:`, error)
+    send({ type: 'cache', requestId })
+  }
+}
+
 port.on('message', ({ data }) => {
   const request = indexerRequest.parse(data)
   switch (request.type) {
     case 'init': {
       const metadata = new ExifToolMetadataSource(request.concurrency)
       const writer = new IndexWriter(openDatabase(request.dbPath))
+      const cache = new ThumbCache(request.thumbDir, request.thumbCacheBytes)
       const thumbnails = new ThumbnailService(
         {
           writer,
-          cache: new ThumbCache(request.thumbDir, request.thumbCacheBytes),
+          cache,
           render: (file, source) => renderMedia(file, source, metadata),
           isReachable: isReachableDirectory,
         },
         request.concurrency,
       )
       const deps = { writer, metadata, isReachable: isReachableDirectory }
-      config = { deps, thumbnails, concurrency: request.concurrency }
+      config = { deps, metadata, cache, thumbnails, concurrency: request.concurrency }
       thumbnails.kick()
+      break
+    }
+    case 'configure': {
+      const current = initialized()
+      // Running scans keep their concurrency; the next one picks up the new value.
+      current.concurrency = request.concurrency
+      current.metadata.setMaxProcs(request.concurrency)
+      current.thumbnails.setConcurrency(request.concurrency)
+      current.cache.setMaxBytes(request.thumbCacheBytes)
       break
     }
     case 'scan':
@@ -84,6 +113,9 @@ port.on('message', ({ data }) => {
         console.error(`Indexer: thumbnail request for media ${request.mediaId} failed:`, error)
         send({ type: 'thumbnail', mediaId: request.mediaId, ok: false })
       })
+      break
+    case 'cache':
+      void cacheRequest(request.requestId, request.action)
       break
   }
 })

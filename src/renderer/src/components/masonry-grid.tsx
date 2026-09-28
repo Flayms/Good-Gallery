@@ -15,6 +15,8 @@ interface MasonryGridProps<T extends MasonryItem> {
   gap?: number
   hasMore?: boolean
   onLoadMore?: () => void
+  /** Scrolls this item into view whenever it changes (no-op if it's visible or negative). */
+  scrollToIndex?: number
   renderItem: (item: T, size: { width: number; height: number }) => ReactNode
   className?: string
 }
@@ -25,6 +27,7 @@ export function MasonryGrid<T extends MasonryItem>({
   gap = 8,
   hasMore = false,
   onLoadMore,
+  scrollToIndex,
   renderItem,
   className,
 }: MasonryGridProps<T>) {
@@ -72,6 +75,10 @@ export function MasonryGrid<T extends MasonryItem>({
     virtualizer.measure()
     virtualizer.scrollToIndex(anchorIndex.current, { align: 'start' })
   })
+
+  useEffect(() => {
+    if (scrollToIndex !== undefined && scrollToIndex >= 0) virtualizer.scrollToIndex(scrollToIndex, { align: 'auto' })
+  }, [scrollToIndex, virtualizer])
 
   const virtualItems = virtualizer.getVirtualItems()
   const lastIndex = virtualItems.at(-1)?.index ?? -1

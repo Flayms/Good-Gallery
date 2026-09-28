@@ -44,6 +44,10 @@ export class ExifToolMetadataSource implements MetadataSource, PreviewSource {
     }
   }
 
+  setMaxProcs(maxProcs: number): void {
+    this.#exiftool.batchCluster.setMaxProcs(maxProcs)
+  }
+
   end(): Promise<void> {
     return this.#exiftool.end()
   }

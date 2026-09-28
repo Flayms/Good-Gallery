@@ -22,7 +22,7 @@ Modern Electron gallery app with a cascading (masonry/waterfall) image display, 
 | API            | @trpc/server + client + tanstack-react-query 11.19.0, zod 4.6.5, superjson                                                 |
 | DB             | better-sqlite3 13.0.3, drizzle-orm 0.45.2, drizzle-kit 0.31.10                                                             |
 | Media          | sharp 0.35.4, exiftool-vendored 38.1.0, ffmpeg-static 5.3.0, thumbhash, p-queue 9.3.3                                      |
-| Tooling        | typescript 7.0.2, @biomejs/biome 2.5.14, vitest 5.0.2, pnpm 12.6.0, electron-builder 26.15.3, Playwright (e2e)             |
+| Tooling        | typescript 7.0.2, @biomejs/biome 2.5.14, vitest 5.0.2, pnpm 12.6.0, electron-builder 26.15.3, @playwright/test 1.63.0 (e2e) |
 
 ### Stack decisions
 
@@ -174,19 +174,35 @@ Notes from implementation:
 - UI: `components/tag-search.tsx` (cmdk `Command` with `shouldFilter={false}`, chips toggle include/exclude on click, Backspace removes the last chip; the highlighted item is controlled because cmdk highlights before async suggestions arrive), `date-range-filter.tsx` (Popover with native date inputs), `folder-tree.tsx`, `popular-tags.tsx`. Indexer progress also refreshes tags and folders.
 - Known worst case: a tag with > 100k matches combined with a filter that matches few of them walks many rows per page.
 
-### Phase 6 – Viewer & polish
+### Phase 6 – Viewer & polish ✅
 
  1. Lightbox: keyboard nav, zoom/pan, video via `gg-media://`, metadata/tag panel, "Show in Explorer".
  2. Settings: library roots (folder picker), cache size + clear, rescan interval, I/O concurrency.
 
-### Phase 7 – Packaging & e2e
+Notes from implementation:
+
+- Viewer navigation walks the gallery's own infinite query (`hooks/use-gallery-media.ts`, shared cache with the grid), loads the next page within 5 items of the end, and navigates with `replace` so Back closes the viewer. The grid scrolls the viewed item into view behind the overlay (`MasonryGrid` `scrollToIndex`), so closing lands on it. Neighbouring images are preloaded.
+- Keys: ←/→ navigate (not while a `<video>` has focus), Esc closes, `i` toggles the info panel, `+` `-` `0` zoom. Zoom/pan (`components/zoomable-image.tsx`, math in `lib/zoom.ts`): wheel zooms around the cursor, double-click toggles fit ↔ actual pixels (≥ 2×, ≤ 8×), dragging pans; the pan is clamped so zoomed content covers the viewport.
+- `media.byId` also returns the absolute path, library label and direct tags; tag badges navigate to the gallery filtered by that tag. `media.showInFolder` resolves the path from the DB by id (no raw paths from the renderer).
+- Native shell calls go through a `Desktop` interface in the tRPC context (`showItemInFolder`, `pickFolder`), faked in router tests. The folder picker adds the chosen folder right away; typing a path stays for unmapped UNC shares.
+- Settings: `settings` table (key → JSON value), `SettingsStore` in main validates with `shared/settings.ts` (invalid stored values fall back to defaults) and emits `change`. Rescan interval re-arms the timer (`0` = startup and manual only); cache cap and concurrency go to a running indexer as a `configure` message (p-queue concurrency, exiftool `setMaxProcs`, cache cap with eviction; running scans keep their concurrency). A respawned indexer reads current settings.
+- Cache usage/clear are request/response messages (`cache` with a `requestId`) answered by the indexer, which owns the cache. Clearing deletes what it can (files being served stay); thumbnails are re-rendered on demand.
+
+### Phase 7 – Packaging & e2e ✅
 
  1. electron-builder NSIS; `asarUnpack` for sharp, better-sqlite3, exiftool `.exe`, ffmpeg; migrations as `extraResources`.
  2. Playwright `_electron` smoke test: launch → add fixture library → index → search tag → open viewer.
 
+Notes from implementation:
+
+- `asarUnpack`: `@img/**` (sharp's native addon + libvips DLLs; sharp's JS can stay packed), `better-sqlite3`, `exiftool-vendored.exe` (it rewrites `app.asar` → `app.asar.unpacked` itself), `ffmpeg-static` (path rewritten in `indexer/thumbnail.ts`). `pnpm dist` → `release/<version>/good-gallery-<version>-setup.exe`. No code signing and no app icon yet.
+- e2e (`e2e/smoke.spec.ts`, `pnpm test:e2e` = build + `playwright test`): generates a library (sharp JPEGs tagged with exiftool, an ffmpeg `testsrc` MP4), then adds it via settings, waits for indexing and thumbnails, navigates the viewer by keyboard, filters by tag, checks zoom and the info panel, changes the cache cap and clears the cache.
+- `GG_USER_DATA_DIR` isolates the profile; `GG_E2E_APP=<path to good-gallery.exe>` runs the same test against a packaged build (passes for `win-unpacked`).
+- Own `tsconfig.e2e.json` (DOM lib for `evaluate` callbacks); a `/// <reference lib="dom" />` in the node project would leak DOM types into main.
+
 ## Verification
 
-1. `pnpm typecheck`, `pnpm lint`, `pnpm test` pass in CI.
+1. `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm test:e2e` pass (no CI set up yet).
 2. Unit tests: scanner diffing (temp dirs), tag normalization/hierarchy, search query builder (in-memory SQLite), cache-key stability, protocol handler rejects unknown IDs.
 3. Performance: 500k synthetic rows → search p95 < ~50 ms; 60 fps scrolling.
 4. Manual: index `\\server\share`, disconnect → cached browsing + offline badge, reconnect → incremental rescan.

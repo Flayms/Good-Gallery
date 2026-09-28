@@ -9,11 +9,12 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "typecheck": "tsc -p tsconfig.node.json --noEmit --composite false && tsc -p tsconfig.web.json --noEmit --composite false",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit --composite false && tsc -p tsconfig.web.json --noEmit --composite false && tsc -p tsconfig.e2e.json --noEmit --composite false",
     "lint": "biome check .",
     "format": "biome check --write .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "electron-vite build && playwright test",
     "db:generate": "drizzle-kit generate",
     "dist": "electron-vite build && electron-builder --win",
     "postinstall": "install-electron"
@@ -21,6 +22,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
     "@fontsource-variable/geist": "^5.3.0",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "~5.103.1",
     "@tanstack/react-router": "1.170.38",

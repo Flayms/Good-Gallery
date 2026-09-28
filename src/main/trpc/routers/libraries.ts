@@ -22,6 +22,9 @@ export const librariesRouter = router({
       .all(),
   ),
 
+  /** Native folder dialog; resolves with null if cancelled. */
+  pickFolder: publicProcedure.mutation(async ({ ctx }) => (await ctx.desktop.pickFolder()) ?? null),
+
   add: publicProcedure
     .input(
       z.object({
