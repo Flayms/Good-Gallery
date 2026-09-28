@@ -1,11 +1,11 @@
-import { pickThumbWidth, thumbUrl } from '@shared/media-urls'
-import { Link } from '@tanstack/react-router'
-import { ImageOffIcon, PlayIcon } from 'lucide-react'
-import { useMemo, useState } from 'react'
 import { formatDuration } from '@/lib/format'
 import { thumbhashDataUrl } from '@/lib/thumbhash'
 import type { RouterOutputs } from '@/lib/trpc'
 import { cn } from '@/lib/utils'
+import { pickThumbWidth, thumbUrl } from '@shared/media-urls'
+import { Link } from '@tanstack/react-router'
+import { ImageOffIcon, PlayIcon } from 'lucide-react'
+import { useMemo, useState } from 'react'
 
 export type MediaItem = RouterOutputs['media']['search']['items'][number]
 

@@ -1,4 +1,3 @@
-import { ImageIcon, VideoIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
@@ -6,6 +5,7 @@ import { Slider } from '@/components/ui/slider'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { MAX_COLUMNS, MIN_COLUMNS } from '@/hooks/use-columns'
 import { type GallerySearch, isMediaKind, isSort, SORT_LABELS, SORTS } from '@/lib/search'
+import { ImageIcon, VideoIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react'
 
 interface GalleryToolbarProps {
   search: GallerySearch

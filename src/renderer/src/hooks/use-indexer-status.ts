@@ -1,8 +1,8 @@
+import { trpc } from '@/lib/trpc'
 import type { IndexerStatus } from '@main/indexer'
 import { useQueryClient } from '@tanstack/react-query'
 import { useSubscription } from '@trpc/tanstack-react-query'
 import { useEffect, useRef } from 'react'
-import { trpc } from '@/lib/trpc'
 
 /** While a scan runs, the gallery refreshes at most this often so new media appear before it ends. */
 const REFRESH_INTERVAL_MS = 10_000

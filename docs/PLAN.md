@@ -14,15 +14,15 @@ Modern Electron gallery app with a cascading (masonry/waterfall) image display, 
 
 ## Tech Stack (versions verified 2026-09-25)
 
-| Area           | Choice                                                                                                            |
-| -------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Shell / build  | electron 44.4.5, electron-vite **6.0.0-beta.1**, vite 8.3.1, @vitejs/plugin-react 6.1.1                           |
-| UI             | react 19.3.0, tailwindcss 4.3.3 (`@tailwindcss/vite`), shadcn 4.21.0, lucide-react, motion                        |
+| Area           | Choice                                                                                                                     |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Shell / build  | electron 44.4.5, electron-vite **6.0.0-beta.1**, vite 8.3.1, @vitejs/plugin-react 6.1.1                                    |
+| UI             | react 19.3.0, tailwindcss 4.3.3 (`@tailwindcss/vite`), shadcn 4.21.0, lucide-react, motion                                 |
 | Data / routing | @tanstack/react-query 5.103.2, @tanstack/react-router 1.170.38 (+ router-plugin 1.168.40), @tanstack/react-virtual 3.14.13 |
-| API            | @trpc/server + client + tanstack-react-query 11.19.0, zod 4.6.5, superjson                                        |
-| DB             | better-sqlite3 13.0.3, drizzle-orm 0.45.2, drizzle-kit 0.31.10                                                    |
-| Media          | sharp 0.35.4, exiftool-vendored 38.1.0, ffmpeg-static 5.3.0, thumbhash, p-queue 9.3.3                             |
-| Tooling        | typescript 7.0.2, @biomejs/biome 2.5.14, vitest 5.0.2, pnpm 12.6.0, electron-builder 26.15.3, Playwright (e2e)    |
+| API            | @trpc/server + client + tanstack-react-query 11.19.0, zod 4.6.5, superjson                                                 |
+| DB             | better-sqlite3 13.0.3, drizzle-orm 0.45.2, drizzle-kit 0.31.10                                                             |
+| Media          | sharp 0.35.4, exiftool-vendored 38.1.0, ffmpeg-static 5.3.0, thumbhash, p-queue 9.3.3                                      |
+| Tooling        | typescript 7.0.2, @biomejs/biome 2.5.14, vitest 5.0.2, pnpm 12.6.0, electron-builder 26.15.3, Playwright (e2e)             |
 
 ### Stack decisions
 
