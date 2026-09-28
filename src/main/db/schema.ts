@@ -34,6 +34,8 @@ export const media = sqliteTable(
     kind: text('kind', { enum: ['image', 'video'] }).notNull(),
     size: integer('size').notNull(),
     mtime: integer('mtime').notNull(),
+    /** Mtime of the `.xmp` sidecar, part of change detection. */
+    sidecarMtime: integer('sidecar_mtime'),
     width: integer('width'),
     height: integer('height'),
     /** Seconds. */

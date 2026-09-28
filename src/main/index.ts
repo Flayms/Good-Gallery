@@ -2,9 +2,15 @@ import { join } from 'node:path'
 import { app, BrowserWindow } from 'electron'
 import { openDatabase } from './db'
 import { IndexerController } from './indexer'
+import { forkIndexer } from './indexer-process'
+import { scheduleRescans } from './rescan'
 import { installSecurityHandlers, rendererDevUrl, rendererIndexFile } from './security'
 import { registerTrpcIpc } from './trpc/ipc-main'
 import { appRouter } from './trpc/router'
+
+// Defaults until they become settings (Phase 6).
+const IO_CONCURRENCY = 4
+const RESCAN_SCHEDULE = { intervalMs: 30 * 60_000, offlineRetryMs: 60_000 }
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -41,10 +47,16 @@ function migrationsFolder(): string {
 app.whenReady().then(() => {
   installSecurityHandlers()
 
-  const db = openDatabase(join(app.getPath('userData'), 'gallery.db'), migrationsFolder())
-  app.on('will-quit', () => db.$client.close())
+  const dbPath = join(app.getPath('userData'), 'gallery.db')
+  const db = openDatabase(dbPath, migrationsFolder())
+  const indexer = new IndexerController(() => forkIndexer({ dbPath, concurrency: IO_CONCURRENCY }))
+  const stopRescans = scheduleRescans(db, indexer, RESCAN_SCHEDULE)
+  app.on('will-quit', () => {
+    stopRescans()
+    indexer.dispose()
+    db.$client.close()
+  })
 
-  const indexer = new IndexerController()
   registerTrpcIpc({
     router: appRouter,
     createContext: () => ({ db, indexer }),

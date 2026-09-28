@@ -21,7 +21,7 @@ Modern Electron gallery app with a cascading (masonry/waterfall) image display, 
 | Data / routing | @tanstack/react-query 5.103.2, @tanstack/react-router 1.170.39 (+ router-plugin), @tanstack/react-virtual 3.14.13 |
 | API            | @trpc/server + client + tanstack-react-query 11.19.0, zod 4.6.5, superjson                                        |
 | DB             | better-sqlite3 13.0.3, drizzle-orm 0.45.2, drizzle-kit 0.31.10                                                    |
-| Media          | sharp 0.35.4, exiftool-vendored 38.2.0, ffmpeg-static 5.3.0, thumbhash, p-queue 9.3.3                             |
+| Media          | sharp 0.35.4, exiftool-vendored 38.1.0, ffmpeg-static 5.3.0, thumbhash, p-queue 9.3.3                             |
 | Tooling        | typescript 7.0.2, @biomejs/biome 2.5.14, vitest 5.0.2, pnpm 12.6.0, electron-builder 26.15.3, Playwright (e2e)    |
 
 ### Stack decisions
@@ -92,12 +92,24 @@ Notes from implementation:
 - Renderer imports `AppRouter` type-only via the `@main/*` path alias (web tsconfig only).
 - Migrations: `pnpm db:generate` → `drizzle/`; packaged as `extraResources` → `resources/migrations`.
 
-### Phase 2 – Indexer
+### Phase 2 – Indexer ✅
 
 1. `utilityProcess` with its own DB write connection, MessagePort to main.
 2. Scanner: streaming `fs.opendir`, extension filter, diff by (size, mtime), batched transactions (~1k rows), p-queue I/O concurrency (~4, configurable).
 3. Metadata via exiftool-vendored (batch mode): dimensions, capture date, duration, tags from `XMP-dc:Subject`, `IPTC:Keywords`, `XMP-lr:HierarchicalSubject` (split on `|`), `XPKeywords`; read `.xmp` sidecars. Normalize tags (trim, case-fold, dedupe).
 4. Network resilience: root reachability check with timeout (online/offline), scheduled + manual rescans (`fs.watch` is unreliable on SMB), retry with backoff, cached browsing while offline.
+
+Notes from implementation:
+
+- exiftool-vendored pinned to 38.1.0 (38.2.0 blocked by `minimumReleaseAge`).
+- Layout: `src/indexer/index.ts` (utilityProcess entry, loaded via `?modulePath`), `scan.ts` (orchestration), `walk.ts` (iterative `opendir` walk, skips dot/`$`/NAS housekeeping dirs and AppleDouble files), `metadata.ts` (exiftool → dimensions/date/duration/tags), `writer.ts` (all DB writes), `protocol.ts` (zod-validated messages). Main: `indexer.ts` (`IndexerController`, transport-agnostic via `IndexerWorker`), `indexer-process.ts` (Electron fork), `rescan.ts`.
+- Uses the utilityProcess `parentPort` instead of a separate MessagePort; config (`dbPath`, concurrency) arrives in an `init` message. Main keeps the scan queue and runs one scan at a time; the worker is spawned lazily and respawned after a crash.
+- Main runs migrations before forking; the indexer opens its connection without migrating.
+- Change detection: `(size, mtime, sidecar_mtime)`; new column `media.sidecar_mtime`. Thumbnails reset to `pending` only on content changes, not sidecar-only changes.
+- Deletion: files not seen during a completed scan are removed, except under directories that failed to list. Cancelled scans write nothing (the root may be gone); offline scans keep everything and flush what was read.
+- Offline detection mid-scan: transient I/O or exiftool errors trigger a reachability check; if the root is gone the scan aborts with `offline`.
+- Tags: `HierarchicalSubject` → parent chain (first hierarchy seen wins, cycles refused), media linked to the leaf only; flat keywords that appear in a hierarchy are dropped (Lightroom writes both). Orphan tags are pruned after each completed scan.
+- Schedule: all roots at startup and every 30 min, offline roots every 60 s, I/O concurrency 4 (constants in `main/index.ts` until Phase 6 settings).
 
 ### Phase 3 – Thumbnails & protocols
 

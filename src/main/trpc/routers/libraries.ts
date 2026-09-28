@@ -1,31 +1,12 @@
-import { stat } from 'node:fs/promises'
 import { basename, isAbsolute, resolve } from 'node:path'
 import { TRPCError } from '@trpc/server'
 import { asc, eq, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { libraryRoots } from '../../db/schema'
+import { isReachableDirectory } from '../../reachability'
 import { publicProcedure, router } from '../trpc'
 
-const STAT_TIMEOUT_MS = 5_000
-
 const idInput = z.object({ id: z.int().positive() })
-
-/** Resolves false instead of hanging when a network share is unreachable. */
-function isReachableDirectory(path: string): Promise<boolean> {
-  return new Promise((done) => {
-    const timer = setTimeout(() => done(false), STAT_TIMEOUT_MS)
-    stat(path).then(
-      (stats) => {
-        clearTimeout(timer)
-        done(stats.isDirectory())
-      },
-      () => {
-        clearTimeout(timer)
-        done(false)
-      },
-    )
-  })
-}
 
 export const librariesRouter = router({
   list: publicProcedure.query(({ ctx }) => ctx.db.select().from(libraryRoots).orderBy(asc(libraryRoots.label)).all()),

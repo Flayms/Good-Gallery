@@ -27,7 +27,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   db = openDatabase(':memory:', migrationsFolder)
-  indexer = new IndexerController()
+  indexer = new IndexerController(() => ({ send() {}, onEvent() {}, onExit() {}, kill() {} }))
   caller = createCaller({ db, indexer })
 })
 
@@ -53,7 +53,7 @@ describe('libraries', () => {
 
     expect(root).toMatchObject({ path: resolve(tempDir), status: 'online' })
     expect(await caller.libraries.list()).toEqual([root])
-    expect(indexer.status.queue).toEqual([root.id])
+    expect(indexer.status.current?.rootId).toBe(root.id)
   })
 
   it('rejects duplicates case-insensitively', async () => {
@@ -66,14 +66,13 @@ describe('libraries', () => {
     await expectTrpcError(caller.libraries.add({ path: join(tempDir, 'missing') }), 'BAD_REQUEST')
   })
 
-  it('removes a root with its media and cancels its scan', async () => {
+  it('removes a root with its media', async () => {
     const root = await caller.libraries.add({ path: tempDir })
     insertMedia(root.id, 'a.jpg')
 
     await caller.libraries.remove({ id: root.id })
 
     expect(db.select().from(media).all()).toEqual([])
-    expect(indexer.status.queue).toEqual([])
     await expectTrpcError(caller.libraries.remove({ id: root.id }), 'NOT_FOUND')
   })
 })

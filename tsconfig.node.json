@@ -13,6 +13,7 @@
     "vitest.config.ts",
     "drizzle.config.ts",
     "src/main/**/*",
+    "src/indexer/**/*",
     "src/preload/**/*",
     "src/shared/**/*"
   ]

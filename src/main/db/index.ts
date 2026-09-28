@@ -3,7 +3,8 @@ import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import * as schema from './schema'
 
-export function openDatabase(file: string, migrationsFolder: string) {
+/** Pass `migrationsFolder` only from the process that owns the schema (main). */
+export function openDatabase(file: string, migrationsFolder?: string) {
   const sqlite = new Database(file)
   sqlite.pragma('journal_mode = WAL')
   sqlite.pragma('synchronous = NORMAL')
@@ -11,7 +12,7 @@ export function openDatabase(file: string, migrationsFolder: string) {
   sqlite.pragma('busy_timeout = 5000')
 
   const db = drizzle({ client: sqlite, schema })
-  migrate(db, { migrationsFolder })
+  if (migrationsFolder) migrate(db, { migrationsFolder })
   return db
 }
 
