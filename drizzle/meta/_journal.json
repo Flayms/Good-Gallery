@@ -22,6 +22,20 @@
       "when": 1790594680131,
       "tag": "0002_thumb_index",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1790612916446,
+      "tag": "0003_search",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790612917169,
+      "tag": "0004_tag_media_count",
+      "breakpoints": true
     }
   ]
 }

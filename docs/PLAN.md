@@ -154,11 +154,25 @@ Notes from implementation:
 - Added `media.byId`. `next-themes` from the shadcn Sonner template dropped (dark-only app).
 - Deferred to Phase 5: sidebar folders and popular tags, top search bar, tag search params.
 
-### Phase 5 – Tag search
+### Phase 5 – Tag search ✅
 
  1. shadcn `Command` combobox with prefix autocomplete (by `name_norm`, usage counts), Badge chips, include/exclude toggle (`-tag`), in a top search bar; tags include/exclude in the URL search params.
  2. SQL: include-all (`IN … GROUP BY … HAVING COUNT = n`), `NOT EXISTS` for exclusions, hierarchical tags match descendants; filters for root, folder prefix, kind, date range. Validate with `EXPLAIN QUERY PLAN` on a 500k-row synthetic DB.
  3. Sidebar: folders per library and popular tags.
+
+Notes from implementation:
+
+- URL search params: `tags` / `exclude` (display names, compared normalized), `folder` (only with `root`), `from` / `to` (inclusive local days `YYYY-MM-DD`, sent as a half-open ms range). `lib/search.ts` maps them to the `media.search` input.
+- Schema (migrations `0003_search`, `0004_tag_media_count`): `media.dir` virtual generated column (`rtrim(rel_path, replace(rel_path, '/', ''))` = folder with trailing `/`) + index `(root_id, dir)`; folder filter is the range `dir >= 'a/b/' AND dir < 'a/b0'` (subfolders included). `tags.media_count` (direct links) kept in sync by `media_tags` insert/delete triggers — a custom migration (`drizzle-kit generate --custom`), since drizzle-kit doesn't model triggers.
+- Tag query (`main/db/tag-search.ts`): each included tag expands to its subtree (recursive CTE, `UNION` so cycles terminate); estimate = sum of `media_count`. Instead of one `GROUP BY … HAVING` (always drives from `media_tags` and sorts every match: 45 ms for a 15k tag, 210–290 ms for a parent tag), the shape is picked per tag:
+  - rarest tag ≤ 5k matches drives (`media.id IN (…)`, sorted afterwards), the other tags are `EXISTS` checks;
+  - otherwise the sort index is walked with `+media.id IN (…)` (unary `+` stops SQLite from turning it into an id lookup; the list is materialized once, bloom filter) for tags ≤ 100k matches, and `EXISTS` for more common tags (building the list would cost more than a probe per row);
+  - `EXISTS` / `NOT EXISTS` use `media_id = +media.id AND +tag_id IN (…)` so SQLite reads a media's few links via the primary key instead of probing once per subtree id or rewriting EXISTS into IN.
+- Benchmark (temporary vitest file, not committed): 500k media in 2 roots, 2k tags (200 cities under 20 countries under `Places`, Zipf-distributed flat tags), ~1M links. p95: no filter 1.4 ms, common / rare / parent tag 11 / 0.8 / 2.3 ms, two tags 17 ms, exclusions 1–3 ms, tag + kind 15–20 ms, folder + tag 21 ms, parent tag + kind + exclusion 36 ms (worst), deep page 12 ms; autocomplete < 6 ms (was 50–95 ms with a live `COUNT` join).
+- Autocomplete counts include descendants (a search for a parent tag matches them) and hide tags without media (orphans are only pruned after the next scan). Popular tags = autocomplete with an empty prefix.
+- `libraries.folders`: `GROUP BY dir` over the `(root_id, dir)` index (~50 ms for 350k media, so only fetched for the selected library); the renderer builds the tree (`lib/folders.ts`), adding folders without direct media.
+- UI: `components/tag-search.tsx` (cmdk `Command` with `shouldFilter={false}`, chips toggle include/exclude on click, Backspace removes the last chip; the highlighted item is controlled because cmdk highlights before async suggestions arrive), `date-range-filter.tsx` (Popover with native date inputs), `folder-tree.tsx`, `popular-tags.tsx`. Indexer progress also refreshes tags and folders.
+- Known worst case: a tag with > 100k matches combined with a filter that matches few of them walks many rows per page.
 
 ### Phase 6 – Viewer & polish
 

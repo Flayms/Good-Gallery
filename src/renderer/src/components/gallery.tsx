@@ -1,13 +1,13 @@
-import { MasonryGrid } from '@/components/masonry-grid'
-import { MediaTile } from '@/components/media-tile'
-import { Button } from '@/components/ui/button'
-import { Skeleton } from '@/components/ui/skeleton'
-import type { GallerySearch } from '@/lib/search'
-import { trpc } from '@/lib/trpc'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { FolderPlusIcon, ImagesIcon, TriangleAlertIcon } from 'lucide-react'
 import { type ReactNode, useCallback, useMemo } from 'react'
+import { MasonryGrid } from '@/components/masonry-grid'
+import { MediaTile } from '@/components/media-tile'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { type GallerySearch, mediaSearchInput } from '@/lib/search'
+import { trpc } from '@/lib/trpc'
 
 const PAGE_SIZE = 200
 const GAP = 8
@@ -51,7 +51,7 @@ export function Gallery({
 }) {
   const { data, error, isPending, hasNextPage, isFetchingNextPage, fetchNextPage } = useInfiniteQuery(
     trpc.media.search.infiniteQueryOptions(
-      { rootId: search.root, kind: search.kind, sort: search.sort, limit: PAGE_SIZE },
+      { ...mediaSearchInput(search), limit: PAGE_SIZE },
       { getNextPageParam: (page) => page.nextCursor },
     ),
   )

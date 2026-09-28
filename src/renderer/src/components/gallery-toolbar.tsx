@@ -1,3 +1,6 @@
+import { ImageIcon, VideoIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react'
+import { DateRangeFilter } from '@/components/date-range-filter'
+import { TagSearch } from '@/components/tag-search'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
@@ -5,7 +8,6 @@ import { Slider } from '@/components/ui/slider'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { MAX_COLUMNS, MIN_COLUMNS } from '@/hooks/use-columns'
 import { type GallerySearch, isMediaKind, isSort, SORT_LABELS, SORTS } from '@/lib/search'
-import { ImageIcon, VideoIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react'
 
 interface GalleryToolbarProps {
   search: GallerySearch
@@ -16,9 +18,10 @@ interface GalleryToolbarProps {
 
 export function GalleryToolbar({ search, onSearchChange, columns, onColumnsChange }: GalleryToolbarProps) {
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+    <header className="flex min-h-12 shrink-0 items-center gap-2 border-b px-3 py-2">
       <SidebarTrigger />
       <Separator orientation="vertical" className="mx-1 h-4!" />
+      <TagSearch search={search} onSearchChange={onSearchChange} />
       <ToggleGroup
         type="single"
         size="sm"
@@ -38,6 +41,7 @@ export function GalleryToolbar({ search, onSearchChange, columns, onColumnsChang
       </ToggleGroup>
 
       <div className="ml-auto flex items-center gap-4">
+        <DateRangeFilter search={search} onSearchChange={onSearchChange} />
         <Select
           value={search.sort ?? 'date-desc'}
           onValueChange={(value) => onSearchChange({ sort: isSort(value) ? value : undefined })}

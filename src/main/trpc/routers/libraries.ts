@@ -1,8 +1,8 @@
 import { basename, isAbsolute, resolve } from 'node:path'
 import { TRPCError } from '@trpc/server'
-import { asc, eq, sql } from 'drizzle-orm'
+import { and, asc, count, eq, ne, sql } from 'drizzle-orm'
 import { z } from 'zod'
-import { libraryRoots } from '../../db/schema'
+import { libraryRoots, media } from '../../db/schema'
 import { isReachableDirectory } from '../../reachability'
 import { publicProcedure, router } from '../trpc'
 
@@ -10,6 +10,17 @@ const idInput = z.object({ id: z.int().positive() })
 
 export const librariesRouter = router({
   list: publicProcedure.query(({ ctx }) => ctx.db.select().from(libraryRoots).orderBy(asc(libraryRoots.label)).all()),
+
+  /** Folders that directly contain media, with their direct media counts (`/`-separated, no trailing `/`). */
+  folders: publicProcedure.input(idInput).query(({ ctx, input }) =>
+    ctx.db
+      .select({ path: sql<string>`rtrim(${media.dir}, '/')`, count: count() })
+      .from(media)
+      .where(and(eq(media.rootId, input.id), ne(media.dir, '')))
+      .groupBy(media.dir)
+      .orderBy(asc(media.dir))
+      .all(),
+  ),
 
   add: publicProcedure
     .input(

@@ -1,10 +1,10 @@
+import { useQuery } from '@tanstack/react-query'
+import { createFileRoute, Outlet } from '@tanstack/react-router'
 import { Gallery } from '@/components/gallery'
 import { GalleryToolbar } from '@/components/gallery-toolbar'
 import { useColumns } from '@/hooks/use-columns'
 import { type GallerySearch, gallerySearch } from '@/lib/search'
 import { trpc } from '@/lib/trpc'
-import { useQuery } from '@tanstack/react-query'
-import { createFileRoute, Outlet } from '@tanstack/react-router'
 
 // Pathless layout: the gallery stays mounted (and keeps its scroll position) while the viewer overlays it.
 export const Route = createFileRoute('/_gallery')({

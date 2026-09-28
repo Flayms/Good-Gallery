@@ -1,12 +1,12 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { FolderPlusIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react'
+import { type FormEvent, useState } from 'react'
+import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { trpc } from '@/lib/trpc'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { FolderPlusIcon, RefreshCwIcon, Trash2Icon } from 'lucide-react'
-import { type FormEvent, useState } from 'react'
-import { toast } from 'sonner'
 
 const STATUS_VARIANT = { online: 'secondary', offline: 'destructive', unknown: 'outline' } as const
 
@@ -18,7 +18,12 @@ export function LibrarySettings() {
 
   const refresh = async (withMedia: boolean) => {
     await queryClient.invalidateQueries({ queryKey: trpc.libraries.list.queryKey() })
-    if (withMedia) await queryClient.invalidateQueries({ queryKey: trpc.media.search.pathKey() })
+    if (withMedia) {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: trpc.media.search.pathKey() }),
+        queryClient.invalidateQueries({ queryKey: trpc.tags.pathKey() }),
+      ])
+    }
   }
   const onError = (error: { message: string }) => toast.error(error.message)
 

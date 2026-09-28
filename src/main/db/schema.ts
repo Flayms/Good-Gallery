@@ -1,13 +1,13 @@
 import { sql } from 'drizzle-orm'
 import {
-    type AnySQLiteColumn,
-    index,
-    integer,
-    primaryKey,
-    real,
-    sqliteTable,
-    text,
-    uniqueIndex,
+  type AnySQLiteColumn,
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
 } from 'drizzle-orm/sqlite-core'
 
 // All timestamps are integer milliseconds since the Unix epoch.
@@ -42,6 +42,8 @@ export const media = sqliteTable(
     duration: real('duration'),
     takenAt: integer('taken_at'),
     sortDate: integer('sort_date').notNull().generatedAlwaysAs(sql`coalesce(taken_at, mtime)`, { mode: 'virtual' }),
+    /** Folder of `relPath` with a trailing `/` (`''` at the root): strips everything after the last `/`. */
+    dir: text('dir').notNull().generatedAlwaysAs(sql`rtrim(rel_path, replace(rel_path, '/', ''))`, { mode: 'virtual' }),
     /** Base64-encoded ThumbHash. */
     thumbhash: text('thumbhash'),
     thumbStatus: text('thumb_status', { enum: ['pending', 'ready', 'error'] })
@@ -53,6 +55,7 @@ export const media = sqliteTable(
     index('media_date_idx').on(t.sortDate, t.id),
     index('media_root_date_idx').on(t.rootId, t.sortDate, t.id),
     index('media_name_idx').on(t.fileName, t.id),
+    index('media_dir_idx').on(t.rootId, t.dir),
     // Background thumbnail generation picks pending media newest first.
     index('media_thumb_idx').on(t.thumbStatus, t.sortDate),
   ],
@@ -65,6 +68,8 @@ export const tags = sqliteTable(
     name: text('name').notNull(),
     nameNorm: text('name_norm').notNull().unique(),
     parentId: integer('parent_id').references((): AnySQLiteColumn => tags.id, { onDelete: 'cascade' }),
+    /** Number of `media_tags` rows (direct links only), maintained by triggers. */
+    mediaCount: integer('media_count').notNull().default(0),
   },
   (t) => [index('tags_parent_idx').on(t.parentId)],
 )

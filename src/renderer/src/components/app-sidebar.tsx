@@ -1,3 +1,9 @@
+import type { IndexerStatus } from '@main/indexer'
+import { useQuery } from '@tanstack/react-query'
+import { Link, useLocation, useSearch } from '@tanstack/react-router'
+import { FolderIcon, ImagesIcon, LayersIcon, Loader2Icon, SettingsIcon, UnplugIcon } from 'lucide-react'
+import { FolderTree } from '@/components/folder-tree'
+import { PopularTags } from '@/components/popular-tags'
 import { Badge } from '@/components/ui/badge'
 import {
   Sidebar,
@@ -13,10 +19,6 @@ import {
   SidebarMenuSkeleton,
 } from '@/components/ui/sidebar'
 import { type RouterOutputs, trpc } from '@/lib/trpc'
-import type { IndexerStatus } from '@main/indexer'
-import { useQuery } from '@tanstack/react-query'
-import { Link, useLocation, useSearch } from '@tanstack/react-router'
-import { FolderIcon, ImagesIcon, LayersIcon, Loader2Icon, SettingsIcon, UnplugIcon } from 'lucide-react'
 
 type Library = RouterOutputs['libraries']['list'][number]
 
@@ -40,7 +42,7 @@ function IndexerProgress({ status, libraries }: { status: IndexerStatus; librari
 
 export function AppSidebar({ indexer }: { indexer: IndexerStatus | undefined }) {
   const libraries = useQuery(trpc.libraries.list.queryOptions())
-  const { root: activeRoot } = useSearch({ strict: false })
+  const { root: activeRoot, folder: activeFolder } = useSearch({ strict: false })
   const onSettings = useLocation({ select: (location) => location.pathname === '/settings' })
 
   return (
@@ -57,7 +59,7 @@ export function AppSidebar({ indexer }: { indexer: IndexerStatus | undefined }) 
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton asChild isActive={!onSettings && activeRoot === undefined}>
-                <Link to="/" search={(prev) => ({ ...prev, root: undefined })}>
+                <Link to="/" search={(prev) => ({ ...prev, root: undefined, folder: undefined })}>
                   <LayersIcon />
                   <span>All libraries</span>
                 </Link>
@@ -66,8 +68,11 @@ export function AppSidebar({ indexer }: { indexer: IndexerStatus | undefined }) 
             {libraries.isPending && <SidebarMenuSkeleton showIcon />}
             {libraries.data?.map((root) => (
               <SidebarMenuItem key={root.id}>
-                <SidebarMenuButton asChild isActive={!onSettings && activeRoot === root.id}>
-                  <Link to="/" search={(prev) => ({ ...prev, root: root.id })} title={root.path}>
+                <SidebarMenuButton
+                  asChild
+                  isActive={!onSettings && activeRoot === root.id && activeFolder === undefined}
+                >
+                  <Link to="/" search={(prev) => ({ ...prev, root: root.id, folder: undefined })} title={root.path}>
                     {root.status === 'offline' ? <UnplugIcon /> : <FolderIcon />}
                     <span>{root.label}</span>
                   </Link>
@@ -83,10 +88,12 @@ export function AppSidebar({ indexer }: { indexer: IndexerStatus | undefined }) 
                     </SidebarMenuBadge>
                   )
                 )}
+                {!onSettings && activeRoot === root.id && <FolderTree rootId={root.id} activeFolder={activeFolder} />}
               </SidebarMenuItem>
             ))}
           </SidebarMenu>
         </SidebarGroup>
+        <PopularTags />
       </SidebarContent>
       <SidebarFooter>
         {indexer && <IndexerProgress status={indexer} libraries={libraries.data ?? []} />}

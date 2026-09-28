@@ -1,9 +1,9 @@
-import { Button } from '@/components/ui/button'
-import { trpc } from '@/lib/trpc'
 import { mediaUrl } from '@shared/media-urls'
 import { useQuery } from '@tanstack/react-query'
 import { XIcon } from 'lucide-react'
 import { useEffect } from 'react'
+import { Button } from '@/components/ui/button'
+import { trpc } from '@/lib/trpc'
 
 /** Minimal full-window viewer; keyboard navigation, zoom and the metadata panel follow in Phase 6. */
 export function MediaViewer({ id, onClose }: { id: number; onClose: () => void }) {

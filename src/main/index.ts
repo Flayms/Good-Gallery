@@ -1,6 +1,6 @@
+import { join } from 'node:path'
 import { MEDIA_SCHEME, THUMB_SCHEME } from '@shared/media-urls'
 import { app, BrowserWindow, protocol } from 'electron'
-import { join } from 'node:path'
 import { openDatabase } from './db'
 import { IndexerController } from './indexer'
 import { forkIndexer } from './indexer-process'

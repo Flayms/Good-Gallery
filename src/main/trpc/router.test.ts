@@ -1,7 +1,8 @@
-import { TRPCError } from '@trpc/server'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { TRPCError } from '@trpc/server'
+import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type Db, openDatabase } from '../db'
 import { libraryRoots, media, mediaTags, tags } from '../db/schema'
@@ -118,6 +119,82 @@ describe('media.search', () => {
 
     expect([...first.items, ...second.items].map((item) => item.fileName)).toEqual(['a.jpg', 'b.jpg', 'c.jpg'])
   })
+
+  it('filters by folder including subfolders', async () => {
+    const root = insertRoot()
+    const ids = ['a/1.jpg', 'a/b/2.jpg', 'ab/3.jpg', '4.jpg'].map(
+      (relPath, i) => insertMedia(root.id, `${i}.jpg`, { relPath, mtime: -i }).id,
+    )
+
+    const search = async (folder: string) =>
+      (await caller.media.search({ rootId: root.id, folder })).items.map((item) => item.id)
+
+    expect(await search('a')).toEqual([ids[0], ids[1]])
+    expect(await search('a/b/')).toEqual([ids[1]])
+    await expectTrpcError(caller.media.search({ folder: 'a' }), 'BAD_REQUEST')
+  })
+
+  it('filters by date range', async () => {
+    const root = insertRoot()
+    const ids = [10, 20, 30].map((takenAt) => insertMedia(root.id, `${takenAt}.jpg`, { takenAt }).id)
+
+    const page = await caller.media.search({ from: 20, to: 30 })
+
+    expect(page.items.map((item) => item.id)).toEqual([ids[1]])
+  })
+})
+
+describe('media.search tags', () => {
+  // Tree: places > france > paris; flat: cat, dog.
+  function setup() {
+    const root = insertRoot()
+    const insertTag = (name: string, parentId: number | null = null) =>
+      db.insert(tags).values({ name, nameNorm: name.toLowerCase(), parentId }).returning().get().id
+    const places = insertTag('Places')
+    const france = insertTag('France', places)
+    const paris = insertTag('Paris', france)
+    const cat = insertTag('Cat')
+    const dog = insertTag('Dog')
+    const file = (name: string, tagIds: number[], mtime: number) => {
+      const id = insertMedia(root.id, name, { mtime }).id
+      if (tagIds.length > 0)
+        db.insert(mediaTags)
+          .values(tagIds.map((tagId) => ({ mediaId: id, tagId })))
+          .run()
+      return id
+    }
+    return {
+      parisCat: file('paris-cat.jpg', [paris, cat], 5),
+      franceDog: file('france-dog.jpg', [france, dog], 4),
+      cat: file('cat.jpg', [cat], 3),
+      untagged: file('none.jpg', [], 2),
+    }
+  }
+
+  const search = async (include: string[], exclude: string[] = []) =>
+    (await caller.media.search({ tags: include, excludeTags: exclude })).items.map((item) => item.id)
+
+  it('requires all included tags, matching descendants', async () => {
+    const ids = setup()
+
+    expect(await search(['places'])).toEqual([ids.parisCat, ids.franceDog])
+    expect(await search([' FRANCE ', 'cat'])).toEqual([ids.parisCat])
+    expect(await search(['paris', 'dog'])).toEqual([])
+  })
+
+  it('excludes tags with their descendants', async () => {
+    const ids = setup()
+
+    expect(await search([], ['france'])).toEqual([ids.cat, ids.untagged])
+    expect(await search(['cat'], ['paris'])).toEqual([ids.cat])
+  })
+
+  it('matches nothing for unknown included tags and ignores unknown exclusions', async () => {
+    const ids = setup()
+
+    expect(await search(['cat', 'unknown'])).toEqual([])
+    expect(await search(['cat'], ['unknown'])).toEqual([ids.parisCat, ids.cat])
+  })
 })
 
 describe('media.byId', () => {
@@ -151,5 +228,40 @@ describe('tags.autocomplete', () => {
       { id: berlin.id, name: 'Berlin', count: 1 },
     ])
     expect(await caller.tags.autocomplete({ limit: 1 })).toEqual([{ id: bern.id, name: 'Bern', count: 3 }])
+  })
+
+  it('counts descendants and follows deletions', async () => {
+    const root = insertRoot()
+    const places = db.insert(tags).values({ name: 'Places', nameNorm: 'places' }).returning().get()
+    const paris = db.insert(tags).values({ name: 'Paris', nameNorm: 'paris', parentId: places.id }).returning().get()
+    const files = [1, 2].map((i) => insertMedia(root.id, `${i}.jpg`))
+    db.insert(mediaTags)
+      .values(files.map((file) => ({ mediaId: file.id, tagId: paris.id })))
+      .run()
+
+    expect(await caller.tags.autocomplete({ prefix: 'pl' })).toEqual([{ id: places.id, name: 'Places', count: 2 }])
+
+    db.delete(media)
+      .where(eq(media.id, files[0]?.id ?? 0))
+      .run()
+    expect(await caller.tags.autocomplete({})).toEqual([
+      { id: paris.id, name: 'Paris', count: 1 },
+      { id: places.id, name: 'Places', count: 1 },
+    ])
+
+    db.delete(media).run()
+    expect(await caller.tags.autocomplete({})).toEqual([])
+  })
+})
+
+describe('libraries.folders', () => {
+  it('lists folders with direct media counts', async () => {
+    const root = insertRoot()
+    for (const relPath of ['top.jpg', 'a/1.jpg', 'a/2.jpg', 'a/b/3.jpg']) insertMedia(root.id, relPath, { relPath })
+
+    expect(await caller.libraries.folders({ id: root.id })).toEqual([
+      { path: 'a', count: 2 },
+      { path: 'a/b', count: 1 },
+    ])
   })
 })
