@@ -22,6 +22,8 @@ export class IndexerController extends EventEmitter<{ status: [IndexerStatus] }>
   #worker: IndexerWorker | undefined
   #disposed = false
   #status: IndexerStatus = { state: 'idle', queue: [], current: null }
+  /** Resolvers of in-flight thumbnail requests by media id. */
+  readonly #thumbnails = new Map<number, { promise: Promise<boolean>; resolve: (ok: boolean) => void }>()
 
   constructor(spawn: () => IndexerWorker) {
     super()
@@ -50,6 +52,18 @@ export class IndexerController extends EventEmitter<{ status: [IndexerStatus] }>
     this.#disposed = true
     this.#worker?.kill()
     this.#worker = undefined
+    this.#failThumbnails()
+  }
+
+  /** Renders a thumbnail ahead of background work. Resolves true once its files are in the cache. */
+  requestThumbnail(mediaId: number): Promise<boolean> {
+    if (this.#disposed) return Promise.resolve(false)
+    const pending = this.#thumbnails.get(mediaId)
+    if (pending) return pending.promise
+    const { promise, resolve } = Promise.withResolvers<boolean>()
+    this.#thumbnails.set(mediaId, { promise, resolve })
+    this.#ensureWorker().send({ type: 'thumbnail', mediaId })
+    return promise
   }
 
   #dispatch(): void {
@@ -66,6 +80,7 @@ export class IndexerController extends EventEmitter<{ status: [IndexerStatus] }>
     worker.onExit(() => {
       if (this.#worker !== worker) return
       this.#worker = undefined
+      this.#failThumbnails()
       const rootId = this.#status.current?.rootId
       if (rootId !== undefined) {
         console.error(`Indexer process exited while scanning root ${rootId}`)
@@ -77,6 +92,11 @@ export class IndexerController extends EventEmitter<{ status: [IndexerStatus] }>
   }
 
   #onEvent(event: IndexerEvent): void {
+    if (event.type === 'thumbnail') {
+      this.#thumbnails.get(event.mediaId)?.resolve(event.ok)
+      this.#thumbnails.delete(event.mediaId)
+      return
+    }
     if (event.rootId !== this.#status.current?.rootId) return
     if (event.type === 'progress') {
       const { type: _, ...current } = event
@@ -90,6 +110,11 @@ export class IndexerController extends EventEmitter<{ status: [IndexerStatus] }>
   #finish(): void {
     this.#update({ state: 'idle', current: null })
     this.#dispatch()
+  }
+
+  #failThumbnails(): void {
+    for (const { resolve } of this.#thumbnails.values()) resolve(false)
+    this.#thumbnails.clear()
   }
 
   #update(patch: Partial<IndexerStatus>): void {

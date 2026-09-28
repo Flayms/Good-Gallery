@@ -3,16 +3,24 @@ import { isReachableDirectory } from '../main/reachability'
 import { ExifToolMetadataSource } from './metadata'
 import { type IndexerEvent, indexerRequest } from './protocol'
 import { type ScanDeps, scanRoot } from './scan'
+import { ThumbCache } from './thumb-cache'
+import { renderMedia } from './thumbnail'
+import { ThumbnailService } from './thumbnails'
 import { IndexWriter } from './writer'
 
 // Entry point of the indexer utilityProcess. Main serializes scans; this process just runs what it is told.
 
 const port = process.parentPort
-let config: { deps: ScanDeps; concurrency: number } | undefined
+let config: { deps: ScanDeps; thumbnails: ThumbnailService; concurrency: number } | undefined
 const scans = new Map<number, AbortController>()
 
 function send(event: IndexerEvent): void {
   port.postMessage(event)
+}
+
+function initialized(): NonNullable<typeof config> {
+  if (!config) throw new Error('Indexer received a request before init')
+  return config
 }
 
 async function scan(rootId: number): Promise<void> {
@@ -20,12 +28,17 @@ async function scan(rootId: number): Promise<void> {
   const controller = new AbortController()
   scans.set(rootId, controller)
   try {
-    if (!config) throw new Error('Indexer received a scan request before init')
-    const outcome = await scanRoot(config.deps, rootId, {
-      concurrency: config.concurrency,
+    const { deps, thumbnails, concurrency } = initialized()
+    const outcome = await scanRoot(deps, rootId, {
+      concurrency,
       signal: controller.signal,
-      onProgress: (progress) => send({ type: 'progress', ...progress }),
+      onProgress: (progress) => {
+        send({ type: 'progress', ...progress })
+        // Written batches may hold new media, so rendering starts before the scan finishes.
+        thumbnails.kick()
+      },
     })
+    thumbnails.kick()
     send({ type: 'done', rootId, outcome })
   } catch (error) {
     console.error(`Indexer: scan of root ${rootId} failed:`, error)
@@ -35,17 +48,29 @@ async function scan(rootId: number): Promise<void> {
   }
 }
 
+async function thumbnail(mediaId: number): Promise<void> {
+  const ok = await initialized().thumbnails.request(mediaId)
+  send({ type: 'thumbnail', mediaId, ok })
+}
+
 port.on('message', ({ data }) => {
   const request = indexerRequest.parse(data)
   switch (request.type) {
     case 'init': {
       const metadata = new ExifToolMetadataSource(request.concurrency)
-      const deps = {
-        writer: new IndexWriter(openDatabase(request.dbPath)),
-        metadata,
-        isReachable: isReachableDirectory,
-      }
-      config = { deps, concurrency: request.concurrency }
+      const writer = new IndexWriter(openDatabase(request.dbPath))
+      const thumbnails = new ThumbnailService(
+        {
+          writer,
+          cache: new ThumbCache(request.thumbDir, request.thumbCacheBytes),
+          render: (file, source) => renderMedia(file, source, metadata),
+          isReachable: isReachableDirectory,
+        },
+        request.concurrency,
+      )
+      const deps = { writer, metadata, isReachable: isReachableDirectory }
+      config = { deps, thumbnails, concurrency: request.concurrency }
+      thumbnails.kick()
       break
     }
     case 'scan':
@@ -53,6 +78,12 @@ port.on('message', ({ data }) => {
       break
     case 'cancel':
       scans.get(request.rootId)?.abort()
+      break
+    case 'thumbnail':
+      thumbnail(request.mediaId).catch((error: unknown) => {
+        console.error(`Indexer: thumbnail request for media ${request.mediaId} failed:`, error)
+        send({ type: 'thumbnail', mediaId: request.mediaId, ok: false })
+      })
       break
   }
 })

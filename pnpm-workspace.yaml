@@ -7,3 +7,5 @@ allowBuilds:
   electron-winstaller: false
   # Ships N-API prebuilds; the implicit node-gyp build would need Visual Studio.
   better-sqlite3: false
+  # Postinstall downloads the ffmpeg binary.
+  ffmpeg-static: true

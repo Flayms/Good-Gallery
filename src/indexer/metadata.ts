@@ -1,5 +1,6 @@
 import { ExifDateTime, ExifTool, type Tags } from 'exiftool-vendored'
 import { cleanTag, normalizeTag } from '../shared/tags'
+import type { PreviewSource } from './thumbnail'
 
 export interface MediaMetadata {
   width: number | null
@@ -18,7 +19,7 @@ export interface MetadataSource {
 }
 
 /** Reads metadata through a pool of long-running exiftool processes (`-stay_open`). */
-export class ExifToolMetadataSource implements MetadataSource {
+export class ExifToolMetadataSource implements MetadataSource, PreviewSource {
   readonly #exiftool: ExifTool
 
   constructor(maxProcs: number) {
@@ -31,6 +32,16 @@ export class ExifToolMetadataSource implements MetadataSource {
       sidecar ? this.#exiftool.read(sidecar) : undefined,
     ])
     return extractMetadata(tags, sidecarTags)
+  }
+
+  async extractPreview(file: string): Promise<Buffer | undefined> {
+    try {
+      const preview = await this.#exiftool.extractBinaryTagToBuffer('PreviewImage', file)
+      return preview.length > 0 ? preview : undefined
+    } catch {
+      // Most files have no preview; real read errors resurface when decoding the file itself.
+      return undefined
+    }
   }
 
   end(): Promise<void> {

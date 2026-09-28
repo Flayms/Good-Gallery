@@ -18,7 +18,7 @@ Modern Electron gallery app with a cascading (masonry/waterfall) image display, 
 | -------------- | ----------------------------------------------------------------------------------------------------------------- |
 | Shell / build  | electron 44.4.5, electron-vite **6.0.0-beta.1**, vite 8.3.1, @vitejs/plugin-react 6.1.1                           |
 | UI             | react 19.3.0, tailwindcss 4.3.3 (`@tailwindcss/vite`), shadcn 4.21.0, lucide-react, motion                        |
-| Data / routing | @tanstack/react-query 5.103.2, @tanstack/react-router 1.170.39 (+ router-plugin), @tanstack/react-virtual 3.14.13 |
+| Data / routing | @tanstack/react-query 5.103.2, @tanstack/react-router 1.170.38 (+ router-plugin 1.168.40), @tanstack/react-virtual 3.14.13 |
 | API            | @trpc/server + client + tanstack-react-query 11.19.0, zod 4.6.5, superjson                                        |
 | DB             | better-sqlite3 13.0.3, drizzle-orm 0.45.2, drizzle-kit 0.31.10                                                    |
 | Media          | sharp 0.35.4, exiftool-vendored 38.1.0, ffmpeg-static 5.3.0, thumbhash, p-queue 9.3.3                             |
@@ -111,17 +111,30 @@ Notes from implementation:
 - Tags: `HierarchicalSubject` → parent chain (first hierarchy seen wins, cycles refused), media linked to the leaf only; flat keywords that appear in a hierarchy are dropped (Lightroom writes both). Orphan tags are pruned after each completed scan.
 - Schedule: all roots at startup and every 30 min, offline roots every 60 s, I/O concurrency 4 (constants in `main/index.ts` until Phase 6 settings).
 
-### Phase 3 – Thumbnails & protocols
+### Phase 3 – Thumbnails & protocols ✅
 
  1. Thumbnails: sharp → WebP at 400w and 800w (HiDPI); prefer embedded JPEG preview when large enough (avoids full reads over SMB); ffmpeg frame at ~10% for videos; compute thumbhash into DB.
  2. Cache: `userData/thumbs/ab/cd/<sha1(rootId+relPath+size+mtime+w)>.webp`, LRU eviction with configurable size cap.
  3. Priority queue: background generation for new files, on-demand requests for visible items take priority.
- 4. `protocol.handle`: `gg-thumb://<id>/<w>` (cache or generate) and `gg-media://<id>` (stream originals with Range support). IDs only, resolved via DB — no raw paths.
+ 4. `protocol.handle`: `gg-thumb://media/<id>/<w>` (cache or generate) and `gg-media://media/<id>` (stream originals with Range support). IDs only, resolved via DB — no raw paths.
 
-### Phase 4 – Masonry gallery UI
+Notes from implementation:
+
+- Layout: indexer `thumbnail.ts` (decode + render), `thumb-cache.ts` (cache key + `ThumbCache`), `thumbnails.ts` (`ThumbnailService` queue); main `protocols.ts` (fetch-style handlers, tested without Electron); `shared/media-urls.ts` (URL build/parse, thumb widths).
+- URLs carry a fixed `media` host: standard schemes canonicalize numeric hosts as IPv4 (`gg-thumb://12` → `//0.0.0.12`).
+- One decode per file → resized to ≤800×2400 raw → both WebP widths + ThumbHash (≤100 px). `sharp.cache(false)` so libvips doesn't hold SMB files open.
+- Embedded preview: exiftool `PreviewImage`, used when its oriented width ≥ min(800, original) and its aspect matches the original within 2 %. The preview gets the original's EXIF orientation applied explicitly (`orient()`, mapping verified against sharp's auto-orient in tests).
+- Videos: `ffmpeg -ss <10 % of duration> -i … -frames:v 1` as PNG over stdout; binary path rewritten to `app.asar.unpacked` for packaging. `ffmpeg-static` postinstall downloads the binary (`allowBuilds: true`).
+- Queue: one p-queue (I/O concurrency) with priorities — background 0, on-demand an increasing counter (latest request first, since earlier ones have likely scrolled away); already queued background jobs get bumped via `setPriority`. Background pulls pending media newest first in batches of 100 (index `media_thumb_idx (thumb_status, sort_date)`), skipping offline roots, and is kicked on init and scan progress.
+- Failures: if the root is still reachable the media is marked `error` (main then answers 404 without retrying); otherwise the root is set offline and the media stays `pending`. Results are only stored if size/mtime didn't change during rendering.
+- Cache: size measured at startup (crash leftovers `*.tmp` removed), atomic writes (temp + rename), eviction by file mtime down to 90 % of the cap; main bumps a thumbnail's mtime when serving it (at most hourly). Background work stops writing files once the cache is full (it still stores the ThumbHash), so it never evicts thumbnails that were actually viewed. Cap: 5 GiB constant in `main/index.ts` until Phase 6.
+- Main asks the indexer via `{ type: 'thumbnail', mediaId }` and awaits the reply (`IndexerController.requestThumbnail`, deduplicated, failed on worker exit).
+- `gg-media` parses a single `bytes=` range (multi-range → full 200, out of range → 416) and streams via `createReadStream`; the scheme is registered with `stream: true` for `<video>` seeking.
+
+### Phase 4 – Masonry gallery UI ✅
 
  1. TanStack Router, file-based routes, **hash history**: `/`, `/settings`, `/media/$id` (viewer overlay).
- 2. Search state in Zod-validated URL search params (tags include/exclude, root, kind, sort).
+ 2. Search state in Zod-validated URL search params (root, kind, sort; tags follow in Phase 5).
  3. `useInfiniteQuery` via `trpc.media.search.infiniteQueryOptions`, cursor pagination (~200/page).
 20. Virtualized masonry (`components/masonry-grid.tsx`, no masonry library): `@tanstack/react-virtual` `useVirtualizer` with `lanes` = column count (shortest-lane placement).
     - Heights computed up front from stored width/height (`lib/masonry.ts`) → no DOM measuring; aspect clamped to 0.3–3, square fallback for unknown dimensions.
@@ -130,12 +143,22 @@ Notes from implementation:
     - Infinite loading: `fetchNextPage()` when the last rendered index nears `items.length`.
     - Pick 400w vs 800w thumb by `colWidth * devicePixelRatio`; thumbhash background → CSS opacity fade-in on `onLoad` (no `motion` per tile).
     - Alternatives rejected: CSS columns / `react-masonry-css` (not virtualized, column-major order), CSS `grid-lanes` (not virtualized), `masonic` (unmaintained). Possible later second view mode: justified rows (exact chronological order).
- 5. Layout: shadcn Sidebar (libraries, folders, popular tags), top search bar, Skeleton, Sonner toasts, indexer progress, offline badges.
+ 5. Layout: shadcn Sidebar (libraries), Skeleton, Sonner toasts, indexer progress, offline badges.
+
+Notes from implementation:
+
+- Routes (`src/renderer/src/routes`, tree generated into `route-tree.gen.ts` by `@tanstack/router-plugin`, committed, excluded from Biome): `__root` (sidebar + toaster), pathless `_gallery` layout (validates search, renders toolbar + grid + `<Outlet>`), `_gallery/index`, `_gallery/media.$id` (overlay, so the grid keeps its scroll position), `settings`.
+- Zoom (2–12 columns) persists in `localStorage`, not the URL.
+- `useIndexerStatus` (single subscription in the root) invalidates `libraries.list` whenever the scanning root changes and `media.search` when a scan ends, plus at most every 10 s while new media are indexed.
+- Viewer is minimal (image / `<video>` via `gg-media`, Escape closes); the lightbox is Phase 6. Settings has basic library management (typed path, rescan, remove); the folder picker is Phase 6.
+- Added `media.byId`. `next-themes` from the shadcn Sonner template dropped (dark-only app).
+- Deferred to Phase 5: sidebar folders and popular tags, top search bar, tag search params.
 
 ### Phase 5 – Tag search
 
- 1. shadcn `Command` combobox with prefix autocomplete (by `name_norm`, usage counts), Badge chips, include/exclude toggle (`-tag`).
+ 1. shadcn `Command` combobox with prefix autocomplete (by `name_norm`, usage counts), Badge chips, include/exclude toggle (`-tag`), in a top search bar; tags include/exclude in the URL search params.
  2. SQL: include-all (`IN … GROUP BY … HAVING COUNT = n`), `NOT EXISTS` for exclusions, hierarchical tags match descendants; filters for root, folder prefix, kind, date range. Validate with `EXPLAIN QUERY PLAN` on a 500k-row synthetic DB.
+ 3. Sidebar: folders per library and popular tags.
 
 ### Phase 6 – Viewer & polish
 

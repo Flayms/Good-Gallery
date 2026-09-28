@@ -53,6 +53,8 @@ export const media = sqliteTable(
     index('media_date_idx').on(t.sortDate, t.id),
     index('media_root_date_idx').on(t.rootId, t.sortDate, t.id),
     index('media_name_idx').on(t.fileName, t.id),
+    // Background thumbnail generation picks pending media newest first.
+    index('media_thumb_idx').on(t.thumbStatus, t.sortDate),
   ],
 )
 

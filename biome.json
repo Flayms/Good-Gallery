@@ -2,7 +2,7 @@
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
   "files": {
-    "includes": ["**", "!src/renderer/src/components/ui", "!drizzle"]
+    "includes": ["**", "!src/renderer/src/components/ui", "!src/renderer/src/route-tree.gen.ts", "!drizzle"]
   },
   "formatter": {
     "indentStyle": "space",

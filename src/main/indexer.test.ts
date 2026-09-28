@@ -96,4 +96,24 @@ describe('IndexerController', () => {
     expect(workers[0]?.killed).toBe(true)
     expect(workers).toHaveLength(1)
   })
+
+  it('deduplicates thumbnail requests and resolves them from worker events', async () => {
+    const { controller, workers } = setup()
+
+    const first = controller.requestThumbnail(7)
+    const second = controller.requestThumbnail(7)
+    workers[0]?.emit({ type: 'thumbnail', mediaId: 7, ok: true })
+
+    expect(await Promise.all([first, second])).toEqual([true, true])
+    expect(workers[0]?.sent).toEqual([{ type: 'thumbnail', mediaId: 7 }])
+  })
+
+  it('fails pending thumbnail requests when the worker exits', async () => {
+    const { controller, workers } = setup()
+    const pending = controller.requestThumbnail(7)
+
+    workers[0]?.exit()
+
+    expect(await pending).toBe(false)
+  })
 })

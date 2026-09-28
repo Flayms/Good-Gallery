@@ -1,8 +1,10 @@
 import { join } from 'node:path'
-import { app, BrowserWindow } from 'electron'
+import { MEDIA_SCHEME, THUMB_SCHEME } from '@shared/media-urls'
+import { app, BrowserWindow, protocol } from 'electron'
 import { openDatabase } from './db'
 import { IndexerController } from './indexer'
 import { forkIndexer } from './indexer-process'
+import { createMediaHandler, createThumbHandler } from './protocols'
 import { scheduleRescans } from './rescan'
 import { installSecurityHandlers, rendererDevUrl, rendererIndexFile } from './security'
 import { registerTrpcIpc } from './trpc/ipc-main'
@@ -11,6 +13,13 @@ import { appRouter } from './trpc/router'
 // Defaults until they become settings (Phase 6).
 const IO_CONCURRENCY = 4
 const RESCAN_SCHEDULE = { intervalMs: 30 * 60_000, offlineRetryMs: 60_000 }
+const THUMB_CACHE_BYTES = 5 * 1024 ** 3
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: THUMB_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
+  // `stream` lets `<video>` play and seek while the response is still loading.
+  { scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+])
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -48,14 +57,23 @@ app.whenReady().then(() => {
   installSecurityHandlers()
 
   const dbPath = join(app.getPath('userData'), 'gallery.db')
+  const thumbDir = join(app.getPath('userData'), 'thumbs')
   const db = openDatabase(dbPath, migrationsFolder())
-  const indexer = new IndexerController(() => forkIndexer({ dbPath, concurrency: IO_CONCURRENCY }))
+  const indexer = new IndexerController(() =>
+    forkIndexer({ dbPath, thumbDir, thumbCacheBytes: THUMB_CACHE_BYTES, concurrency: IO_CONCURRENCY }),
+  )
   const stopRescans = scheduleRescans(db, indexer, RESCAN_SCHEDULE)
   app.on('will-quit', () => {
     stopRescans()
     indexer.dispose()
     db.$client.close()
   })
+
+  protocol.handle(
+    THUMB_SCHEME,
+    createThumbHandler({ db, cacheDir: thumbDir, render: (mediaId) => indexer.requestThumbnail(mediaId) }),
+  )
+  protocol.handle(MEDIA_SCHEME, createMediaHandler({ db }))
 
   registerTrpcIpc({
     router: appRouter,

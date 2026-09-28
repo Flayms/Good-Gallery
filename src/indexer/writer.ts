@@ -1,9 +1,10 @@
-import { eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, ne, notInArray, sql } from 'drizzle-orm'
 import type { Db } from '../main/db'
 import { type LibraryRoot, libraryRoots, media, mediaTags, tags } from '../main/db/schema'
 import { cleanTag, normalizeTag } from '../shared/tags'
 import type { MediaKind } from './media-types'
 import type { MediaMetadata } from './metadata'
+import type { ThumbKey } from './thumb-cache'
 
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
 
@@ -22,6 +23,14 @@ export interface IndexedFile {
   mtime: number
   sidecarMtime: number | null
   metadata: MediaMetadata
+}
+
+/** Everything needed to render a thumbnail and to store it under the right cache key. */
+export interface ThumbSource extends ThumbKey {
+  id: number
+  rootPath: string
+  kind: MediaKind
+  duration: number | null
 }
 
 const DELETE_CHUNK = 500
@@ -91,6 +100,52 @@ export class IndexWriter {
     let deleted: number
     do deleted = this.#db.run(prune).changes
     while (deleted > 0)
+  }
+
+  thumbSource(id: number): ThumbSource | undefined {
+    return this.#db
+      .select({
+        id: media.id,
+        rootId: media.rootId,
+        rootPath: libraryRoots.path,
+        relPath: media.relPath,
+        kind: media.kind,
+        size: media.size,
+        mtime: media.mtime,
+        duration: media.duration,
+      })
+      .from(media)
+      .innerJoin(libraryRoots, eq(libraryRoots.id, media.rootId))
+      .where(eq(media.id, id))
+      .get()
+  }
+
+  /** Newest media still waiting for a thumbnail, skipping offline roots and `exclude`. */
+  pendingThumbs(limit: number, exclude: number[]): number[] {
+    return this.#db
+      .select({ id: media.id })
+      .from(media)
+      .innerJoin(libraryRoots, eq(libraryRoots.id, media.rootId))
+      .where(
+        and(
+          eq(media.thumbStatus, 'pending'),
+          ne(libraryRoots.status, 'offline'),
+          exclude.length > 0 ? notInArray(media.id, exclude) : undefined,
+        ),
+      )
+      .orderBy(desc(media.sortDate))
+      .limit(limit)
+      .all()
+      .map((row) => row.id)
+  }
+
+  /** Stores the outcome unless the file changed while its thumbnail was rendered. `null` marks a failure. */
+  setThumbnail({ id, size, mtime }: ThumbSource, thumbhash: string | null): void {
+    this.#db
+      .update(media)
+      .set({ thumbhash, thumbStatus: thumbhash === null ? 'error' : 'ready' })
+      .where(and(eq(media.id, id), eq(media.size, size), eq(media.mtime, mtime)))
+      .run()
   }
 
   #writeFile(tx: Tx, rootId: number, { metadata, ...file }: IndexedFile): void {

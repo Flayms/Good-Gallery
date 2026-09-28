@@ -1,3 +1,4 @@
+import { TRPCError } from '@trpc/server'
 import { and, asc, desc, eq, type SQL, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { media } from '../../db/schema'
@@ -14,6 +15,29 @@ const searchInput = z.object({
 export type MediaCursor = NonNullable<z.infer<typeof searchInput>['cursor']>
 
 export const mediaRouter = router({
+  byId: publicProcedure.input(z.object({ id: z.int().positive() })).query(({ ctx, input }) => {
+    const item = ctx.db
+      .select({
+        id: media.id,
+        rootId: media.rootId,
+        relPath: media.relPath,
+        fileName: media.fileName,
+        kind: media.kind,
+        size: media.size,
+        width: media.width,
+        height: media.height,
+        duration: media.duration,
+        takenAt: media.takenAt,
+        mtime: media.mtime,
+        thumbhash: media.thumbhash,
+      })
+      .from(media)
+      .where(eq(media.id, input.id))
+      .get()
+    if (!item) throw new TRPCError({ code: 'NOT_FOUND', message: 'Media not found' })
+    return item
+  }),
+
   search: publicProcedure.input(searchInput).query(({ ctx, input }) => {
     const sortColumn = input.sort === 'name-asc' ? media.fileName : media.sortDate
     const descending = input.sort === 'date-desc'

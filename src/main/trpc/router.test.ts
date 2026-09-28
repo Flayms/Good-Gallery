@@ -120,6 +120,16 @@ describe('media.search', () => {
   })
 })
 
+describe('media.byId', () => {
+  it('returns a single item or NOT_FOUND', async () => {
+    const root = insertRoot()
+    const item = insertMedia(root.id, 'a.jpg', { width: 3, height: 2 })
+
+    expect(await caller.media.byId({ id: item.id })).toMatchObject({ fileName: 'a.jpg', width: 3, height: 2 })
+    await expectTrpcError(caller.media.byId({ id: item.id + 1 }), 'NOT_FOUND')
+  })
+})
+
 describe('tags.autocomplete', () => {
   it('matches normalized prefixes ordered by usage', async () => {
     const root = insertRoot()

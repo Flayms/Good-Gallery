@@ -17,6 +17,20 @@ const KINDS: Record<string, MediaKind> = {
   '.mkv': 'video',
 }
 
+const MIME_TYPES: Record<string, string> = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.avif': 'image/avif',
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.mov': 'video/quicktime',
+  '.webm': 'video/webm',
+  '.mkv': 'video/x-matroska',
+}
+
 // NAS / OS housekeeping folders (Synology, QNAP, Windows).
 const IGNORED_DIRS = new Set(['@eadir', '#recycle', '#snapshot', '.@__thumb', 'system volume information'])
 
@@ -24,6 +38,10 @@ export function mediaKind(fileName: string): MediaKind | undefined {
   // Dotfiles include macOS AppleDouble files (`._IMG_1.jpg`), which aren't real media.
   if (fileName.startsWith('.')) return undefined
   return KINDS[extname(fileName).toLowerCase()]
+}
+
+export function mimeType(fileName: string): string {
+  return MIME_TYPES[extname(fileName).toLowerCase()] ?? 'application/octet-stream'
 }
 
 export function isIgnoredDir(name: string): boolean {
