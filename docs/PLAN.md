@@ -97,7 +97,7 @@ Notes from implementation:
 1. `utilityProcess` with its own DB write connection, MessagePort to main.
 2. Scanner: streaming `fs.opendir`, extension filter, diff by (size, mtime), batched transactions (~1k rows), p-queue I/O concurrency (~4, configurable).
 3. Metadata via exiftool-vendored (batch mode): dimensions, capture date, duration, tags from `XMP-dc:Subject`, `IPTC:Keywords`, `XMP-lr:HierarchicalSubject` (split on `|`), `XPKeywords`; read `.xmp` sidecars. Normalize tags (trim, case-fold, dedupe).
-4. Network resilience: root reachability check with timeout (online/offline), scheduled + manual rescans (`fs.watch` is unreliable on SMB), retry with backoff, cached browsing while offline.
+4. Network resilience: root reachability check with timeout (online/offline), change detection via watcher + quick scans (see notes), retry with backoff, cached browsing while offline.
 
 Notes from implementation:
 
@@ -109,7 +109,10 @@ Notes from implementation:
 - Deletion: files not seen during a completed scan are removed, except under directories that failed to list. Cancelled scans write nothing (the root may be gone); offline scans keep everything and flush what was read.
 - Offline detection mid-scan: transient I/O or exiftool errors trigger a reachability check; if the root is gone the scan aborts with `offline`.
 - Tags: `HierarchicalSubject` → parent chain (first hierarchy seen wins, cycles refused), media linked to the leaf only; flat keywords that appear in a hierarchy are dropped (Lightroom writes both). Orphan tags are pruned after each completed scan.
-- Schedule: all roots at startup and every 30 min, offline roots every 60 s, I/O concurrency 4 (constants in `main/index.ts` until Phase 6 settings).
+- Schedule: quick scan of all roots at startup and every 60 min (setting), offline roots every 60 s, I/O concurrency 4.
+- Scan scopes (`ScanScope` in `protocol.ts`): `full` lists every folder and stats every file (new root, manual Rescan); `quick` stats each folder stored in the `folders` table (root, rel dir, mtime at listing) and only re-lists folders whose mtime changed — folder mtimes change on add/remove/rename of direct children, not on in-place edits, so edits while the app is closed need a manual rescan; `changes` lists the parents of paths reported by the watcher, stats only new and reported files (plus files whose sidecar was reported) and walks new subfolders. Without stored folders every scope runs as `full`. Vanished folders (missing from a listing, or `ENOENT`) are removed with their media; folders that failed to list are stored with mtime `-1` so the next quick scan retries them.
+- Watcher (`indexer/watcher.ts`): recursive `fs.watch` per root (ReadDirectoryChangesW, which SMB supports), started in the indexer after a completed scan, stopped when the root goes offline or is removed. Changed paths are debounced (2 s, max 10 s) and sent to main as `changed`; main queues a `changes` scan (one job per root, merged: full > quick > changes, > 5000 paths → quick). Lost events (null filename) or watcher errors queue a quick scan. Only stating reported files matters because libuv also reports last-access changes, so the indexer's own reads trigger events.
+- Writes: batches of 250 files and at least every 2 s, so media appear while a slow share is scanned; `progress.indexed` counts written files.
 
 ### Phase 3 – Thumbnails & protocols ✅
 
@@ -149,7 +152,7 @@ Notes from implementation:
 
 - Routes (`src/renderer/src/routes`, tree generated into `route-tree.gen.ts` by `@tanstack/router-plugin`, committed, excluded from Biome): `__root` (sidebar + toaster), pathless `_gallery` layout (validates search, renders toolbar + grid + `<Outlet>`), `_gallery/index`, `_gallery/media.$id` (overlay, so the grid keeps its scroll position), `settings`.
 - Zoom (2–12 columns) persists in `localStorage`, not the URL.
-- `useIndexerStatus` (single subscription in the root) invalidates `libraries.list` whenever the scanning root changes and `media.search` when a scan ends, plus at most every 10 s while new media are indexed.
+- `useIndexerStatus` (single subscription in the root) invalidates `libraries.list` whenever the scanning root changes and `media.search` when a scan ends, right after the first files of a scan are written, then at most every 5 s.
 - Viewer is minimal (image / `<video>` via `gg-media`, Escape closes); the lightbox is Phase 6. Settings has basic library management (typed path, rescan, remove); the folder picker is Phase 6.
 - Added `media.byId`. `next-themes` from the shadcn Sonner template dropped (dark-only app).
 - Deferred to Phase 5: sidebar folders and popular tags, top search bar, tag search params.
@@ -185,7 +188,7 @@ Notes from implementation:
 - Keys: ←/→ navigate (not while a `<video>` has focus), Esc closes, `i` toggles the info panel, `+` `-` `0` zoom. Zoom/pan (`components/zoomable-image.tsx`, math in `lib/zoom.ts`): wheel zooms around the cursor, double-click toggles fit ↔ actual pixels (≥ 2×, ≤ 8×), dragging pans; the pan is clamped so zoomed content covers the viewport.
 - `media.byId` also returns the absolute path, library label and direct tags; tag badges navigate to the gallery filtered by that tag. `media.showInFolder` resolves the path from the DB by id (no raw paths from the renderer).
 - Native shell calls go through a `Desktop` interface in the tRPC context (`showItemInFolder`, `pickFolder`), faked in router tests. The folder picker adds the chosen folder right away; typing a path stays for unmapped UNC shares.
-- Settings: `settings` table (key → JSON value), `SettingsStore` in main validates with `shared/settings.ts` (invalid stored values fall back to defaults) and emits `change`. Rescan interval re-arms the timer (`0` = startup and manual only); cache cap and concurrency go to a running indexer as a `configure` message (p-queue concurrency, exiftool `setMaxProcs`, cache cap with eviction; running scans keep their concurrency). A respawned indexer reads current settings.
+- Settings: `settings` table (key → JSON value), `SettingsStore` in main validates with `shared/settings.ts` (invalid stored values fall back to defaults) and emits `change`. The quick-check interval re-arms the timer (`0` = startup only); cache cap and concurrency go to a running indexer as a `configure` message (p-queue concurrency, exiftool `setMaxProcs`, cache cap with eviction; running scans keep their concurrency). A respawned indexer reads current settings.
 - Cache usage/clear are request/response messages (`cache` with a `requestId`) answered by the indexer, which owns the cache. Clearing deletes what it can (files being served stay); thumbnails are re-rendered on demand.
 
 ### Phase 7 – Packaging & e2e ✅

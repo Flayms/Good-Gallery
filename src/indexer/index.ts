@@ -1,11 +1,12 @@
 import { openDatabase } from '../main/db'
 import { isReachableDirectory } from '../main/reachability'
 import { ExifToolMetadataSource } from './metadata'
-import { type IndexerEvent, indexerRequest } from './protocol'
+import { type IndexerEvent, indexerRequest, MAX_CHANGED_PATHS, type ScanScope } from './protocol'
 import { type ScanDeps, scanRoot } from './scan'
 import { ThumbCache } from './thumb-cache'
 import { renderMedia } from './thumbnail'
 import { ThumbnailService } from './thumbnails'
+import { RootWatcher } from './watcher'
 import { IndexWriter } from './writer'
 
 // Entry point of the indexer utilityProcess. Main serializes scans; this process just runs what it is told.
@@ -21,6 +22,7 @@ let config:
     }
   | undefined
 const scans = new Map<number, AbortController>()
+const watchers = new Map<number, RootWatcher>()
 
 function send(event: IndexerEvent): void {
   port.postMessage(event)
@@ -31,13 +33,40 @@ function initialized(): NonNullable<typeof config> {
   return config
 }
 
-async function scan(rootId: number): Promise<void> {
+/** Reports changes of a root to main, which queues a scan of the changed folders. */
+function startWatching(rootId: number, rootPath: string): void {
+  if (watchers.has(rootId)) return
+  try {
+    const watcher = new RootWatcher(rootPath, {
+      onChange: (paths) => {
+        send({ type: 'changed', rootId, paths: paths && paths.length <= MAX_CHANGED_PATHS ? paths : undefined })
+      },
+      onError: (error) => {
+        console.warn(`Indexer: watching ${rootPath} failed:`, error)
+        watchers.delete(rootId)
+        // Changes may have been missed; the scan also notices if the root went offline.
+        send({ type: 'changed', rootId })
+      },
+    })
+    watchers.set(rootId, watcher)
+  } catch (error) {
+    // Only the scheduled quick scans will notice changes then.
+    console.warn(`Indexer: cannot watch ${rootPath}:`, error)
+  }
+}
+
+function stopWatching(rootId: number): void {
+  watchers.get(rootId)?.close()
+  watchers.delete(rootId)
+}
+
+async function scan(rootId: number, scope: ScanScope): Promise<void> {
   if (scans.has(rootId)) return
   const controller = new AbortController()
   scans.set(rootId, controller)
   try {
     const { deps, thumbnails, concurrency } = initialized()
-    const outcome = await scanRoot(deps, rootId, {
+    const outcome = await scanRoot(deps, rootId, scope, {
       concurrency,
       signal: controller.signal,
       onProgress: (progress) => {
@@ -47,6 +76,9 @@ async function scan(rootId: number): Promise<void> {
       },
     })
     thumbnails.kick()
+    const root = deps.writer.root(rootId)
+    if (outcome === 'completed' && root) startWatching(rootId, root.path)
+    else if (outcome === 'offline') stopWatching(rootId)
     send({ type: 'done', rootId, outcome })
   } catch (error) {
     console.error(`Indexer: scan of root ${rootId} failed:`, error)
@@ -103,10 +135,11 @@ port.on('message', ({ data }) => {
       break
     }
     case 'scan':
-      void scan(request.rootId)
+      void scan(request.rootId, request.scope)
       break
-    case 'cancel':
+    case 'remove':
       scans.get(request.rootId)?.abort()
+      stopWatching(request.rootId)
       break
     case 'thumbnail':
       thumbnail(request.mediaId).catch((error: unknown) => {

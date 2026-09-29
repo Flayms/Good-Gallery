@@ -61,6 +61,23 @@ export const media = sqliteTable(
   ],
 )
 
+/**
+ * Folders of a root as last listed, with their mtime before listing. A folder's mtime changes when entries are
+ * added, removed or renamed in it (not when files change), so quick scans only re-list folders whose mtime differs.
+ */
+export const folders = sqliteTable(
+  'folders',
+  {
+    rootId: integer('root_id')
+      .notNull()
+      .references(() => libraryRoots.id, { onDelete: 'cascade' }),
+    /** `/`-separated, no trailing `/`; `''` for the root itself. */
+    relDir: text('rel_dir').notNull(),
+    mtime: integer('mtime').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.rootId, t.relDir] })],
+)
+
 export const tags = sqliteTable(
   'tags',
   {

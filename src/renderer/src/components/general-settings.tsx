@@ -10,12 +10,12 @@ import { Slider } from '@/components/ui/slider'
 import { formatBytes } from '@/lib/format'
 import { trpc } from '@/lib/trpc'
 
-const RESCAN_INTERVALS = [0, 15, 30, 60, 180, 360, 1440]
+const QUICK_CHECK_INTERVALS = [0, 15, 30, 60, 180, 360, 1440]
 const CACHE_SIZES_GIB = [1, 2, 5, 10, 20, 50, 100]
 const MAX_CONCURRENCY = 16
 
 function intervalLabel(minutes: number): string {
-  if (minutes === 0) return 'Only at startup and manually'
+  if (minutes === 0) return 'Only at startup'
   if (minutes < 60) return `Every ${minutes} minutes`
   if (minutes === 60) return 'Every hour'
   if (minutes === 1440) return 'Daily'
@@ -97,23 +97,26 @@ export function GeneralSettings() {
       <Skeleton className="h-48" />
     )
   }
-  const { rescanIntervalMinutes, ioConcurrency, thumbCacheGiB } = settings.data
+  const { quickCheckIntervalMinutes, ioConcurrency, thumbCacheGiB } = settings.data
 
   return (
     <>
       <section className="flex flex-col gap-4">
         <h2 className="font-heading font-medium text-lg">Indexing</h2>
         <div className="flex flex-col divide-y rounded-lg border">
-          <SettingRow label="Rescan libraries" description="Network shares don't report changes, so they are polled.">
+          <SettingRow
+            label="Check for missed changes"
+            description="Changes are picked up as they happen; this re-checks changed folders in case a notification got lost."
+          >
             <Select
-              value={String(rescanIntervalMinutes)}
-              onValueChange={(value) => set({ rescanIntervalMinutes: Number(value) })}
+              value={String(quickCheckIntervalMinutes)}
+              onValueChange={(value) => set({ quickCheckIntervalMinutes: Number(value) })}
             >
-              <SelectTrigger className="w-56" aria-label="Rescan interval">
+              <SelectTrigger className="w-56" aria-label="Check interval">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {withCurrent(RESCAN_INTERVALS, rescanIntervalMinutes).map((minutes) => (
+                {withCurrent(QUICK_CHECK_INTERVALS, quickCheckIntervalMinutes).map((minutes) => (
                   <SelectItem key={minutes} value={String(minutes)}>
                     {intervalLabel(minutes)}
                   </SelectItem>

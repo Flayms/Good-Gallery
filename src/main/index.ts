@@ -79,12 +79,12 @@ app.whenReady().then(() => {
   const settings = new SettingsStore(db)
   const indexer = new IndexerController(() => forkIndexer({ dbPath, thumbDir, ...indexerConfig(settings.get()) }))
   const rescans = scheduleRescans(db, indexer, {
-    intervalMs: settings.get().rescanIntervalMinutes * 60_000,
+    intervalMs: settings.get().quickCheckIntervalMinutes * 60_000,
     offlineRetryMs: OFFLINE_RETRY_MS,
   })
   settings.on('change', (next, previous) => {
-    if (next.rescanIntervalMinutes !== previous.rescanIntervalMinutes) {
-      rescans.setInterval(next.rescanIntervalMinutes * 60_000)
+    if (next.quickCheckIntervalMinutes !== previous.quickCheckIntervalMinutes) {
+      rescans.setInterval(next.quickCheckIntervalMinutes * 60_000)
     }
     if (next.thumbCacheGiB !== previous.thumbCacheGiB || next.ioConcurrency !== previous.ioConcurrency) {
       indexer.configure(indexerConfig(next))

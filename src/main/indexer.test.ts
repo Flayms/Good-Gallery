@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import type { IndexerEvent, IndexerRequest } from '../indexer/protocol'
-import { IndexerController, type IndexerWorker } from './indexer'
+import type { IndexerEvent, IndexerRequest, ScanScope } from '../indexer/protocol'
+import { IndexerController, type IndexerWorker, mergeScopes } from './indexer'
+
+const FULL: ScanScope = { mode: 'full' }
+const QUICK: ScanScope = { mode: 'quick' }
 
 class FakeWorker implements IndexerWorker {
   readonly sent: IndexerRequest[] = []
@@ -42,13 +45,17 @@ describe('IndexerController', () => {
   it('runs scans one at a time in request order', () => {
     const { controller, workers } = setup()
 
-    controller.requestScan(1)
-    controller.requestScan(2)
-    controller.requestScan(1)
+    controller.requestScan(1, QUICK)
+    controller.requestScan(2, QUICK)
+    controller.requestScan(1, QUICK)
 
-    expect(controller.status).toEqual({ state: 'scanning', queue: [2], current: { rootId: 1, scanned: 0, indexed: 0 } })
+    expect(controller.status).toEqual({
+      state: 'scanning',
+      queue: [2],
+      current: { rootId: 1, mode: 'quick', scanned: 0, indexed: 0 },
+    })
     workers[0]?.emit({ type: 'progress', rootId: 1, scanned: 10, indexed: 3 })
-    expect(controller.status.current).toEqual({ rootId: 1, scanned: 10, indexed: 3 })
+    expect(controller.status.current).toEqual({ rootId: 1, mode: 'quick', scanned: 10, indexed: 3 })
 
     workers[0]?.emit({ type: 'done', rootId: 1, outcome: 'completed' })
     expect(controller.status).toMatchObject({ state: 'scanning', queue: [], current: { rootId: 2 } })
@@ -57,38 +64,76 @@ describe('IndexerController', () => {
     expect(controller.status).toEqual({ state: 'idle', queue: [], current: null })
     expect(workers).toHaveLength(1)
     expect(workers[0]?.sent).toEqual([
-      { type: 'scan', rootId: 1 },
-      { type: 'scan', rootId: 2 },
+      { type: 'scan', rootId: 1, scope: QUICK },
+      { type: 'scan', rootId: 2, scope: QUICK },
     ])
   })
 
-  it('cancels queued scans locally and running scans in the worker', () => {
+  it('merges scans of a queued root into the one covering most', () => {
     const { controller, workers } = setup()
-    controller.requestScan(1)
-    controller.requestScan(2)
+    controller.requestScan(1, QUICK)
+    controller.requestScan(2, { mode: 'changes', paths: ['a'] })
+    controller.requestScan(2, { mode: 'changes', paths: ['b', 'a'] })
+    controller.requestScan(3, QUICK)
+    controller.requestScan(3, FULL)
 
-    controller.cancelScan(2)
-    controller.cancelScan(1)
+    expect(controller.status.queue).toEqual([2, 3])
+    workers[0]?.emit({ type: 'done', rootId: 1, outcome: 'completed' })
+    workers[0]?.emit({ type: 'done', rootId: 2, outcome: 'completed' })
+
+    expect(workers[0]?.sent.slice(1)).toEqual([
+      { type: 'scan', rootId: 2, scope: { mode: 'changes', paths: ['a', 'b'] } },
+      { type: 'scan', rootId: 3, scope: FULL },
+    ])
+  })
+
+  it('queues reported changes even while their root is scanned', () => {
+    const { controller, workers } = setup()
+    controller.requestScan(1, QUICK)
+
+    controller.requestScan(1, QUICK)
+    workers[0]?.emit({ type: 'changed', rootId: 1, paths: ['a/1.jpg'] })
+    workers[0]?.emit({ type: 'changed', rootId: 2 })
+
+    expect(controller.status.queue).toEqual([1, 2])
+    workers[0]?.emit({ type: 'done', rootId: 1, outcome: 'completed' })
+    expect(workers[0]?.sent.at(-1)).toEqual({
+      type: 'scan',
+      rootId: 1,
+      scope: { mode: 'changes', paths: ['a/1.jpg'] },
+    })
+  })
+
+  it('removes roots from the queue and the worker', () => {
+    const { controller, workers } = setup()
+    controller.requestScan(1, QUICK)
+    controller.requestScan(2, QUICK)
+
+    controller.removeRoot(2)
+    controller.removeRoot(1)
 
     expect(controller.status.queue).toEqual([])
-    expect(workers[0]?.sent.at(-1)).toEqual({ type: 'cancel', rootId: 1 })
+    expect(workers[0]?.sent.slice(1)).toEqual([
+      { type: 'remove', rootId: 2 },
+      { type: 'remove', rootId: 1 },
+    ])
   })
 
   it('continues with a new worker after a crash', () => {
     const { controller, workers } = setup()
-    controller.requestScan(1)
-    controller.requestScan(2)
+    controller.requestScan(1, QUICK)
+    controller.requestScan(2, QUICK)
 
     workers[0]?.exit()
 
     expect(controller.status.current?.rootId).toBe(2)
-    expect(workers[1]?.sent).toEqual([{ type: 'scan', rootId: 2 }])
+    expect(workers[1]?.sent).toEqual([{ type: 'scan', rootId: 2, scope: QUICK }])
   })
 
   it('stops dispatching after dispose', () => {
     const { controller, workers } = setup()
-    controller.requestScan(1)
-    controller.requestScan(2)
+    controller.requestScan(1, QUICK)
+    controller.requestScan(2, QUICK)
 
     controller.dispose()
     workers[0]?.exit()
@@ -122,7 +167,7 @@ describe('IndexerController', () => {
     controller.configure({ thumbCacheBytes: 100, concurrency: 2 })
     expect(workers).toHaveLength(0)
 
-    controller.requestScan(1)
+    controller.requestScan(1, QUICK)
     controller.configure({ thumbCacheBytes: 100, concurrency: 2 })
 
     expect(workers[0]?.sent.at(-1)).toEqual({ type: 'configure', thumbCacheBytes: 100, concurrency: 2 })
@@ -142,5 +187,15 @@ describe('IndexerController', () => {
     const failed = controller.thumbnailCache('usage')
     workers[0]?.exit()
     await expect(failed).rejects.toThrow('exited')
+  })
+})
+
+describe('mergeScopes', () => {
+  it('turns too many changed paths into a quick scan', () => {
+    const paths = Array.from({ length: 3000 }, (_, i) => `${i}.jpg`)
+    const more = Array.from({ length: 3000 }, (_, i) => `more/${i}.jpg`)
+
+    expect(mergeScopes({ mode: 'changes', paths }, { mode: 'changes', paths: more })).toEqual(QUICK)
+    expect(mergeScopes({ mode: 'changes', paths }, FULL)).toEqual(FULL)
   })
 })

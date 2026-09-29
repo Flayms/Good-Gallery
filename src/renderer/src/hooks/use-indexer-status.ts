@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { trpc } from '@/lib/trpc'
 
 /** While a scan runs, the gallery refreshes at most this often so new media appear before it ends. */
-const REFRESH_INTERVAL_MS = 10_000
+const REFRESH_INTERVAL_MS = 5000
 
 /** Live indexer status; refreshes libraries and indexed data (media, tags, folders) as scans progress and finish. */
 export function useIndexerStatus(): IndexerStatus | undefined {
@@ -33,9 +33,13 @@ export function useIndexerStatus(): IndexerStatus | undefined {
     refreshIndexed()
   }, [scanningRoot, queryClient, refreshIndexed])
 
+  // `indexed` counts written files; the first ones show up right away, later ones in intervals.
   useEffect(() => {
     const now = Date.now()
-    if (indexed <= lastRefresh.current.indexed || now - lastRefresh.current.at < REFRESH_INTERVAL_MS) return
+    // A lower count means another scan started, possibly of the same root without an idle status in between.
+    if (indexed < lastRefresh.current.indexed) lastRefresh.current = { at: now, indexed: 0 }
+    const { at, indexed: refreshed } = lastRefresh.current
+    if (indexed <= refreshed || (refreshed > 0 && now - at < REFRESH_INTERVAL_MS)) return
     lastRefresh.current = { at: now, indexed }
     refreshIndexed()
   }, [indexed, refreshIndexed])

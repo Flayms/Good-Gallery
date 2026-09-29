@@ -1,11 +1,12 @@
-import { mkdir, mkdtemp, rm, unlink, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, unlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { asc, eq } from 'drizzle-orm'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type Db, openDatabase } from '../main/db'
-import { libraryRoots, media, mediaTags, tags } from '../main/db/schema'
+import { folders, libraryRoots, media, mediaTags, tags } from '../main/db/schema'
 import { EMPTY_METADATA, type MediaMetadata, type MetadataSource } from './metadata'
+import type { ScanScope } from './protocol'
 import { type ScanDeps, type ScanOptions, scanRoot } from './scan'
 import { IndexWriter } from './writer'
 
@@ -14,11 +15,14 @@ const migrationsFolder = resolve(import.meta.dirname, '../../drizzle')
 /** Returns metadata keyed by file name and records which files were read. */
 class FakeMetadata implements MetadataSource {
   readonly byName = new Map<string, Partial<MediaMetadata>>()
+  /** Reads of these files wait until the promise resolves. */
+  readonly blocked = new Map<string, Promise<void>>()
   reads: string[] = []
 
   async read(file: string, sidecar?: string): Promise<MediaMetadata> {
     const name = basename(file)
     this.reads.push(sidecar ? `${name}+xmp` : name)
+    await this.blocked.get(name)
     return { ...EMPTY_METADATA, ...this.byName.get(name) }
   }
 }
@@ -49,12 +53,37 @@ async function touch(relPath: string, content = 'x', mtime?: Date) {
   if (mtime) await utimes(path, mtime, mtime)
 }
 
-function scan(options: Partial<ScanOptions> = {}) {
-  return scanRoot(deps, rootId, { concurrency: 2, signal: new AbortController().signal, onProgress() {}, ...options })
+const PAST = new Date(2020, 0, 1)
+
+/** Dates the given folders back, so that later changes in them are noticed by their mtime. */
+async function age(...relDirs: string[]) {
+  for (const relDir of relDirs) await utimes(join(dir, relDir), PAST, PAST)
+}
+
+function scan(options: Partial<ScanOptions> = {}, scope: ScanScope = { mode: 'full' }) {
+  return scanRoot(deps, rootId, scope, {
+    concurrency: 2,
+    signal: new AbortController().signal,
+    onProgress() {},
+    ...options,
+  })
 }
 
 function indexed() {
   return db.select().from(media).orderBy(asc(media.relPath)).all()
+}
+
+function indexedPaths() {
+  return indexed().map((row) => row.relPath)
+}
+
+function storedFolders() {
+  return db
+    .select({ relDir: folders.relDir })
+    .from(folders)
+    .orderBy(asc(folders.relDir))
+    .all()
+    .map((row) => row.relDir)
 }
 
 function tagsOf(mediaId: number) {
@@ -150,6 +179,81 @@ describe('scanRoot', () => {
     expect(await scan()).toBe('offline')
     expect(indexed()).toHaveLength(1)
     expect(db.select().from(libraryRoots).get()?.status).toBe('offline')
+  })
+
+  it('writes read files while the scan still runs', async () => {
+    await touch('a.jpg')
+    await touch('b.jpg')
+    const release = Promise.withResolvers<void>()
+    metadata.blocked.set('b.jpg', release.promise)
+    const progress: number[] = []
+
+    const running = scan({ concurrency: 1, flushIntervalMs: 10, onProgress: (p) => progress.push(p.indexed) })
+
+    await vi.waitFor(() => expect(indexedPaths()).toEqual(['a.jpg']))
+    expect(progress).toContain(1)
+    release.resolve()
+    expect(await running).toBe('completed')
+    expect(indexedPaths()).toEqual(['a.jpg', 'b.jpg'])
+  })
+
+  it('quick scans only re-list folders whose entries changed', async () => {
+    await touch('keep/a.jpg', 'x', PAST)
+    await touch('changed/b.jpg', 'x', PAST)
+    await touch('old/c.jpg', 'x', PAST)
+    await touch('old/sub/d.jpg', 'x', PAST)
+    await age('keep', 'changed', 'old/sub', 'old', '')
+    await scan()
+    expect(storedFolders()).toEqual(['', 'changed', 'keep', 'old', 'old/sub'])
+    metadata.reads = []
+
+    // Changed in place: the folder mtime stays, so only a full scan notices.
+    const keepMtime = (await stat(join(dir, 'keep'))).mtime
+    await touch('keep/a.jpg', 'xy')
+    await utimes(join(dir, 'keep'), keepMtime, keepMtime)
+    await touch('changed/new.jpg')
+    await unlink(join(dir, 'changed/b.jpg'))
+    await rm(join(dir, 'old'), { recursive: true })
+    await touch('fresh/deep/e.jpg')
+
+    expect(await scan({}, { mode: 'quick' })).toBe('completed')
+    expect(metadata.reads.sort()).toEqual(['e.jpg', 'new.jpg'])
+    expect(indexedPaths()).toEqual(['changed/new.jpg', 'fresh/deep/e.jpg', 'keep/a.jpg'])
+    expect(storedFolders()).toEqual(['', 'changed', 'fresh', 'fresh/deep', 'keep'])
+
+    metadata.reads = []
+    await scan()
+    expect(metadata.reads).toEqual(['a.jpg'])
+  })
+
+  it('falls back to a full scan without stored folders', async () => {
+    await touch('a/b.jpg')
+
+    expect(await scan({}, { mode: 'quick' })).toBe('completed')
+    expect(indexedPaths()).toEqual(['a/b.jpg'])
+    expect(storedFolders()).toEqual(['', 'a'])
+  })
+
+  it('checks only reported files of changed folders', async () => {
+    await touch('a/x.jpg', 'x', PAST)
+    await touch('a/y.jpg', 'x', PAST)
+    await touch('a/unreported.jpg', 'x', PAST)
+    await touch('b/z.jpg', 'x', PAST)
+    await scan()
+    metadata.reads = []
+
+    await touch('a/x.jpg', 'xy')
+    await touch('a/y.xmp')
+    await touch('a/unreported.jpg', 'xy')
+    await touch('a/new.jpg')
+    await rm(join(dir, 'b'), { recursive: true })
+    await touch('c/w.jpg')
+    const paths = ['a/x.jpg', 'a/y.xmp', 'a/new.jpg', 'b', 'c']
+
+    expect(await scan({}, { mode: 'changes', paths })).toBe('completed')
+    expect(metadata.reads.sort()).toEqual(['new.jpg', 'w.jpg', 'x.jpg', 'y.jpg+xmp'])
+    expect(indexedPaths()).toEqual(['a/new.jpg', 'a/unreported.jpg', 'a/x.jpg', 'a/y.jpg', 'c/w.jpg'])
+    expect(storedFolders()).toEqual(['', 'a', 'c'])
   })
 
   it('writes nothing when cancelled', async () => {

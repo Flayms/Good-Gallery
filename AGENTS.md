@@ -51,6 +51,8 @@ Only add a package if you import it directly; don't list transitive deps.
 * **Preload must be CJS** (`index.cjs`) for the sandbox; main is ESM.
 * **drizzle-kit breaks expression indexes** - use generated columns instead. Generate migrations with `pnpm db:generate`, don't hand-write them.
   * Triggers aren't modelled by drizzle-kit: create an empty migration with `pnpm db:generate --custom --name <name>` and separate statements with `--> statement-breakpoint` (the migrator prepares each chunk as one statement).
+* **Folder mtimes** (quick scans) only change when direct children are added, removed or renamed - not on in-place edits or changes deeper down. Don't use them to skip whole subtrees or file stats outside `quick` scans.
+* **`fs.watch` on Windows reports last-access changes** too, so the indexer's own reads cause events; `changes` scans must keep stating only reported files.
 * **SQLite query plans:** tag filters in `main/db/tag-search.ts` rely on unary `+` (`+media.id`, `+tag_id`) to pin plans; removing them looks harmless but makes common-tag searches 10–100× slower.
 * **shadcn:** the framework isn't auto-detected; `pnpm dlx shadcn@latest add <comp>` works with the existing `components.json`.
 * **Biome:** `biome migrate` may set the linter preset to `"none"` - keep `"recommended"`.

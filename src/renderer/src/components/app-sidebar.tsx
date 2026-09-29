@@ -30,7 +30,9 @@ function IndexerProgress({ status, libraries }: { status: IndexerStatus; librari
     <div className="flex flex-col gap-0.5 px-2 py-1 text-muted-foreground text-xs" aria-live="polite">
       <div className="flex items-center gap-1.5 text-foreground">
         <Loader2Icon className="size-3.5 animate-spin" />
-        <span className="truncate">Indexing {label}</span>
+        <span className="truncate">
+          {current.mode === 'full' ? 'Indexing' : 'Checking'} {label}
+        </span>
       </div>
       <span className="tabular-nums">
         {current.scanned.toLocaleString()} files · {current.indexed.toLocaleString()} updated

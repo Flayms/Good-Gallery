@@ -1,11 +1,35 @@
 import { EventEmitter } from 'node:events'
-import type { IndexerConfig, IndexerEvent, IndexerRequest, ScanProgress } from '../indexer/protocol'
+import {
+  type IndexerConfig,
+  type IndexerEvent,
+  type IndexerRequest,
+  MAX_CHANGED_PATHS,
+  type ScanProgress,
+  type ScanScope,
+} from '../indexer/protocol'
 
 export interface IndexerStatus {
   state: 'idle' | 'scanning'
   /** Root ids waiting to be scanned, in order. */
   queue: number[]
-  current: ScanProgress | null
+  current: (ScanProgress & { mode: ScanScope['mode'] }) | null
+}
+
+interface ScanJob {
+  rootId: number
+  scope: ScanScope
+}
+
+/** How much of a root a scope covers: a larger one also finds everything a smaller one would. */
+const COVERAGE: Record<ScanScope['mode'], number> = { changes: 0, quick: 1, full: 2 }
+
+/** A scope covering both scans of a root. */
+export function mergeScopes(a: ScanScope, b: ScanScope): ScanScope {
+  if (a.mode === 'changes' && b.mode === 'changes') {
+    const paths = [...new Set([...a.paths, ...b.paths])]
+    return paths.length <= MAX_CHANGED_PATHS ? { mode: 'changes', paths } : { mode: 'quick' }
+  }
+  return COVERAGE[a.mode] >= COVERAGE[b.mode] ? a : b
 }
 
 /** Transport to the indexer process, abstracted for tests. */
@@ -16,12 +40,17 @@ export interface IndexerWorker {
   kill(): void
 }
 
-/** Main-process facade for the indexer: queues scans and runs them one at a time in a lazily spawned worker. */
+/**
+ * Main-process facade for the indexer: queues scans (one per root, merged) and runs them one at a time in a lazily
+ * spawned worker. Changes reported by the worker's watchers are queued as scans too.
+ */
 export class IndexerController extends EventEmitter<{ status: [IndexerStatus] }> {
   readonly #spawn: () => IndexerWorker
   #worker: IndexerWorker | undefined
   #disposed = false
   #status: IndexerStatus = { state: 'idle', queue: [], current: null }
+  readonly #jobs: ScanJob[] = []
+  #running: ScanJob | undefined
   /** Resolvers of in-flight thumbnail requests by media id. */
   readonly #thumbnails = new Map<number, { promise: Promise<boolean>; resolve: (ok: boolean) => void }>()
   readonly #cacheRequests = new Map<number, PromiseWithResolvers<number>>()
@@ -36,18 +65,34 @@ export class IndexerController extends EventEmitter<{ status: [IndexerStatus] }>
     return this.#status
   }
 
-  requestScan(rootId: number): void {
-    if (this.#status.queue.includes(rootId) || this.#status.current?.rootId === rootId) return
-    this.#update({ queue: [...this.#status.queue, rootId] })
+  requestScan(rootId: number, scope: ScanScope): void {
+    const running = this.#running
+    // Changes may be in folders the running scan already passed, so only other scopes can be covered by it.
+    if (
+      running?.rootId === rootId &&
+      scope.mode !== 'changes' &&
+      COVERAGE[running.scope.mode] >= COVERAGE[scope.mode]
+    ) {
+      return
+    }
+    const queued = this.#jobs.find((job) => job.rootId === rootId)
+    if (queued) {
+      queued.scope = mergeScopes(queued.scope, scope)
+      return
+    }
+    this.#jobs.push({ rootId, scope })
+    this.#update({ queue: this.#jobs.map((job) => job.rootId) })
     this.#dispatch()
   }
 
-  cancelScan(rootId: number): void {
-    if (this.#status.current?.rootId === rootId) {
-      this.#worker?.send({ type: 'cancel', rootId })
-    } else if (this.#status.queue.includes(rootId)) {
-      this.#update({ queue: this.#status.queue.filter((id) => id !== rootId) })
+  /** Forgets a removed root: drops its queued scan, cancels a running one and stops watching it. */
+  removeRoot(rootId: number): void {
+    const index = this.#jobs.findIndex((job) => job.rootId === rootId)
+    if (index !== -1) {
+      this.#jobs.splice(index, 1)
+      this.#update({ queue: this.#jobs.map((job) => job.rootId) })
     }
+    this.#worker?.send({ type: 'remove', rootId })
   }
 
   dispose(): void {
@@ -84,10 +129,17 @@ export class IndexerController extends EventEmitter<{ status: [IndexerStatus] }>
   }
 
   #dispatch(): void {
-    const [rootId, ...queue] = this.#status.queue
-    if (this.#disposed || this.#status.current || rootId === undefined) return
-    this.#ensureWorker().send({ type: 'scan', rootId })
-    this.#update({ state: 'scanning', queue, current: { rootId, scanned: 0, indexed: 0 } })
+    if (this.#disposed || this.#running) return
+    const job = this.#jobs.shift()
+    if (!job) return
+    this.#running = job
+    const { rootId, scope } = job
+    this.#ensureWorker().send({ type: 'scan', rootId, scope })
+    this.#update({
+      state: 'scanning',
+      queue: this.#jobs.map((queued) => queued.rootId),
+      current: { rootId, mode: scope.mode, scanned: 0, indexed: 0 },
+    })
   }
 
   #ensureWorker(): IndexerWorker {
@@ -98,9 +150,8 @@ export class IndexerController extends EventEmitter<{ status: [IndexerStatus] }>
       if (this.#worker !== worker) return
       this.#worker = undefined
       this.#failPending()
-      const rootId = this.#status.current?.rootId
-      if (rootId !== undefined) {
-        console.error(`Indexer process exited while scanning root ${rootId}`)
+      if (this.#running) {
+        console.error(`Indexer process exited while scanning root ${this.#running.rootId}`)
         this.#finish()
       }
     })
@@ -121,10 +172,15 @@ export class IndexerController extends EventEmitter<{ status: [IndexerStatus] }>
       else request?.resolve(event.bytes)
       return
     }
-    if (event.rootId !== this.#status.current?.rootId) return
+    if (event.type === 'changed') {
+      this.requestScan(event.rootId, event.paths ? { mode: 'changes', paths: event.paths } : { mode: 'quick' })
+      return
+    }
+    const current = this.#status.current
+    if (event.rootId !== current?.rootId) return
     if (event.type === 'progress') {
-      const { type: _, ...current } = event
-      this.#update({ current })
+      const { type: _, ...progress } = event
+      this.#update({ current: { ...current, ...progress } })
     } else {
       if (event.outcome === 'failed') console.error(`Indexer: scan of root ${event.rootId} failed: ${event.error}`)
       this.#finish()
@@ -132,6 +188,7 @@ export class IndexerController extends EventEmitter<{ status: [IndexerStatus] }>
   }
 
   #finish(): void {
+    this.#running = undefined
     this.#update({ state: 'idle', current: null })
     this.#dispatch()
   }

@@ -1,6 +1,6 @@
-import { and, desc, eq, inArray, ne, notInArray, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, lt, ne, notInArray, or, type SQL, sql } from 'drizzle-orm'
 import type { Db } from '../main/db'
-import { type LibraryRoot, libraryRoots, media, mediaTags, tags } from '../main/db/schema'
+import { folders, type LibraryRoot, libraryRoots, media, mediaTags, tags } from '../main/db/schema'
 import { cleanTag, normalizeTag } from '../shared/tags'
 import type { MediaKind } from './media-types'
 import type { MediaMetadata } from './metadata'
@@ -34,6 +34,12 @@ export interface ThumbSource extends ThumbKey {
 }
 
 const DELETE_CHUNK = 500
+const INSERT_CHUNK = 500
+
+/** Range condition for the subfolders of `relDir` (`/`-separated, no trailing `/`): `0` is the character after `/`. */
+function subfolderRange(column: typeof media.dir | typeof folders.relDir, relDir: string): SQL | undefined {
+  return and(gte(column, `${relDir}/`), lt(column, `${relDir}0`))
+}
 
 /** All index writes of the indexer process. Not safe for concurrent use from multiple processes. */
 export class IndexWriter {
@@ -56,6 +62,51 @@ export class IndexWriter {
 
   /** Indexed files of a root, keyed by `relPath`. */
   existing(rootId: number): Map<string, ExistingEntry> {
+    return this.#existing(eq(media.rootId, rootId))
+  }
+
+  /** Indexed files directly in one folder of a root, keyed by `relPath`. */
+  existingIn(rootId: number, relDir: string): Map<string, ExistingEntry> {
+    return this.#existing(and(eq(media.rootId, rootId), eq(media.dir, relDir ? `${relDir}/` : '')))
+  }
+
+  /** Folder mtimes of a root as last listed, keyed by `relDir`. */
+  folders(rootId: number): Map<string, number> {
+    const rows = this.#db.select().from(folders).where(eq(folders.rootId, rootId)).all()
+    return new Map(rows.map((row) => [row.relDir, row.mtime]))
+  }
+
+  /** Stores listed folders; `replace` drops all other folders of the root (after a full scan). */
+  saveFolders(rootId: number, listed: Map<string, number>, { replace = false } = {}): void {
+    const rows = [...listed].map(([relDir, mtime]) => ({ rootId, relDir, mtime }))
+    this.#db.transaction((tx) => {
+      if (replace) tx.delete(folders).where(eq(folders.rootId, rootId)).run()
+      for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
+        tx.insert(folders)
+          .values(rows.slice(i, i + INSERT_CHUNK))
+          .onConflictDoUpdate({ target: [folders.rootId, folders.relDir], set: { mtime: sql`excluded.mtime` } })
+          .run()
+      }
+    })
+  }
+
+  /** Removes vanished folders with everything below them: subfolders and media. */
+  removeFolders(rootId: number, relDirs: string[]): void {
+    this.#db.transaction((tx) => {
+      for (const relDir of relDirs) {
+        tx.delete(media)
+          .where(and(eq(media.rootId, rootId), subfolderRange(media.dir, relDir)))
+          .run()
+        tx.delete(folders)
+          .where(
+            and(eq(folders.rootId, rootId), or(eq(folders.relDir, relDir), subfolderRange(folders.relDir, relDir))),
+          )
+          .run()
+      }
+    })
+  }
+
+  #existing(where: SQL | undefined): Map<string, ExistingEntry> {
     const rows = this.#db
       .select({
         id: media.id,
@@ -65,7 +116,7 @@ export class IndexWriter {
         sidecarMtime: media.sidecarMtime,
       })
       .from(media)
-      .where(eq(media.rootId, rootId))
+      .where(where)
       .all()
     return new Map(rows.map(({ relPath, ...entry }) => [relPath, entry]))
   }

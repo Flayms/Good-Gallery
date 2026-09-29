@@ -52,7 +52,7 @@ export const librariesRouter = router({
         .values({ path, label: input.label ?? (basename(path) || path), status: 'online' })
         .returning()
         .get()
-      ctx.indexer.requestScan(root.id)
+      ctx.indexer.requestScan(root.id, { mode: 'full' })
       return root
     }),
 
@@ -63,12 +63,13 @@ export const librariesRouter = router({
       .returning({ id: libraryRoots.id })
       .get()
     if (!removed) throw new TRPCError({ code: 'NOT_FOUND', message: 'Library not found' })
-    ctx.indexer.cancelScan(input.id)
+    ctx.indexer.removeRoot(input.id)
   }),
 
   rescan: publicProcedure.input(idInput).mutation(({ ctx, input }) => {
     const root = ctx.db.select({ id: libraryRoots.id }).from(libraryRoots).where(eq(libraryRoots.id, input.id)).get()
     if (!root) throw new TRPCError({ code: 'NOT_FOUND', message: 'Library not found' })
-    ctx.indexer.requestScan(root.id)
+    // The manual rescan also finds files changed in place while the app wasn't running.
+    ctx.indexer.requestScan(root.id, { mode: 'full' })
   }),
 })
