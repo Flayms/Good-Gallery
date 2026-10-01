@@ -1,13 +1,18 @@
 import { join } from 'node:path'
+import { ASPECT_SCALE, tileAspect } from '@shared/aspect'
 import { TRPCError } from '@trpc/server'
-import { and, asc, desc, eq, gte, lt, type SQL, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, lt, type SQL, sql } from 'drizzle-orm'
 import { z } from 'zod'
+import type { Db } from '../../db'
 import { libraryRoots, media, mediaTags, tags } from '../../db/schema'
 import { tagConditions } from '../../db/tag-search'
 import { publicProcedure, router } from '../trpc'
 
+const MAX_BY_IDS = 500
 const idInput = z.object({ id: z.int().positive() })
 const tagList = z.array(z.string().max(200)).max(20).default([])
+
+export const SORT_FIELDS = ['name', 'taken', 'modified', 'path', 'size'] as const
 
 const searchInput = z
   .object({
@@ -23,16 +28,46 @@ const searchInput = z
     from: z.int().optional(),
     /** Exclusive upper bound of the sort date, ms. */
     to: z.int().optional(),
-    sort: z.enum(['date-desc', 'date-asc', 'name-asc']).default('date-desc'),
-    limit: z.int().min(1).max(500).default(200),
-    cursor: z.object({ value: z.union([z.number(), z.string()]), id: z.int() }).nullish(),
+    sortBy: z.enum(SORT_FIELDS).default('taken'),
+    dir: z.enum(['asc', 'desc']).default('desc'),
   })
   .refine((input) => input.folder === undefined || input.rootId !== undefined, {
     message: 'folder requires rootId',
     path: ['folder'],
   })
 
-export type MediaCursor = NonNullable<z.infer<typeof searchInput>['cursor']>
+type SearchInput = z.infer<typeof searchInput>
+
+/** WHERE conditions of a search; a condition that can never match if a tag filter is unsatisfiable. */
+function filters(db: Db, input: SearchInput): SQL | undefined {
+  const tagFilters = tagConditions(db, input.tags, input.excludeTags)
+  if (!tagFilters) return sql`0`
+  const folder = input.folder?.replace(/^\/+|\/+$/g, '')
+  return and(
+    input.rootId === undefined ? undefined : eq(media.rootId, input.rootId),
+    // `dir` ends with `/`, and `0` is the character after `/`: a range scan over the folder and its subfolders.
+    folder ? and(gte(media.dir, `${folder}/`), lt(media.dir, `${folder}0`)) : undefined,
+    input.kind === undefined ? undefined : eq(media.kind, input.kind),
+    input.from === undefined ? undefined : gte(media.sortDate, input.from),
+    input.to === undefined ? undefined : lt(media.sortDate, input.to),
+    ...tagFilters,
+  )
+}
+
+const SORT_COLUMNS = {
+  name: [media.fileNameLower],
+  taken: [media.sortDate],
+  modified: [media.mtime],
+  // Unique, so it needs no id tiebreak.
+  path: [media.rootId, media.relPath],
+  size: [media.size],
+} as const
+
+function sortOrder(input: SearchInput): SQL[] {
+  const order = input.dir === 'asc' ? asc : desc
+  const columns = SORT_COLUMNS[input.sortBy]
+  return [...columns.map((column) => order(column)), ...(input.sortBy === 'path' ? [] : [order(media.id)])]
+}
 
 function absolutePath(rootPath: string, relPath: string): string {
   return join(rootPath, ...relPath.split('/'))
@@ -85,61 +120,37 @@ export const mediaRouter = router({
     ctx.desktop.showItemInFolder(absolutePath(row.rootPath, row.relPath))
   }),
 
-  search: publicProcedure.input(searchInput).query(({ ctx, input }) => {
-    const sortColumn = input.sort === 'name-asc' ? media.fileName : media.sortDate
-    const descending = input.sort === 'date-desc'
-
-    const tagFilters = tagConditions(ctx.db, input.tags, input.excludeTags)
-    if (!tagFilters) return { items: [], nextCursor: null }
-
-    const folder = input.folder?.replace(/^\/+|\/+$/g, '')
-    const filters: (SQL | undefined)[] = [
-      input.rootId === undefined ? undefined : eq(media.rootId, input.rootId),
-      // `dir` ends with `/`, and `0` is the character after `/`: a range scan over the folder and its subfolders.
-      folder ? and(gte(media.dir, `${folder}/`), lt(media.dir, `${folder}0`)) : undefined,
-      input.kind === undefined ? undefined : eq(media.kind, input.kind),
-      input.from === undefined ? undefined : gte(media.sortDate, input.from),
-      input.to === undefined ? undefined : lt(media.sortDate, input.to),
-      ...tagFilters,
-    ]
-    if (input.cursor) {
-      const { value, id } = input.cursor
-      filters.push(
-        descending
-          ? sql`(${sortColumn}, ${media.id}) < (${value}, ${id})`
-          : sql`(${sortColumn}, ${media.id}) > (${value}, ${id})`,
-      )
-    }
-
-    const order = descending ? desc : asc
+  /** Ids and aspects of every match in sort order: the gallery lays out the whole result before loading any item. */
+  layout: publicProcedure.input(searchInput).query(({ ctx, input }) => {
     const rows = ctx.db
+      .select({ id: media.id, width: media.width, height: media.height })
+      .from(media)
+      .where(filters(ctx.db, input))
+      .orderBy(...sortOrder(input))
+      .all()
+    const ids = new Array<number>(rows.length)
+    const aspects = new Array<number>(rows.length)
+    rows.forEach((row, i) => {
+      ids[i] = row.id
+      aspects[i] = Math.round(tileAspect(row.width, row.height) * ASPECT_SCALE)
+    })
+    return { ids, aspects }
+  }),
+
+  /** Tile data for the given ids, in no particular order. */
+  byIds: publicProcedure.input(z.object({ ids: z.array(z.int()).max(MAX_BY_IDS) })).query(({ ctx, input }) =>
+    ctx.db
       .select({
         id: media.id,
         rootId: media.rootId,
         fileName: media.fileName,
         kind: media.kind,
-        width: media.width,
-        height: media.height,
         duration: media.duration,
-        takenAt: media.takenAt,
-        mtime: media.mtime,
-        sortDate: media.sortDate,
         thumbhash: media.thumbhash,
         thumbStatus: media.thumbStatus,
       })
       .from(media)
-      .where(and(...filters))
-      .orderBy(order(sortColumn), order(media.id))
-      .limit(input.limit + 1)
-      .all()
-
-    const items = rows.slice(0, input.limit)
-    const last = items.at(-1)
-    const nextCursor: MediaCursor | null =
-      rows.length > input.limit && last
-        ? { value: input.sort === 'name-asc' ? last.fileName : last.sortDate, id: last.id }
-        : null
-
-    return { items, nextCursor }
-  }),
+      .where(inArray(media.id, input.ids))
+      .all(),
+  ),
 })

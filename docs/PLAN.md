@@ -138,12 +138,13 @@ Notes from implementation:
 
  1. TanStack Router, file-based routes, **hash history**: `/`, `/settings`, `/media/$id` (viewer overlay).
  2. Search state in Zod-validated URL search params (root, kind, sort; tags follow in Phase 5).
- 3. `useInfiniteQuery` via `trpc.media.search.infiniteQueryOptions`, cursor pagination (~200/page).
+ 3. ~~Cursor pagination~~ replaced by a layout index: `media.layout` returns the ids + aspects (×1000) of every match in sort order, `media.byIds` returns tile data for the visible chunks (200 positions), see `hooks/use-gallery-media.ts`. The grid's height is exact from the start (scrollbar jumps anywhere).
+    - Sort: `sortBy` (name, taken, modified, path, size) + `dir` URL params; name sorts on the generated `file_name_lower` column, path on `(root_id, rel_path)`.
 20. Virtualized masonry (`components/masonry-grid.tsx`, no masonry library): `@tanstack/react-virtual` `useVirtualizer` with `lanes` = column count (shortest-lane placement).
-    - Heights computed up front from stored width/height (`lib/masonry.ts`) → no DOM measuring; aspect clamped to 0.3–3, square fallback for unknown dimensions.
+    - Heights computed up front from stored width/height (`shared/aspect.ts`, `lib/masonry.ts`) → no DOM measuring; aspect clamped to 0.3–3, square fallback for unknown dimensions.
     - Container width via `ResizeObserver`; whole-pixel column width; absolute positioning via `translate(lane * (colWidth + gap), start)`.
     - Zoom slider sets column count; on zoom/resize `measure()` + `scrollToIndex(firstVisible)` to keep scroll position.
-    - Infinite loading: `fetchNextPage()` when the last rendered index nears `items.length`.
+    - Visible index range is reported via `onRangeChange`; unloaded tiles render a muted placeholder.
     - Pick 400w vs 800w thumb by `colWidth * devicePixelRatio`; thumbhash background → CSS opacity fade-in on `onLoad` (no `motion` per tile).
     - Alternatives rejected: CSS columns / `react-masonry-css` (not virtualized, column-major order), CSS `grid-lanes` (not virtualized), `masonic` (unmaintained). Possible later second view mode: justified rows (exact chronological order).
  5. Layout: shadcn Sidebar (libraries), Skeleton, Sonner toasts, indexer progress, offline badges.

@@ -1,13 +1,22 @@
-import { ImageIcon, VideoIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react'
+import { ArrowDownIcon, ArrowUpIcon, ImageIcon, VideoIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react'
 import { DateRangeFilter } from '@/components/date-range-filter'
 import { TagSearch } from '@/components/tag-search'
+import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { Slider } from '@/components/ui/slider'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { MAX_COLUMNS, MIN_COLUMNS } from '@/hooks/use-columns'
-import { type GallerySearch, isMediaKind, isSort, SORT_LABELS, SORTS } from '@/lib/search'
+import {
+  DEFAULT_DIR,
+  DEFAULT_SORT,
+  type GallerySearch,
+  isMediaKind,
+  isSortField,
+  SORT_FIELDS,
+  SORT_LABELS,
+} from '@/lib/search'
 
 interface GalleryToolbarProps {
   search: GallerySearch
@@ -17,6 +26,7 @@ interface GalleryToolbarProps {
 }
 
 export function GalleryToolbar({ search, onSearchChange, columns, onColumnsChange }: GalleryToolbarProps) {
+  const descending = (search.dir ?? DEFAULT_DIR) === 'desc'
   return (
     <header className="flex min-h-12 shrink-0 items-center gap-2 border-b px-3 py-2">
       <SidebarTrigger />
@@ -42,21 +52,34 @@ export function GalleryToolbar({ search, onSearchChange, columns, onColumnsChang
 
       <div className="ml-auto flex items-center gap-4">
         <DateRangeFilter search={search} onSearchChange={onSearchChange} />
-        <Select
-          value={search.sort ?? 'date-desc'}
-          onValueChange={(value) => onSearchChange({ sort: isSort(value) ? value : undefined })}
-        >
-          <SelectTrigger size="sm" className="w-36" aria-label="Sort order">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {SORTS.map((sort) => (
-              <SelectItem key={sort} value={sort}>
-                {SORT_LABELS[sort]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-1">
+          <Select
+            value={search.sortBy ?? DEFAULT_SORT}
+            onValueChange={(value) =>
+              onSearchChange({ sortBy: isSortField(value) && value !== DEFAULT_SORT ? value : undefined })
+            }
+          >
+            <SelectTrigger size="sm" className="w-36" aria-label="Sort by">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SORT_FIELDS.map((field) => (
+                <SelectItem key={field} value={field}>
+                  {SORT_LABELS[field]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            size="icon-sm"
+            onClick={() => onSearchChange({ dir: descending ? 'asc' : undefined })}
+            aria-label={descending ? 'Descending' : 'Ascending'}
+            title={descending ? 'Descending' : 'Ascending'}
+          >
+            {descending ? <ArrowDownIcon /> : <ArrowUpIcon />}
+          </Button>
+        </div>
 
         <div className="flex items-center gap-2 text-muted-foreground">
           <ZoomOutIcon className="size-4" />

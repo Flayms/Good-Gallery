@@ -17,7 +17,12 @@ export function useIndexerStatus(): IndexerStatus | undefined {
   const lastRefresh = useRef({ at: 0, indexed: 0 })
 
   const refreshIndexed = useCallback(() => {
-    for (const queryKey of [trpc.media.search.pathKey(), trpc.tags.pathKey(), trpc.libraries.folders.pathKey()]) {
+    for (const queryKey of [
+      trpc.media.layout.pathKey(),
+      trpc.media.byIds.pathKey(),
+      trpc.tags.pathKey(),
+      trpc.libraries.folders.pathKey(),
+    ]) {
       void queryClient.invalidateQueries({ queryKey })
     }
   }, [queryClient])

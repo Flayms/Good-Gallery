@@ -88,46 +88,56 @@ describe('libraries', () => {
   })
 })
 
-describe('media.search', () => {
-  it('pages through all items by date without gaps or duplicates', async () => {
+describe('media.layout', () => {
+  const layoutIds = async (input: Parameters<typeof caller.media.layout>[0] = {}) =>
+    (await caller.media.layout(input)).ids
+
+  it('orders by date taken, newest first, with the id as tie-breaker', async () => {
     const root = insertRoot()
     // Same date on two items exercises the id tie-breaker.
     const dates = [5, 3, 3, 9, 1]
     const ids = dates.map((takenAt, i) => insertMedia(root.id, `${i}.jpg`, { takenAt }).id)
 
-    const seen: number[] = []
-    let cursor: Awaited<ReturnType<typeof caller.media.search>>['nextCursor'] = null
-    do {
-      const page = await caller.media.search({ limit: 2, cursor })
-      seen.push(...page.items.map((item) => item.id))
-      cursor = page.nextCursor
-    } while (cursor)
-
-    expect(seen).toEqual([ids[3], ids[0], ids[2], ids[1], ids[4]])
+    expect(await layoutIds()).toEqual([ids[3], ids[0], ids[2], ids[1], ids[4]])
+    expect(await layoutIds({ dir: 'asc' })).toEqual([ids[4], ids[1], ids[2], ids[0], ids[3]])
   })
 
   it('falls back to mtime and filters by kind and root', async () => {
     const root = insertRoot()
-    const other = insertRoot('D:\\Other')
+    const other = insertRoot('D:Other')
     const video = insertMedia(root.id, 'b.mp4', { kind: 'video', mtime: 10 })
     insertMedia(root.id, 'a.jpg')
     insertMedia(other.id, 'c.mp4', { kind: 'video' })
 
-    const page = await caller.media.search({ rootId: root.id, kind: 'video' })
-
-    expect(page.items.map((item) => item.id)).toEqual([video.id])
-    expect(page.items[0]?.sortDate).toBe(10)
-    expect(page.nextCursor).toBeNull()
+    expect(await layoutIds({ rootId: root.id, kind: 'video' })).toEqual([video.id])
   })
 
-  it('sorts by name', async () => {
+  it.each([
+    ['name', 'asc', ['a.jpg', 'B.jpg', 'c.jpg']],
+    ['name', 'desc', ['c.jpg', 'B.jpg', 'a.jpg']],
+    ['modified', 'asc', ['c.jpg', 'a.jpg', 'B.jpg']],
+    ['size', 'desc', ['B.jpg', 'c.jpg', 'a.jpg']],
+    ['path', 'asc', ['B.jpg', 'a.jpg', 'c.jpg']],
+    ['taken', 'asc', ['a.jpg', 'c.jpg', 'B.jpg']],
+  ] as const)('sorts by %s %s', async (sortBy, dir, expected) => {
     const root = insertRoot()
-    for (const name of ['c.jpg', 'a.jpg', 'b.jpg']) insertMedia(root.id, name)
+    insertMedia(root.id, 'a.jpg', { size: 1, mtime: 2, takenAt: 1, relPath: 'z/a.jpg' })
+    insertMedia(root.id, 'B.jpg', { size: 3, mtime: 3, takenAt: 3, relPath: 'a/B.jpg' })
+    insertMedia(root.id, 'c.jpg', { size: 2, mtime: 1, takenAt: 2, relPath: 'z/c.jpg' })
 
-    const first = await caller.media.search({ sort: 'name-asc', limit: 2 })
-    const second = await caller.media.search({ sort: 'name-asc', limit: 2, cursor: first.nextCursor })
+    const { ids } = await caller.media.layout({ sortBy, dir })
+    const items = await caller.media.byIds({ ids })
 
-    expect([...first.items, ...second.items].map((item) => item.fileName)).toEqual(['a.jpg', 'b.jpg', 'c.jpg'])
+    expect(ids.map((id) => items.find((item) => item.id === id)?.fileName)).toEqual(expected)
+  })
+
+  it('returns clamped aspects, a square when the size is unknown', async () => {
+    const root = insertRoot()
+    insertMedia(root.id, 'a.jpg', { width: 4000, height: 3000, mtime: 3 })
+    insertMedia(root.id, 'b.jpg', { mtime: 2 })
+    insertMedia(root.id, 'c.jpg', { width: 100, height: 10_000, mtime: 1 })
+
+    expect((await caller.media.layout({})).aspects).toEqual([750, 1000, 3000])
   })
 
   it('filters by folder including subfolders', async () => {
@@ -136,25 +146,32 @@ describe('media.search', () => {
       (relPath, i) => insertMedia(root.id, `${i}.jpg`, { relPath, mtime: -i }).id,
     )
 
-    const search = async (folder: string) =>
-      (await caller.media.search({ rootId: root.id, folder })).items.map((item) => item.id)
-
-    expect(await search('a')).toEqual([ids[0], ids[1]])
-    expect(await search('a/b/')).toEqual([ids[1]])
-    await expectTrpcError(caller.media.search({ folder: 'a' }), 'BAD_REQUEST')
+    expect(await layoutIds({ rootId: root.id, folder: 'a' })).toEqual([ids[0], ids[1]])
+    expect(await layoutIds({ rootId: root.id, folder: 'a/b/' })).toEqual([ids[1]])
+    await expectTrpcError(caller.media.layout({ folder: 'a' }), 'BAD_REQUEST')
   })
 
   it('filters by date range', async () => {
     const root = insertRoot()
     const ids = [10, 20, 30].map((takenAt) => insertMedia(root.id, `${takenAt}.jpg`, { takenAt }).id)
 
-    const page = await caller.media.search({ from: 20, to: 30 })
-
-    expect(page.items.map((item) => item.id)).toEqual([ids[1]])
+    expect(await layoutIds({ from: 20, to: 30 })).toEqual([ids[1]])
   })
 })
 
-describe('media.search tags', () => {
+describe('media.byIds', () => {
+  it('returns the tile data of the requested items only', async () => {
+    const root = insertRoot()
+    const a = insertMedia(root.id, 'a.jpg')
+    insertMedia(root.id, 'b.jpg')
+
+    const items = await caller.media.byIds({ ids: [a.id, 999] })
+
+    expect(items.map((item) => item.fileName)).toEqual(['a.jpg'])
+  })
+})
+
+describe('media.layout tags', () => {
   // Tree: places > france > paris; flat: cat, dog.
   function setup() {
     const root = insertRoot()
@@ -182,7 +199,7 @@ describe('media.search tags', () => {
   }
 
   const search = async (include: string[], exclude: string[] = []) =>
-    (await caller.media.search({ tags: include, excludeTags: exclude })).items.map((item) => item.id)
+    (await caller.media.layout({ tags: include, excludeTags: exclude })).ids
 
   it('requires all included tags, matching descendants', async () => {
     const ids = setup()

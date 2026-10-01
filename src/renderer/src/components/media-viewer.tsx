@@ -4,7 +4,6 @@ import { Link } from '@tanstack/react-router'
 import { ChevronLeftIcon, ChevronRightIcon, FolderOpenIcon, InfoIcon, XIcon } from 'lucide-react'
 import { type ReactNode, useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import type { MediaItem } from '@/components/media-tile'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ZoomableImage } from '@/components/zoomable-image'
@@ -65,15 +64,21 @@ function InfoPanel({ item }: { item: MediaDetails }) {
   )
 }
 
-function preload(item: MediaItem | undefined) {
+/** A gallery neighbour; `kind` is unknown until its data is loaded. */
+export interface MediaNeighbour {
+  id: number
+  kind?: 'image' | 'video'
+}
+
+function preload(item: MediaNeighbour | undefined) {
   if (item?.kind === 'image') new Image().src = mediaUrl(item.id)
 }
 
 interface MediaViewerProps {
   id: number
-  /** Neighbours in the gallery order, if the item is part of the loaded gallery. */
-  prev?: MediaItem
-  next?: MediaItem
+  /** Neighbours in the gallery order, if the item is part of the gallery. */
+  prev?: MediaNeighbour
+  next?: MediaNeighbour
   onNavigate: (id: number) => void
   onClose: () => void
 }

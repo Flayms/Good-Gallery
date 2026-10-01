@@ -20,7 +20,8 @@ export function LibrarySettings() {
     await queryClient.invalidateQueries({ queryKey: trpc.libraries.list.queryKey() })
     if (withMedia) {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: trpc.media.search.pathKey() }),
+        queryClient.invalidateQueries({ queryKey: trpc.media.layout.pathKey() }),
+        queryClient.invalidateQueries({ queryKey: trpc.media.byIds.pathKey() }),
         queryClient.invalidateQueries({ queryKey: trpc.tags.pathKey() }),
       ])
     }

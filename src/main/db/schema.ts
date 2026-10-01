@@ -44,6 +44,8 @@ export const media = sqliteTable(
     sortDate: integer('sort_date').notNull().generatedAlwaysAs(sql`coalesce(taken_at, mtime)`, { mode: 'virtual' }),
     /** Folder of `relPath` with a trailing `/` (`''` at the root): strips everything after the last `/`. */
     dir: text('dir').notNull().generatedAlwaysAs(sql`rtrim(rel_path, replace(rel_path, '/', ''))`, { mode: 'virtual' }),
+    /** Case-insensitive name for sorting (an expression index would break drizzle-kit). */
+    fileNameLower: text('file_name_lower').notNull().generatedAlwaysAs(sql`lower(file_name)`, { mode: 'virtual' }),
     /** Base64-encoded ThumbHash. */
     thumbhash: text('thumbhash'),
     thumbStatus: text('thumb_status', { enum: ['pending', 'ready', 'error'] })
@@ -54,7 +56,9 @@ export const media = sqliteTable(
     uniqueIndex('media_root_path_uq').on(t.rootId, t.relPath),
     index('media_date_idx').on(t.sortDate, t.id),
     index('media_root_date_idx').on(t.rootId, t.sortDate, t.id),
-    index('media_name_idx').on(t.fileName, t.id),
+    index('media_name_idx').on(t.fileNameLower, t.id),
+    index('media_mtime_idx').on(t.mtime, t.id),
+    index('media_size_idx').on(t.size, t.id),
     index('media_dir_idx').on(t.rootId, t.dir),
     // Background thumbnail generation picks pending media newest first.
     index('media_thumb_idx').on(t.thumbStatus, t.sortDate),

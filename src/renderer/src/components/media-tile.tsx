@@ -7,7 +7,7 @@ import { thumbhashDataUrl } from '@/lib/thumbhash'
 import type { RouterOutputs } from '@/lib/trpc'
 import { cn } from '@/lib/utils'
 
-export type MediaItem = RouterOutputs['media']['search']['items'][number]
+export type MediaItem = RouterOutputs['media']['byIds'][number]
 
 export function MediaTile({ item, width }: { item: MediaItem; width: number }) {
   const [state, setState] = useState<'loading' | 'loaded' | 'failed'>('loading')

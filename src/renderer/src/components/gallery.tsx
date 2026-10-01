@@ -1,6 +1,6 @@
 import { Link, useParams } from '@tanstack/react-router'
 import { FolderPlusIcon, ImagesIcon, TriangleAlertIcon } from 'lucide-react'
-import { type ReactNode, useCallback } from 'react'
+import { type ReactNode, useCallback, useMemo } from 'react'
 import { MasonryGrid } from '@/components/masonry-grid'
 import { MediaTile } from '@/components/media-tile'
 import { Button } from '@/components/ui/button'
@@ -48,15 +48,17 @@ export function Gallery({
   hasLibraries: boolean
 }) {
   const {
-    query: { error, isPending, hasNextPage, isFetchingNextPage, fetchNextPage },
-    items,
+    layout: { error, isPending },
+    ids,
+    count,
+    aspectAt,
+    getItem,
+    setRange,
   } = useGalleryMedia(search)
   // The viewer navigates through the same items; keep the one it shows in view behind it.
   const viewedId = useParams({ strict: false, select: (params) => params.id })
-  const viewedIndex = viewedId === undefined ? undefined : items.findIndex((item) => item.id === viewedId)
-  const loadMore = useCallback(() => {
-    if (!isFetchingNextPage) void fetchNextPage()
-  }, [isFetchingNextPage, fetchNextPage])
+  const viewedIndex = useMemo(() => (viewedId === undefined ? undefined : ids.indexOf(viewedId)), [ids, viewedId])
+  const getKey = useCallback((index: number) => ids[index] ?? -index - 1, [ids])
 
   if (isPending) return <GallerySkeleton columns={columns} />
   if (error) {
@@ -66,7 +68,7 @@ export function Gallery({
       </EmptyState>
     )
   }
-  if (items.length === 0) {
+  if (count === 0) {
     return hasLibraries ? (
       <EmptyState icon={<ImagesIcon className="size-10" />} title="No media found">
         <p className="text-sm">Nothing matches the current filters yet — new files appear while indexing.</p>
@@ -82,14 +84,18 @@ export function Gallery({
 
   return (
     <MasonryGrid
-      items={items}
+      count={count}
+      getKey={getKey}
+      aspectAt={aspectAt}
       columns={columns}
       gap={GAP}
-      hasMore={hasNextPage}
-      onLoadMore={loadMore}
+      onRangeChange={setRange}
       scrollToIndex={viewedIndex}
       className="p-3"
-      renderItem={(item, size) => <MediaTile item={item} width={size.width} />}
+      renderItem={(index, size) => {
+        const item = getItem(index)
+        return item ? <MediaTile item={item} width={size.width} /> : <div className="size-full rounded-md bg-muted" />
+      }}
     />
   )
 }

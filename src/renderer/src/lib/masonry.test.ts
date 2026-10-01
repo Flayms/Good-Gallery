@@ -12,17 +12,7 @@ describe('columnWidth', () => {
 })
 
 describe('tileHeight', () => {
-  it('preserves aspect ratio', () => {
-    expect(tileHeight(4000, 3000, 200)).toBe(150)
-  })
-
-  it('falls back to a square when dimensions are unknown', () => {
-    expect(tileHeight(null, null, 200)).toBe(200)
-    expect(tileHeight(0, 100, 200)).toBe(200)
-  })
-
-  it('clamps extreme aspect ratios', () => {
-    expect(tileHeight(100, 10_000, 200)).toBe(600)
-    expect(tileHeight(10_000, 100, 200)).toBe(60)
+  it('scales the column width by the aspect', () => {
+    expect(tileHeight(0.75, 200)).toBe(150)
   })
 })

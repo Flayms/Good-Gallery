@@ -1,36 +1,35 @@
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { columnWidth, tileHeight } from '@/lib/masonry'
 import { cn } from '@/lib/utils'
 
-export interface MasonryItem {
-  id: number | string
-  width: number | null
-  height: number | null
-}
-
-interface MasonryGridProps<T extends MasonryItem> {
-  items: readonly T[]
+interface MasonryGridProps {
+  count: number
+  /** Stable key of the item at `index`. */
+  getKey: (index: number) => number
+  /** Height / width of the item at `index`; known for every item up front so the scroll length is exact. */
+  aspectAt: (index: number) => number
   columns: number
   gap?: number
-  hasMore?: boolean
-  onLoadMore?: () => void
+  /** Called with the first and last rendered index whenever the visible range changes. */
+  onRangeChange?: (start: number, end: number) => void
   /** Scrolls this item into view whenever it changes (no-op if it's visible or negative). */
   scrollToIndex?: number
-  renderItem: (item: T, size: { width: number; height: number }) => ReactNode
+  renderItem: (index: number, size: { width: number; height: number }) => ReactNode
   className?: string
 }
 
-export function MasonryGrid<T extends MasonryItem>({
-  items,
+export function MasonryGrid({
+  count,
+  getKey,
+  aspectAt,
   columns,
   gap = 8,
-  hasMore = false,
-  onLoadMore,
+  onRangeChange,
   scrollToIndex,
   renderItem,
   className,
-}: MasonryGridProps<T>) {
+}: MasonryGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(0)
 
@@ -46,16 +45,11 @@ export function MasonryGrid<T extends MasonryItem>({
 
   const colWidth = columnWidth(containerWidth, columns, gap)
 
-  const getItemKey = useCallback((index: number) => items[index]?.id ?? index, [items])
-
   const virtualizer = useVirtualizer({
-    count: items.length,
+    count,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (index) => {
-      const item = items[index]
-      return item ? tileHeight(item.width, item.height, colWidth) : colWidth
-    },
-    getItemKey,
+    estimateSize: (index) => tileHeight(aspectAt(index), colWidth),
+    getItemKey: getKey,
     lanes: columns,
     gap,
     overscan: 8,
@@ -81,32 +75,30 @@ export function MasonryGrid<T extends MasonryItem>({
   }, [scrollToIndex, virtualizer])
 
   const virtualItems = virtualizer.getVirtualItems()
-  const lastIndex = virtualItems.at(-1)?.index ?? -1
+  // Lanes interleave indices, so the range is the min / max rather than the first / last.
+  const rangeStart = virtualItems.reduce((min, item) => Math.min(min, item.index), Number.POSITIVE_INFINITY)
+  const rangeEnd = virtualItems.reduce((max, item) => Math.max(max, item.index), -1)
 
   useEffect(() => {
-    if (hasMore && items.length > 0 && lastIndex >= items.length - columns * 2) onLoadMore?.()
-  }, [hasMore, lastIndex, items.length, columns, onLoadMore])
+    if (rangeEnd >= 0) onRangeChange?.(rangeStart, rangeEnd)
+  }, [rangeStart, rangeEnd, onRangeChange])
 
   return (
     <div ref={scrollRef} className={cn('h-full overflow-y-auto', className)}>
       <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
-        {virtualItems.map((virtualItem) => {
-          const item = items[virtualItem.index]
-          if (!item) return null
-          return (
-            <div
-              key={virtualItem.key}
-              className="absolute top-0 left-0"
-              style={{
-                width: colWidth,
-                height: virtualItem.size,
-                transform: `translate(${virtualItem.lane * (colWidth + gap)}px, ${virtualItem.start}px)`,
-              }}
-            >
-              {renderItem(item, { width: colWidth, height: virtualItem.size })}
-            </div>
-          )
-        })}
+        {virtualItems.map((virtualItem) => (
+          <div
+            key={virtualItem.key}
+            className="absolute top-0 left-0"
+            style={{
+              width: colWidth,
+              height: virtualItem.size,
+              transform: `translate(${virtualItem.lane * (colWidth + gap)}px, ${virtualItem.start}px)`,
+            }}
+          >
+            {renderItem(virtualItem.index, { width: colWidth, height: virtualItem.size })}
+          </div>
+        ))}
       </div>
     </div>
   )
