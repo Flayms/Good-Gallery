@@ -1,7 +1,7 @@
+import ffmpegStatic from 'ffmpeg-static'
 import { execFile } from 'node:child_process'
 import { extname } from 'node:path'
 import { promisify } from 'node:util'
-import ffmpegStatic from 'ffmpeg-static'
 import sharp, { type Sharp } from 'sharp'
 import { rgbaToThumbHash } from 'thumbhash'
 import { MAX_THUMB_WIDTH, THUMB_WIDTHS, type ThumbWidth } from '../shared/media-urls'
@@ -60,7 +60,14 @@ export function orient(image: Sharp, orientation: number): Sharp {
 async function loadPreview(file: string, previews: PreviewSource): Promise<Sharp | undefined> {
   const buffer = await previews.extractPreview(file)
   if (!buffer) return undefined
-  const [original, preview] = await Promise.all([sharp(file).metadata(), sharp(buffer).metadata()])
+  const [original, preview] = await Promise.all([
+    sharp(file).metadata(),
+    // Some cameras (e.g. DJI) point PreviewImage at data that isn't an image.
+    sharp(buffer)
+      .metadata()
+      .catch(() => undefined),
+  ])
+  if (!preview) return undefined
   const orientation = original.orientation ?? 1
   const previewWidth = orientation >= 5 ? preview.height : preview.width
   const aspectRatio = preview.width / preview.height / (original.width / original.height)

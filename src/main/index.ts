@@ -47,6 +47,13 @@ function createWindow(): void {
   const devUrl = rendererDevUrl()
   if (devUrl) {
     void win.loadURL(devUrl)
+    win.webContents.on('before-input-event', (event, input) => {
+      if (input.type === 'keyDown' && input.key === 'F12') {
+        win.webContents.toggleDevTools()
+        event.preventDefault()
+      }
+    })
+    win.webContents.openDevTools({ mode: 'detach' })
   } else {
     void win.loadFile(rendererIndexFile)
   }

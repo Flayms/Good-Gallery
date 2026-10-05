@@ -1,9 +1,9 @@
+import ffmpegPath from 'ffmpeg-static'
 import { execFile } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
-import ffmpegPath from 'ffmpeg-static'
 import sharp from 'sharp'
 import { thumbHashToAverageRGBA } from 'thumbhash'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -100,6 +100,19 @@ describe('renderMedia', () => {
       file,
       { kind: 'image', duration: null },
       { extractPreview: async () => preview },
+    )
+
+    expect(averageColor(thumbnails)).toEqual([1, 0, 0])
+  })
+
+  it('falls back to the full image when the preview is not an image', async () => {
+    const file = join(dir, 'broken-preview.jpg')
+    await solid(1600, 1200, '#ff0000').jpeg().toFile(file)
+
+    const thumbnails = await renderMedia(
+      file,
+      { kind: 'image', duration: null },
+      { extractPreview: async () => Buffer.from('not an image') },
     )
 
     expect(averageColor(thumbnails)).toEqual([1, 0, 0])

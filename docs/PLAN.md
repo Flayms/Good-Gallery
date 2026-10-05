@@ -14,14 +14,14 @@ Modern Electron gallery app with a cascading (masonry/waterfall) image display, 
 
 ## Tech Stack (versions verified 2026-09-25)
 
-| Area           | Choice                                                                                                                     |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Shell / build  | electron 44.4.5, electron-vite **6.0.0-beta.1**, vite 8.3.1, @vitejs/plugin-react 6.1.1                                    |
-| UI             | react 19.3.0, tailwindcss 4.3.3 (`@tailwindcss/vite`), shadcn 4.21.0, lucide-react, motion                                 |
-| Data / routing | @tanstack/react-query 5.103.2, @tanstack/react-router 1.170.38 (+ router-plugin 1.168.40), @tanstack/react-virtual 3.14.13 |
-| API            | @trpc/server + client + tanstack-react-query 11.19.0, zod 4.6.5, superjson                                                 |
-| DB             | better-sqlite3 13.0.3, drizzle-orm 0.45.2, drizzle-kit 0.31.10                                                             |
-| Media          | sharp 0.35.4, exiftool-vendored 38.1.0, ffmpeg-static 5.3.0, thumbhash, p-queue 9.3.3                                      |
+| Area           | Choice                                                                                                                      |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Shell / build  | electron 44.4.5, electron-vite **6.0.0-beta.1**, vite 8.3.1, @vitejs/plugin-react 6.1.1                                     |
+| UI             | react 19.3.0, tailwindcss 4.3.3 (`@tailwindcss/vite`), shadcn 4.21.0, lucide-react, motion                                  |
+| Data / routing | @tanstack/react-query 5.103.2, @tanstack/react-router 1.170.38 (+ router-plugin 1.168.40), @tanstack/react-virtual 3.14.13  |
+| API            | @trpc/server + client + tanstack-react-query 11.19.0, zod 4.6.5, superjson                                                  |
+| DB             | better-sqlite3 13.0.3, drizzle-orm 0.45.2, drizzle-kit 0.31.10                                                              |
+| Media          | sharp 0.35.4, exiftool-vendored 38.1.0, ffmpeg-static 5.3.0, thumbhash, p-queue 9.3.3                                       |
 | Tooling        | typescript 7.0.2, @biomejs/biome 2.5.14, vitest 5.0.2, pnpm 12.6.0, electron-builder 26.15.3, @playwright/test 1.63.0 (e2e) |
 
 ### Stack decisions
@@ -204,6 +204,20 @@ Notes from implementation:
 - `GG_USER_DATA_DIR` isolates the profile; `GG_E2E_APP=<path to good-gallery.exe>` runs the same test against a packaged build (passes for `win-unpacked`).
 - Own `tsconfig.e2e.json` (DOM lib for `evaluate` callbacks); a `/// <reference lib="dom" />` in the node project would leak DOM types into main.
 
+### Phase 8 – Tag categories, ratings, context menu ✅
+
+1. People/places as tag categories: no new metadata fields, the category is derived from the top-level tag name (`shared/tags.ts` `TAG_CATEGORY_ROOTS`), so existing `People|Name` / `Places|Country|City` hierarchies (digiKam, Lightroom, …) are picked up as-is. Face regions (`PersonInImage`, MWG `RegionName`/`RegionType=Face`, XMP-MP `RegionPersonDisplayName`) are additionally read and added as `People|<name>` tags, since not every tool writes a keyword hierarchy for faces.
+2. Rating: MWG composite `Rating` (-1 rejected / 0 unrated / 1-5), stored as `media.rating` (null when unrated); filter by an exact set of stars, `0` meaning unrated.
+3. Sidebar: `People` and `Places` groups (tag tree, top 10 + "Show all"), then the existing popular-tags list renamed to `Tags` (excludes category tags).
+4. Right-click menu ("Show in Explorer", "Information") on grid tiles and in the viewer; "Information" opens a side sheet in the grid, the existing info panel in the viewer. Clicking the black space around a photo or video (not the media itself) closes the viewer, like Escape.
+
+Notes from implementation:
+
+- `media.meta_version` (bumped as `shared/metadata.ts` `METADATA_VERSION`) lets the indexer tell "unchanged file" apart from "unchanged file, old extractor": `scan.ts` re-reads a file if its stored version is behind, and `main/rescan.ts` upgrades a root's periodic quick scan to a full scan while any of its rows are behind. **Bump `METADATA_VERSION` whenever `metadata.ts` extraction changes, or already-indexed files keep stale data until their content changes.**
+- `main/db/tag-categories.ts`: `categoryTags` (tree with counts, for the sidebar), `categorizedTagIds` (excluded from `tags.popular`), `categoriesOf` (walks a tag's ancestor chain to classify it, used by `media.byId`). All via recursive CTEs, mirroring `tag-search.ts`'s style.
+- `MediaContextMenu` wraps a tile or the viewer's media area; "Information" either opens its own `Sheet` (grid) or an `onInformation` callback (viewer, toggles the existing panel). Both render the shared `MediaInfo` component (fields, star rating, tags grouped by category).
+- Viewer backdrop click: the media container's own `onClick` closes it for video (and general padding), but `ZoomableImage` needs its own `onBackdropClick` prop, since its root `div` fills the whole area and would otherwise swallow the click before it reaches the parent. A short delay distinguishes a plain click from the first click of a double-click (which zooms); a pan release (moved > 4px) never triggers it either.
+
 ## Verification
 
 1. `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm test:e2e` pass (no CI set up yet).
@@ -217,3 +231,5 @@ Notes from implementation:
 1. **ffmpeg-static is GPL-3.0** – fine for personal/OSS; for closed distribution use an LGPL build or Chromium `<video>` frame capture (no HEVC).
 2. **SQLite driver** – better-sqlite3 (recommended) vs. built-in `node:sqlite` (no native rebuild, Drizzle support uncertain).
 3. **pnpm via mise** – may need a `pnpm.cmd` shim for Electron tooling on Windows.
+4. **Tag categories** are name-based (a fixed list of root aliases), not a stored column; a user-renamed "People" tag to something not in the list would stop being grouped. Manual tagging/categorization is still out of scope for v1.
+

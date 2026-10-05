@@ -1,21 +1,35 @@
-import { type MouseEvent, type PointerEvent, useCallback, useEffect, useRef, useState, type WheelEvent } from 'react'
 import { cn } from '@/lib/utils'
-import { FIT, MAX_SCALE, type Size, type ZoomView, zoomTo } from '@/lib/zoom'
+import { FIT, MAX_SCALE, type Size, zoomTo, type ZoomView } from '@/lib/zoom'
+import { type MouseEvent, type PointerEvent, useCallback, useEffect, useRef, useState, type WheelEvent } from 'react'
 
 const WHEEL_SENSITIVITY = 0.002
 const KEY_ZOOM_STEP = 1.25
+/** Longer than this and a pointer-down → pointer-up isn't a click, it's the end of a pan. */
+const DRAG_THRESHOLD = 4
+/** A single click is only fired once this long has passed without a second one turning it into a double-click. */
+const CLICK_DELAY = 250
 
 function sizeOf(element: HTMLElement): Size {
   // Layout size, unaffected by the zoom transform.
   return { width: element.offsetWidth, height: element.offsetHeight }
 }
 
+interface ZoomableImageProps {
+  src: string
+  alt: string
+  /** Fires for a plain (non-double) click that lands on the letterboxing around the image, not the image itself. */
+  onBackdropClick?: () => void
+}
+
 /** Image fitted into its container; wheel / double-click / `+` `-` `0` zoom, dragging pans. */
-export function ZoomableImage({ src, alt }: { src: string; alt: string }) {
+export function ZoomableImage({ src, alt, onBackdropClick }: ZoomableImageProps) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
-  const drag = useRef<{ pointerId: number; x: number; y: number; view: ZoomView } | null>(null)
+  const drag = useRef<{ pointerId: number; x: number; y: number; view: ZoomView; dragged: boolean } | null>(null)
+  const clickTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [view, setView] = useState(FIT)
+
+  useEffect(() => () => clearTimeout(clickTimer.current), [])
 
   /** Zooms around a point given in client coordinates, or around the center. */
   const zoom = useCallback((scale: (current: ZoomView) => number, client?: { x: number; y: number }) => {
@@ -45,7 +59,16 @@ export function ZoomableImage({ src, alt }: { src: string; alt: string }) {
     zoom((current) => current.scale * factor, { x: event.clientX, y: event.clientY })
   }
 
+  const onClick = (event: MouseEvent) => {
+    // A pan release or a click on the image itself (not the surrounding letterboxing) never closes the viewer.
+    if (!onBackdropClick || event.target !== event.currentTarget) return
+    clearTimeout(clickTimer.current)
+    // Delayed so a following click (a double-click, handled below) can cancel it instead of also zooming and closing.
+    clickTimer.current = setTimeout(onBackdropClick, CLICK_DELAY)
+  }
+
   const onDoubleClick = (event: MouseEvent) => {
+    clearTimeout(clickTimer.current)
     const image = imageRef.current
     // Toggles between fitted and actual pixels (at least 2×, so small images zoom too).
     const actual = image ? image.naturalWidth / Math.max(1, image.offsetWidth) : 2
@@ -58,7 +81,7 @@ export function ZoomableImage({ src, alt }: { src: string; alt: string }) {
   const onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0 || view.scale <= 1) return
     event.currentTarget.setPointerCapture(event.pointerId)
-    drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, view }
+    drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, view, dragged: false }
   }
 
   const onPointerMove = (event: PointerEvent) => {
@@ -66,22 +89,25 @@ export function ZoomableImage({ src, alt }: { src: string; alt: string }) {
     const viewport = viewportRef.current
     const image = imageRef.current
     if (!start || start.pointerId !== event.pointerId || !viewport || !image) return
-    const moved = {
-      ...start.view,
-      x: start.view.x + event.clientX - start.x,
-      y: start.view.y + event.clientY - start.y,
-    }
+    const dx = event.clientX - start.x
+    const dy = event.clientY - start.y
+    if (Math.hypot(dx, dy) > DRAG_THRESHOLD) start.dragged = true
+    const moved = { ...start.view, x: start.view.x + dx, y: start.view.y + dy }
     // zoomTo at the same scale only clamps the pan.
     setView(zoomTo(moved, moved.scale, { x: 0, y: 0 }, sizeOf(image), sizeOf(viewport)))
   }
 
   const onPointerUp = (event: PointerEvent) => {
-    if (drag.current?.pointerId === event.pointerId) drag.current = null
+    if (drag.current?.pointerId !== event.pointerId) return
+    // A real pan shouldn't also fire the click that follows pointer-up.
+    if (drag.current.dragged) clearTimeout(clickTimer.current)
+    drag.current = null
   }
 
   const zoomed = view.scale > 1
   return (
     // To assistive tech this is just the image; the mouse gestures mirror the global `+` `-` `0` keys.
+    // biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only convenience; Escape already closes the viewer.
     <div
       ref={viewportRef}
       role="img"
@@ -91,6 +117,7 @@ export function ZoomableImage({ src, alt }: { src: string; alt: string }) {
         zoomed ? 'cursor-grab active:cursor-grabbing' : 'cursor-zoom-in',
       )}
       onWheel={onWheel}
+      onClick={onClick}
       onDoubleClick={onDoubleClick}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

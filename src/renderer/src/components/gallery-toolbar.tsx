@@ -1,5 +1,5 @@
-import { ArrowDownIcon, ArrowUpIcon, ImageIcon, VideoIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react'
 import { DateRangeFilter } from '@/components/date-range-filter'
+import { RatingFilter } from '@/components/rating-filter'
 import { TagSearch } from '@/components/tag-search'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -17,6 +17,7 @@ import {
   SORT_FIELDS,
   SORT_LABELS,
 } from '@/lib/search'
+import { ArrowDownIcon, ArrowUpIcon, ImageIcon, VideoIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react'
 
 interface GalleryToolbarProps {
   search: GallerySearch
@@ -52,6 +53,7 @@ export function GalleryToolbar({ search, onSearchChange, columns, onColumnsChang
 
       <div className="ml-auto flex items-center gap-4">
         <DateRangeFilter search={search} onSearchChange={onSearchChange} />
+        <RatingFilter search={search} onSearchChange={onSearchChange} />
         <div className="flex items-center gap-1">
           <Select
             value={search.sortBy ?? DEFAULT_SORT}

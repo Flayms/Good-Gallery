@@ -1,68 +1,14 @@
-import { mediaUrl } from '@shared/media-urls'
-import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
-import { ChevronLeftIcon, ChevronRightIcon, FolderOpenIcon, InfoIcon, XIcon } from 'lucide-react'
-import { type ReactNode, useEffect, useState } from 'react'
-import { toast } from 'sonner'
-import { Badge } from '@/components/ui/badge'
+import { MediaContextMenu } from '@/components/media-context-menu'
+import { MediaInfo } from '@/components/media-info'
 import { Button } from '@/components/ui/button'
 import { ZoomableImage } from '@/components/zoomable-image'
-import { formatBytes, formatDuration } from '@/lib/format'
-import { withTag } from '@/lib/search'
-import { type RouterOutputs, trpc } from '@/lib/trpc'
+import { trpc } from '@/lib/trpc'
 import { cn } from '@/lib/utils'
-
-type MediaDetails = RouterOutputs['media']['byId']
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <dt className="text-white/50 text-xs">{label}</dt>
-      <dd className="break-words">{children}</dd>
-    </div>
-  )
-}
-
-function InfoPanel({ item }: { item: MediaDetails }) {
-  return (
-    <aside className="flex w-80 shrink-0 flex-col gap-4 overflow-y-auto border-white/10 border-l p-4 text-sm">
-      <dl className="flex flex-col gap-3">
-        <Field label="File">{item.fileName}</Field>
-        <Field label="Location">
-          <span className="select-text break-all">{item.path}</span>
-        </Field>
-        <Field label="Library">{item.rootLabel}</Field>
-        {item.takenAt !== null && <Field label="Taken">{new Date(item.takenAt).toLocaleString()}</Field>}
-        <Field label="Modified">{new Date(item.mtime).toLocaleString()}</Field>
-        {item.width !== null && item.height !== null && (
-          <Field label="Dimensions">
-            {item.width} × {item.height}
-          </Field>
-        )}
-        {item.duration !== null && <Field label="Duration">{formatDuration(item.duration)}</Field>}
-        <Field label="Size">{formatBytes(item.size)}</Field>
-      </dl>
-      {item.tags.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          <span className="text-white/50 text-xs">Tags</span>
-          <div className="flex flex-wrap gap-1.5">
-            {item.tags.map((tag) => (
-              <Badge key={tag.id} variant="secondary" asChild>
-                <Link
-                  to="/"
-                  search={(prev) => ({ ...prev, ...withTag(prev, tag.name, 'include') })}
-                  title={`Show only ${tag.name}`}
-                >
-                  {tag.name}
-                </Link>
-              </Badge>
-            ))}
-          </div>
-        </div>
-      )}
-    </aside>
-  )
-}
+import { mediaUrl } from '@shared/media-urls'
+import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query'
+import { ChevronLeftIcon, ChevronRightIcon, FolderOpenIcon, InfoIcon, XIcon } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 
 /** A gallery neighbour; `kind` is unknown until its data is loaded. */
 export interface MediaNeighbour {
@@ -145,39 +91,54 @@ export function MediaViewer({ id, prev, next, onNavigate, onClose }: MediaViewer
         </Button>
       </div>
       <div className="flex min-h-0 flex-1">
-        <div className="relative flex min-w-0 flex-1 items-center justify-center p-4 pt-0">
-          {error && <p className="text-white/60">{error.message}</p>}
-          {item?.kind === 'video' && (
-            // biome-ignore lint/a11y/useMediaCaption: personal videos come without caption tracks.
-            <video key={item.id} src={mediaUrl(item.id)} controls autoPlay className="max-h-full max-w-full" />
-          )}
-          {item?.kind === 'image' && <ZoomableImage key={item.id} src={mediaUrl(item.id)} alt={item.fileName} />}
-          {prev && (
-            <Button
-              variant="ghost"
-              size="icon-lg"
-              className={cn(navButton, 'left-3')}
-              onClick={() => onNavigate(prev.id)}
-              aria-label="Previous"
-              title="Previous (←)"
-            >
-              <ChevronLeftIcon />
-            </Button>
-          )}
-          {next && (
-            <Button
-              variant="ghost"
-              size="icon-lg"
-              className={cn(navButton, 'right-3')}
-              onClick={() => onNavigate(next.id)}
-              aria-label="Next"
-              title="Next (→)"
-            >
-              <ChevronRightIcon />
-            </Button>
-          )}
-        </div>
-        {showInfo && item && <InfoPanel item={item} />}
+        <MediaContextMenu id={id} onInformation={() => setShowInfo(true)}>
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: mouse-only convenience; Escape already closes. */}
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: see above. */}
+          <div
+            className="relative flex min-w-0 flex-1 items-center justify-center p-4 pt-0"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) onClose()
+            }}
+          >
+            {error && <p className="text-white/60">{error.message}</p>}
+            {item?.kind === 'video' && (
+              // biome-ignore lint/a11y/useMediaCaption: personal videos come without caption tracks.
+              <video key={item.id} src={mediaUrl(item.id)} controls autoPlay className="max-h-full max-w-full" />
+            )}
+            {item?.kind === 'image' && (
+              <ZoomableImage key={item.id} src={mediaUrl(item.id)} alt={item.fileName} onBackdropClick={onClose} />
+            )}
+            {prev && (
+              <Button
+                variant="ghost"
+                size="icon-lg"
+                className={cn(navButton, 'left-3')}
+                onClick={() => onNavigate(prev.id)}
+                aria-label="Previous"
+                title="Previous (←)"
+              >
+                <ChevronLeftIcon />
+              </Button>
+            )}
+            {next && (
+              <Button
+                variant="ghost"
+                size="icon-lg"
+                className={cn(navButton, 'right-3')}
+                onClick={() => onNavigate(next.id)}
+                aria-label="Next"
+                title="Next (→)"
+              >
+                <ChevronRightIcon />
+              </Button>
+            )}
+          </div>
+        </MediaContextMenu>
+        {showInfo && item && (
+          <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-white/10 border-l p-4 text-sm">
+            <MediaInfo item={item} />
+          </aside>
+        )}
       </div>
     </div>
   )

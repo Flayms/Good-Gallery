@@ -1,16 +1,19 @@
-import { join } from 'node:path'
 import { ASPECT_SCALE, tileAspect } from '@shared/aspect'
 import { TRPCError } from '@trpc/server'
-import { and, asc, desc, eq, gte, inArray, lt, type SQL, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, isNull, lt, or, type SQL, sql } from 'drizzle-orm'
+import { join } from 'node:path'
 import { z } from 'zod'
 import type { Db } from '../../db'
 import { libraryRoots, media, mediaTags, tags } from '../../db/schema'
+import { categoriesOf } from '../../db/tag-categories'
 import { tagConditions } from '../../db/tag-search'
 import { publicProcedure, router } from '../trpc'
 
 const MAX_BY_IDS = 500
 const idInput = z.object({ id: z.int().positive() })
 const tagList = z.array(z.string().max(200)).max(20).default([])
+/** `0` means unrated. */
+const ratingList = z.array(z.int().min(0).max(5)).max(6).default([])
 
 export const SORT_FIELDS = ['name', 'taken', 'modified', 'path', 'size'] as const
 
@@ -24,6 +27,8 @@ const searchInput = z
     tags: tagList,
     /** Media must carry none of these tags (nor their descendants). */
     excludeTags: tagList,
+    /** Media must have one of these ratings; `0` matches unrated media. Empty means no filter. */
+    ratings: ratingList,
     /** Inclusive lower bound of the sort date, ms. */
     from: z.int().optional(),
     /** Exclusive upper bound of the sort date, ms. */
@@ -39,6 +44,11 @@ const searchInput = z
 type SearchInput = z.infer<typeof searchInput>
 
 /** WHERE conditions of a search; a condition that can never match if a tag filter is unsatisfiable. */
+function ratingFilter(ratings: number[]): SQL | undefined {
+  if (ratings.length === 0) return undefined
+  return or(...ratings.map((rating) => (rating === 0 ? isNull(media.rating) : eq(media.rating, rating))))
+}
+
 function filters(db: Db, input: SearchInput): SQL | undefined {
   const tagFilters = tagConditions(db, input.tags, input.excludeTags)
   if (!tagFilters) return sql`0`
@@ -50,6 +60,7 @@ function filters(db: Db, input: SearchInput): SQL | undefined {
     input.kind === undefined ? undefined : eq(media.kind, input.kind),
     input.from === undefined ? undefined : gte(media.sortDate, input.from),
     input.to === undefined ? undefined : lt(media.sortDate, input.to),
+    ratingFilter(input.ratings),
     ...tagFilters,
   )
 }
@@ -74,7 +85,7 @@ function absolutePath(rootPath: string, relPath: string): string {
 }
 
 export const mediaRouter = router({
-  /** Media details for the viewer, with the absolute file path and direct tags. */
+  /** Media details for the viewer, with the absolute file path and direct tags, grouped by category. */
   byId: publicProcedure.input(idInput).query(({ ctx, input }) => {
     const item = ctx.db
       .select({
@@ -92,6 +103,7 @@ export const mediaRouter = router({
         takenAt: media.takenAt,
         mtime: media.mtime,
         thumbhash: media.thumbhash,
+        rating: media.rating,
       })
       .from(media)
       .innerJoin(libraryRoots, eq(libraryRoots.id, media.rootId))
@@ -105,8 +117,16 @@ export const mediaRouter = router({
       .where(eq(mediaTags.mediaId, input.id))
       .orderBy(asc(tags.nameNorm))
       .all()
+    const categories = categoriesOf(
+      ctx.db,
+      itemTags.map((tag) => tag.id),
+    )
     const { rootPath, ...rest } = item
-    return { ...rest, path: absolutePath(rootPath, item.relPath), tags: itemTags }
+    return {
+      ...rest,
+      path: absolutePath(rootPath, item.relPath),
+      tags: itemTags.map((tag) => ({ ...tag, category: categories.get(tag.id) })),
+    }
   }),
 
   showInFolder: publicProcedure.input(idInput).mutation(({ ctx, input }) => {

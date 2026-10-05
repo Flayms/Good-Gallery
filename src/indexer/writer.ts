@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, inArray, lt, ne, notInArray, or, type SQL, sql } from 'drizzle-orm'
 import type { Db } from '../main/db'
 import { folders, type LibraryRoot, libraryRoots, media, mediaTags, tags } from '../main/db/schema'
+import { METADATA_VERSION } from '../shared/metadata'
 import { cleanTag, normalizeTag } from '../shared/tags'
 import type { MediaKind } from './media-types'
 import type { MediaMetadata } from './metadata'
@@ -13,6 +14,7 @@ export interface ExistingEntry {
   size: number
   mtime: number
   sidecarMtime: number | null
+  metaVersion: number
 }
 
 export interface IndexedFile {
@@ -114,6 +116,7 @@ export class IndexWriter {
         size: media.size,
         mtime: media.mtime,
         sidecarMtime: media.sidecarMtime,
+        metaVersion: media.metaVersion,
       })
       .from(media)
       .where(where)
@@ -205,7 +208,7 @@ export class IndexWriter {
     const contentChanged = sql`${media.size} <> excluded.size OR ${media.mtime} <> excluded.mtime`
     const row = tx
       .insert(media)
-      .values({ rootId, ...file, ...columns })
+      .values({ rootId, ...file, ...columns, metaVersion: METADATA_VERSION })
       .onConflictDoUpdate({
         target: [media.rootId, media.relPath],
         set: {
@@ -218,6 +221,8 @@ export class IndexWriter {
           height: sql`excluded.height`,
           duration: sql`excluded.duration`,
           takenAt: sql`excluded.taken_at`,
+          rating: sql`excluded.rating`,
+          metaVersion: sql`excluded.meta_version`,
           thumbhash: sql`CASE WHEN ${contentChanged} THEN NULL ELSE ${media.thumbhash} END`,
           thumbStatus: sql`CASE WHEN ${contentChanged} THEN 'pending' ELSE ${media.thumbStatus} END`,
         },

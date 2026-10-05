@@ -1,6 +1,7 @@
-import { eq } from 'drizzle-orm'
+import { eq, lt } from 'drizzle-orm'
+import { METADATA_VERSION } from '../shared/metadata'
 import type { Db } from './db'
-import { libraryRoots } from './db/schema'
+import { libraryRoots, media } from './db/schema'
 import type { IndexerController } from './indexer'
 
 export interface RescanSchedule {
@@ -22,8 +23,17 @@ export interface RescanScheduler {
  */
 export function scheduleRescans(db: Db, indexer: IndexerController, schedule: RescanSchedule): RescanScheduler {
   const scanAll = () => {
+    // Roots with rows from an older metadata extractor get a full scan instead, once, to pick up the new fields.
+    const outdated = new Set(
+      db
+        .selectDistinct({ rootId: media.rootId })
+        .from(media)
+        .where(lt(media.metaVersion, METADATA_VERSION))
+        .all()
+        .map((row) => row.rootId),
+    )
     for (const { id } of db.select({ id: libraryRoots.id }).from(libraryRoots).all()) {
-      indexer.requestScan(id, { mode: 'quick' })
+      indexer.requestScan(id, { mode: outdated.has(id) ? 'full' : 'quick' })
     }
   }
   const scanOffline = () => {

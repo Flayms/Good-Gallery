@@ -1,7 +1,8 @@
-import { normalizeTag } from '@shared/tags'
-import { and, gte, lt, sql } from 'drizzle-orm'
+import { normalizeTag, TAG_CATEGORIES } from '@shared/tags'
+import { and, gte, lt, notInArray, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { tags } from '../../db/schema'
+import { categorizedTagIds, categoryTags } from '../../db/tag-categories'
 import { publicProcedure, router } from '../trpc'
 
 export const tagsRouter = router({
@@ -31,4 +32,27 @@ export const tagsRouter = router({
         ORDER BY count DESC, t.name_norm
         LIMIT ${input.limit}`)
     }),
+
+  /** Every tag of a category (people, places), most used first, with its place in that category's hierarchy. */
+  category: publicProcedure
+    .input(z.object({ category: z.enum(TAG_CATEGORIES) }))
+    .query(({ ctx, input }) => categoryTags(ctx.db, input.category)),
+
+  /** Most used tags outside any category, for the sidebar's general tag list. */
+  popular: publicProcedure.input(z.object({ limit: z.int().min(1).max(50).default(20) })).query(({ ctx, input }) => {
+    const excluded = categorizedTagIds(ctx.db)
+    const matches = excluded.length > 0 ? notInArray(tags.id, excluded) : sql`1`
+    return ctx.db.all<{ id: number; name: string; count: number }>(sql`
+      WITH RECURSIVE tree(root, id) AS (
+        SELECT ${tags.id}, ${tags.id} FROM ${tags} WHERE ${matches}
+        UNION
+        SELECT tree.root, ${tags.id} FROM ${tags} JOIN tree ON ${tags.parentId} = tree.id
+      )
+      SELECT t.id, t.name, sum(d.media_count) AS count
+      FROM tree JOIN ${tags} AS d ON d.id = tree.id JOIN ${tags} AS t ON t.id = tree.root
+      GROUP BY tree.root
+      HAVING count > 0
+      ORDER BY count DESC, t.name_norm
+      LIMIT ${input.limit}`)
+  }),
 })

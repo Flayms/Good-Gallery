@@ -2,10 +2,11 @@ import type { Stats } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { join, posix } from 'node:path'
 import PQueue from 'p-queue'
+import { METADATA_VERSION } from '../shared/metadata'
 import { EMPTY_METADATA, type MediaMetadata, type MetadataSource } from './metadata'
 import type { ScanOutcome, ScanProgress, ScanScope } from './protocol'
 import { errorCode, isTransient, withRetry } from './retry'
-import { type DirListing, findSidecar, type WalkOptions, walk } from './walk'
+import { type DirListing, findSidecar, walk, type WalkOptions } from './walk'
 import type { ExistingEntry, IndexedFile, IndexWriter } from './writer'
 
 export interface ScanDeps {
@@ -199,7 +200,13 @@ export async function scanRoot(
 
       const mtime = Math.trunc(stats.mtimeMs)
       const sidecarMtime = sidecarStats ? Math.trunc(sidecarStats.mtimeMs) : null
-      if (known?.size === stats.size && known.mtime === mtime && known.sidecarMtime === sidecarMtime) return
+      if (
+        known?.size === stats.size &&
+        known.mtime === mtime &&
+        known.sidecarMtime === sidecarMtime &&
+        known.metaVersion === METADATA_VERSION
+      )
+        return
 
       const fileMetadata = await readMetadata(absPath, sidecarStats ? sidecarPath : undefined)
       if (!fileMetadata) return

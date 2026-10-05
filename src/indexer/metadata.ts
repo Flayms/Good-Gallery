@@ -1,5 +1,5 @@
 import { ExifDateTime, ExifTool, type Tags } from 'exiftool-vendored'
-import { cleanTag, normalizeTag } from '../shared/tags'
+import { cleanTag, normalizeTag, PEOPLE_TAG_ROOT } from '../shared/tags'
 import type { PreviewSource } from './thumbnail'
 
 export interface MediaMetadata {
@@ -8,11 +8,20 @@ export interface MediaMetadata {
   /** Seconds. */
   duration: number | null
   takenAt: number | null
+  /** 1-5, or null when unrated or rejected. */
+  rating: number | null
   /** Tag paths, outermost first; flat keywords are single-element paths. */
   tags: string[][]
 }
 
-export const EMPTY_METADATA: MediaMetadata = { width: null, height: null, duration: null, takenAt: null, tags: [] }
+export const EMPTY_METADATA: MediaMetadata = {
+  width: null,
+  height: null,
+  duration: null,
+  takenAt: null,
+  rating: null,
+  tags: [],
+}
 
 export interface MetadataSource {
   read(file: string, sidecar?: string): Promise<MediaMetadata>
@@ -77,10 +86,19 @@ function textValues(value: unknown): string[] {
 export function extractTags(sources: Tags[]): string[][] {
   const hierarchical: string[][] = []
   const flat: string[] = []
+  const people: string[] = []
   for (const tags of sources) {
     for (const value of textValues(tags.HierarchicalSubject)) hierarchical.push(value.split('|'))
     flat.push(...textValues(tags.Keywords), ...textValues(tags.Subject))
     for (const value of textValues(tags.XPKeywords)) flat.push(...value.split(';'))
+    // Face regions: a generic IPTC field plus the flattened MWG and Microsoft Photo struct fields
+    // (Lightroom, Picasa, digiKam, Windows Photo Gallery all write one of these).
+    people.push(...textValues(tags.PersonInImage), ...textValues(tags.RegionPersonDisplayName))
+    const regionNames = textValues(tags.RegionName)
+    const regionTypes = textValues(tags.RegionType)
+    regionNames.forEach((name, i) => {
+      if (regionTypes[i] === 'Face') people.push(name)
+    })
   }
 
   const paths = new Map<string, string[]>()
@@ -90,10 +108,21 @@ export function extractTags(sources: Tags[]): string[][] {
     if (names.length > 0 && !paths.has(key)) paths.set(key, names)
   }
   for (const path of hierarchical) add(path)
-  // Lightroom also writes every hierarchy level as a flat keyword; the hierarchy already covers those.
-  const inHierarchy = new Set(hierarchical.flat().map(normalizeTag))
-  for (const name of flat) if (!inHierarchy.has(normalizeTag(name))) add([name])
+  for (const name of people) add([PEOPLE_TAG_ROOT, name])
+  // Lightroom also writes every hierarchy level (and some tools every face name) as a flat keyword too;
+  // the hierarchy and face regions already cover those.
+  const named = new Set([...hierarchical.flat(), ...people].map(normalizeTag))
+  for (const name of flat) if (!named.has(normalizeTag(name))) add([name])
   return [...paths.values()]
+}
+
+/** First valid rating among the sources; -1 (rejected) and 0 (unrated) both mean "no rating". */
+function extractRating(sources: Tags[]): number | null {
+  for (const { Rating: rating } of sources) {
+    if (typeof rating !== 'number' || !Number.isFinite(rating)) continue
+    return rating <= 0 ? null : Math.min(5, Math.round(rating))
+  }
+  return null
 }
 
 /** Sidecar values fill gaps in the embedded metadata; tags from both are merged. */
@@ -114,6 +143,7 @@ export function extractMetadata(tags: Tags, sidecar?: Tags): MediaMetadata {
     height,
     duration: isPositive(tags.Duration) ? tags.Duration : null,
     takenAt,
+    rating: extractRating(sources),
     tags: extractTags(sources),
   }
 }

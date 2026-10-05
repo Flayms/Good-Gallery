@@ -1,10 +1,11 @@
+import { asc, eq } from 'drizzle-orm'
 import { mkdir, mkdtemp, rm, stat, unlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
-import { asc, eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { type Db, openDatabase } from '../main/db'
 import { folders, libraryRoots, media, mediaTags, tags } from '../main/db/schema'
+import { METADATA_VERSION } from '../shared/metadata'
 import { EMPTY_METADATA, type MediaMetadata, type MetadataSource } from './metadata'
 import type { ScanScope } from './protocol'
 import { type ScanDeps, type ScanOptions, scanRoot } from './scan'
@@ -169,6 +170,18 @@ describe('scanRoot', () => {
       { relPath: 'sidecar.jpg', sidecarMtime: expect.any(Number), thumbStatus: 'ready', thumbhash: 'abc' },
     ])
     expect(db.select().from(tags).all()).toEqual([])
+  })
+
+  it('re-reads files from an older metadata extractor, even if otherwise unchanged', async () => {
+    await touch('a.jpg')
+    await scan()
+    db.update(media).set({ metaVersion: 0 }).run()
+    metadata.reads = []
+
+    expect(await scan()).toBe('completed')
+
+    expect(metadata.reads).toEqual(['a.jpg'])
+    expect(indexed()).toMatchObject([{ relPath: 'a.jpg', metaVersion: METADATA_VERSION }])
   })
 
   it('keeps the index of unreachable roots', async () => {

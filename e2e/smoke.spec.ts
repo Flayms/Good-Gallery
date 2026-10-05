@@ -1,18 +1,18 @@
+import {
+    _electron as electron,
+    type ElectronApplication,
+    expect,
+    type Locator,
+    type Page,
+    test,
+} from '@playwright/test'
+import { ExifTool, type WriteTags } from 'exiftool-vendored'
+import ffmpegPath from 'ffmpeg-static'
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import {
-  type ElectronApplication,
-  _electron as electron,
-  expect,
-  type Locator,
-  type Page,
-  test,
-} from '@playwright/test'
-import { ExifTool, type WriteTags } from 'exiftool-vendored'
-import ffmpegPath from 'ffmpeg-static'
 import sharp from 'sharp'
 
 // Smoke test of the built app (`out/`, or a packaged executable via GG_E2E_APP) against a generated library.
@@ -25,7 +25,13 @@ const INDEXING_TIMEOUT = 60_000
 const FIXTURES: { name: string; width: number; height: number; color: string; tags: WriteTags }[] = [
   { name: 'beach.jpg', width: 1200, height: 800, color: '#3b82f6', tags: { Subject: ['Beach', 'Summer'] } },
   { name: 'forest.jpg', width: 800, height: 1200, color: '#16a34a', tags: { HierarchicalSubject: ['Places|Forest'] } },
-  { name: 'city.jpg', width: 1000, height: 1000, color: '#f97316', tags: { Keywords: ['Summer'] } },
+  {
+    name: 'city.jpg',
+    width: 1000,
+    height: 1000,
+    color: '#f97316',
+    tags: { Keywords: ['Summer'], HierarchicalSubject: ['People|Anton'], Rating: 5 },
+  },
 ]
 const VIDEO = 'clip.mp4'
 
@@ -93,6 +99,33 @@ test('indexes a library, browses it, filters by tag and shows details', async ()
   const thumbsLoaded = () =>
     tiles.evaluateAll((links) => links.every((link) => (link.querySelector('img')?.naturalWidth ?? 0) > 0))
   await expect.poll(thumbsLoaded, { timeout: INDEXING_TIMEOUT }).toBe(true)
+
+  // Clicking the black space around the media (not the media itself) closes the viewer, same as Escape.
+  await page.getByRole('link', { name: VIDEO }).click()
+  const videoViewer = page.getByRole('dialog', { name: VIDEO })
+  await expect(videoViewer).toBeVisible()
+  await videoViewer.click({ position: { x: 20, y: 100 } })
+  await expect(videoViewer).toBeHidden()
+
+  // People (from a keyword hierarchy here, or a face region) get their own sidebar group.
+  await expect(page.getByRole('link', { name: 'Anton' })).toBeVisible()
+
+  // Rating filters by exact stars.
+  await page.getByRole('button', { name: 'Rating' }).click()
+  await page.getByRole('button', { name: '5 stars' }).click()
+  await expect(tiles).toHaveCount(1)
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Rating' }).click()
+  await page.getByRole('button', { name: 'Clear' }).click()
+  await page.keyboard.press('Escape')
+  await expect(tiles).toHaveCount(FIXTURES.length + 1)
+
+  // Right-clicking a tile shows its tags without opening the full viewer.
+  await page.getByRole('link', { name: 'city.jpg' }).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Information' }).click()
+  const infoSheet = page.getByRole('dialog', { name: 'city.jpg' })
+  await expect(infoSheet.getByRole('link', { name: 'Anton' })).toBeVisible()
+  await page.keyboard.press('Escape')
 
   // Keyboard navigation follows the gallery order.
   const names = await tiles.evaluateAll((links) => links.map((link) => link.getAttribute('title')))

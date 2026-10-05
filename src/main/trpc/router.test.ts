@@ -1,9 +1,9 @@
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
 import { DEFAULT_SETTINGS } from '@shared/settings'
 import { TRPCError } from '@trpc/server'
 import { eq } from 'drizzle-orm'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type Db, openDatabase } from '../db'
 import { libraryRoots, media, mediaTags, settings as settingsTable, tags } from '../db/schema'
@@ -252,6 +252,28 @@ describe('media.byId', () => {
       ],
     })
   })
+
+  it('includes the rating and groups tags by category', async () => {
+    const root = insertRoot()
+    const item = insertMedia(root.id, 'c.jpg', { rating: 4 })
+    const people = db.insert(tags).values({ name: 'People', nameNorm: 'people' }).returning().get()
+    const anton = db.insert(tags).values({ name: 'Anton', nameNorm: 'anton', parentId: people.id }).returning().get()
+    const cat = db.insert(tags).values({ name: 'Cat', nameNorm: 'cat' }).returning().get()
+    db.insert(mediaTags)
+      .values([
+        { mediaId: item.id, tagId: anton.id },
+        { mediaId: item.id, tagId: cat.id },
+      ])
+      .run()
+
+    expect(await caller.media.byId({ id: item.id })).toMatchObject({
+      rating: 4,
+      tags: [
+        { id: anton.id, name: 'Anton', category: 'people' },
+        { id: cat.id, name: 'Cat', category: undefined },
+      ],
+    })
+  })
 })
 
 describe('media.showInFolder', () => {
@@ -340,6 +362,67 @@ describe('tags.autocomplete', () => {
 
     db.delete(media).run()
     expect(await caller.tags.autocomplete({})).toEqual([])
+  })
+})
+
+describe('media.layout ratings', () => {
+  it('filters by exact rating, 0 meaning unrated', async () => {
+    const root = insertRoot()
+    const fiveStar = insertMedia(root.id, 'a.jpg', { rating: 5 }).id
+    const threeStar = insertMedia(root.id, 'b.jpg', { rating: 3 }).id
+    const unrated = insertMedia(root.id, 'c.jpg').id
+
+    expect((await caller.media.layout({ ratings: [5] })).ids).toEqual([fiveStar])
+    expect((await caller.media.layout({ ratings: [0] })).ids).toEqual([unrated])
+    expect((await caller.media.layout({ ratings: [3, 5] })).ids.sort()).toEqual([threeStar, fiveStar].sort())
+    expect((await caller.media.layout({})).ids).toHaveLength(3)
+  })
+})
+
+describe('tags.category', () => {
+  it('groups by the top-level tag regardless of its exact name, with counts including descendants', async () => {
+    const root = insertRoot()
+    const insertTag = (name: string, parentId: number | null = null) =>
+      db.insert(tags).values({ name, nameNorm: name.toLowerCase(), parentId }).returning().get()
+    const people = insertTag('People')
+    const anton = insertTag('Anton', people.id)
+    const persons = insertTag('Persons')
+    const bea = insertTag('Bea', persons.id)
+    const cat = insertTag('Cat')
+    const files = [1, 2].map((i) => insertMedia(root.id, `${i}.jpg`))
+    db.insert(mediaTags)
+      .values([
+        { mediaId: files[0]?.id ?? 0, tagId: anton.id },
+        { mediaId: files[1]?.id ?? 0, tagId: bea.id },
+        { mediaId: files[0]?.id ?? 0, tagId: cat.id },
+      ])
+      .run()
+
+    expect(await caller.tags.category({ category: 'people' })).toEqual([
+      { id: anton.id, name: 'Anton', parentId: null, count: 1 },
+      { id: bea.id, name: 'Bea', parentId: null, count: 1 },
+    ])
+    expect(await caller.tags.category({ category: 'places' })).toEqual([])
+  })
+})
+
+describe('tags.popular', () => {
+  it('excludes category tags and their roots', async () => {
+    const root = insertRoot()
+    const insertTag = (name: string, parentId: number | null = null) =>
+      db.insert(tags).values({ name, nameNorm: name.toLowerCase(), parentId }).returning().get()
+    const people = insertTag('People')
+    const anton = insertTag('Anton', people.id)
+    const cat = insertTag('Cat')
+    const files = [1, 2].map((i) => insertMedia(root.id, `${i}.jpg`))
+    db.insert(mediaTags)
+      .values([
+        { mediaId: files[0]?.id ?? 0, tagId: anton.id },
+        { mediaId: files[1]?.id ?? 0, tagId: cat.id },
+      ])
+      .run()
+
+    expect(await caller.tags.popular({})).toEqual([{ id: cat.id, name: 'Cat', count: 1 }])
   })
 })
 

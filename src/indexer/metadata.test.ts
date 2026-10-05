@@ -1,8 +1,8 @@
+import { ExifDateTime, type Tags } from 'exiftool-vendored'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { crc32, deflateSync } from 'node:zlib'
-import { ExifDateTime, type Tags } from 'exiftool-vendored'
 import { describe, expect, it } from 'vitest'
 import { ExifToolMetadataSource, extractMetadata, extractTags } from './metadata'
 
@@ -24,6 +24,20 @@ describe('extractTags', () => {
 
   it('accepts numeric keywords', () => {
     expect(extractTags([{ Keywords: [2024, 'x'] as unknown as string[] }])).toEqual([['2024'], ['x']])
+  })
+
+  it('adds face-region names as People tags, from any of the fields apps use', () => {
+    expect(extractTags([{ PersonInImage: 'Anton' }])).toEqual([['People', 'Anton']])
+    expect(extractTags([{ RegionPersonDisplayName: ['Anton'] }])).toEqual([['People', 'Anton']])
+    expect(extractTags([{ RegionName: ['Anton', 'My Dog'], RegionType: ['Face', 'Pet'] }])).toEqual([
+      ['People', 'Anton'],
+    ])
+  })
+
+  it('does not duplicate a face region already covered by a keyword hierarchy', () => {
+    const tags: Tags = { HierarchicalSubject: ['People|Anton'], PersonInImage: 'Anton', Keywords: ['Anton'] }
+
+    expect(extractTags([tags])).toEqual([['People', 'Anton']])
   })
 })
 
@@ -52,6 +66,15 @@ describe('extractMetadata', () => {
   it('reads video duration', () => {
     expect(extractMetadata({ Duration: 12.5 }).duration).toBe(12.5)
     expect(extractMetadata({ Duration: '0 s' }).duration).toBeNull()
+  })
+
+  it('normalizes the rating, falling back to the sidecar', () => {
+    expect(extractMetadata({ Rating: 5 }).rating).toBe(5)
+    expect(extractMetadata({ Rating: 2.4 }).rating).toBe(2)
+    expect(extractMetadata({ Rating: 0 }).rating).toBeNull()
+    expect(extractMetadata({ Rating: -1 }).rating).toBeNull()
+    expect(extractMetadata({}).rating).toBeNull()
+    expect(extractMetadata({}, { Rating: 3 }).rating).toBe(3)
   })
 })
 

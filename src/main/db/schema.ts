@@ -1,13 +1,13 @@
 import { sql } from 'drizzle-orm'
 import {
-  type AnySQLiteColumn,
-  index,
-  integer,
-  primaryKey,
-  real,
-  sqliteTable,
-  text,
-  uniqueIndex,
+    type AnySQLiteColumn,
+    index,
+    integer,
+    primaryKey,
+    real,
+    sqliteTable,
+    text,
+    uniqueIndex,
 } from 'drizzle-orm/sqlite-core'
 
 // All timestamps are integer milliseconds since the Unix epoch.
@@ -51,6 +51,10 @@ export const media = sqliteTable(
     thumbStatus: text('thumb_status', { enum: ['pending', 'ready', 'error'] })
       .notNull()
       .default('pending'),
+    /** 1-5, or null when unrated. */
+    rating: integer('rating'),
+    /** Metadata extractor version that last wrote this row; lets re-reads pick up new fields without a full rescan. */
+    metaVersion: integer('meta_version').notNull().default(0),
   },
   (t) => [
     uniqueIndex('media_root_path_uq').on(t.rootId, t.relPath),
@@ -62,6 +66,7 @@ export const media = sqliteTable(
     index('media_dir_idx').on(t.rootId, t.dir),
     // Background thumbnail generation picks pending media newest first.
     index('media_thumb_idx').on(t.thumbStatus, t.sortDate),
+    index('media_rating_idx').on(t.rating, t.id),
   ],
 )
 

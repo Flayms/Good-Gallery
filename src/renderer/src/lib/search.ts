@@ -38,6 +38,8 @@ export const gallerySearch = z.object({
   /** Local calendar days (`YYYY-MM-DD`), both inclusive. */
   from: z.iso.date().optional(),
   to: z.iso.date().optional(),
+  /** `0` means unrated. */
+  rating: z.array(z.int().min(0).max(5)).optional(),
 })
 
 export type GallerySearch = z.infer<typeof gallerySearch>
@@ -66,6 +68,7 @@ export function mediaSearchInput(search: GallerySearch) {
     dir: search.dir,
     tags: search.tags ?? [],
     excludeTags: search.exclude ?? [],
+    ratings: search.rating ?? [],
     from: search.from === undefined ? undefined : startOfDay(search.from),
     to: search.to === undefined ? undefined : startOfDay(search.to, 1),
   }
