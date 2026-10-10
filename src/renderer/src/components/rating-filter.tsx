@@ -1,8 +1,8 @@
+import { StarIcon, StarOffIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import type { GallerySearch } from '@/lib/search'
-import { StarIcon, StarOffIcon } from 'lucide-react'
 
 const RATINGS = [0, 1, 2, 3, 4, 5] as const
 

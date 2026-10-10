@@ -1,18 +1,18 @@
-import {
-    _electron as electron,
-    type ElectronApplication,
-    expect,
-    type Locator,
-    type Page,
-    test,
-} from '@playwright/test'
-import { ExifTool, type WriteTags } from 'exiftool-vendored'
-import ffmpegPath from 'ffmpeg-static'
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  type Locator,
+  type Page,
+  test,
+} from '@playwright/test'
+import { ExifTool, type WriteTags } from 'exiftool-vendored'
+import ffmpegPath from 'ffmpeg-static'
 import sharp from 'sharp'
 
 // Smoke test of the built app (`out/`, or a packaged executable via GG_E2E_APP) against a generated library.
@@ -111,11 +111,11 @@ test('indexes a library, browses it, filters by tag and shows details', async ()
   await expect(page.getByRole('link', { name: 'Anton' })).toBeVisible()
 
   // Rating filters by exact stars.
-  await page.getByRole('button', { name: 'Rating' }).click()
+  await page.getByRole('button', { name: 'Rating', exact: true }).click()
   await page.getByRole('button', { name: '5 stars' }).click()
   await expect(tiles).toHaveCount(1)
   await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: 'Rating' }).click()
+  await page.getByRole('button', { name: 'Rating', exact: true }).click()
   await page.getByRole('button', { name: 'Clear' }).click()
   await page.keyboard.press('Escape')
   await expect(tiles).toHaveCount(FIXTURES.length + 1)
@@ -136,7 +136,7 @@ test('indexes a library, browses it, filters by tag and shows details', async ()
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).toBeHidden()
 
-  await page.getByRole('combobox', { name: 'Filter by tags' }).fill('bea')
+  await page.getByRole('combobox', { name: 'Search tags or file names' }).fill('bea')
   await page.getByRole('option', { name: /Beach/ }).click()
   // Closes the suggestions, which stay open for adding more tags.
   await page.keyboard.press('Escape')
@@ -161,6 +161,30 @@ test('indexes a library, browses it, filters by tag and shows details', async ()
   await expect(page.getByRole('dialog')).toBeHidden()
   await expect(page.getByRole('button', { name: 'Remove Summer' })).toBeVisible()
   await expect(tiles).toHaveCount(1)
+
+  // The search bar also matches file names (case-insensitive substring).
+  await page.getByRole('button', { name: 'Remove Summer' }).click()
+  await page.getByRole('button', { name: 'Remove Beach' }).click()
+  await page.getByRole('combobox', { name: 'Search tags or file names' }).fill('CIT')
+  await page.getByRole('option', { name: /File name contains/ }).click()
+  await page.keyboard.press('Escape')
+  await expect(tiles).toHaveCount(1)
+  await expect(page.getByRole('link', { name: 'city.jpg' })).toBeVisible()
+  await page.getByRole('button', { name: /Remove file name filter/ }).click()
+  await expect(tiles).toHaveCount(FIXTURES.length + 1)
+
+  // Zoom buttons step the column count; the slider mirrors it.
+  // Radix labels the slider root; the thumb carries the value.
+  const zoom = page.getByLabel('Zoom', { exact: true }).getByRole('slider')
+  const zoomLevel = async () => Number(await zoom.getAttribute('aria-valuenow'))
+  const before = await zoomLevel()
+  await page.getByRole('button', { name: 'Zoom in' }).click()
+  await expect.poll(zoomLevel).toBe(before + 1)
+  await tiles.first().hover()
+  await page.keyboard.down('Control')
+  await page.mouse.wheel(0, 100)
+  await page.keyboard.up('Control')
+  await expect.poll(zoomLevel).toBe(before)
 
   // The cache is owned by the indexer process; settings changes and cache requests are forwarded to it.
   await page.getByRole('link', { name: 'Settings' }).click()

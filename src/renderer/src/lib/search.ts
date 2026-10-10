@@ -27,6 +27,8 @@ export const gallerySearch = z.object({
   /** `/`-separated folder below `root`, including subfolders. */
   folder: z.string().min(1).optional(),
   kind: z.enum(MEDIA_KINDS).optional(),
+  /** Case-insensitive substring of the file name. */
+  name: z.string().min(1).optional(),
   /** Omitted for the default (date taken). */
   sortBy: z.enum(SORT_FIELDS).optional(),
   /** Omitted for the default (descending). */
@@ -64,6 +66,7 @@ export function mediaSearchInput(search: GallerySearch) {
     rootId: search.root,
     folder: search.root === undefined ? undefined : search.folder,
     kind: search.kind,
+    name: search.name,
     sortBy: search.sortBy,
     dir: search.dir,
     tags: search.tags ?? [],

@@ -1,6 +1,6 @@
 import { and, inArray, isNull, sql } from 'drizzle-orm'
-import type { Db } from '.'
 import { TAG_CATEGORIES, TAG_CATEGORY_ROOTS, type TagCategory } from '../../shared/tags'
+import type { Db } from '.'
 import { tags } from './schema'
 
 export interface CategoryTag {

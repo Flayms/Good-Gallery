@@ -1,11 +1,11 @@
-import { MediaInfo } from '@/components/media-info'
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { trpc } from '@/lib/trpc'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { FolderOpenIcon, InfoIcon } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 import { toast } from 'sonner'
+import { MediaInfo } from '@/components/media-info'
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu'
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { trpc } from '@/lib/trpc'
 
 function MediaInfoSheet({
   id,

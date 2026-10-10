@@ -1,8 +1,8 @@
-import { ExifDateTime, type Tags } from 'exiftool-vendored'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { crc32, deflateSync } from 'node:zlib'
+import { ExifDateTime, type Tags } from 'exiftool-vendored'
 import { describe, expect, it } from 'vitest'
 import { ExifToolMetadataSource, extractMetadata, extractTags } from './metadata'
 

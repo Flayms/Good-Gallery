@@ -1,9 +1,9 @@
-import { DEFAULT_SETTINGS } from '@shared/settings'
-import { TRPCError } from '@trpc/server'
-import { eq } from 'drizzle-orm'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { DEFAULT_SETTINGS } from '@shared/settings'
+import { TRPCError } from '@trpc/server'
+import { eq } from 'drizzle-orm'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { type Db, openDatabase } from '../db'
 import { libraryRoots, media, mediaTags, settings as settingsTable, tags } from '../db/schema'
@@ -376,6 +376,37 @@ describe('media.layout ratings', () => {
     expect((await caller.media.layout({ ratings: [0] })).ids).toEqual([unrated])
     expect((await caller.media.layout({ ratings: [3, 5] })).ids.sort()).toEqual([threeStar, fiveStar].sort())
     expect((await caller.media.layout({})).ids).toHaveLength(3)
+  })
+})
+
+describe('media.layout name', () => {
+  it('matches a case-insensitive substring of the file name, combined with other filters', async () => {
+    const root = insertRoot()
+    const beach = insertMedia(root.id, 'IMG_Beach_01.jpg', { rating: 5 }).id
+    const beachVideo = insertMedia(root.id, 'beach.mp4', { kind: 'video' }).id
+    insertMedia(root.id, 'mountain.jpg')
+
+    expect((await caller.media.layout({ name: 'BEACH' })).ids.sort()).toEqual([beach, beachVideo].sort())
+    expect((await caller.media.layout({ name: 'h_0' })).ids).toEqual([beach])
+    expect((await caller.media.layout({ name: 'beach', kind: 'video' })).ids).toEqual([beachVideo])
+    expect((await caller.media.layout({ name: 'beach', ratings: [5] })).ids).toEqual([beach])
+    expect((await caller.media.layout({ name: '%' })).ids).toEqual([])
+  })
+})
+
+describe('media.ratingCounts', () => {
+  it('counts media per rating, 0 meaning unrated', async () => {
+    const root = insertRoot()
+    insertMedia(root.id, 'a.jpg', { rating: 5 })
+    insertMedia(root.id, 'b.jpg', { rating: 5 })
+    insertMedia(root.id, 'c.jpg', { rating: 2 })
+    insertMedia(root.id, 'd.jpg')
+
+    expect(await caller.media.ratingCounts()).toEqual([
+      { rating: 5, count: 2 },
+      { rating: 2, count: 1 },
+      { rating: 0, count: 1 },
+    ])
   })
 })
 

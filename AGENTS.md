@@ -1,6 +1,6 @@
 # AGENTS.md
 
-* See [docs/PLAN.md](docs/PLAN.md) for scope, tech stack, architecture, phases and per-phase implementation notes.
+* See [README.md](README.md) for features, scripts, architecture and tech stack.
 
 The role of this file is to describe common mistakes and confusion points that agents might encounter as they work in this project. If you ever encounter something in this project that surprises you, please alert the developer working with you and indicate that this is the case in the AGENTS.md file to help prevent future agents from having the same issue.
 
@@ -16,7 +16,7 @@ Be brief in your responses.
 * **Follow SOLID principles:** Single Responsibility, Open/Closed, Liskov Substitution, Interface Segregation, Dependency Inversion.
 * Decide when it's appropriate to apply DRY, YAGNI and KISS.
 * Follow the tech stack instead of rolling your own implementations.
-* Keep [docs/PLAN.md](docs/PLAN.md) up to date when finishing a phase or deviating from the plan.
+* Keep [README.md](README.md) up to date when features, scripts or the architecture change.
 
 ## Linting
 
@@ -67,6 +67,8 @@ Only add a package if you import it directly; don't list transitive deps.
 * **sharp `rotate()` + `flop()` order** doesn't match its docs; the EXIF orientation mapping in `indexer/thumbnail.ts` is pinned by a test against `autoOrient()`.
 * **e2e:** `pnpm test:e2e` builds first; `pnpm exec playwright test` reuses `out/`. `GG_E2E_APP=<exe>` targets a packaged build.
   * Playwright's `getByLabel` doesn't find the tag search input (it has both `aria-label` and a `<label htmlFor>`); use `getByRole('combobox', { name })`.
+  * Role names match substrings by default: `button 'Rating'` also hits the sidebar's `Ratings` trigger. Use `exact: true`.
+  * The Radix `Slider` puts its `aria-label` on the root, not on the `slider` thumb: `getByLabel('Zoom', { exact: true }).getByRole('slider')`.
   * The tag suggestions stay open after picking one and cover the grid; press Escape before clicking tiles.
   * `evaluate` callbacks need DOM types: they come from `tsconfig.e2e.json`. Don't add `/// <reference lib="dom" />` to node-project files - it leaks into main and breaks `Buffer`/stream `BodyInit` types.
 * **electron-builder** sometimes fails with `EPERM ... rename` while extracting NSIS into its cache; rerunning `pnpm exec electron-builder --win` works.

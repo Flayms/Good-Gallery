@@ -20,6 +20,7 @@ export function useIndexerStatus(): IndexerStatus | undefined {
     for (const queryKey of [
       trpc.media.layout.pathKey(),
       trpc.media.byIds.pathKey(),
+      trpc.media.ratingCounts.pathKey(),
       trpc.tags.pathKey(),
       trpc.libraries.folders.pathKey(),
     ]) {

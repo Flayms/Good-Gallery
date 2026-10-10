@@ -1,12 +1,12 @@
+import { TAG_CATEGORIES, type TagCategory } from '@shared/tags'
+import { Link } from '@tanstack/react-router'
+import { StarIcon } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { formatBytes, formatDuration } from '@/lib/format'
 import { withTag } from '@/lib/search'
 import type { RouterOutputs } from '@/lib/trpc'
 import { cn } from '@/lib/utils'
-import { TAG_CATEGORIES, type TagCategory } from '@shared/tags'
-import { Link } from '@tanstack/react-router'
-import { StarIcon } from 'lucide-react'
-import type { ReactNode } from 'react'
 
 export type MediaDetails = RouterOutputs['media']['byId']
 

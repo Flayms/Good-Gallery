@@ -22,6 +22,11 @@ describe('mediaSearchInput', () => {
     expect(input.to).toBe(new Date(2024, 3, 1).getTime())
   })
 
+  it('passes the file name filter through', () => {
+    expect(mediaSearchInput({ name: 'beach' }).name).toBe('beach')
+    expect(mediaSearchInput({}).name).toBeUndefined()
+  })
+
   it('drops the folder without a root', () => {
     expect(mediaSearchInput({ folder: 'a' }).folder).toBeUndefined()
     expect(mediaSearchInput({ root: 1, folder: 'a' }).folder).toBe('a')

@@ -1,3 +1,4 @@
+import { ArrowDownIcon, ArrowUpIcon, ImageIcon, VideoIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react'
 import { DateRangeFilter } from '@/components/date-range-filter'
 import { RatingFilter } from '@/components/rating-filter'
 import { TagSearch } from '@/components/tag-search'
@@ -17,13 +18,12 @@ import {
   SORT_FIELDS,
   SORT_LABELS,
 } from '@/lib/search'
-import { ArrowDownIcon, ArrowUpIcon, ImageIcon, VideoIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react'
 
 interface GalleryToolbarProps {
   search: GallerySearch
   onSearchChange: (patch: Partial<GallerySearch>) => void
   columns: number
-  onColumnsChange: (columns: number) => void
+  onColumnsChange: (update: number | ((columns: number) => number)) => void
 }
 
 export function GalleryToolbar({ search, onSearchChange, columns, onColumnsChange }: GalleryToolbarProps) {
@@ -83,9 +83,18 @@ export function GalleryToolbar({ search, onSearchChange, columns, onColumnsChang
           </Button>
         </div>
 
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <ZoomOutIcon className="size-4" />
+        <div className="flex items-center gap-1">
           {/* Zooming in means fewer, wider columns. */}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => onColumnsChange((count) => count + 1)}
+            disabled={columns >= MAX_COLUMNS}
+            aria-label="Zoom out"
+            title="Zoom out (Ctrl + wheel)"
+          >
+            <ZoomOutIcon />
+          </Button>
           <Slider
             className="w-28"
             min={MIN_COLUMNS}
@@ -97,7 +106,16 @@ export function GalleryToolbar({ search, onSearchChange, columns, onColumnsChang
             }}
             aria-label="Zoom"
           />
-          <ZoomInIcon className="size-4" />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => onColumnsChange((count) => count - 1)}
+            disabled={columns <= MIN_COLUMNS}
+            aria-label="Zoom in"
+            title="Zoom in (Ctrl + wheel)"
+          >
+            <ZoomInIcon />
+          </Button>
         </div>
       </div>
     </header>

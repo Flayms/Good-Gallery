@@ -4,7 +4,8 @@ import type { Db } from '.'
 import { media, mediaTags, tags } from './schema'
 
 /**
- * Query shapes by (estimated) matches of an included tag, measured on 500k media (docs/PLAN.md, Phase 5):
+ * Query shapes by (estimated) matches of an included tag, measured on 500k synthetic media
+ * (2k tags, ~1M links; p95 11 ms for a common tag, 0.8 ms for a rare one, 36 ms worst case):
  * - up to `DRIVING_MAX`, the rarest tag drives: its media are looked up by id and sorted (~3 µs per match);
  * - otherwise the sort index is walked and rows are checked against each tag's materialized media ids
  *   (~0.2 µs per id to build, cheap per row);

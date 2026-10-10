@@ -1,3 +1,6 @@
+import { useQuery } from '@tanstack/react-query'
+import { Link, useSearch } from '@tanstack/react-router'
+import { MinusIcon, TagIcon } from 'lucide-react'
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -9,9 +12,6 @@ import {
 } from '@/components/ui/sidebar'
 import { tagMode, withoutTag, withTag } from '@/lib/search'
 import { trpc } from '@/lib/trpc'
-import { useQuery } from '@tanstack/react-query'
-import { Link, useSearch } from '@tanstack/react-router'
-import { MinusIcon, TagIcon } from 'lucide-react'
 
 const POPULAR_TAGS = 15
 

@@ -1,19 +1,14 @@
-import { PopularTags } from '@/components/popular-tags'
-import { TagTree } from '@/components/tag-tree'
-import {
-  SidebarGroup,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarMenuSkeleton,
-} from '@/components/ui/sidebar'
-import { buildTagTree } from '@/lib/tag-tree'
-import { trpc } from '@/lib/trpc'
 import { TAG_CATEGORIES, type TagCategory } from '@shared/tags'
 import { useQuery } from '@tanstack/react-query'
 import { useSearch } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
+import { CollapsibleSidebarGroup } from '@/components/collapsible-sidebar-group'
+import { PopularTags } from '@/components/popular-tags'
+import { SidebarRatings } from '@/components/sidebar-ratings'
+import { TagTree } from '@/components/tag-tree'
+import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuSkeleton } from '@/components/ui/sidebar'
+import { buildTagTree } from '@/lib/tag-tree'
+import { trpc } from '@/lib/trpc'
 
 const CATEGORY_LABELS: Record<TagCategory, string> = { people: 'People', places: 'Places' }
 
@@ -29,8 +24,12 @@ function CategoryGroup({ category }: { category: TagCategory }) {
   if (query.data?.length === 0) return null
   const visible = showAll ? tree : tree.slice(0, TOP_LEVEL_PREVIEW)
   return (
-    <SidebarGroup>
-      <SidebarGroupLabel>{CATEGORY_LABELS[category]}</SidebarGroupLabel>
+    // Collapsing starts over with the preview, so expanding never shows the full list right away.
+    <CollapsibleSidebarGroup
+      id={category}
+      label={CATEGORY_LABELS[category]}
+      onOpenChange={(open) => open || setShowAll(false)}
+    >
       <SidebarMenu>
         {query.isPending && <SidebarMenuSkeleton showIcon />}
         <TagTree nodes={visible} search={search} />
@@ -42,17 +41,18 @@ function CategoryGroup({ category }: { category: TagCategory }) {
           </SidebarMenuItem>
         )}
       </SidebarMenu>
-    </SidebarGroup>
+    </CollapsibleSidebarGroup>
   )
 }
 
-/** Sidebar tag sections: people and places (from face regions and keyword hierarchies), then everything else. */
+/** Sidebar sections: people and places (from face regions and keyword hierarchies), ratings, then other tags. */
 export function SidebarTags() {
   return (
     <>
       {TAG_CATEGORIES.map((category) => (
         <CategoryGroup key={category} category={category} />
       ))}
+      <SidebarRatings />
       <PopularTags />
     </>
   )

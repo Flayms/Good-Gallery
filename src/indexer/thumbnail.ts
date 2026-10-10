@@ -1,7 +1,7 @@
-import ffmpegStatic from 'ffmpeg-static'
 import { execFile } from 'node:child_process'
 import { extname } from 'node:path'
 import { promisify } from 'node:util'
+import ffmpegStatic from 'ffmpeg-static'
 import sharp, { type Sharp } from 'sharp'
 import { rgbaToThumbHash } from 'thumbhash'
 import { MAX_THUMB_WIDTH, THUMB_WIDTHS, type ThumbWidth } from '../shared/media-urls'

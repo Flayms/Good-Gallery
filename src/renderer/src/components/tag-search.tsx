@@ -2,7 +2,7 @@ import { normalizeTag } from '@shared/tags'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Command as CommandPrimitive } from 'cmdk'
 import { cn } from 'cn'
-import { MinusIcon, PlusIcon, SearchIcon, TagIcon, XIcon } from 'lucide-react'
+import { FileIcon, FileSearchIcon, MinusIcon, PlusIcon, SearchIcon, TagIcon, XIcon } from 'lucide-react'
 import { type KeyboardEvent, useId, useRef, useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { CommandEmpty, CommandItem, CommandList, CommandShortcut } from '@/components/ui/command'
@@ -10,10 +10,30 @@ import { type GallerySearch, type TagMode, withoutTag, withTag } from '@/lib/sea
 import { trpc } from '@/lib/trpc'
 
 const SUGGESTIONS = 10
+/** cmdk value of the file name item; tag items use their numeric id. */
+const FILE_NAME_VALUE = 'file-name'
 
 interface TagSearchProps {
   search: GallerySearch
   onSearchChange: (patch: Partial<GallerySearch>) => void
+}
+
+function RemoveButton({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <button type="button" className="rounded-full p-0.5 hover:bg-foreground/10" onClick={onRemove} aria-label={label}>
+      <XIcon className="size-3" />
+    </button>
+  )
+}
+
+function FileNameChip({ name, onRemove }: { name: string; onRemove: () => void }) {
+  return (
+    <Badge variant="outline" className="h-6 gap-1 pr-0.5" title="File name contains">
+      <FileIcon className="size-3" />
+      <span>{name}</span>
+      <RemoveButton label={`Remove file name filter ${name}`} onRemove={onRemove} />
+    </Badge>
+  )
 }
 
 function TagChip({
@@ -39,19 +59,15 @@ function TagChip({
         {excluded ? <MinusIcon className="size-3" /> : <TagIcon className="size-3" />}
         <span className={cn(excluded && 'line-through')}>{name}</span>
       </button>
-      <button
-        type="button"
-        className="rounded-full p-0.5 hover:bg-foreground/10"
-        onClick={onRemove}
-        aria-label={`Remove ${name}`}
-      >
-        <XIcon className="size-3" />
-      </button>
+      <RemoveButton label={`Remove ${name}`} onRemove={onRemove} />
     </Badge>
   )
 }
 
-/** Tag filter: chips for the selected tags and an autocomplete input; a leading `-` adds an exclusion. */
+/**
+ * Tag and file name filter: chips for the selected tags (and file name text) and an autocomplete input;
+ * a leading `-` adds a tag exclusion.
+ */
 export function TagSearch({ search, onSearchChange }: TagSearchProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const inputId = useId()
@@ -75,20 +91,28 @@ export function TagSearch({ search, onSearchChange }: TagSearchProps) {
   const options = (suggestions.data ?? [])
     .filter((tag) => !selectedNames.has(normalizeTag(tag.name)))
     .slice(0, SUGGESTIONS)
+  // Exclusions only exist for tags.
+  const fileName = mode === 'include' ? query.trim() : ''
+  const values = [...options.map((tag) => String(tag.id)), ...(fileName ? [FILE_NAME_VALUE] : [])]
   // cmdk only highlights the first item when the query changes, before the new suggestions arrive.
   const [highlighted, setHighlighted] = useState('')
-  const highlightedValue = options.some((tag) => String(tag.id) === highlighted)
-    ? highlighted
-    : String(options[0]?.id ?? '')
+  const highlightedValue = values.includes(highlighted) ? highlighted : (values[0] ?? '')
 
   const add = (name: string) => {
     onSearchChange(withTag(search, name, mode))
     setQuery('')
   }
 
+  const addFileName = () => {
+    onSearchChange({ name: fileName })
+    setQuery('')
+  }
+
   const onKeyDown = (event: KeyboardEvent) => {
     const last = selected.at(-1)
-    if (event.key === 'Backspace' && query === '' && last) {
+    if (event.key === 'Backspace' && query === '' && search.name) {
+      onSearchChange({ name: undefined })
+    } else if (event.key === 'Backspace' && query === '' && last) {
       onSearchChange(withoutTag(search, last.name))
     } else if (event.key === 'Escape') {
       if (query) setQuery('')
@@ -120,6 +144,7 @@ export function TagSearch({ search, onSearchChange }: TagSearchProps) {
             onRemove={() => onSearchChange(withoutTag(search, tag.name))}
           />
         ))}
+        {search.name && <FileNameChip name={search.name} onRemove={() => onSearchChange({ name: undefined })} />}
         <CommandPrimitive.Input
           id={inputId}
           ref={inputRef}
@@ -127,8 +152,10 @@ export function TagSearch({ search, onSearchChange }: TagSearchProps) {
           onValueChange={setQuery}
           onFocus={() => setOpen(true)}
           onBlur={() => setOpen(false)}
-          placeholder={selected.length === 0 ? 'Filter by tags… (-tag to exclude)' : undefined}
-          aria-label="Filter by tags"
+          placeholder={
+            selected.length === 0 && !search.name ? 'Search tags or file names… (-tag to exclude)' : undefined
+          }
+          aria-label="Search tags or file names"
           className="h-6 min-w-24 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
       </label>
@@ -144,6 +171,12 @@ export function TagSearch({ search, onSearchChange }: TagSearchProps) {
                 <CommandShortcut className="tracking-normal tabular-nums">{tag.count.toLocaleString()}</CommandShortcut>
               </CommandItem>
             ))}
+            {fileName && (
+              <CommandItem value={FILE_NAME_VALUE} onSelect={addFileName}>
+                <FileSearchIcon />
+                <span className="truncate">File name contains “{fileName}”</span>
+              </CommandItem>
+            )}
           </CommandList>
         </div>
       )}

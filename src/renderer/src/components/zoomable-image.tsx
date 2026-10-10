@@ -1,6 +1,6 @@
-import { cn } from '@/lib/utils'
-import { FIT, MAX_SCALE, type Size, zoomTo, type ZoomView } from '@/lib/zoom'
 import { type MouseEvent, type PointerEvent, useCallback, useEffect, useRef, useState, type WheelEvent } from 'react'
+import { cn } from '@/lib/utils'
+import { FIT, MAX_SCALE, type Size, type ZoomView, zoomTo } from '@/lib/zoom'
 
 const WHEEL_SENSITIVITY = 0.002
 const KEY_ZOOM_STEP = 1.25

@@ -1,3 +1,7 @@
+import type { IndexerStatus } from '@main/indexer'
+import { useQuery } from '@tanstack/react-query'
+import { Link, useLocation, useSearch } from '@tanstack/react-router'
+import { FolderIcon, ImagesIcon, LayersIcon, Loader2Icon, SettingsIcon, UnplugIcon } from 'lucide-react'
 import { FolderTree } from '@/components/folder-tree'
 import { SidebarTags } from '@/components/sidebar-tags'
 import { Badge } from '@/components/ui/badge'
@@ -15,10 +19,6 @@ import {
   SidebarMenuSkeleton,
 } from '@/components/ui/sidebar'
 import { type RouterOutputs, trpc } from '@/lib/trpc'
-import type { IndexerStatus } from '@main/indexer'
-import { useQuery } from '@tanstack/react-query'
-import { Link, useLocation, useSearch } from '@tanstack/react-router'
-import { FolderIcon, ImagesIcon, LayersIcon, Loader2Icon, SettingsIcon, UnplugIcon } from 'lucide-react'
 
 type Library = RouterOutputs['libraries']['list'][number]
 

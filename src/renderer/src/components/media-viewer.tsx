@@ -1,14 +1,14 @@
+import { mediaUrl } from '@shared/media-urls'
+import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query'
+import { ChevronLeftIcon, ChevronRightIcon, FolderOpenIcon, InfoIcon, XIcon } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { MediaContextMenu } from '@/components/media-context-menu'
 import { MediaInfo } from '@/components/media-info'
 import { Button } from '@/components/ui/button'
 import { ZoomableImage } from '@/components/zoomable-image'
 import { trpc } from '@/lib/trpc'
 import { cn } from '@/lib/utils'
-import { mediaUrl } from '@shared/media-urls'
-import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query'
-import { ChevronLeftIcon, ChevronRightIcon, FolderOpenIcon, InfoIcon, XIcon } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { toast } from 'sonner'
 
 /** A gallery neighbour; `kind` is unknown until its data is loaded. */
 export interface MediaNeighbour {

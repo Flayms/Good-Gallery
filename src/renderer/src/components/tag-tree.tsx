@@ -1,3 +1,7 @@
+import { Link } from '@tanstack/react-router'
+import { cn } from 'cn'
+import { ChevronRightIcon, MinusIcon, TagIcon } from 'lucide-react'
+import { useState } from 'react'
 import {
   SidebarMenuBadge,
   SidebarMenuButton,
@@ -8,10 +12,6 @@ import {
 } from '@/components/ui/sidebar'
 import { type GallerySearch, tagMode, withoutTag, withTag } from '@/lib/search'
 import type { TagNode } from '@/lib/tag-tree'
-import { Link } from '@tanstack/react-router'
-import { cn } from 'cn'
-import { ChevronRightIcon, MinusIcon, TagIcon } from 'lucide-react'
-import { useState } from 'react'
 
 function tagSearchPatch(node: TagNode, search: GallerySearch) {
   const mode = tagMode(search, node.name)

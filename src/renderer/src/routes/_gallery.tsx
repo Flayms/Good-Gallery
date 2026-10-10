@@ -1,8 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute, Outlet } from '@tanstack/react-router'
+import { useRef } from 'react'
 import { Gallery } from '@/components/gallery'
 import { GalleryToolbar } from '@/components/gallery-toolbar'
 import { useColumns } from '@/hooks/use-columns'
+import { useCtrlWheelZoom } from '@/hooks/use-ctrl-wheel-zoom'
 import { type GallerySearch, gallerySearch } from '@/lib/search'
 import { trpc } from '@/lib/trpc'
 
@@ -17,6 +19,9 @@ function GalleryLayout() {
   const navigate = Route.useNavigate()
   const [columns, setColumns] = useColumns()
   const libraries = useQuery(trpc.libraries.list.queryOptions())
+  const gridRef = useRef<HTMLDivElement>(null)
+  // Scrolling down zooms out, i.e. adds columns.
+  useCtrlWheelZoom(gridRef, (steps) => setColumns((columns) => columns + steps))
 
   const onSearchChange = (patch: Partial<GallerySearch>) => {
     void navigate({ to: '/', search: (prev) => ({ ...prev, ...patch }) })
@@ -25,7 +30,7 @@ function GalleryLayout() {
   return (
     <>
       <GalleryToolbar search={search} onSearchChange={onSearchChange} columns={columns} onColumnsChange={setColumns} />
-      <div className="min-h-0 flex-1">
+      <div ref={gridRef} className="min-h-0 flex-1">
         <Gallery search={search} columns={columns} hasLibraries={(libraries.data?.length ?? 0) > 0} />
       </div>
       <Outlet />

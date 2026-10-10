@@ -1,7 +1,7 @@
+import { join } from 'node:path'
 import { ASPECT_SCALE, tileAspect } from '@shared/aspect'
 import { TRPCError } from '@trpc/server'
-import { and, asc, desc, eq, gte, inArray, isNull, lt, or, type SQL, sql } from 'drizzle-orm'
-import { join } from 'node:path'
+import { and, asc, count, desc, eq, gte, inArray, isNull, lt, or, type SQL, sql } from 'drizzle-orm'
 import { z } from 'zod'
 import type { Db } from '../../db'
 import { libraryRoots, media, mediaTags, tags } from '../../db/schema'
@@ -23,6 +23,8 @@ const searchInput = z
     /** `/`-separated folder below the root; includes subfolders. */
     folder: z.string().min(1).max(1024).optional(),
     kind: z.enum(['image', 'video']).optional(),
+    /** Case-insensitive substring of the file name. */
+    name: z.string().trim().max(200).optional(),
     /** Media must carry every tag (or one of its descendants). */
     tags: tagList,
     /** Media must carry none of these tags (nor their descendants). */
@@ -43,12 +45,17 @@ const searchInput = z
 
 type SearchInput = z.infer<typeof searchInput>
 
-/** WHERE conditions of a search; a condition that can never match if a tag filter is unsatisfiable. */
 function ratingFilter(ratings: number[]): SQL | undefined {
   if (ratings.length === 0) return undefined
   return or(...ratings.map((rating) => (rating === 0 ? isNull(media.rating) : eq(media.rating, rating))))
 }
 
+/** `lower()` on both sides: SQLite's (ASCII-only) folding must match the generated `file_name_lower` column. */
+function nameFilter(name: string | undefined): SQL | undefined {
+  return name ? sql`instr(${media.fileNameLower}, lower(${name})) > 0` : undefined
+}
+
+/** WHERE conditions of a search; a condition that can never match if a tag filter is unsatisfiable. */
 function filters(db: Db, input: SearchInput): SQL | undefined {
   const tagFilters = tagConditions(db, input.tags, input.excludeTags)
   if (!tagFilters) return sql`0`
@@ -61,6 +68,7 @@ function filters(db: Db, input: SearchInput): SQL | undefined {
     input.from === undefined ? undefined : gte(media.sortDate, input.from),
     input.to === undefined ? undefined : lt(media.sortDate, input.to),
     ratingFilter(input.ratings),
+    nameFilter(input.name),
     ...tagFilters,
   )
 }
@@ -156,6 +164,16 @@ export const mediaRouter = router({
     })
     return { ids, aspects }
   }),
+
+  /** Number of media per rating (`0` = unrated), across all libraries; ratings without media are left out. */
+  ratingCounts: publicProcedure.query(({ ctx }) =>
+    ctx.db
+      .select({ rating: sql<number>`coalesce(${media.rating}, 0)`, count: count() })
+      .from(media)
+      .groupBy(media.rating)
+      .orderBy(desc(media.rating))
+      .all(),
+  ),
 
   /** Tile data for the given ids, in no particular order. */
   byIds: publicProcedure.input(z.object({ ids: z.array(z.int()).max(MAX_BY_IDS) })).query(({ ctx, input }) =>

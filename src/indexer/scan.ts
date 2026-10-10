@@ -6,7 +6,7 @@ import { METADATA_VERSION } from '../shared/metadata'
 import { EMPTY_METADATA, type MediaMetadata, type MetadataSource } from './metadata'
 import type { ScanOutcome, ScanProgress, ScanScope } from './protocol'
 import { errorCode, isTransient, withRetry } from './retry'
-import { type DirListing, findSidecar, walk, type WalkOptions } from './walk'
+import { type DirListing, findSidecar, type WalkOptions, walk } from './walk'
 import type { ExistingEntry, IndexedFile, IndexWriter } from './writer'
 
 export interface ScanDeps {
