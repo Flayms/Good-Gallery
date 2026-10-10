@@ -186,6 +186,20 @@ test('indexes a library, browses it, filters by tag and shows details', async ()
   await page.keyboard.up('Control')
   await expect.poll(zoomLevel).toBe(before)
 
+  // Every view shows all media; the list opens items like the tiles do.
+  const views = page.getByRole('radiogroup', { name: 'View' })
+  for (const view of ['Justified', 'Grid', 'List', 'Masonry']) {
+    await views.getByRole('radio', { name: view, exact: true }).click()
+    await expect(tiles).toHaveCount(FIXTURES.length + 1)
+    if (view === 'List') {
+      await expect(zoom).toBeDisabled()
+      await page.getByRole('link', { name: 'city.jpg' }).click()
+      await expect(page.getByRole('dialog', { name: 'city.jpg' })).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(page.getByRole('dialog')).toBeHidden()
+    }
+  }
+
   // The cache is owned by the indexer process; settings changes and cache requests are forwarded to it.
   await page.getByRole('link', { name: 'Settings' }).click()
   await page.getByRole('combobox', { name: 'Maximum cache size' }).click()

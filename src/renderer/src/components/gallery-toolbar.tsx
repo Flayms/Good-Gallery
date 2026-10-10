@@ -1,4 +1,16 @@
-import { ArrowDownIcon, ArrowUpIcon, ImageIcon, VideoIcon, ZoomInIcon, ZoomOutIcon } from 'lucide-react'
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  ImageIcon,
+  LayoutDashboardIcon,
+  LayoutGridIcon,
+  ListIcon,
+  type LucideIcon,
+  Rows3Icon,
+  VideoIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
+} from 'lucide-react'
 import { DateRangeFilter } from '@/components/date-range-filter'
 import { RatingFilter } from '@/components/rating-filter'
 import { TagSearch } from '@/components/tag-search'
@@ -9,6 +21,7 @@ import { SidebarTrigger } from '@/components/ui/sidebar'
 import { Slider } from '@/components/ui/slider'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { MAX_COLUMNS, MIN_COLUMNS } from '@/hooks/use-columns'
+import { GALLERY_VIEWS, type GalleryView, isGalleryView, VIEW_LABELS } from '@/hooks/use-gallery-view'
 import {
   DEFAULT_DIR,
   DEFAULT_SORT,
@@ -19,15 +32,32 @@ import {
   SORT_LABELS,
 } from '@/lib/search'
 
+const VIEW_ICONS: Record<GalleryView, LucideIcon> = {
+  masonry: LayoutDashboardIcon,
+  justified: Rows3Icon,
+  grid: LayoutGridIcon,
+  list: ListIcon,
+}
+
 interface GalleryToolbarProps {
   search: GallerySearch
   onSearchChange: (patch: Partial<GallerySearch>) => void
+  view: GalleryView
+  onViewChange: (view: GalleryView) => void
   columns: number
   onColumnsChange: (update: number | ((columns: number) => number)) => void
 }
 
-export function GalleryToolbar({ search, onSearchChange, columns, onColumnsChange }: GalleryToolbarProps) {
+export function GalleryToolbar({
+  search,
+  onSearchChange,
+  view,
+  onViewChange,
+  columns,
+  onColumnsChange,
+}: GalleryToolbarProps) {
   const descending = (search.dir ?? DEFAULT_DIR) === 'desc'
+  const zoomable = view !== 'list'
   return (
     <header className="flex min-h-12 shrink-0 items-center gap-2 border-b px-3 py-2">
       <SidebarTrigger />
@@ -83,13 +113,35 @@ export function GalleryToolbar({ search, onSearchChange, columns, onColumnsChang
           </Button>
         </div>
 
+        <ToggleGroup
+          type="single"
+          size="sm"
+          variant="outline"
+          spacing={0}
+          value={view}
+          // Clicking the active item deselects it (empty value); keep the current view then.
+          onValueChange={(value) => {
+            if (isGalleryView(value)) onViewChange(value)
+          }}
+          aria-label="View"
+        >
+          {GALLERY_VIEWS.map((option) => {
+            const Icon = VIEW_ICONS[option]
+            return (
+              <ToggleGroupItem key={option} value={option} aria-label={VIEW_LABELS[option]} title={VIEW_LABELS[option]}>
+                <Icon />
+              </ToggleGroupItem>
+            )
+          })}
+        </ToggleGroup>
+
         <div className="flex items-center gap-1">
           {/* Zooming in means fewer, wider columns. */}
           <Button
             variant="ghost"
             size="icon-sm"
             onClick={() => onColumnsChange((count) => count + 1)}
-            disabled={columns >= MAX_COLUMNS}
+            disabled={!zoomable || columns >= MAX_COLUMNS}
             aria-label="Zoom out"
             title="Zoom out (Ctrl + wheel)"
           >
@@ -100,6 +152,7 @@ export function GalleryToolbar({ search, onSearchChange, columns, onColumnsChang
             min={MIN_COLUMNS}
             max={MAX_COLUMNS}
             step={1}
+            disabled={!zoomable}
             value={[MIN_COLUMNS + MAX_COLUMNS - columns]}
             onValueChange={([zoom]) => {
               if (zoom !== undefined) onColumnsChange(MIN_COLUMNS + MAX_COLUMNS - zoom)
@@ -110,7 +163,7 @@ export function GalleryToolbar({ search, onSearchChange, columns, onColumnsChang
             variant="ghost"
             size="icon-sm"
             onClick={() => onColumnsChange((count) => count - 1)}
-            disabled={columns <= MIN_COLUMNS}
+            disabled={!zoomable || columns <= MIN_COLUMNS}
             aria-label="Zoom in"
             title="Zoom in (Ctrl + wheel)"
           >

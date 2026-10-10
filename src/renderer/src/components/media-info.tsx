@@ -21,7 +21,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-function Rating({ value }: { value: number }) {
+export function Rating({ value }: { value: number }) {
   return (
     <div className="flex gap-0.5" role="img" aria-label={`Rated ${value} out of 5`}>
       {[1, 2, 3, 4, 5].map((star) => (

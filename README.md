@@ -1,10 +1,10 @@
 # Good Gallery
 
-A Windows desktop gallery for large photo and video libraries (50k–500k files). Media appear in a virtualized masonry grid. Libraries on network shares are supported, and thumbnails are cached locally. Search uses the tags that are already embedded in your files.
+A Windows desktop gallery for large photo and video libraries (50k–500k files). Media appear in a virtualized masonry, justified, grid or list view. Libraries on network shares are supported, and thumbnails are cached locally. Search uses the tags that are already embedded in your files.
 
 ## Features
 
-- **Masonry grid:** virtualized, so it stays fast at any library size. Zoom with the slider, the +/- buttons or Ctrl + mouse wheel.
+- **Views:** Masonry (columns), Justified (rows of equal height), Grid (square tiles) and List (details). All are virtualized, so they stay fast at any library size. Zoom the tile views with the slider, the +/- buttons or Ctrl + mouse wheel.
 - **Network shares:** libraries can live on `\\server\share`. Thumbnails (WebP and ThumbHash placeholders) are cached locally, and the cached index stays browsable while a share is offline.
 - **Change detection:** a file watcher picks up changes, plus periodic quick scans. Manual rescans are also possible.
 - **Search:** combine tags (include or exclude, hierarchical), filename text, folder, date range, rating and media type. Sort by date taken, date modified, name, path or size.

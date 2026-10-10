@@ -175,14 +175,21 @@ export const mediaRouter = router({
       .all(),
   ),
 
-  /** Tile data for the given ids, in no particular order. */
+  /** Tile and list data for the given ids, in no particular order. */
   byIds: publicProcedure.input(z.object({ ids: z.array(z.int()).max(MAX_BY_IDS) })).query(({ ctx, input }) =>
     ctx.db
       .select({
         id: media.id,
         rootId: media.rootId,
+        relPath: media.relPath,
         fileName: media.fileName,
         kind: media.kind,
+        size: media.size,
+        mtime: media.mtime,
+        takenAt: media.takenAt,
+        width: media.width,
+        height: media.height,
+        rating: media.rating,
         duration: media.duration,
         thumbhash: media.thumbhash,
         thumbStatus: media.thumbStatus,

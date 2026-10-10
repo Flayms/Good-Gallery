@@ -5,6 +5,7 @@ import { Gallery } from '@/components/gallery'
 import { GalleryToolbar } from '@/components/gallery-toolbar'
 import { useColumns } from '@/hooks/use-columns'
 import { useCtrlWheelZoom } from '@/hooks/use-ctrl-wheel-zoom'
+import { useGalleryView } from '@/hooks/use-gallery-view'
 import { type GallerySearch, gallerySearch } from '@/lib/search'
 import { trpc } from '@/lib/trpc'
 
@@ -18,10 +19,13 @@ function GalleryLayout() {
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
   const [columns, setColumns] = useColumns()
+  const [view, setView] = useGalleryView()
   const libraries = useQuery(trpc.libraries.list.queryOptions())
   const gridRef = useRef<HTMLDivElement>(null)
-  // Scrolling down zooms out, i.e. adds columns.
-  useCtrlWheelZoom(gridRef, (steps) => setColumns((columns) => columns + steps))
+  // Scrolling down zooms out, i.e. adds columns. The list has no zoom.
+  useCtrlWheelZoom(gridRef, (steps) => {
+    if (view !== 'list') setColumns((columns) => columns + steps)
+  })
 
   const onSearchChange = (patch: Partial<GallerySearch>) => {
     void navigate({ to: '/', search: (prev) => ({ ...prev, ...patch }) })
@@ -29,9 +33,16 @@ function GalleryLayout() {
 
   return (
     <>
-      <GalleryToolbar search={search} onSearchChange={onSearchChange} columns={columns} onColumnsChange={setColumns} />
+      <GalleryToolbar
+        search={search}
+        onSearchChange={onSearchChange}
+        view={view}
+        onViewChange={setView}
+        columns={columns}
+        onColumnsChange={setColumns}
+      />
       <div ref={gridRef} className="min-h-0 flex-1">
-        <Gallery search={search} columns={columns} hasLibraries={(libraries.data?.length ?? 0) > 0} />
+        <Gallery search={search} view={view} columns={columns} hasLibraries={(libraries.data?.length ?? 0) > 0} />
       </div>
       <Outlet />
     </>
