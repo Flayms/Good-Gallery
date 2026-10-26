@@ -15,8 +15,19 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **egui-managed textures have no mipmaps**, so large images drawn small alias. Register own `wgpu::Texture`s (`Rgba8Unorm`) with mips via `register_native_texture_with_sampler_options`.
 * **`eframe` default features can't include `winit/default`** in a dependency spec (no slashes); use the defaults.
 
+## libmpv
+
+* **`libmpv2` (crate) only wraps the OpenGL render API.** The software renderer (`"sw"`) needs raw `mpv_render_param`s (`SW_SIZE`, `SW_FORMAT`, `SW_STRIDE`, `SW_POINTER`); use an own FFI. Its import library is MinGW (`libmpv.dll.a`), so loading the DLL at runtime with `libloading` also avoids link trouble with MSVC.
+* **The render thread must not call client functions** (`mpv_get_property` etc.): render.h forbids it, it can stall the core (timeouts, "mpv_render_context_render() not being called or stuck"). Pass the video size from the UI thread.
+* **`rgb0` leaves the fourth byte undefined**, and egui blends with alpha: force it to 255 (≈ 0.7 ms per 1080p frame) or sample with alpha 1 in a shader.
+* **The software renderer ignores rotation.** `video-params/rotate` is set, but frames and `dwidth` / `dheight` stay unrotated: rotate the quad.
+* **Default timing judders against our vsync.** With frames timed to the audio clock, a 30 fps video on 60 Hz shows frames for 1 or 3 vblanks in up to 44 % of frames, varying run to run. Use `video-sync=display-resample` + `override-display-fps`, render once per UI frame with `report_swap`, and skip frames whose next-frame info has `REPEAT`.
+* **`libmpv-2.dll` hard-imports `vulkan-1.dll`** (shinchiro builds): without the Vulkan loader it doesn't load. Load at runtime and degrade.
+* **wgpu needs `bytes_per_row` aligned to 256**, mpv wants stride and pointer aligned to 64: allocate the frame buffer with a 256-byte-aligned stride and a 64-byte-aligned pointer.
+
 ## Performance measurement
 
+* **Check the power source before benchmarking.** On battery (`Get-CimInstance Win32_Battery` → `BatteryStatus` 1 = discharging, 2 = AC) an idle, continuously repainting window measured 30 ms per frame in one run and 16.7 ms in the next. Record an idle baseline at the start and end of a matrix.
 * **At 60 Hz with vsync, every frame interval is ≈ 16.7 ms**, so p95 targets below that can only be checked with `PresentMode::AutoNoVsync`. Count intervals > 20 ms with vsync on separately for real stutter.
 * **Windows Defender scans every first read of a file** (≈ 13 ms per thumbnail, verdicts expire within minutes). Warm files before measuring rendering, and measure cold IO separately. A 30-byte header read doesn't warm a file, a full read does.
 * **Too many decode threads hurt frame time** on an integrated GPU: 14 threads p95 67 ms, 4 threads 7 ms. Run workers at below-normal priority.
@@ -28,6 +39,8 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **robocopy exit code 1 means "files copied"**, not failure (≥ 8 is an error).
 * **PowerShell passes `$null` to a P/Invoke `string` parameter as `""`**: use `[NullString]::Value` (e.g. `FindWindowW`). `Process.MainWindowHandle` may return a hidden 16 × 16 helper window right after start; find the window by title.
 * **Windows Python doesn't see Git Bash's `/tmp`**; use the scratchpad or relative paths.
+* **`python` may not run at all** (a mise shim points to a missing install). Use `node` for small scripts (`spikes/video/summarize.js`).
+* **Running a spike that loads a downloaded binary** (e.g. `libmpv-2.dll`) is blocked by auto mode until the user approves it. Ask before the first run.
 * **Spike crates are standalone**: run `cargo` inside `spikes/<name>/`; their `results/` and `vendor/` folders are git-ignored.
 
 ## Carried over from the reference

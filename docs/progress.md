@@ -5,7 +5,7 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | Milestone | Title                                  | Status      | Plan                                    |
 | --------- | -------------------------------------- | ----------- | --------------------------------------- |
 | M0a       | Spikes: grid and look                  | Done        | [M00](rewrite/milestones/M00-spikes.md) |
-| M0b       | Spikes: video                          | Planning    | [M00](rewrite/milestones/M00-spikes.md) |
+| M0b       | Spikes: video                          | Done        | [M00](rewrite/milestones/M00-spikes.md) |
 | M1        | Foundation                             | Not started | —                                       |
 | M2        | Spec audit                             | Not started | —                                       |
 | M3        | Database and libraries                 | Not started | —                                       |
@@ -21,6 +21,14 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-26 · M0b · Spikes: video
+
+- Fixtures generated with ffmpeg 7.1 into `%TEMP%\gg-spike\video` (`spikes/video/fixtures.sh`): MP4 H.264, MOV HEVC (1080p, 4K, rotated 90°), MKV H.264 + Opus with chapters, WebM VP9 + Opus, plus 1 s GOP variants; 30 s with timecode, frame number and a flash + beep every second.
+- **Video: Go with libmpv.** `spikes/video`: own FFI over `libmpv-2.dll` (shinchiro build 20261021, loaded at runtime), software render API on a render thread at display size, written into a `wgpu::Texture`, display-synced timing. All fixtures play; 0–4 mpv drops per 600 frames, 1–40 off-cadence frames, exact seeks on target; 1080p ≈ 1 core, 4K ≈ 2 cores (2.9 / 5.7 ms render per frame). Mains-power rerun after the first matrix was skewed by the battery.
+- Decisions in `docs/architecture.md` (video playback); pitfalls added (libmpv render-thread rules, `rgb0` alpha, rotation, judder with audio-clock timing, `vulkan-1.dll` import, power source, Python).
+- Open: (1) manual check by the user: controls by mouse and audio by ear (`cd spikes/video && cargo run --release -- --sync display`, fixtures in the combo box); (2) real phone videos not tried, none provided; (3) the UI misses a vblank in ≈ 12 % of frames while 4K plays on the iGPU, zero-copy (GL interop) is the lever if M9 needs it; (4) `libmpv-2.dll` is 121 MB and hard-imports `vulkan-1.dll`, a trimmed build in M11; (5) still open from M0a: snap layouts check, thumbnail cache layout (M5), fast flings (M6).
+- Next: M1 (Foundation). M0 is done: three go results.
 
 ### 2026-10-26 · M0a · Spikes: grid and look
 

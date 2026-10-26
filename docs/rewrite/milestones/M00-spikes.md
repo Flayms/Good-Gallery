@@ -1,6 +1,6 @@
 # M00 · Spikes
 
-**Status:** Approved (2026-10-26)
+**Status:** Done (2026-10-26)
 **Specs:** none (spikes are throwaway; results feed `docs/architecture.md` and M2)
 
 ## Approach
@@ -14,7 +14,7 @@ The milestone is split into two sessions:
 
 ### Pinned versions (checked on crates.io, 2026-10-26)
 
-`eframe` / `egui` / `egui-wgpu` **0.37.0** (wgpu 30.0, skrifa + harfrust text stack, `VariationCoords` for variable fonts). `libmpv2` 6.0.0. Spikes pin exact versions (`=0.37.0`) so M1 can take them over unchanged if they hold up.
+`eframe` / `egui` / `egui-wgpu` **0.37.0** (wgpu 30.0, skrifa + harfrust text stack, `VariationCoords` for variable fonts). libmpv from the mpv-dev build 20261021 (own FFI, see Spike 3). Spikes pin exact versions (`=0.37.0`) so M1 can take them over unchanged if they hold up.
 
 ### Test machine
 
@@ -54,7 +54,7 @@ Scroll is scripted (`--bench`): 1 440 px/s (the speed the reference was measured
 ### Spike 3 · Video (M0b)
 
 - **Fixtures**, generated with the installed ffmpeg 7.1 into `%TEMP%\gg-spike\video`: 30 s, 1080p, with a tone and burned-in timecode (for checking A/V sync and seek accuracy): MP4 (H.264 + AAC), MOV (HEVC + AAC, plus a 4K variant and one with rotation metadata like a phone portrait video), MKV (H.264 + Opus, with chapters), WebM (VP9 + Opus). If the user has real phone videos, those are tried too (read-only, copied first).
-- **Candidate 1, libmpv** (`libmpv2` 6.0.0, mpv-dev build for Windows x86_64 downloaded into `spikes/video/vendor/`, git-ignored). Render with the SW render API into a buffer uploaded to a wgpu texture each frame (works with the wgpu backend as is). Measure CPU load and dropped frames at 1080p and 4K, with hardware decoding (`hwdec=auto-copy`). If SW rendering is too slow at 4K, try the OpenGL render API via a shared texture (WGL_NV_DX_interop) and note the complexity. Audio, seeking, volume and pause come from mpv.
+- **Candidate 1, libmpv** (mpv-dev build for Windows x86_64 downloaded into `spikes/video/vendor/`, git-ignored; planned with `libmpv2` 6.0.0, replaced by an own FFI because that crate has no SW render API, see *Results*). Render with the SW render API into a buffer uploaded to a wgpu texture each frame (works with the wgpu backend as is). Measure CPU load and dropped frames at 1080p and 4K, with hardware decoding (`hwdec=auto-copy`). If SW rendering is too slow at 4K, try the OpenGL render API via a shared texture (WGL_NV_DX_interop) and note the complexity. Audio, seeking, volume and pause come from mpv.
 - **Candidate 2, `ffmpeg-next` + `cpal`** only if libmpv fails: own decoding, audio output and A/V sync. Much more code to own, so only as a fallback.
 - **GStreamer** is not tried unless both fail (large runtime to ship).
 - **Licensing and shipping:** GPL-3 matches this repo's license. Record which DLLs ship next to the executable and their size.
@@ -89,10 +89,10 @@ Real crates, tests, CI and anything in `crates/` (M1). The spikes don't read the
 
 ### M0b · Video
 
-- [ ] 10. Generate the fixture videos.
-- [ ] 11. `spikes/video` with libmpv: SW render into a wgpu texture, play / pause / seek / volume, all four containers, rotation.
-- [ ] 12. Measure CPU and dropped frames at 1080p and 4K; try GL interop if SW is too slow; fallback candidate only if libmpv fails.
-- [ ] 13. Results, go / no-go, shipping notes (DLLs, sizes, license) recorded here and in `docs/architecture.md`; `docs/progress.md` updated.
+- [x] 10. Generate the fixture videos.
+- [x] 11. `spikes/video` with libmpv: SW render into a wgpu texture, play / pause / seek / volume, all four containers, rotation.
+- [x] 12. Measure CPU and dropped frames at 1080p and 4K; try GL interop if SW is too slow; fallback candidate only if libmpv fails.
+- [x] 13. Results, go / no-go, shipping notes (DLLs, sizes, license) recorded here and in `docs/architecture.md`; `docs/progress.md` updated.
 
 ## Exit criteria
 
@@ -152,6 +152,48 @@ Cold runs keep frame times (p95 6.7 ms) but show 81 % placeholders at 12 columns
 - **Title bar:** variant 3 (`hybrid`) works with winit 0.30 through a window subclass: `WM_NCHITTEST` reports `HTMINBUTTON` / `HTMAXBUTTON` / `HTCLOSE` on the drawn buttons, `HTCAPTION` on empty toolbar space and `HTTOP` on the top edge (checked with `titlebar-check.ps1`), and keeps the native shadow, resize and snap. Variant 1 adds a second 32 px bar above the toolbar; variant 2 reports `HTCLIENT` everywhere (no snap layouts, no top-edge resize). **M1 uses variant 3.** Snap layouts on hover still need a manual check with a real mouse.
 - Screenshots for approval (local only, they show the user's photos): `spikes/grid/results/compare-window.png` (whole window next to the reference), `compare-text.png` (sidebar at 2×), `compare-glass.png` (glass vs Chromium), `compare-titlebar.png`, `compare-hinting.png`.
 
-### Spike 3 · Video
+### Spike 3 · Video: **Go** (libmpv)
 
-*M0b.*
+Measured 2026-10-26 on the test machine (on mains power, see *Power* below), window maximized, 20 s of playback per run after the first frames, then 8 exact seeks while paused. Raw JSON in `spikes/video/results/` (git-ignored); rerun with `spikes/video/fixtures.sh` and `spikes/video/matrix.sh`.
+
+**Setup that won:** libmpv (`vo=libmpv`, `hwdec=auto-copy`) with the software render API on a render thread. The thread renders `rgb0` at the size the video occupies on screen and writes it into a `wgpu::Texture` itself (`Queue` is `Send + Sync`). Timing is **display-synced**: `video-sync=display-resample`, `override-display-fps`, the UI wakes the render thread once per presented frame, which calls `mpv_render_context_report_swap` and renders only when mpv's next-frame info isn't a repeat.
+
+| Fixture (display-synced) | Decoder | CPU (1 core = 100 %) | Render p50 (ms) | mpv drops / 600 | Judder / 600 | A/V sync at end | Seek restart median / max (ms) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| MP4 H.264 + AAC, 1080p | d3d11va-copy | 91 % | 2.9 | 4 | 40 | +14 ms | 224 / 309 |
+| MP4 H.264, 1080p, 1 s GOP | d3d11va-copy | 97 % | 2.5 | 3 | 26 | +3 ms | 74 / 236 |
+| MOV HEVC + AAC, 1080p | d3d11va-copy | 103 % | 2.4 | 0 | 1 | +0.5 ms | |
+| MOV HEVC, 1080p, rotated 90° | d3d11va-copy | 97 % | 2.5 | 0 | 3 | −1 ms | |
+| MKV H.264 + Opus, chapters | d3d11va-copy | 107 % | 2.6 | 0 | 7 | +0.1 ms | |
+| WebM VP9 + Opus, 1080p | d3d11va-copy | 117 % | 3.2 | 0 | 8 | −14 ms | 156 / 473 |
+| MP4 H.264, 2160p | d3d11va-copy | 190 % | 5.2 | 0 | 26 | +9 ms | |
+| MOV HEVC, 2160p | d3d11va-copy | 215 % | 5.7 | 1 | 19 | +7 ms | 576 / 789 |
+| MOV HEVC, 2160p, 1 s GOP | d3d11va-copy | 196 % | 5.4 | 2 | 15 | +15 ms | 208 / 518 |
+| *audio-synced* H.264 1080p (2 runs) / HEVC 2160p | d3d11va-copy | 97–124 % / 210 % | (blocks) | 0 | **45–265** / 7 | 0 | |
+| *native size* H.264 1080p / HEVC 2160p | d3d11va-copy | 68 % / 341 % | 2.0 / **9.5 + 9.2** | 7 / 2 | 30 / **177** | | |
+| *software decoding* H.264 1080p / HEVC 2160p / VP9 1080p | no | 141 % / 254 % / 136 % | 3.1 / 4.8 / 3.2 | 0 / 3 / 0 | 18 / 13 / 7 | | |
+
+*Judder* = video frames whose on-screen interval was outside 25–42 ms (each 30 fps frame should stay for exactly 2 vblanks at 60 Hz). *Render* is mpv's software render (scaling + YUV → RGB); forcing alpha and `write_texture` add ≈ 0.7 ms each at display size. CPU is the whole process; the machine has 16 logical cores, so 100 % ≈ 6 % of the machine.
+
+- **All four containers play** (plus rotation and 4K): MKV reports its 3 chapters, Opus and AAC go out through WASAPI, every exact seek lands on its target (152 seeks, largest error 2e-15 s). Play / pause, seek (keyframe seeks while dragging, exact on release), volume and arrow keys work through mpv properties and commands.
+- **Display-synced timing is required.** With mpv's default timing (frames timed to the audio clock, `mpv_render_context_render` blocking until the frame's display time) the frame lands at a random phase against our vsync, and 45–265 of 600 frames show for 1 or 3 vblanks instead of 2, varying run to run. Display-synced: 1–40.
+- **Render at display size, not at the video's size.** 4K at native size costs 9.5 ms render + 5 ms alpha + 4 ms upload per frame and judders (177 / 600); scaled to the window it costs 5.7 ms on the render thread.
+- **4K on the integrated GPU:** hardware decoding doesn't save CPU over software decoding at 4K (copy-back + scaling ≈ 2 cores either way), and the UI misses a vblank in ≈ 11–13 % of frames while 4K plays (idle window: 2–4 %, 1080p: 1–10 %). Acceptable for a gallery's viewer; a zero-copy path is the lever if M9 needs more.
+- **GL interop (WGL_NV_DX_interop) not tried:** the software path meets the bar at 4K, and interop would need a WGL context next to wgpu's D3D12 / Vulkan device plus a shared texture. Noted as the option for zero-copy. Candidate 2 (`ffmpeg-next` + `cpal`) and GStreamer weren't needed.
+- **Rotation:** the software renderer ignores the display matrix (`video-params/rotate` = 90, but frames come out landscape and `dwidth` / `dheight` stay unrotated). The UI rotates the quad's UVs instead (free on the GPU); the result matches ffmpeg's autorotate.
+- **Seek latency** depends on the GOP: exact seeks decode from the previous keyframe. x264's default GOP (250 frames, 8 s) is the worst case (≈ 0.2–0.3 s at 1080p, ≈ 0.6–0.8 s at 4K); a 1 s GOP like phone videos 74 ms median at 1080p.
+- **Not done:** real phone videos (none provided); audio was checked through mpv's state (WASAPI output open, A/V sync), not by ear.
+
+#### Binding
+
+`libmpv2` 6.0.0 only wraps the OpenGL render API, so the spike uses its own FFI (`spikes/video/src/mpv.rs`, ≈ 300 lines) and loads `libmpv-2.dll` at runtime with `libloading`. Runtime loading also means a missing or broken DLL disables video instead of preventing startup.
+
+#### Shipping and license
+
+- One DLL: `libmpv-2.dll` from shinchiro/mpv-winbuild-cmake release 20261021 (`mpv-dev-x86_64-20261021-git-e471496c56.7z`, baseline x86-64; a `-v3` AVX2 build exists). **121 MB** uncompressed (47 MB gzipped, 31.6 MB in the 7z). FFmpeg and every other library is linked statically.
+- Imports only system DLLs, but **`vulkan-1.dll` is a hard import**: on a machine without the Vulkan loader (old GPU drivers, some VMs) the DLL doesn't load, so loading at runtime and failing soft matters.
+- The build is GPL (mpv + FFmpeg with GPL parts), compatible with this repo's GPL-3; a release must point to the exact sources (M11). A trimmed custom build (only the decoders and demuxers we need, no Vulkan / shaderc / libplacebo) would cut the size a lot; also M11.
+
+#### Power
+
+The first matrix ran on battery (9 %, `Win32_Battery.BatteryStatus` = 1): an idle, continuously repainting window measured 30 ms per frame in one run and 16.7 ms in the next. All numbers above are from a rerun on mains power.
