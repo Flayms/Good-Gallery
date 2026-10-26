@@ -1,0 +1,30 @@
+[package]
+name = "spike-grid"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "M0 spike: justified grid over 100k thumbnails, texture streaming, glass, font, title bar. Throwaway."
+
+# Standalone, not part of any workspace.
+[workspace]
+
+[dependencies]
+eframe = "=0.37.0"
+image = { version = "=0.25.10", default-features = false, features = ["webp", "png"] }
+webp = { version = "=0.3.1", default-features = false }
+libwebp-sys = "=0.9.6"
+windows-sys = { version = "0.61", features = ["Win32_System_Threading", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+raw-window-handle = "0.6"
+rayon = "1"
+crossbeam-channel = "0.5"
+memory-stats = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bytemuck = { version = "1", features = ["derive"] }
+
+[profile.release]
+debug = "line-tables-only"
+
+# Spikes measure performance: dependencies optimized even in dev builds.
+[profile.dev.package."*"]
+opt-level = 3

@@ -6,6 +6,7 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 
 | Term                     | Definition                                                                                                                                                                        |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+
 | **Library**              | A folder on a local disk or a network share (`\\server\share`) that the user added. Indexed recursively. (code: _library root_, `library_roots`, `rootId`)                          |
 | **Library status**       | `online` (reachable), `offline` (unreachable at the last check) or `unknown`. The index of an offline library stays browsable.                                                      |
 | **Media item**           | One indexed image or video file in a library. (code: `media`)                                                                                                                     |

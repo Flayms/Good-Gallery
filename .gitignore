@@ -6,3 +6,7 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Spike outputs
+spikes/*/results/
+spikes/*/vendor/
