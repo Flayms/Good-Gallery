@@ -42,6 +42,9 @@ static REFERENCE: LazyLock<Regex> =
 static HEADING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^###\s+(~~)?\s*(REQ-\d{3}-\d{2})").unwrap());
 static STATUS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^\*\*Status:\*\*\s*(\w+)").unwrap());
 static SPEC_PATH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:^|/)((\d{3})-[^/]+)/spec\.md$").unwrap());
+/// `mod tests {`, also `pub mod` / `pub(crate) mod`.
+static TEST_MODULE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{$").unwrap());
 static ROW_ID: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^REQ-\d{3}-\d{2}$").unwrap());
 
 struct Req {
@@ -260,8 +263,7 @@ pub fn test_region<'a>(path: &str, text: &'a str) -> Option<&'a str> {
     while let Some(line) = lines.next() {
         if line.trim() == "#[cfg(test)]" {
             let next = lines.peek().map_or("", |next| next.trim());
-            let is_module = next.strip_prefix("pub ").unwrap_or(next).starts_with("mod ") && next.ends_with('{');
-            if is_module {
+            if TEST_MODULE.is_match(next) {
                 return Some(&text[offset..]);
             }
         }
@@ -597,6 +599,18 @@ mod tests {
         assert_eq!(test_region("crates/a/tests/it.rs", "fn a() {}"), Some("fn a() {}"));
         assert_eq!(test_region("crates/a/benches/b.rs", "fn a() {}"), Some("fn a() {}"));
         assert_eq!(test_region("crates/a/src/db/tests.rs", "fn a() {}"), Some("fn a() {}"));
+        let visible = "fn a() {}
+#[cfg(test)]
+pub(crate) mod tests {
+}";
+        assert_eq!(
+            test_region("crates/a/src/lib.rs", visible),
+            Some(
+                "#[cfg(test)]
+pub(crate) mod tests {
+}"
+            )
+        );
     }
 
     #[test]

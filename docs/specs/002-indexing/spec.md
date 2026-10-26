@@ -118,10 +118,10 @@ Every library is mirrored in a local index, so browsing and searching 50k–500k
 
 | REQ        | Test                                                                                                                                                        | Result                                                                  |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| REQ-002-01 | — | no test |
-| REQ-002-02 | — | no test |
+| REQ-002-01 | `crates/domain/src/media.rs` › recognizes_supported_files_in_any_letter_case | partial: file types only; scanning in M4b |
+| REQ-002-02 | `crates/domain/src/media.rs` › skips_dotfiles_and_housekeeping_folders | partial: name rules only; the walk in M4b |
 | REQ-002-03 | — | no test |
-| REQ-002-04 | — | no test |
+| REQ-002-04 | `crates/db/src/writer.rs` › removes_vanished_folders_with_everything_below | partial: removal in the index; detecting changes comes with scanning (M4b) |
 | REQ-002-05 | — | no test |
 | REQ-002-06 | — | no test |
 | REQ-002-07 | — | no test |
@@ -131,4 +131,4 @@ Every library is mirrored in a local index, so browsing and searching 50k–500k
 | REQ-002-11 | — | no test |
 | REQ-002-12 | — | no test |
 | REQ-002-13 | — | no test |
-| REQ-002-14 | — | no test |
+| REQ-002-14 | `crates/db/src/writer.rs` › prunes_unused_tags_bottom_up | partial: pruning itself; running it after a scan comes in M4b |

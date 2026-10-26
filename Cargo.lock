@@ -789,6 +789,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 name = "db"
 version = "0.0.0"
 dependencies = [
+ "domain",
  "rusqlite",
  "serde",
  "serde_json",
@@ -860,6 +861,9 @@ dependencies = [
 [[package]]
 name = "domain"
 version = "0.0.0"
+dependencies = [
+ "unicode-normalization",
+]
 
 [[package]]
 name = "downcast-rs"
@@ -1637,6 +1641,8 @@ dependencies = [
  "num-traits",
  "png 0.18.1",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -1930,6 +1936,16 @@ dependencies = [
 [[package]]
 name = "media"
 version = "0.0.0"
+dependencies = [
+ "chrono",
+ "domain",
+ "image",
+ "regex",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+]
 
 [[package]]
 name = "memchr"
@@ -3448,6 +3464,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "tinyvec"
+version = "1.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
+
+[[package]]
 name = "tokio"
 version = "1.54.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3608,6 +3630,15 @@ name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "unicode-normalization"
+version = "0.1.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75cd3fb03d5288b3ba9a1ee103ac7e9cbb59f0b03d64f8ddfcc04dd42758a85d"
+dependencies = [
+ "tinyvec",
+]
 
 [[package]]
 name = "unicode-properties"

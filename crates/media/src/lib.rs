@@ -1,1 +1,4 @@
-//! Thumbnails, video frames, exiftool.
+//! Reading media files: metadata through exiftool; thumbnails and video frames (M5).
+
+pub mod exiftool;
+pub mod metadata;

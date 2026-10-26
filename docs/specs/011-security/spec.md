@@ -116,6 +116,6 @@ Deprecated 2026-10-26: there is no IPC transport. Cancelling indexer work when a
 | ~~REQ-011-06~~ | — | no test (deprecated) |
 | ~~REQ-011-07~~ | — | no test (deprecated) |
 | REQ-011-08 | — | no test |
-| REQ-011-09 | — | no test |
-| REQ-011-10 | — | no test |
+| REQ-011-09 | `crates/media/src/exiftool.rs` › reads_files_with_awkward_names (exiftool) | pass |
+| REQ-011-10 | `crates/media/src/metadata.rs` › survives_hostile_values | partial: extraction only; indexing such files in M4b |
 | REQ-011-11 | — | no test |

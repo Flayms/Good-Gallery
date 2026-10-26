@@ -131,7 +131,7 @@ Tiles appear instantly and stay sharp, even for libraries on slow network shares
 | REQ-005-07 | — | no test |
 | REQ-005-08 | — | no test |
 | REQ-005-09 | — | no test |
-| REQ-005-10 | — | no test |
+| REQ-005-10 | `crates/db/src/writer.rs` › rewriting_resets_the_thumbnail_only_when_the_content_changed | partial: index side only; thumbnails in M5 |
 | REQ-005-11 | — | no test |
 | REQ-005-12 | — | no test |
 | REQ-005-13 | — | no test |

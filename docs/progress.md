@@ -9,7 +9,9 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | M1        | Foundation                             | Done        | [M01](rewrite/milestones/M01-foundation.md) |
 | M2        | Spec audit                             | Done        | [M02](rewrite/milestones/M02-spec-audit.md) |
 | M3        | Database and libraries                 | Done        | [M03](rewrite/milestones/M03-database-libraries.md) |
-| M4        | Indexing, change detection, metadata   | Not started | —                                       |
+| M4a       | Indexing: metadata                     | Done        | [M04](rewrite/milestones/M04-indexing.md) |
+| M4b       | Indexing: scanning                     | Not started | [M04](rewrite/milestones/M04-indexing.md) |
+| M4c       | Indexing: change detection, oracle     | Not started | [M04](rewrite/milestones/M04-indexing.md) |
 | M5        | Thumbnails                             | Not started | —                                       |
 | M6        | Gallery                                | Not started | —                                       |
 | M7        | Search and sidebar                     | Not started | —                                       |
@@ -21,6 +23,14 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-26 · M4a · Indexing: metadata
+
+- M4 plan written (self-approved) and split into M4a (metadata), M4b (scanning), M4c (change detection, oracle).
+- `domain`: media kinds, housekeeping folders, sidecar lookup, tag normalization, `MediaMetadata`. `media::exiftool`: process pool with exiftool-vendored's arguments. `media::metadata`: the reference's extraction with its test cases, dates with exiftool-vendored's zone inference (without geo-tz). `db::writer`: port of `IndexWriter`.
+- Deviation recorded: no GPS-based time zones (`docs/architecture.md`).
+- REQ-004-02, -04 … -09, -11 pass; REQ-004-03, -10, REQ-002-01, -02, -04, -14, REQ-011-10 partial until scanning exists; REQ-011-09 pass.
+- Next: M4b (scanning).
 
 ### 2026-10-26 · M3 · Database and libraries
 

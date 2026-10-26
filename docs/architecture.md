@@ -84,6 +84,17 @@ Architectural decisions that outlive a milestone, newest last. One entry each: w
 
 **Decided:** `app::AppState` holds what the UI shows plus the write connection (until the indexer owns it in M4); slow work (reachability, folder dialog) runs on threads and sends an event back over a channel, applied at the start of the next frame (`AppState::poll`). Tests call `AppState::wait_for_jobs` before stepping the harness, so they never race the jobs. OS dialogs sit behind a trait (`FolderPicker`) so tests use a fake.
 
+### 2026-10-26 · Metadata through exiftool, read like exiftool-vendored (M4a)
+
+**Decided:** `media::exiftool` keeps a pool of `exiftool -stay_open True -@ -` processes (size = parallel file reads) and reads each file with the arguments exiftool-vendored v38 builds from its default options (`-charset filename=utf8 -json -fast`, its UTF-8 repair filter, `-api struct=1 -use MWG -api keepUTCTime`, numeric `-*Duration*# … -Orientation#`, `-all <file> -ignoreMinorErrors`), so both apps get the same tag values; values the filter repaired are unwrapped as exiftool-vendored does. Arguments go over stdin, one per line, no shell; paths are always absolute, so no file name is taken as an option. A read over 60 s replaces its process. Executable: `GOOD_GALLERY_EXIFTOOL`, `exiftoolexiftool.exe` next to the app, then `PATH` (bundled in M11; the reference bundles 13.59). Extraction (`media::metadata`) is a port of the reference's rules on the JSON. `METADATA_VERSION` stays the reference's value (1) as long as the rules are the same.
+**Deviation:** exiftool-vendored infers a photo's zone from its GPS position (geo-tz, a large time-zone shape database) when nothing else names one. Not ported: such photos (GPS, no offset tags, no zoned capture date, no GPS timestamp) get the computer's local zone. Everything else of its zone inference is ported (offset tags incl. Nikon daylight saving, offsets of other capture dates, UTC for videos, offset to the GPS time). Revisit if the oracle shows it matters.
+**Deviation (reference bug):** with `struct=1` exiftool returns face regions as structs (`RegionInfo.RegionList[]`, `RegionInfoMP.Regions[]`); the reference only reads the flattened `RegionName` / `RegionType` / `RegionPersonDisplayName`, which it never gets, so it misses MWG and Microsoft face regions. REQ-004-09 asks for them, so this port reads the structs too: files with such regions get `People|<name>` tags the reference didn't write.
+**Tests that need exiftool** skip themselves when it isn't found, unless `GG_REQUIRE_HELPERS=1` (CI).
+
+### 2026-10-26 · Pure media and tag rules in `domain` (M4a)
+
+**Decided:** file kinds, housekeeping folders, sidecar lookup, tag normalization, `MediaMetadata` and `METADATA_VERSION` live in `domain`; `db` depends on `domain` for the writer, `media` for extraction. `db::writer::IndexWriter` owns the write connection (the indexer thread from M4b on).
+
 ### Open: thumbnail cache layout vs Defender (decide in M5)
 
 Defender scans every first read of a file (≈ 13 ms per thumbnail, verdicts expire within minutes); a pack file reads 300 thumbnails in 29 ms instead of ≈ 3.9 s. Keeping the reference's per-file layout keeps the cache compatible but leaves cold scrolling at 12 columns mostly placeholders.
