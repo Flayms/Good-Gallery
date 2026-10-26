@@ -6,7 +6,7 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | --------- | -------------------------------------- | ----------- | --------------------------------------- |
 | M0a       | Spikes: grid and look                  | Done        | [M00](rewrite/milestones/M00-spikes.md) |
 | M0b       | Spikes: video                          | Done        | [M00](rewrite/milestones/M00-spikes.md) |
-| M1        | Foundation                             | Not started | —                                       |
+| M1        | Foundation                             | Done        | [M01](rewrite/milestones/M01-foundation.md) |
 | M2        | Spec audit                             | Not started | —                                       |
 | M3        | Database and libraries                 | Not started | —                                       |
 | M4        | Indexing, change detection, metadata   | Not started | —                                       |
@@ -21,6 +21,16 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-26 · M1 · Foundation
+
+- The user asked to work through all milestones without their input and to commit after each one (no remote, no PRs). Milestone plans are self-approved from here on; the commit is the review point.
+- Cargo workspace with `crates/{domain,db,media,indexer,app}` and `xtask`; `cargo xtask check-specs` ported from the reference with its tests (spec 012 `Implemented`, 8/8 pass). REQ convention settled: `fn req_012_01_…` or `/// REQ-012-01: …`, only the test part of a file counts.
+- `cargo run -p app` opens a themed window (tokens and font in `app::theme`, first-run empty state); `egui_kittest` snapshot test `first_run`; `--screenshot <file.png>` for visual checks.
+- CI workflow written (`.github/workflows/ci.yml`, Windows, fmt / clippy / test / check-specs) but not run: the repo has no remote. REQ-014-01 stays `no test`.
+- Decisions in `docs/architecture.md`: indexer as a thread with message API, no async runtime, thiserror / anyhow, tracing, REQ references, visual checks.
+- Open: (1) CI has never run; push to GitHub to check it (snapshot tests on WARP may need a threshold); (2) custom title bar from the spike not ported yet (comes with the toolbar in M6, polish in M10).
+- Next: M2 (Spec audit).
 
 ### 2026-10-26 · M0b · Spikes: video
 

@@ -41,6 +41,31 @@ Architectural decisions that outlive a milestone, newest last. One entry each: w
 **Why:** mpv brings decoding, audio output, A/V sync, seeking and every container; the software render API works with wgpu as is. Display-synced timing removes the judder that audio-clock timing causes against our vsync (45–265 of 600 frames).
 **Rejected:** `libmpv2` crate (only the OpenGL render API), audio-clock timing (judder), rendering at the video's own size (4K: ≈ 19 ms CPU per frame, judder), GL interop (not needed; would need a WGL context beside wgpu), `ffmpeg-next` + `cpal` and GStreamer (not needed). Details: `docs/rewrite/milestones/M00-spikes.md`, *Spike 3*.
 
+### 2026-10-26 · Workspace and crate layout (M1)
+
+**Decided:** one Cargo workspace (`resolver = "3"`, edition 2024) with `crates/{domain,db,media,indexer,app}` and `xtask/` as sketched above; shared versions and lints in `[workspace.dependencies]` / `[workspace.lints]`. `app` is a library (`app::ui`, `AppState`, `theme`) plus a thin `main.rs`, so `egui_kittest` tests drive the same UI code as the window. `cargo xtask <task>` is a Cargo alias. Spikes stay outside the workspace. Dependencies are optimized in dev builds (`[profile.dev.package."*"] opt-level = 3`): decoding and layout are too slow unoptimized to judge anything.
+
+### 2026-10-26 · Indexer runs as a thread (M1)
+
+**Decided:** the indexer runs on threads inside the app process, not as a child process. Its API is message-based (commands in, events out over `crossbeam-channel`), and every job runs under `catch_unwind`, so a panic fails that job instead of the app.
+**Why:** exiftool and ffmpeg already run as separate processes; the in-process decoders (libwebp, the `image` crate) are mature. A child process would need an IPC layer, a second process to supervise and a second copy of the decoders in memory.
+**Revisit if** a C decoder crashes in practice: because the API is message-based, it can move behind a pipe to `app --indexer` without changing callers.
+
+### 2026-10-26 · No async runtime, errors, logging (M1)
+
+**Decided:**
+- *Concurrency:* OS threads and `crossbeam-channel`, small worker pools where needed. No tokio: the work is CPU- or disk-bound, with few concurrent tasks and no network protocol.
+- *Errors:* `thiserror` enums in library crates (`domain`, `db`, `media`, `indexer`), `anyhow` in `app` and `xtask`.
+- *Logging:* `tracing` everywhere; `app` installs `tracing-subscriber` with `RUST_LOG`-style filtering (default `info`) on stderr. A log file in the user data folder comes with packaging (M11).
+
+### 2026-10-26 · REQ references in Rust tests (M1)
+
+**Decided:** a test references a REQ at the start of its name (`fn req_012_01_reports_unknown_reqs()`) or in a doc comment directly above it (`/// REQ-012-01: …`). `cargo xtask check-specs` reads `.rs` files below `crates/` and `xtask/` and counts only their test part: from the first `#[cfg(test)]` on, or the whole file below `tests/` or `benches/`. REQs mentioned in production code don't count as coverage. Spec: 012.
+
+### 2026-10-26 · Visual checks (M1)
+
+**Decided:** UI changes are checked two ways: `egui_kittest` snapshot tests (wgpu renderer, PNGs in `crates/app/tests/snapshots/`, `UPDATE_SNAPSHOTS=1` rewrites them) and `cargo run -p app -- --screenshot <file.png>`, which renders a few frames, saves the window and exits, so a session can look at the real app without anyone at the screen.
+
 ### Open: thumbnail cache layout vs Defender (decide in M5)
 
 Defender scans every first read of a file (≈ 13 ms per thumbnail, verdicts expire within minutes); a pack file reads 300 thumbnails in 29 ms instead of ≈ 3.9 s. Keeping the reference's per-file layout keeps the cache compatible but leaves cold scrolling at 12 columns mostly placeholders.

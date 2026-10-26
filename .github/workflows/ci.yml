@@ -1,0 +1,47 @@
+# Checks every commit and pull request (docs/specs/014-ci-release). The release workflow reuses this one.
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      # Installs the toolchain and components pinned in rust-toolchain.toml.
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo xtask check-specs
+
+  test:
+    name: Test
+    # The app, its native dependencies and the snapshot tests (wgpu on WARP) target Windows.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-diffs
+          path: crates/*/tests/snapshots/*.diff.png
+          if-no-files-found: ignore

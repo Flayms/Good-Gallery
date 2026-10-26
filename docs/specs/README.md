@@ -17,7 +17,7 @@ All specs were ported from the reference (`../good-gallery/docs/specs/`) on 2026
 | [009-media-viewer](009-media-viewer/spec.md)             | Viewer, zoom and pan, info panel, context menu                   | Approved | M8, M9    |
 | [010-settings](010-settings/spec.md)                     | Indexing and thumbnail cache settings                            | Approved | M10       |
 | [011-security](011-security/spec.md)                     | Renderer isolation, API and file access boundaries               | Approved | M2, M10   |
-| [012-spec-consistency](012-spec-consistency/spec.md)     | Check that specs and tests reference each other                  | Approved | M1        |
+| [012-spec-consistency](012-spec-consistency/spec.md)     | Check that specs and tests reference each other                  | Implemented | M1        |
 | [013-visual-design](013-visual-design/spec.md)           | Glass chrome, typeface, compact toolbar, viewer over the blur    | Approved | M10       |
 | [014-ci-release](014-ci-release/spec.md)                 | CI checks, release script, changelog and GitHub releases         | Approved | M1, M11   |
 | [015-filmstrip](015-filmstrip/spec.md)                   | Row of thumbnails in the viewer to jump through the gallery      | Approved | M8        |

@@ -1,6 +1,6 @@
 # 012 · Spec consistency check
 
-**Status:** Approved (ported from the reference, not yet implemented in Rust)
+**Status:** Implemented
 
 ## Goal
 
@@ -64,18 +64,18 @@ Specs and tests reference each other: verification tables name the tests of a RE
 
 ## Assumptions
 
-- A test file references a REQ by mentioning its ID anywhere in the file, by convention at the start of the test title (`it('REQ-007-01: …')`, e2e: `test.step('REQ-…: …')`).
-- Test files are `*.test.ts(x)` below `src/` and `scripts/`, and every `.ts` file below `e2e/`.
+- A test references a REQ by mentioning its ID in the test part of a file, by convention at the start of the test name (`fn req_007_01_filters_by_tag()`, the ID in lower case with underscores) or in a doc comment directly above the test (`/// REQ-007-01, REQ-007-02: …`). Both spellings count.
+- Test files are the `.rs` files below `crates/` and `xtask/` (except `target/` folders). Rust keeps unit tests next to the code, so only the test part of a file counts: everything from the first `#[cfg(test)]` on, or the whole file below a `tests/` or `benches/` folder. A REQ mentioned in production code is not a reference.
 
 ## Verification
 
 | REQ        | Test                                                                                   | Result |
 | ---------- | -------------------------------------------------------------------------------------- | ------ |
-| REQ-012-01 | — | no test |
-| REQ-012-02 | — | no test |
-| REQ-012-03 | — | no test |
-| REQ-012-04 | — | no test |
-| REQ-012-05 | — | no test |
-| REQ-012-06 | — | no test |
-| REQ-012-07 | — | no test |
-| REQ-012-08 | — | no test |
+| REQ-012-01 | `xtask/src/check_specs.rs` › reports_test_references_to_unknown_reqs, counts_test_names_as_references | pass |
+| REQ-012-02 | `xtask/src/check_specs.rs` › reports_test_references_to_deprecated_reqs | pass |
+| REQ-012-03 | `xtask/src/check_specs.rs` › reports_missing_duplicate_and_unknown_verification_rows | pass |
+| REQ-012-04 | `xtask/src/check_specs.rs` › reports_results_that_dont_match_the_tests | pass |
+| REQ-012-05 | `xtask/src/check_specs.rs` › reports_duplicate_reqs_and_reqs_in_the_wrong_spec | pass |
+| REQ-012-06 | `xtask/src/check_specs.rs` › reports_untested_reqs_of_implemented_specs_as_warnings | pass |
+| REQ-012-07 | `xtask/src/check_specs.rs` › exits_non_zero_only_on_errors | pass |
+| REQ-012-08 | `xtask/src/check_specs.rs` › summarizes_results_per_spec, prints_the_summary_on_request | pass |

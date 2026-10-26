@@ -15,6 +15,13 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **egui-managed textures have no mipmaps**, so large images drawn small alias. Register own `wgpu::Texture`s (`Rgba8Unorm`) with mips via `register_native_texture_with_sampler_options`.
 * **`eframe` default features can't include `winit/default`** in a dependency spec (no slashes); use the defaults.
 
+* **Dropping a `FullOutput` with texture deltas panics in debug builds** (`TexturesDelta` asserts on drop). Tests that call `ctx.run_ui` themselves must `.textures_delta.clear()` the result.
+* **The root `Ui` of an `egui_kittest` harness has a margin**, so painting `ui.max_rect()` leaves a black frame. Paint the window background on `LayerId::background()` over `ctx.content_rect()`.
+
+## Visual checks
+
+* **Screenshot of the real app:** `cargo run -p app -- --screenshot <file.png>` renders 3 frames, saves the window and exits. Save into the scratchpad, then look at the PNG. Snapshot tests: `cargo test -p app`; `UPDATE_SNAPSHOTS=1` rewrites `crates/app/tests/snapshots/*.png` (check the new PNG before committing it; `*.new.png` / `*.diff.png` are ignored).
+
 ## libmpv
 
 * **`libmpv2` (crate) only wraps the OpenGL render API.** The software renderer (`"sw"`) needs raw `mpv_render_param`s (`SW_SIZE`, `SW_FORMAT`, `SW_STRIDE`, `SW_POINTER`); use an own FFI. Its import library is MinGW (`libmpv.dll.a`), so loading the DLL at runtime with `libloading` also avoids link trouble with MSVC.

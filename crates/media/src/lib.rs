@@ -1,0 +1,1 @@
+//! Thumbnails, video frames, exiftool.
