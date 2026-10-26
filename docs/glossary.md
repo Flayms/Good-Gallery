@@ -35,7 +35,7 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | Term                 | Definition                                                                                                                                                                   |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Index**            | The local database of libraries, media items, folders and tags. Lives in the user profile, separate from the libraries.                                                         |
-| **Indexer**          | The background process that scans libraries, reads metadata and renders thumbnails.                                                                                          |
+| **Indexer**          | The background threads that scan libraries, reads metadata and renders thumbnails.                                                                                          |
 | **Scan**             | One sync of a library with the index. At most one scan runs at a time. Further scans wait in the **scan queue**, one per library.                                              |
 | **Full scan**        | Lists every folder and checks every file. Runs when a library is added, on manual _Rescan_, and once after a metadata version change. Shown as _Indexing_.                       |
 | **Quick scan**       | Only lists folders whose contents (added, removed or renamed entries) changed since the last scan. Runs at startup and periodically. Shown as _Checking_.                    |
@@ -64,7 +64,7 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | **Tile**          | One media item in the Masonry, Justified or Grid view.                                                                                                           |
 | **Tag indicators** | Optional icons in a tile's corner: one star per rating point, and icons when the media item has _Places_, _People_ or other tags. The user picks which are shown. |
 | **Zoom level**    | The tile size of the gallery as a number of columns (2–12). More columns means smaller tiles. (code: `columns`)                                                  |
-| **Search**        | The filters and sort order of the gallery: tags, file name, library, folder, media kind, date range, rating. Kept in the URL. (code: `GallerySearch`)            |
+| **Search**        | The filters and sort order of the gallery: tags, file name, library, folder, media kind, date range, rating. Kept while the viewer is open. (code: `GallerySearch`)            |
 | **Included / excluded tag** | A tag that matching media items must have (including descendants), or must not have.                                                             |
 | **Search bar**    | The toolbar input with chips for included / excluded tags and the file name filter, plus tag suggestions.                                                       |
 | **Sidebar**       | Navigation on the left: libraries with their folder tree, People, Places, Ratings, Tags, indexer progress and Settings.                                          |

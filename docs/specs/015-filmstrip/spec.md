@@ -1,6 +1,6 @@
 # 015 · Filmstrip
 
-**Status:** Approved (ported from the reference, not yet implemented in Rust)
+**Status:** Approved
 
 ## Goal
 
@@ -33,7 +33,7 @@ In the viewer, the user sees a single row of thumbnails of the whole gallery bel
 
 - **Given** the filmstrip
 - **When** the user clicks a thumbnail, or focuses it and presses Enter
-- **Then** the viewer shows that item, the same way as stepping to it (REQ-009-02): no history entry, and the photos around it start preloading (REQ-009-13)
+- **Then** the viewer shows that item, the same way as stepping to it (REQ-009-02): the photos around it start preloading (REQ-009-13)
 
 ### REQ-015-05 · Browse the filmstrip
 

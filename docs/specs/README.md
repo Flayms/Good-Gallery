@@ -2,7 +2,7 @@
 
 One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why). Large or architectural work gets a plan in `docs/rewrite/milestones/` during the rewrite, and a `plan.md` in the spec folder afterwards. Workflow and tiers: see [AGENTS.md](../../AGENTS.md). Terms: see [glossary](../glossary.md).
 
-All specs were ported from the reference (`../good-gallery/docs/specs/`) on 2026-10-26 with their requirements unchanged. Their Verification tables were reset, since the reference tests don't run here. The reference's per-spec `plan.md` files describe the TypeScript approach and were not copied; read them there for background. Electron-specific REQs are deprecated or reworded in M2.
+All specs were ported from the reference (`../good-gallery/docs/specs/`) on 2026-10-26 with their requirements unchanged. Their Verification tables were reset, since the reference tests don't run here. The reference's per-spec `plan.md` files describe the TypeScript approach and were not copied; read them there for background. M2 (2026-10-26) deprecated the Electron-specific REQs (most of 011), reworded technology-bound ones and added the REQs the rewrite needs (data compatibility, frame-time and memory budgets, helper and metadata safety); see `docs/rewrite/milestones/M02-spec-audit.md`.
 
 | Spec                                                     | Area                                                             | Status   | Milestone |
 | -------------------------------------------------------- | ---------------------------------------------------------------- | -------- | --------- |
@@ -16,7 +16,7 @@ All specs were ported from the reference (`../good-gallery/docs/specs/`) on 2026
 | [008-sidebar](008-sidebar/spec.md)                       | Libraries, folder tree, People, Places, Ratings, Tags            | Approved | M7        |
 | [009-media-viewer](009-media-viewer/spec.md)             | Viewer, zoom and pan, info panel, context menu                   | Approved | M8, M9    |
 | [010-settings](010-settings/spec.md)                     | Indexing and thumbnail cache settings                            | Approved | M10       |
-| [011-security](011-security/spec.md)                     | Renderer isolation, API and file access boundaries               | Approved | M2, M10   |
+| [011-security](011-security/spec.md)                     | File access, helper programs, hostile metadata, no network       | Approved | M4, M5, M8 |
 | [012-spec-consistency](012-spec-consistency/spec.md)     | Check that specs and tests reference each other                  | Implemented | M1        |
 | [013-visual-design](013-visual-design/spec.md)           | Glass chrome, typeface, compact toolbar, viewer over the blur    | Approved | M10       |
 | [014-ci-release](014-ci-release/spec.md)                 | CI checks, release script, changelog and GitHub releases         | Approved | M1, M11   |

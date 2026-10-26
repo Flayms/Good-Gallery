@@ -1,6 +1,6 @@
 # 001 · Library management
 
-**Status:** Approved (ported from the reference, not yet implemented in Rust)
+**Status:** Approved
 
 ## Goal
 
@@ -54,6 +54,13 @@ The user decides which folders make up the gallery: folders on local disks or ne
 - **Then** each library shows its label, status (`online`, `offline`, `unknown`), full path and the time it was last indexed, sorted by label
 - **And** without libraries the list says "No libraries yet."
 
+### REQ-001-08 · Existing index
+
+- **Given** an index written by Good Gallery's Electron version
+- **When** the app starts with it
+- **Then** it opens without re-indexing, with all libraries, media items, tags and settings
+- **And** the Electron version can still open the index afterwards (same schema and migration bookkeeping)
+
 ## Out of scope
 
 - Renaming a library's label in the UI (the label is always derived from the folder name).
@@ -78,3 +85,4 @@ The user decides which folders make up the gallery: folders on local disks or ne
 | REQ-001-05 | — | no test |
 | REQ-001-06 | — | no test |
 | REQ-001-07 | — | no test |
+| REQ-001-08 | — | no test |

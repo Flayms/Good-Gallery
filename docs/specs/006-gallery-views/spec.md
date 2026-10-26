@@ -1,6 +1,6 @@
 # 006 · Gallery views
 
-**Status:** Approved (ported from the reference, not yet implemented in Rust)
+**Status:** Approved
 
 ## Goal
 
@@ -80,6 +80,19 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 - **When** it writes media items to the index
 - **Then** the gallery, sidebar counts and tag suggestions refresh right after the first written files, then at most every 5 seconds, and once more when the scan ends
 
+### REQ-006-12 · Frame-time budget
+
+- **Given** a gallery of 100,000 media items at 12 columns, with their thumbnails in the thumbnail cache
+- **When** the user scrolls continuously
+- **Then** the 95th percentile of frame times stays below 16 ms on an integrated laptop GPU (measured without vsync)
+
+### REQ-006-13 · Thumbnail memory budget
+
+- **Given** the user scrolls through a large gallery
+- **When** thumbnails are loaded for display
+- **Then** the memory they take on the GPU stays within a fixed budget, dropping the least recently shown first
+- **And** thumbnails of visible tiles and of tiles about to scroll into view are kept
+
 ## Out of scope
 
 - Selecting multiple media items, and drag and drop to other apps.
@@ -107,3 +120,5 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 | REQ-006-09 | — | no test |
 | REQ-006-10 | — | no test |
 | REQ-006-11 | — | no test |
+| REQ-006-12 | — | no test |
+| REQ-006-13 | — | no test |

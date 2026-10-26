@@ -1,10 +1,10 @@
 # 007 · Search
 
-**Status:** Approved (ported from the reference, not yet implemented in Rust)
+**Status:** Approved
 
 ## Goal
 
-The user finds media items by the tags already embedded in their files, combined with file name, media kind, date, rating, library and folder, and orders the result as needed. Search stays fast for 500k media items, and the search state lives in the URL, so it survives reloads and opening the viewer.
+The user finds media items by the tags already embedded in their files, combined with file name, media kind, date, rating, library and folder, and orders the result as needed. Search stays fast for 500k media items, and the search survives opening and closing the viewer.
 
 ## Requirements
 
@@ -22,7 +22,7 @@ The user finds media items by the tags already embedded in their files, combined
 
 ### REQ-007-03 · Unknown tags
 
-- **Given** a tag in the search that doesn't exist in the index (e.g. from an old URL)
+- **Given** a tag in the search that doesn't exist in the index (e.g. removed by a scan while it was in the search)
 - **When** the gallery is filtered
 - **Then** an unknown included tag matches nothing, and an unknown excluded tag is ignored
 
@@ -87,11 +87,11 @@ The user finds media items by the tags already embedded in their files, combined
 - **Then** the gallery is ordered accordingly: date taken falls back to date modified, names compare without letter case, full path orders by library first
 - **And** the default is date taken, newest first, and items with equal values keep a stable order
 
-### REQ-007-13 · Search in the URL
+### REQ-007-13 · Search kept while viewing
 
 - **Given** any combination of filters and sort order
-- **When** the user opens and closes the viewer, or the window reloads
-- **Then** the same search is still applied, with default values left out of the URL
+- **When** the user opens and closes the viewer
+- **Then** the same search is still applied
 
 ### REQ-007-14 · Search speed
 

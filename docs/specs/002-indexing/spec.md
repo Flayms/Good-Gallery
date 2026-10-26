@@ -1,6 +1,6 @@
 # 002 · Indexing
 
-**Status:** Approved (ported from the reference, not yet implemented in Rust)
+**Status:** Approved
 
 ## Goal
 
@@ -89,11 +89,12 @@ Every library is mirrored in a local index, so browsing and searching 50k–500k
 - **Then** it is still indexed, without metadata
 - **And** a file that can't be accessed at all keeps the state it was last indexed with
 
-### REQ-002-13 · Indexer crash
+### REQ-002-13 · Indexer failure
 
-- **Given** the indexer process exits unexpectedly while scanning
+- **Given** the indexer fails unexpectedly while scanning (a panic in a scan or while reading a file)
 - **When** further scans are waiting or requested
-- **Then** they run in a new indexer process, and the interrupted scan counts as finished
+- **Then** they still run, and the interrupted scan counts as finished
+- **And** the window stays open and responsive
 
 ### REQ-002-14 · Remove unused tags
 

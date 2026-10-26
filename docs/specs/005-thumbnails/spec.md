@@ -1,6 +1,6 @@
 # 005 · Thumbnails
 
-**Status:** Approved (ported from the reference, not yet implemented in Rust)
+**Status:** Approved
 
 ## Goal
 
@@ -100,6 +100,12 @@ Tiles appear instantly and stay sharp, even for libraries on slow network shares
 - **Then** the cached thumbnails are shown
 - **And** items without a cached thumbnail show the "no image" icon over their placeholder, if one was rendered before
 
+### REQ-005-15 · Existing thumbnail cache
+
+- **Given** thumbnails cached by Good Gallery's Electron version
+- **When** the app shows those media items
+- **Then** the cached thumbnails are shown without rendering them again, as long as the files didn't change
+
 ## Out of scope
 
 - Thumbnails for formats beyond the supported media types (002).
@@ -130,3 +136,4 @@ Tiles appear instantly and stay sharp, even for libraries on slow network shares
 | REQ-005-12 | — | no test |
 | REQ-005-13 | — | no test |
 | REQ-005-14 | — | no test |
+| REQ-005-15 | — | no test |

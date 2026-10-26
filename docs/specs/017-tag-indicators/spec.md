@@ -1,6 +1,6 @@
 # 017 · Tag indicators
 
-**Status:** Approved (ported from the reference, not yet implemented in Rust)
+**Status:** Approved
 
 ## Goal
 

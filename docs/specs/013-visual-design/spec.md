@@ -1,10 +1,10 @@
 # 013 · Visual design
 
-**Status:** Approved (ported from the reference, not yet implemented in Rust)
+**Status:** Approved
 
 ## Goal
 
-Good Gallery gets its own look instead of the shadcn defaults. The photos are the only color, and controls float over them as glass. The toolbar fits small windows, the viewer floats over the blurred window and takes its color from the photo, and the app looks the same on Windows, macOS and Linux. Design decisions and tokens are recorded in [docs/design.md](../../design.md).
+Good Gallery gets its own look instead of a UI toolkit's defaults. The photos are the only color, and controls float over them as glass. The toolbar fits small windows, the viewer floats over the blurred window and takes its color from the photo, and the app looks the same on Windows, macOS and Linux. Design decisions and tokens are recorded in [docs/design.md](../../design.md).
 
 ## Requirements
 
@@ -125,8 +125,8 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 
 ## Assumptions
 
-- The Chromium of the bundled Electron supports `backdrop-filter`, `prefers-reduced-transparency`, `prefers-reduced-motion`, the Window Controls Overlay and same-document view transitions.
-- Glass over the scrolling gallery keeps scrolling smooth on a typical laptop GPU. Phase 0 of the plan measures this; if it fails, the toolbar becomes opaque and REQ-013-03 is revised.
+- The OS settings for reduced transparency and reduced motion are Windows' _Transparency effects_ and _Animation effects_ (Settings › Accessibility › Visual effects); the app follows them while it runs.
+- Glass over the scrolling gallery keeps scrolling smooth on a typical laptop GPU: M0 measured ≈ 0.4 ms per glass surface on an integrated GPU.
 - The placeholder of a media item represents its colors well enough to tint the viewer.
 
 ## Verification

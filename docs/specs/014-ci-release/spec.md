@@ -1,6 +1,6 @@
 # 014 · CI and releases
 
-**Status:** Approved (ported from the reference, not yet implemented in Rust)
+**Status:** Approved
 
 ## Goal
 
@@ -12,7 +12,7 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 
 - **Given** a commit pushed to any branch, or a pull request
 - **When** CI runs
-- **Then** it runs the linter, the type check, the spec check, the unit tests and the e2e tests, and the run fails if any of them fails
+- **Then** it checks the formatting, runs the linter (clippy), the spec check and all tests including the UI tests, and the run fails if any of them fails
 
 ### REQ-014-02 · Checks gate merges
 
@@ -48,7 +48,7 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 
 - **Given** the preconditions hold
 - **When** the release script runs
-- **Then** it prints the next version and its notes, asks for confirmation, then sets the version in `package.json`, commits it with `CHANGELOG.md` as `chore(release): vX.Y.Z`, tags the commit `vX.Y.Z` and pushes both. With `--dry-run` it stops after printing, with `--yes` it doesn't ask
+- **Then** it prints the next version and its notes, asks for confirmation, then sets the version in `Cargo.toml`, commits it with `CHANGELOG.md` as `chore(release): vX.Y.Z`, tags the commit `vX.Y.Z` and pushes both. With `--dry-run` it stops after printing, with `--yes` it doesn't ask
 
 ### REQ-014-08 · Published release
 

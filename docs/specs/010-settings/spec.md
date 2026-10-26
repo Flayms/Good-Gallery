@@ -1,6 +1,6 @@
 # 010 · Settings
 
-**Status:** Approved (ported from the reference, not yet implemented in Rust)
+**Status:** Approved
 
 ## Goal
 

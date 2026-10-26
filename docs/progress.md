@@ -7,7 +7,7 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | M0a       | Spikes: grid and look                  | Done        | [M00](rewrite/milestones/M00-spikes.md) |
 | M0b       | Spikes: video                          | Done        | [M00](rewrite/milestones/M00-spikes.md) |
 | M1        | Foundation                             | Done        | [M01](rewrite/milestones/M01-foundation.md) |
-| M2        | Spec audit                             | Not started | —                                       |
+| M2        | Spec audit                             | Done        | [M02](rewrite/milestones/M02-spec-audit.md) |
 | M3        | Database and libraries                 | Not started | —                                       |
 | M4        | Indexing, change detection, metadata   | Not started | —                                       |
 | M5        | Thumbnails                             | Not started | —                                       |
@@ -21,6 +21,14 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-26 · M2 · Spec audit
+
+- Specs audited (plan: `docs/rewrite/milestones/M02-spec-audit.md`, self-approved). 011 rewritten: REQ-011-01…07 deprecated (no web page, IPC, protocols), new REQ-011-08 (files only from the index), -09 (helpers can't be steered by file names), -10 (hostile metadata), -11 (no network).
+- New REQs: REQ-001-08 (existing index stays compatible both ways), REQ-005-15 (existing thumbnail cache is used), REQ-006-12 (frame-time budget), REQ-006-13 (thumbnail memory budget). Reworded: REQ-002-13 (indexer failure instead of process crash), REQ-007-13 (search kept while viewing, no URL), REQ-009-02 / -03 / -12 (mouse back button, no viewer URL), REQ-014-01 / -07 (Rust checks, `Cargo.toml`), REQ-015-04.
+- `docs/design.md` in egui terms (tokens in `theme`, own glass pass, Windows settings for the fallbacks); glossary (*Search*, *Indexer*).
+- Doc-only milestone: no code review run (nothing to review beyond wording); `cargo xtask check-specs` clean.
+- Next: M3 (Database and libraries).
 
 ### 2026-10-26 · M1 · Foundation
 

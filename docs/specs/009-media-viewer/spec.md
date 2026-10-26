@@ -1,6 +1,6 @@
 # 009 · Media viewer
 
-**Status:** Approved (ported from the reference, not yet implemented in Rust)
+**Status:** Approved
 
 ## Goal
 
@@ -22,12 +22,12 @@ The user looks at one media item at full quality without losing their place in t
 - **Then** the previous or next item of the gallery is shown, following its current filters and sort order. There is no _Previous_ on the first item and no _Next_ on the last
 - **And** the _Previous_ / _Next_ buttons stay in place while they are pressed
 - **And** while video controls have focus, ← / → seek the video instead
-- **And** stepping adds no history entries, so Back closes the viewer
+- **And** the mouse's back button (or Alt + ←) closes the viewer instead of stepping back through the items seen
 
 ### REQ-009-03 · Close the viewer
 
 - **Given** the viewer
-- **When** the user presses Escape, clicks _Close_, uses Back, or clicks the dark area around the photo or video
+- **When** the user presses Escape, clicks _Close_, presses the mouse's back button or Alt + ←, or clicks the dark area around the photo or video
 - **Then** the viewer closes and the gallery is shown with the same search
 - **And** clicks on the media itself, the release of a pan, and double-clicks don't close it
 
@@ -85,8 +85,8 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 
 ### REQ-009-12 · Missing items
 
-- **Given** a viewer URL for an item that isn't indexed (anymore), or whose file vanished
-- **When** the viewer opens it
+- **Given** an item that is no longer indexed (e.g. removed by a scan while the viewer shows it), or whose file vanished
+- **When** the viewer shows it
 - **Then** it shows "Media not found", or the media fails to load, instead of showing something else
 
 ### REQ-009-13 · Preload ahead
@@ -130,7 +130,7 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 
 ## Assumptions
 
-- Chromium can decode all supported media types (002). Videos with codecs Chromium can't play (e.g. some HEVC files) don't play in the viewer.
+- The video backend (libmpv, see `docs/architecture.md`) plays all supported containers and their common codecs, including HEVC.
 - Originals are read straight from the library, so viewing needs the library to be reachable (thumbnails don't).
 
 ## Verification
