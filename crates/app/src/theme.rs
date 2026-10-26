@@ -144,7 +144,8 @@ fn style(style: &mut egui::Style) {
         state.fg_stroke = Stroke::new(ICON_STROKE, PAPER);
         state.expansion = 0.0;
     }
-    widgets.noninteractive.fg_stroke = Stroke::new(1.0, MIST);
+    // Labels are Paper; secondary text sets Mist itself.
+    widgets.noninteractive.fg_stroke = Stroke::new(1.0, PAPER);
     widgets.noninteractive.bg_stroke = Stroke::new(1.0, RIM);
 }
 

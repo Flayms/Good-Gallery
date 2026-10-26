@@ -1,0 +1,1 @@
+CREATE INDEX `media_thumb_idx` ON `media` (`thumb_status`,`sort_date`);

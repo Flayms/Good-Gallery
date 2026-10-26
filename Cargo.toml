@@ -22,6 +22,14 @@ egui = "=0.37.0"
 egui_kittest = { version = "=0.37.0", features = ["wgpu", "snapshot"] }
 
 anyhow = "1.0.104"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+crossbeam-channel = "0.5.17"
+egui_extras = { version = "=0.37.0", default-features = false, features = ["svg"] }
+rfd = "0.17.2"
+rusqlite = { version = "0.41.0", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11.1"
 regex = "1.12"
 tempfile = "3"
 thiserror = "2.0.21"

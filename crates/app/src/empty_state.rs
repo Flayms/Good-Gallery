@@ -1,28 +1,73 @@
-//! Centered messages for a gallery with nothing to show, inviting the next step.
+//! Centered messages for a page with nothing to show, inviting the next step.
 
+use crate::icons::Icon;
 use crate::theme;
-use eframe::egui::{self, Color32, CornerRadius, FontId, Rect, RichText, Sense, Stroke, Vec2};
+use eframe::egui::{self, CornerRadius, FontId, Rect, RichText};
 
 const ICON: f32 = 40.0;
 
-/// First run: no library added yet.
+/// First run: no library added yet. The response is the *Add a library* button's.
 pub fn no_libraries(ui: &mut egui::Ui) -> egui::Response {
+    centered(ui, Icon::FolderPlus, "No libraries yet", None, Some("Add a library")).expect("the button was added")
+}
+
+/// Libraries exist, but nothing matches (or nothing is indexed yet).
+pub fn no_media(ui: &mut egui::Ui) {
+    message(
+        ui,
+        Icon::Images,
+        "No media found",
+        Some("Nothing matches the current filters yet — new files appear while indexing."),
+    );
+}
+
+pub fn error(ui: &mut egui::Ui, title: &str, detail: &str) {
+    centered(ui, Icon::TriangleAlert, title, Some(detail), None);
+}
+
+pub fn message(ui: &mut egui::Ui, icon: Icon, title: &str, detail: Option<&str>) {
+    centered(ui, icon, title, detail, None);
+}
+
+/// Icon, title, optional detail and optional primary button, centered in the available space.
+fn centered(
+    ui: &mut egui::Ui,
+    icon: Icon,
+    title: &str,
+    detail: Option<&str>,
+    button: Option<&str>,
+) -> Option<egui::Response> {
     let rect = ui.max_rect();
     let gap = 3.0 * theme::SPACE;
     let title_font = FontId::new(theme::SIZE_BODY, theme::semibold());
-    let title_height = ui.fonts_mut(|f| f.row_height(&title_font));
-    let content_height = ICON + gap + title_height + gap + ui.spacing().interact_size.y;
-    let top = rect.center().y - content_height / 2.0;
+    let row = |font: &FontId| ui.fonts_mut(|f| f.row_height(font));
+    let mut height = ICON + gap + row(&title_font);
+    if let Some(detail) = detail {
+        // The detail wraps (e.g. an error with a path), so measure it at the width it gets.
+        let font = FontId::new(theme::SIZE_BODY, egui::FontFamily::Proportional);
+        let wrap_width = rect.width() - 48.0;
+        let galley = ui.fonts_mut(|f| f.layout(detail.to_owned(), font, theme::MIST, wrap_width));
+        height += gap + galley.size().y;
+    }
+    if button.is_some() {
+        height += gap + ui.spacing().interact_size.y;
+    }
+    let top = rect.center().y - height / 2.0;
     let mut child = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(Rect::from_min_max(egui::pos2(rect.left(), top), rect.max))
+            .max_rect(Rect::from_min_max(
+                egui::pos2(rect.left() + 24.0, top),
+                rect.max - egui::vec2(24.0, 0.0),
+            ))
             .layout(egui::Layout::top_down(egui::Align::Center)),
     );
     child.spacing_mut().item_spacing.y = gap;
-    let (icon, _) = child.allocate_exact_size(Vec2::splat(ICON), Sense::hover());
-    folder_plus(child.painter(), icon, theme::MIST);
-    child.label(RichText::new("No libraries yet").font(title_font).color(theme::PAPER));
-    primary_button(&mut child, "Add a library")
+    child.add(icon.image(ICON, theme::MIST));
+    child.label(RichText::new(title).font(title_font).color(theme::PAPER));
+    if let Some(detail) = detail {
+        child.label(RichText::new(detail).color(theme::MIST));
+    }
+    button.map(|label| primary_button(&mut child, label))
 }
 
 /// Paper fill with Darkroom text.
@@ -35,26 +80,4 @@ pub fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
             .fill(theme::PAPER)
             .corner_radius(CornerRadius::same(theme::RADIUS_CONTROL)),
     )
-}
-
-/// lucide `folder-plus`, drawn on its 24-unit grid scaled to `rect`; the stroke scales with it, as in SVG.
-fn folder_plus(painter: &egui::Painter, rect: Rect, color: Color32) {
-    let s = rect.width() / 24.0;
-    let p = |x: f32, y: f32| rect.min + Vec2::new(x, y) * s;
-    let stroke = Stroke::new(theme::ICON_STROKE * s, color);
-    let outline = vec![
-        p(2.0, 6.0),
-        p(4.0, 4.0),
-        p(9.0, 4.0),
-        p(11.0, 7.0),
-        p(20.0, 7.0),
-        p(22.0, 9.0),
-        p(22.0, 18.0),
-        p(20.0, 20.0),
-        p(4.0, 20.0),
-        p(2.0, 18.0),
-    ];
-    painter.add(egui::Shape::closed_line(outline, stroke));
-    painter.line_segment([p(12.0, 10.0), p(12.0, 16.0)], stroke);
-    painter.line_segment([p(9.0, 13.0), p(15.0, 13.0)], stroke);
 }

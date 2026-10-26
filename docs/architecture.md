@@ -66,6 +66,24 @@ Architectural decisions that outlive a milestone, newest last. One entry each: w
 
 **Decided:** UI changes are checked two ways: `egui_kittest` snapshot tests (wgpu renderer, PNGs in `crates/app/tests/snapshots/`, `UPDATE_SNAPSHOTS=1` rewrites them) and `cargo run -p app -- --screenshot <file.png>`, which renders a few frames, saves the window and exits, so a session can look at the real app without anyone at the screen.
 
+### 2026-10-26 · Index compatibility and migrations (M3)
+
+**Decided:** `crates/db/migrations/` holds the reference's `drizzle/*.sql` and `meta/_journal.json` byte for byte (`.gitattributes`: `-text`). `db::open` migrates like drizzle's SQLite migrator: `__drizzle_migrations` created with drizzle's exact DDL text, newest `created_at` read, newer journal entries run chunk by chunk in one transaction, `(sha256 of the file, journal when)` inserted. Tests prove both directions against `crates/db/tests/fixtures/reference.db`, which the reference's own migrator creates (`make-reference-db.mjs`): the fixture opens here, and a database created here has the same schema and bookkeeping rows. A schema change therefore lands in the reference's migration folder format; new migrations must keep the journal order and `when` values increasing.
+**Connections:** one write connection (pragmas as in the reference: WAL, `synchronous = NORMAL`, foreign keys, `busy_timeout = 5000`), read-only connections for readers.
+
+### 2026-10-26 · Data folder during the rewrite (M3)
+
+**Decided:** the app uses `%APPDATA%good-gallery-rust` (override `--data-dir`), not the Electron version's `%APPDATA%good-gallery`, so development runs never touch the user's real index. M11 switches to the shared folder (REQ-001-08 makes that safe).
+
+### 2026-10-26 · Icons (M3)
+
+**Decided:** lucide icons as SVG files, generated from the reference's `lucide-react` by `crates/app/assets/icons/make-icons.mjs` (white stroke 1.75), embedded with `include_bytes!` (`app::icons::Icon`) and rendered by `egui_extras`' SVG loader (resvg) at the size they are drawn, tinted per use.
+**Rejected:** an icon font (lucide's font drops the stroke-width control), hand-drawn shapes (the spike's approach; doesn't scale to ~40 icons).
+
+### 2026-10-26 · UI state and background jobs (M3)
+
+**Decided:** `app::AppState` holds what the UI shows plus the write connection (until the indexer owns it in M4); slow work (reachability, folder dialog) runs on threads and sends an event back over a channel, applied at the start of the next frame (`AppState::poll`). Tests call `AppState::wait_for_jobs` before stepping the harness, so they never race the jobs. OS dialogs sit behind a trait (`FolderPicker`) so tests use a fake.
+
 ### Open: thumbnail cache layout vs Defender (decide in M5)
 
 Defender scans every first read of a file (≈ 13 ms per thumbnail, verdicts expire within minutes); a pack file reads 300 thumbnails in 29 ms instead of ≈ 3.9 s. Keeping the reference's per-file layout keeps the cache compatible but leaves cold scrolling at 12 columns mostly placeholders.

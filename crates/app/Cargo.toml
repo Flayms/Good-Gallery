@@ -9,12 +9,18 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+chrono.workspace = true
+db.workspace = true
+egui_extras.workspace = true
+indexer.workspace = true
+rfd.workspace = true
 eframe.workspace = true
 image = { version = "=0.25.10", default-features = false, features = ["png"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+tempfile.workspace = true
 egui_kittest.workspace = true
 
 [lints]

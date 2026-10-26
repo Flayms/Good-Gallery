@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-description = "Repository tasks: check-specs."
+description = "Repository tasks: check-specs, library operations."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,8 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+db.workspace = true
+indexer.workspace = true
 regex.workspace = true
 
 [dev-dependencies]

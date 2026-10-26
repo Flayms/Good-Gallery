@@ -18,6 +18,10 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **Dropping a `FullOutput` with texture deltas panics in debug builds** (`TexturesDelta` asserts on drop). Tests that call `ctx.run_ui` themselves must `.textures_delta.clear()` the result.
 * **The root `Ui` of an `egui_kittest` harness has a margin**, so painting `ui.max_rect()` leaves a black frame. Paint the window background on `LayerId::background()` over `ctx.content_rect()`.
 
+* **wgpu harnesses on parallel test threads crash the test process** on Windows (`STATUS_HEAP_CORRUPTION`). UI tests take a global lock through `tests/common::Fixture`; keep every `.wgpu()` harness behind it.
+* **Labels default to the non-interactive `fg_stroke` color.** `theme` sets it to Paper; secondary text sets Mist itself.
+* **Icon-only buttons need an accessible name** for tests and screen readers: `icons::icon_button` sets one through `Response::widget_info`.
+
 ## Visual checks
 
 * **Screenshot of the real app:** `cargo run -p app -- --screenshot <file.png>` renders 3 frames, saves the window and exits. Save into the scratchpad, then look at the PNG. Snapshot tests: `cargo test -p app`; `UPDATE_SNAPSHOTS=1` rewrites `crates/app/tests/snapshots/*.png` (check the new PNG before committing it; `*.new.png` / `*.diff.png` are ignored).
@@ -49,6 +53,10 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **`python` may not run at all** (a mise shim points to a missing install). Use `node` for small scripts (`spikes/video/summarize.js`).
 * **Running a spike that loads a downloaded binary** (e.g. `libmpv-2.dll`) is blocked by auto mode until the user approves it. Ask before the first run.
 * **Spike crates are standalone**: run `cargo` inside `spikes/<name>/`; their `results/` and `vendor/` folders are git-ignored.
+
+## Indexer
+
+* **A stat on a hung SMB share blocks its thread for the OS timeout** (often 30–60 s), past our 5 s reachability timeout. `reachability::with_timeout` leaves that thread behind; fine for single checks, but periodic checks of many offline libraries (M4) must not start a new check while the previous one for the same library still runs.
 
 ## Carried over from the reference
 

@@ -1,6 +1,6 @@
 # 001 · Library management
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Goal
 
@@ -78,11 +78,11 @@ The user decides which folders make up the gallery: folders on local disks or ne
 
 | REQ        | Test                                                                                                                                          | Result                                                                              |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| REQ-001-01 | — | no test |
-| REQ-001-02 | — | no test |
-| REQ-001-03 | — | no test |
-| REQ-001-04 | — | no test |
-| REQ-001-05 | — | no test |
-| REQ-001-06 | — | no test |
-| REQ-001-07 | — | no test |
-| REQ-001-08 | — | no test |
+| REQ-001-01 | `crates/indexer/src/libraries.rs` › adds_a_reachable_folder…, normalizes_the_path; `crates/app/tests/libraries.rs` › adds_a_typed_path_and_confirms | pass |
+| REQ-001-02 | `crates/app/tests/libraries.rs` › adds_the_picked_folder_and_nothing_when_cancelled (fake dialog) | pass |
+| REQ-001-03 | `crates/indexer/src/libraries.rs` › rejects_relative_and_missing_paths; `reachability.rs` › gives_up_after_the_timeout; `crates/app/tests/libraries.rs` › explains_invalid_paths | pass |
+| REQ-001-04 | `crates/indexer/src/libraries.rs` › rejects_duplicates_case_insensitively; `crates/app/tests/libraries.rs` › rejects_a_duplicate_in_another_letter_case | pass |
+| REQ-001-05 | `crates/indexer/src/libraries.rs` › removes_a_library_with_its_media_and_stops_its_scans; `crates/app/tests/libraries.rs` › removes_a_library_after_confirmation… | partial: cancelling queued and running scans is checked through `ScanRequests::remove_library` only; the scan queue comes in M4 |
+| REQ-001-06 | `crates/indexer/src/libraries.rs` › rescan_queues_a_full_scan; `crates/app/tests/libraries.rs` › rescan_queues_a_full_scan_and_confirms | pass |
+| REQ-001-07 | `crates/app/tests/libraries.rs` › lists_libraries_with_status_path_and_last_indexed_time, says_when_there_are_no_libraries | pass |
+| REQ-001-08 | `crates/db/src/lib.rs` › opens_an_index_written_by_the_reference, leaves_the_reference_bookkeeping_alone, creates_the_reference_schema_and_bookkeeping | pass |

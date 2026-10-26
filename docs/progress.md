@@ -8,7 +8,7 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | M0b       | Spikes: video                          | Done        | [M00](rewrite/milestones/M00-spikes.md) |
 | M1        | Foundation                             | Done        | [M01](rewrite/milestones/M01-foundation.md) |
 | M2        | Spec audit                             | Done        | [M02](rewrite/milestones/M02-spec-audit.md) |
-| M3        | Database and libraries                 | Not started | —                                       |
+| M3        | Database and libraries                 | Done        | [M03](rewrite/milestones/M03-database-libraries.md) |
 | M4        | Indexing, change detection, metadata   | Not started | —                                       |
 | M5        | Thumbnails                             | Not started | —                                       |
 | M6        | Gallery                                | Not started | —                                       |
@@ -21,6 +21,16 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-26 · M3 · Database and libraries
+
+- `db`: the reference's migrations byte for byte, drizzle-compatible bookkeeping, pragmas, reader connections, library rows, settings storage. `reference.db` fixture made by the reference's own migrator proves compatibility both ways (REQ-001-08).
+- `indexer::libraries`: add (absolute, normalized, reachable within 5 s, duplicate check, label), remove, rescan behind a `ScanRequests` trait (no-op until M4). `cargo xtask libraries --db <file> list|add|remove|rescan`.
+- `app`: data folder `%APPDATA%good-gallery-rust` (`--data-dir`), Settings page with the *Libraries* section (add, browse, list, rescan, remove with confirmation, toasts), gallery empty states, lucide icons as SVG.
+- A copy of the real index lists its two libraries (CLI) and the app opens it (20,383 media items).
+- Spec 001 `Implemented` (REQ-001-05 partial until the scan queue exists); REQ-010-01 / -02 partial (storage), REQ-006-10 partial (two of four states).
+- Decisions in `docs/architecture.md`: migrations and compatibility, data folder, icons, UI state and jobs. Pitfalls: parallel wgpu tests crash (serialized), copying from the reference is blocked.
+- Next: M4 (Indexing, change detection, metadata).
 
 ### 2026-10-26 · M2 · Spec audit
 

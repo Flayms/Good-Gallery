@@ -64,8 +64,8 @@ The user adapts indexing and the thumbnail cache to their hardware and network: 
 
 | REQ        | Test                                                                                                                                                         | Result                                                       |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
-| REQ-010-01 | — | no test |
-| REQ-010-02 | — | no test |
+| REQ-010-01 | `crates/db/src/settings.rs` › starts_with_defaults_and_persists_updates | partial: storage only, the Settings page controls come in M10 |
+| REQ-010-02 | `crates/db/src/settings.rs` › rejects_out_of_range_values, falls_back_to_defaults… | partial: storage only, errors in the UI come in M10 |
 | REQ-010-03 | — | no test |
 | REQ-010-04 | — | no test |
 | REQ-010-05 | — | no test |

@@ -1,6 +1,6 @@
 [package]
 name = "indexer"
-description = "Scan queue, walk, watcher, writer, rescan scheduling."
+description = "Scan queue, walk, watcher, writer, rescan scheduling; library operations."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +8,12 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+db.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
 
 [lints]
 workspace = true

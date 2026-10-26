@@ -1,6 +1,7 @@
 //! Repository tasks, run with `cargo xtask <task>`.
 
 mod check_specs;
+mod libraries;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -13,8 +14,15 @@ fn main() -> ExitCode {
             let code = check_specs::run(&root, &args[1..], &mut |line| println!("{line}"));
             ExitCode::from(code as u8)
         }
+        Some("libraries") => match libraries::run(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("error: {error:#}");
+                ExitCode::FAILURE
+            }
+        },
         _ => {
-            eprintln!("usage: cargo xtask check-specs [--summary]");
+            eprintln!("usage: cargo xtask check-specs [--summary] | libraries …");
             ExitCode::FAILURE
         }
     }

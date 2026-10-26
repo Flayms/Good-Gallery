@@ -6,7 +6,7 @@ All specs were ported from the reference (`../good-gallery/docs/specs/`) on 2026
 
 | Spec                                                     | Area                                                             | Status   | Milestone |
 | -------------------------------------------------------- | ---------------------------------------------------------------- | -------- | --------- |
-| [001-library-management](001-library-management/spec.md) | Add, remove and rescan libraries                                 | Approved | M3        |
+| [001-library-management](001-library-management/spec.md) | Add, remove and rescan libraries                                 | Implemented | M3        |
 | [002-indexing](002-indexing/spec.md)                     | Scanning libraries into the index, scan queue, offline libraries | Approved | M4        |
 | [003-change-detection](003-change-detection/spec.md)     | Watcher, quick scans, scheduled checks                           | Approved | M4        |
 | [004-metadata](004-metadata/spec.md)                     | Dates, dimensions, ratings and tags from files and sidecars      | Approved | M4        |
