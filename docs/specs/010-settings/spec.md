@@ -68,5 +68,5 @@ The user adapts indexing and the thumbnail cache to their hardware and network: 
 | REQ-010-02 | `crates/db/src/settings.rs` › rejects_out_of_range_values, falls_back_to_defaults… | partial: storage only, errors in the UI come in M10 |
 | REQ-010-03 | — | no test |
 | REQ-010-04 | — | no test |
-| REQ-010-05 | — | no test |
-| REQ-010-06 | — | no test |
+| REQ-010-05 | `crates/indexer/src/thumb_cache.rs` › evicts_down_to_a_lowered_cap | partial: the cache evicts to a lowered limit; the setting has no UI until M10 |
+| REQ-010-06 | `crates/indexer/src/thumb_cache.rs` › req_010_06_clears_all_thumbnails | partial: the cache reports its usage and clears; the Settings section comes in M10 |

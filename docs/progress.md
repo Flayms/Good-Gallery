@@ -12,7 +12,7 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | M4a       | Indexing: metadata                     | Done        | [M04](rewrite/milestones/M04-indexing.md) |
 | M4b       | Indexing: scanning                     | Done        | [M04](rewrite/milestones/M04-indexing.md) |
 | M4c       | Indexing: change detection, oracle     | Done        | [M04](rewrite/milestones/M04-indexing.md) |
-| M5        | Thumbnails                             | Not started | —                                       |
+| M5        | Thumbnails                             | Done        | [M05](rewrite/milestones/M05-thumbnails.md) |
 | M6        | Gallery                                | Not started | —                                       |
 | M7        | Search and sidebar                     | Not started | —                                       |
 | M8        | Photo viewer and filmstrip             | Not started | —                                       |
@@ -23,6 +23,18 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-27 · M5 · Thumbnails
+
+- Plan written and self-approved (`docs/rewrite/milestones/M05-thumbnails.md`), one part.
+- `domain::thumbs` (widths, `pick_thumb_width`, `ThumbKey`), `media::thumbnail` (decode with JPEG shrink-on-load and EXIF orientation, Lanczos3 resize into 800 × 2400, WebP q80, ThumbHash, embedded previews through exiftool), `media::ffmpeg` (video frames at 10 %, AVIF), `db::thumbs`, `indexer::thumb_cache` (the Electron version's layout, atomic writes, LRU eviction, view clock), `indexer::thumbnails::ThumbnailService` (priority queue, background batches, failed vs offline, full cache). The indexer kicks it after writes and scans; the app starts it with the data folder's `thumbs` and the cache limit.
+- Spec 005 `Implemented`: all REQs pass except REQ-005-06 and -14, partial until the tiles exist (M6). REQ-010-05 / -06 partial (cache side). REQ-005-01 corrected (800 × 2400 box, no 3:1 crop).
+- Decisions in `docs/architecture.md`: cache layout kept (Defender question: revisit in M6 with cold-scroll measurements), rendering stack, AVIF through ffmpeg, ICC profiles not applied (deviation).
+- Oracle extended with thumbnails: 11 fixtures, same sizes, mean ≤ 2.72 levels. `cargo xtask thumbs` finds the real cache's thumbnails exactly as Node's hashing does (17,618 of 20,295).
+- Found under full-suite load: replacing a thumbnail failed with "Access is denied" while the file was held open (Defender); `ThumbCache::write` now retries the rename (test held the file open: red, then green).
+- Code review fixes: the cache's size count lost writes made during eviction or the startup walk and counted replaced files twice; every write over the cap started another eviction walk; a render thread waited for the cache measurement (with one thread, requests waited too); queued items of a library just found offline were still tried; a request arriving mid-render into a full cache got no files; large PNG / WebP hit the `image` crate's 512 MiB limit (now sharp's 268 Mpx); the variable `NOT IN` query evicted cached statements; the library status update is shared with the writer. Not tested: the decode limit (needs a > 512 MiB image) and the late-request window (needs a hook between two lines).
+- Open: (1) thumbnails render at normal thread priority; M6 measures whether background rendering costs frame time. (2) ffmpeg must be bundled (M11); without it videos get no thumbnails (error toast). (3) Settings for cache size / usage / clearing come in M10.
+- Next: M6 (Gallery): texture streaming reads through `ThumbCache::read` and requests missing thumbnails from the service; measure cold scrolling with the real cache.
 
 ### 2026-10-27 · M4c · Indexing: change detection, oracle
 

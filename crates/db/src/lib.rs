@@ -4,6 +4,7 @@
 pub mod libraries;
 mod migrate;
 pub mod settings;
+pub mod thumbs;
 pub mod writer;
 
 pub use rusqlite;

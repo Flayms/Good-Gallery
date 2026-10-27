@@ -3,6 +3,8 @@
 mod check_specs;
 mod libraries;
 mod oracle;
+mod oracle_thumbs;
+mod thumbs;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -30,8 +32,15 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Some("thumbs") => match thumbs::run(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("error: {error:#}");
+                ExitCode::FAILURE
+            }
+        },
         _ => {
-            eprintln!("usage: cargo xtask check-specs [--summary] | libraries … | oracle …");
+            eprintln!("usage: cargo xtask check-specs [--summary] | libraries … | oracle … | thumbs …");
             ExitCode::FAILURE
         }
     }

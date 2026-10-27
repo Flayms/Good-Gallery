@@ -82,6 +82,14 @@ pub fn insert(conn: &Connection, path: &str, label: &str, status: LibraryStatus)
     Ok(conn.query_row(&sql, (path, label, status.as_str()), from_row)?)
 }
 
+pub fn set_status(conn: &Connection, id: i64, status: LibraryStatus) -> Result<()> {
+    conn.execute(
+        "UPDATE library_roots SET status = ?1 WHERE id = ?2",
+        (status.as_str(), id),
+    )?;
+    Ok(())
+}
+
 /// Deletes a library with its media items and folders (foreign key cascades). False if there was none.
 pub fn delete(conn: &Connection, id: i64) -> Result<bool> {
     Ok(conn.execute("DELETE FROM library_roots WHERE id = ?1", [id])? > 0)

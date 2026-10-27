@@ -71,6 +71,8 @@ pub struct AppState {
     written_since_refresh: bool,
     /// Kept alive for the app's lifetime; dropping it stops the schedule.
     scheduler: Option<indexer::schedule::Scheduler>,
+    /// Renders thumbnails in the background; the gallery's tiles request theirs from it (M6).
+    thumbnails: Option<Arc<indexer::thumbnails::ThumbnailService>>,
 }
 
 impl AppState {
@@ -91,6 +93,12 @@ impl AppState {
     /// Runs scheduled scans for as long as the app runs.
     pub fn with_scheduler(mut self, scheduler: indexer::schedule::Scheduler) -> Self {
         self.scheduler = Some(scheduler);
+        self
+    }
+
+    /// Renders thumbnails for as long as the app runs.
+    pub fn with_thumbnails(mut self, thumbnails: Arc<indexer::thumbnails::ThumbnailService>) -> Self {
+        self.thumbnails = Some(thumbnails);
         self
     }
 
@@ -119,6 +127,7 @@ impl AppState {
             last_written_refresh: None,
             written_since_refresh: false,
             scheduler: None,
+            thumbnails: None,
         }
     }
 

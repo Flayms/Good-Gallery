@@ -65,10 +65,7 @@ impl IndexWriter {
                 "UPDATE library_roots SET status = ?1, last_scan_at = ?2 WHERE id = ?3",
                 params![status.as_str(), at, id],
             )?,
-            None => self.conn.execute(
-                "UPDATE library_roots SET status = ?1 WHERE id = ?2",
-                params![status.as_str(), id],
-            )?,
+            None => return libraries::set_status(&self.conn, id, status),
         };
         Ok(())
     }

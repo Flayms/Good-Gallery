@@ -1,6 +1,6 @@
 # 005 · Thumbnails
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Goal
 
@@ -12,7 +12,7 @@ Tiles appear instantly and stay sharp, even for libraries on slow network shares
 
 - **Given** a media item
 - **When** its thumbnails are rendered
-- **Then** WebP thumbnails 400 and 800 px wide are created, never larger than the original, at most 3 times as tall as wide, together with a placeholder
+- **Then** WebP thumbnails 400 and 800 px wide are created, never larger than the original and at most 2400 px (3 × the largest width) tall, together with a placeholder
 
 ### REQ-005-02 · Sharp tiles
 
@@ -122,18 +122,18 @@ Tiles appear instantly and stay sharp, even for libraries on slow network shares
 
 | REQ        | Test                                                                                                                                                                 | Result                                                                     |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| REQ-005-01 | — | no test |
-| REQ-005-02 | — | no test |
-| REQ-005-03 | — | no test |
-| REQ-005-04 | — | no test |
-| REQ-005-05 | — | no test |
-| REQ-005-06 | — | no test |
-| REQ-005-07 | — | no test |
-| REQ-005-08 | — | no test |
-| REQ-005-09 | — | no test |
-| REQ-005-10 | `crates/db/src/writer.rs` › rewriting_resets_the_thumbnail_only_when_the_content_changed | partial: index side only; thumbnails in M5 |
-| REQ-005-11 | — | no test |
-| REQ-005-12 | — | no test |
-| REQ-005-13 | — | no test |
-| REQ-005-14 | — | no test |
-| REQ-005-15 | — | no test |
+| REQ-005-01 | `crates/media/src/thumbnail.rs` › req_005_01_renders_every_width_as_webp_without_upscaling_plus_a_thumbhash, req_005_01_fits_tall_strips_into_2400_pixels; `crates/indexer/tests/end_to_end.rs` › req_005_08_renders_thumbnails_of_scanned_media; `cargo xtask oracle` (thumbnails) | pass |
+| REQ-005-02 | `crates/domain/src/thumbs.rs` › req_005_02_picks_the_smallest_thumbnail_covering_the_physical_width | pass (the tiles that call it come in M6) |
+| REQ-005-03 | `crates/media/src/thumbnail.rs` › req_005_03_matches_sharps_auto_orientation_for_every_orientation, req_005_03_turns_jpegs_upright_by_their_exif_orientation; `cargo xtask oracle` (portrait.jpg) | pass |
+| REQ-005-04 | `crates/media/src/thumbnail.rs` › req_005_04_uses_a_large_enough_embedded_preview_with_the_original_orientation, req_005_04_ignores_small_differently_shaped_or_invalid_previews, req_005_04_decodes_a_truncated_jpeg_partially, req_005_04_shrinks_large_jpegs_while_decoding; `crates/media/src/exiftool.rs` › req_005_04_reads_embedded_images | pass |
+| REQ-005-05 | `crates/media/src/ffmpeg.rs` › req_005_05_shows_the_frame_at_a_tenth_of_the_duration | pass |
+| REQ-005-06 | `crates/indexer/src/thumbnails.rs` › req_005_08_req_005_06_renders_pending_media_in_the_background_newest_first | partial: placeholders and failed states are stored; the tiles that show them come in M6 |
+| REQ-005-07 | `crates/indexer/src/thumbnails.rs` › req_005_07_runs_the_latest_request_first | pass |
+| REQ-005-08 | `crates/indexer/src/thumbnails.rs` › req_005_08_req_005_06_renders_pending_media_in_the_background_newest_first, req_005_08_picks_up_media_written_later, req_005_08_renders_more_than_one_batch; `crates/db/src/thumbs.rs` › req_005_08_lists_pending_media_newest_first_without_offline_libraries; `crates/indexer/tests/end_to_end.rs` › req_005_08_renders_thumbnails_of_scanned_media | pass |
+| REQ-005-09 | `crates/indexer/src/thumbnails.rs` › req_005_09_req_005_14_marks_unrenderable_media_as_failed_but_only_while_the_library_is_reachable, req_005_09_a_panic_marks_the_item_failed_and_rendering_goes_on, req_005_09_skips_queued_items_of_a_library_found_offline; `crates/db/src/thumbs.rs` › stores_the_outcome_unless_the_file_changed | pass |
+| REQ-005-10 | `crates/db/src/writer.rs` › req_005_10_rewriting_resets_the_thumbnail_only_when_the_content_changed; `crates/indexer/src/thumb_cache.rs` › req_005_10_path_changes_with_every_part_of_the_key; `crates/db/src/thumbs.rs` › stores_the_outcome_unless_the_file_changed | pass |
+| REQ-005-11 | `crates/indexer/src/thumb_cache.rs` › req_005_11_evicts_least_recently_viewed_thumbnails_once_over_the_cap, evicts_down_to_a_lowered_cap, req_005_11_reading_counts_as_a_view_at_most_once_an_hour, req_005_11_counts_replaced_and_concurrent_writes_once | pass (M6's texture loader must read through `ThumbCache::read`) |
+| REQ-005-12 | `crates/indexer/src/thumbnails.rs` › req_005_12_stores_only_requested_thumbnails_once_the_cache_is_full | pass |
+| REQ-005-13 | `crates/indexer/src/thumb_cache.rs` › req_005_13_measures_existing_thumbnails_and_drops_leftover_temp_files, req_005_13_writes_leave_no_temp_files | pass |
+| REQ-005-14 | `crates/indexer/src/thumbnails.rs` › req_005_09_req_005_14_marks_unrenderable_media_as_failed_but_only_while_the_library_is_reachable | partial: cached thumbnails are read without touching the library, and items of an offline library stay pending; the tiles come in M6 |
+| REQ-005-15 | `crates/indexer/src/thumb_cache.rs` › req_005_15_matches_the_electron_versions_cache_paths; `cargo xtask thumbs` on a copy of the real index and cache (17,618 of 20,295 found, as with Node's hashing) | pass |

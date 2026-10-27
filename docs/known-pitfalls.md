@@ -71,6 +71,14 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 
 * **A stat on a hung SMB share blocks its thread for the OS timeout** (often 30–60 s), past our 5 s reachability timeout. `reachability::with_timeout` leaves that thread behind; fine for single checks, but periodic checks of many offline libraries (M4) must not start a new check while the previous one for the same library still runs. (M4c: scans run one at a time and queued scans merge per library, so the minute-by-minute re-checks leave at most one stuck thread behind per hung library.)
 
+## Thumbnails
+
+* **Replacing a file on Windows fails while someone has it open without delete sharing** (Defender scanning a file just written, often): `std::fs::rename` returns "Access is denied". `ThumbCache::write` retries for ≈ 300 ms; a test under full-suite load hit it.
+* **exiftool can't write `PreviewImage` into a plain JPEG**, so embedded previews can't be generated as fixtures; the unit tests fake the preview source. `ThumbnailImage` (IFD1) is writable and tests the binary extraction.
+* **Compare transparent thumbnails premultiplied.** libwebp drops the color of fully transparent pixels, sharp's output doesn't, so raw RGBA differences look large (mean 5.5) where nothing visible differs (1.4 premultiplied).
+* **The `image` crate decodes AVIF only with `avif-native`** (dav1d, a C library with a meson build); AVIF goes through ffmpeg instead.
+* **`fit: 'inside'` in sharp enlarges** unless `withoutEnlargement` is set: the 100 px ThumbHash input is enlarged from small images, the thumbnails never are.
+
 ## Carried over from the reference
 
 These still apply to the Rust implementation. The reference's own `docs/known-pitfalls.md` has the Electron-specific rest.

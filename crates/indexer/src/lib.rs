@@ -7,6 +7,8 @@ pub mod reachability;
 pub mod retry;
 pub mod scan;
 pub mod schedule;
+pub mod thumb_cache;
+pub mod thumbnails;
 pub mod walk;
 pub mod watcher;
 

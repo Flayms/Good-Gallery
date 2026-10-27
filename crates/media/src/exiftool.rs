@@ -1,6 +1,8 @@
 //! A pool of long-running exiftool processes (`-stay_open`), read with the arguments of exiftool-vendored (the
 //! reference's library), so both apps see the same tags.
 
+use crate::thumbnail::PreviewSource;
+use base64::Engine as _;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -289,21 +291,58 @@ impl ExifTool {
 
     /// All tags of `file` as exiftool-vendored reads them: one JSON object.
     pub fn read(&self, file: &Path) -> Result<serde_json::Map<String, serde_json::Value>, ExifToolError> {
-        let mut process = self.acquire()?;
-        let result = process.run(&read_args(file));
-        match result {
-            Ok(reply) => {
-                self.release(Some(process));
-                parse_reply(&reply)
-            }
-            Err(error) => {
-                // A timed-out or broken process can't be trusted with the next file.
-                drop(process);
-                self.release(None);
-                Err(error)
-            }
-        }
+        parse_reply(&self.run(&read_args(file))?)
     }
+
+    /// A binary tag of `file` (e.g. an embedded preview), as exiftool-vendored's `extractBinaryTagToBuffer` reads it;
+    /// `None` if the file doesn't have it.
+    pub fn read_binary(&self, tag: &str, file: &Path) -> Result<Option<Vec<u8>>, ExifToolError> {
+        let tags = parse_reply(&self.run(&binary_args(tag, file))?)?;
+        // exiftool may spell the tag in another letter case.
+        let value = tags
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(tag))
+            .and_then(|(_, value)| value.as_str());
+        Ok(value
+            .and_then(|value| value.strip_prefix("base64:"))
+            .and_then(|data| base64::engine::general_purpose::STANDARD.decode(data).ok()))
+    }
+
+    fn run(&self, args: &[String]) -> Result<String, ExifToolError> {
+        let mut process = self.acquire()?;
+        let result = process.run(args);
+        if result.is_ok() {
+            self.release(Some(process));
+        } else {
+            // A timed-out or broken process can't be trusted with the next file.
+            drop(process);
+            self.release(None);
+        }
+        result
+    }
+}
+
+/// Embedded JPEG previews for thumbnails (REQ-005-04). Most files have none; real read errors resurface when the
+/// file itself is decoded.
+impl PreviewSource for ExifTool {
+    fn extract_preview(&self, file: &Path) -> Option<Vec<u8>> {
+        self.read_binary("PreviewImage", file)
+            .ok()
+            .flatten()
+            .filter(|data| !data.is_empty())
+    }
+}
+
+/// The arguments of exiftool-vendored's `BinaryToBufferTask`: the tag as base64 in JSON.
+fn binary_args(tag: &str, file: &Path) -> Vec<String> {
+    vec![
+        "-charset".into(),
+        "filename=utf8".into(),
+        "-json".into(),
+        "-b".into(),
+        format!("-{tag}"),
+        file.to_string_lossy().into_owned(),
+    ]
 }
 
 fn parse_reply(reply: &str) -> Result<serde_json::Map<String, serde_json::Value>, ExifToolError> {
@@ -386,6 +425,40 @@ pub(crate) mod tests {
             assert_eq!(tags["ImageWidth"], 3, "{name}");
             assert_eq!(tags["FileName"], name, "{name}");
         }
+    }
+
+    /// REQ-005-04: binary tags come back as the bytes exiftool stored; files without them give `None`.
+    #[test]
+    fn req_005_04_reads_embedded_images() {
+        let Some(exiftool) = exiftool() else { return };
+        let dir = tempfile::tempdir().unwrap();
+        let (file, thumb) = (dir.path().join("a.jpg"), dir.path().join("t.jpg"));
+        image::RgbImage::new(64, 48).save(&file).unwrap();
+        image::RgbImage::new(16, 12).save(&thumb).unwrap();
+        assert_eq!(exiftool.read_binary("ThumbnailImage", &file).unwrap(), None);
+        assert_eq!(exiftool.extract_preview(&file), None);
+
+        let status = Command::new(find_exiftool().unwrap())
+            .arg("-overwrite_original")
+            .arg(format!("-ThumbnailImage<={}", thumb.display()))
+            .arg(&file)
+            .stdout(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        assert_eq!(
+            exiftool.read_binary("ThumbnailImage", &file).unwrap(),
+            Some(std::fs::read(&thumb).unwrap())
+        );
+    }
+
+    #[test]
+    fn uses_the_reference_arguments_for_binary_tags() {
+        assert_eq!(
+            binary_args("PreviewImage", Path::new("D:\\a.jpg")).join(" "),
+            "-charset filename=utf8 -json -b -PreviewImage D:\\a.jpg"
+        );
     }
 
     #[test]

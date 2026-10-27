@@ -112,6 +112,7 @@ struct Shared {
     events: Mutex<Sender<IndexerEvent>>,
     /// Tells the UI to look at the events (e.g. requests a repaint).
     notify: Box<dyn Fn() + Send + Sync>,
+    on_written: Box<dyn Fn() + Send + Sync>,
     concurrency: AtomicUsize,
     watchers: Mutex<HashMap<i64, LibraryWatcher>>,
 }
@@ -210,6 +211,9 @@ pub struct IndexerDeps {
     /// Parallel file reads.
     pub concurrency: usize,
     pub notify: Box<dyn Fn() + Send + Sync>,
+    /// Called after a scan wrote files and after every scan, on the indexer thread: starts background rendering of
+    /// new thumbnails (`ThumbnailService::kick`).
+    pub on_written: Box<dyn Fn() + Send + Sync>,
 }
 
 pub struct Indexer {
@@ -226,6 +230,7 @@ impl Indexer {
             wake: Condvar::new(),
             events: Mutex::new(tx),
             notify: deps.notify,
+            on_written: deps.on_written,
             concurrency: AtomicUsize::new(deps.concurrency.max(1)),
             watchers: Mutex::new(HashMap::new()),
         });
@@ -388,6 +393,7 @@ fn run(
             if progress.indexed > last_indexed {
                 last_indexed = progress.indexed;
                 shared.send(IndexerEvent::Written(job.library));
+                (shared.on_written)();
             }
         };
         let concurrency = shared.concurrency.load(Ordering::Relaxed);
@@ -433,12 +439,14 @@ fn run(
         };
         // Wakes `remove_library` calls waiting for this scan to stop.
         shared.wake.notify_all();
+        // A library back online may have media items waiting for thumbnails.
+        (shared.on_written)();
         shared.send(IndexerEvent::Done(job.library, result));
         shared.send(IndexerEvent::Status(status));
     }
 }
 
-fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
+pub(crate) fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
     panic
         .downcast_ref::<&str>()
         .map(|s| s.to_string())
@@ -527,6 +535,7 @@ mod tests {
                 is_reachable,
                 concurrency: 2,
                 notify: Box::new(|| {}),
+                on_written: Box::new(|| {}),
             });
             Self {
                 dirs,

@@ -1,6 +1,7 @@
 //! `cargo xtask oracle [--reference <dir>] [--keep <dir>]`: generates a fixture library, indexes it with the reference
 //! (`xtask/oracle/reference-index.ts`, bundled with the reference's vite and run with Node) and with this indexer, and
-//! diffs the two indexes, ignoring ids and scan times. Documented deviations are listed but don't fail the run.
+//! diffs the two indexes, ignoring ids and scan times. Documented deviations are listed but don't fail the run. Then
+//! compares thumbnails rendered by both (`oracle_thumbs`).
 
 use anyhow::{Context as _, bail};
 use db::libraries::{self, LibraryStatus};
@@ -372,7 +373,7 @@ fn extra_files() -> Vec<(&'static str, Vec<u8>)> {
     ]
 }
 
-fn run_command(command: &mut Command) -> anyhow::Result<()> {
+pub fn run_command(command: &mut Command) -> anyhow::Result<()> {
     let output = command.output().with_context(|| format!("can't run {command:?}"))?;
     if !output.status.success() {
         bail!(
@@ -526,7 +527,7 @@ pub fn run(args: &[String]) -> anyhow::Result<bool> {
 
     let (reference_index, our_index) = (work.join("reference.db"), work.join("ours.db"));
     index_with_reference(&reference, &work, &library, &reference_index)?;
-    index_with_ours(exiftool, &library, &our_index)?;
+    index_with_ours(exiftool.clone(), &library, &our_index)?;
 
     let reference_rows = snapshot(&db::open_reader(&reference_index)?)?;
     let our_rows = snapshot(&db::open_reader(&our_index)?)?;
@@ -558,15 +559,16 @@ pub fn run(args: &[String]) -> anyhow::Result<bool> {
             deviation.table, deviation.key
         );
     }
-    if let Some(dir) = &keep {
-        println!("kept in {}", dir.display());
-    }
     println!(
         "{} documented, {} unexpected differences",
         documented.len(),
         unexpected.len()
     );
-    Ok(unexpected.is_empty())
+    let thumbnails_match = crate::oracle_thumbs::run(&reference, &work, &exiftool)?;
+    if let Some(dir) = &keep {
+        println!("kept in {}", dir.display());
+    }
+    Ok(unexpected.is_empty() && thumbnails_match)
 }
 
 #[cfg(test)]
