@@ -118,17 +118,17 @@ Every library is mirrored in a local index, so browsing and searching 50k–500k
 
 | REQ        | Test                                                                                                                                                        | Result                                                                  |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| REQ-002-01 | `crates/domain/src/media.rs` › recognizes_supported_files_in_any_letter_case | partial: file types only; scanning in M4b |
-| REQ-002-02 | `crates/domain/src/media.rs` › skips_dotfiles_and_housekeeping_folders | partial: name rules only; the walk in M4b |
-| REQ-002-03 | — | no test |
-| REQ-002-04 | `crates/db/src/writer.rs` › removes_vanished_folders_with_everything_below | partial: removal in the index; detecting changes comes with scanning (M4b) |
-| REQ-002-05 | — | no test |
-| REQ-002-06 | — | no test |
-| REQ-002-07 | — | no test |
-| REQ-002-08 | — | no test |
-| REQ-002-09 | — | no test |
-| REQ-002-10 | — | no test |
-| REQ-002-11 | — | no test |
-| REQ-002-12 | — | no test |
-| REQ-002-13 | — | no test |
-| REQ-002-14 | `crates/db/src/writer.rs` › prunes_unused_tags_bottom_up | partial: pruning itself; running it after a scan comes in M4b |
+| REQ-002-01 | `crates/domain/src/media.rs` › recognizes_supported_files…; `crates/indexer/src/scan.rs` › indexes_media_recursively_and_skips_housekeeping_files | pass |
+| REQ-002-02 | `crates/domain/src/media.rs` › skips_dotfiles…; `crates/indexer/src/walk.rs` › walks_depth_first_and_skips_housekeeping, skips_symbolic_links; `scan.rs` › indexes_media_recursively… | pass |
+| REQ-002-03 | `crates/indexer/src/scan.rs` › indexes_media_recursively_and_skips_housekeeping_files | pass |
+| REQ-002-04 | `crates/indexer/src/scan.rs` › rescans_incrementally; `crates/db/src/writer.rs` › removes_vanished_folders_with_everything_below | pass |
+| REQ-002-05 | `crates/indexer/src/scan.rs` › rereads_files_from_an_older_metadata_extractor | partial: the full scan instead of a quick one for such libraries comes with the schedule (M4c) |
+| REQ-002-06 | `crates/indexer/src/scan.rs` › writes_read_files_while_the_scan_still_runs | pass |
+| REQ-002-07 | `crates/indexer/src/indexer.rs` › merges_scopes_keeping_the_more_thorough_kind, runs_scans_one_at_a_time_in_request_order | pass |
+| REQ-002-08 | `crates/app/tests/indexing.rs` › shows_which_library_is_scanned_with_counts_and_waiting_scans | partial: shown in a corner until the sidebar exists (M7); the spinner on the library entry comes with it |
+| REQ-002-09 | `crates/indexer/src/scan.rs` › keeps_the_index_of_unreachable_libraries | pass |
+| REQ-002-10 | `crates/indexer/src/scan.rs` › stops_and_keeps_everything_when_the_library_goes_offline_during_a_scan | pass |
+| REQ-002-11 | `crates/indexer/src/scan.rs` (failed folders keep their media and are stored as unlisted) | no test |
+| REQ-002-12 | `crates/indexer/src/scan.rs` › indexes_files_with_unreadable_metadata_without_it | partial: files that can't be accessed at all aren't tested |
+| REQ-002-13 | `crates/indexer/src/indexer.rs` › a_panicking_scan_counts_as_finished…, a_panic_while_reading_one_file_costs_only_that_file | pass |
+| REQ-002-14 | `crates/indexer/src/scan.rs` › rescans_incrementally; `crates/db/src/writer.rs` › prunes_unused_tags_bottom_up | pass |

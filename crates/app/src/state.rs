@@ -3,10 +3,14 @@
 use crate::toasts::Toasts;
 use db::libraries::Library;
 use db::rusqlite::Connection;
-use indexer::ScanRequests;
+use indexer::{IndexerEvent, IndexerStatus, ScanRequests};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+/// While a scan writes, the gallery and counts refresh at most this often (REQ-006-11).
+const REFRESH_WHILE_SCANNING: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Page {
@@ -60,6 +64,11 @@ pub struct AppState {
     pending_jobs: usize,
     pub settings_page: SettingsPage,
     pub toasts: Toasts,
+    indexer_events: Option<Receiver<IndexerEvent>>,
+    pub indexer_status: IndexerStatus,
+    /// When written files were last shown; `None` until the running scan wrote its first files.
+    last_written_refresh: Option<Instant>,
+    written_since_refresh: bool,
 }
 
 impl AppState {
@@ -68,6 +77,13 @@ impl AppState {
         state.db = Some(Arc::new(Mutex::new(conn)));
         state.refresh();
         state
+    }
+
+    /// Sends scan requests to `indexer` and shows what it reports.
+    pub fn with_indexer(mut self, indexer: Arc<dyn ScanRequests>, events: Receiver<IndexerEvent>) -> Self {
+        self.scans = indexer;
+        self.indexer_events = Some(events);
+        self
     }
 
     /// The index couldn't be opened: the app shows `error` instead of the gallery.
@@ -90,14 +106,34 @@ impl AppState {
             pending_jobs: 0,
             settings_page: SettingsPage::default(),
             toasts: Toasts::default(),
+            indexer_events: None,
+            indexer_status: IndexerStatus::default(),
+            last_written_refresh: None,
+            written_since_refresh: false,
         }
     }
 
     /// Reloads what the UI shows from the index.
     pub fn refresh(&mut self) {
-        let Some(db) = &self.db else { return };
-        let conn = lock(db);
-        let result = indexer::libraries::list(&conn)
+        let Some(db) = self.db.clone() else { return };
+        let conn = lock(&db);
+        self.reload(&conn);
+    }
+
+    /// [`Self::refresh`] unless the connection is busy; false if it was.
+    fn try_refresh(&mut self) -> bool {
+        let Some(db) = self.db.clone() else { return true };
+        let conn = match db.try_lock() {
+            Ok(conn) => conn,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return false,
+        };
+        self.reload(&conn);
+        true
+    }
+
+    fn reload(&mut self, conn: &Connection) {
+        let result = indexer::libraries::list(conn)
             .map_err(|e| e.to_string())
             .and_then(|libraries| {
                 let count = conn
@@ -105,7 +141,6 @@ impl AppState {
                     .map_err(|e| e.to_string())?;
                 Ok((libraries, count))
             });
-        drop(conn);
         match result {
             Ok((libraries, count)) => (self.libraries, self.media_count) = (libraries, count),
             Err(error) => self.toasts.error(error),
@@ -172,6 +207,42 @@ impl AppState {
         while let Ok(event) = self.events.1.try_recv() {
             self.apply(event);
         }
+        let events: Vec<IndexerEvent> = self.indexer_events.iter().flat_map(|rx| rx.try_iter()).collect();
+        for event in events {
+            self.apply_indexer(event);
+        }
+        // Written files show right away the first time, then at most every 5 seconds, and once more at the end.
+        if self.written_since_refresh
+            && self
+                .last_written_refresh
+                .is_none_or(|at| at.elapsed() >= REFRESH_WHILE_SCANNING)
+        {
+            // Not while a background job (e.g. removing a large library) holds the connection: try next frame.
+            if self.try_refresh() {
+                self.written_since_refresh = false;
+                self.last_written_refresh = Some(Instant::now());
+            }
+        }
+    }
+
+    fn apply_indexer(&mut self, event: IndexerEvent) {
+        match event {
+            IndexerEvent::Status(status) => self.indexer_status = status,
+            IndexerEvent::Written(_) => self.written_since_refresh = true,
+            IndexerEvent::Done(_, result) => {
+                if let indexer::ScanResult::Failed(error) = result {
+                    self.toasts.error(format!("Indexing failed: {error}"));
+                }
+                self.written_since_refresh = false;
+                self.last_written_refresh = None;
+                self.refresh();
+            }
+        }
+    }
+
+    /// Whether the UI must keep polling (jobs or a scan running).
+    pub fn is_active(&self) -> bool {
+        self.is_busy() || self.indexer_status.current.is_some() || self.written_since_refresh
     }
 
     /// Waits for all background jobs and applies them (tests, before stepping the UI).

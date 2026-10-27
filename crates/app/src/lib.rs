@@ -3,6 +3,7 @@
 pub mod empty_state;
 pub mod format;
 pub mod icons;
+pub mod indexer_progress;
 pub mod settings_page;
 pub mod state;
 pub mod theme;
@@ -25,7 +26,7 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     let ctx = ui.ctx().clone();
     ctx.layer_painter(egui::LayerId::background())
         .rect_filled(ctx.content_rect(), 0.0, theme::DARKROOM);
-    if state.is_busy() {
+    if state.is_active() {
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
 
@@ -37,6 +38,7 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
             Page::Settings => settings_page::ui(ui, state),
         }
     }
+    indexer_progress::show(&ctx, state);
     state.toasts.show(&ctx);
 }
 

@@ -89,13 +89,13 @@ Files that are added, changed, renamed or deleted in a library show up in the ga
 
 | REQ        | Test                                                                                                                                                             | Result                                                          |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| REQ-003-01 | — | no test |
-| REQ-003-02 | — | no test |
-| REQ-003-03 | — | no test |
-| REQ-003-04 | — | no test |
-| REQ-003-05 | — | no test |
+| REQ-003-01 | `crates/indexer/src/watcher.rs` › reports_new_files_in_a_watched_folder | partial: the watcher itself; started and stopped by the indexer in M4c |
+| REQ-003-02 | `crates/indexer/src/watcher.rs` › reports_the_changed_paths_once_changes_settle, reports_within_the_maximum_delay… | pass |
+| REQ-003-03 | `crates/indexer/src/watcher.rs` › normalizes_separators_and_skips_housekeeping_paths | pass |
+| REQ-003-04 | `crates/indexer/src/scan.rs` › checks_only_reported_files_of_changed_folders | partial: the scan itself; reported by the watcher in M4c |
+| REQ-003-05 | `crates/indexer/src/watcher.rs` › reports_unknown_changes_when_events_were_lost | partial: the 5,000-path limit is checked when queueing (M4c) |
 | REQ-003-06 | — | no test |
 | REQ-003-07 | — | no test |
-| REQ-003-08 | — | no test |
-| REQ-003-09 | — | no test |
-| REQ-003-10 | — | no test |
+| REQ-003-08 | `crates/indexer/src/scan.rs` › quick_scans_only_relist_folders_whose_entries_changed, falls_back_to_a_full_scan_without_stored_folders | pass |
+| REQ-003-09 | `crates/indexer/src/schedule.rs` › scans_at_startup_and_offline_libraries…, quick_checks_every_interval… | partial: the schedule itself; started by the app in M4c |
+| REQ-003-10 | `crates/indexer/src/schedule.rs` › scans_at_startup_and_offline_libraries_again_and_again | partial: the schedule itself; watching again after the reconnect in M4c |

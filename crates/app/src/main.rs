@@ -93,21 +93,45 @@ fn parse_args() -> anyhow::Result<Options> {
     Ok(Options { data_dir, screenshot })
 }
 
-/// Opens the index in the data folder, or the reason it can't be opened.
-fn open_state(data_dir: &Path) -> AppState {
+/// Opens the index in the data folder (one connection for the UI, one for the indexer) and starts the indexer, or
+/// says why it can't. `ctx` lets the indexer wake the UI.
+fn open_state(data_dir: &Path, ctx: &egui::Context) -> AppState {
     let opened = std::fs::create_dir_all(data_dir)
         .with_context(|| format!("can't create {}", data_dir.display()))
         .and_then(|()| {
             let path = data_dir.join("gallery.db");
-            db::open(&path).with_context(|| format!("can't open {}", path.display()))
+            let open = || db::open(&path).with_context(|| format!("can't open {}", path.display()));
+            Ok((open()?, open()?))
         });
-    match opened {
-        Ok(conn) => AppState::new(conn, Arc::new(indexer::NoScans), Arc::new(NativeFolderPicker)),
+    let (conn, writer) = match opened {
+        Ok(connections) => connections,
         Err(error) => {
             tracing::error!("{error:#}");
-            AppState::failed(format!("{error:#}"))
+            return AppState::failed(format!("{error:#}"));
         }
-    }
+    };
+    let settings = db::settings::load(&conn).unwrap_or_default();
+    let state = AppState::new(conn, Arc::new(indexer::NoScans), Arc::new(NativeFolderPicker));
+    let Some(exiftool) = media::exiftool::find_exiftool() else {
+        tracing::error!("exiftool not found: libraries can't be indexed");
+        let mut state = state;
+        state
+            .toasts
+            .error("exiftool not found, so libraries can't be indexed. Put exiftool.exe next to the app.");
+        return state;
+    };
+    let concurrency = settings.io_concurrency as usize;
+    let ctx = ctx.clone();
+    let (indexer, events) = indexer::Indexer::start(indexer::IndexerDeps {
+        writer: db::writer::IndexWriter::new(writer),
+        metadata: Arc::new(media::exiftool::ExifTool::new(exiftool, concurrency)),
+        is_reachable: Arc::new(|path: &Path| {
+            indexer::reachability::is_reachable_directory(path, indexer::reachability::TIMEOUT)
+        }),
+        concurrency,
+        notify: Box::new(move || ctx.request_repaint()),
+    });
+    state.with_indexer(Arc::new(indexer), events)
 }
 
 fn main() -> anyhow::Result<()> {
@@ -115,7 +139,6 @@ fn main() -> anyhow::Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
     let options = parse_args()?;
-    let state = open_state(&options.data_dir);
     let screenshot_failed = Arc::new(AtomicBool::new(false));
     let failed = screenshot_failed.clone();
     let native = eframe::NativeOptions {
@@ -131,7 +154,7 @@ fn main() -> anyhow::Result<()> {
         Box::new(move |cc| {
             app::setup(&cc.egui_ctx);
             Ok(Box::new(GalleryApp {
-                state,
+                state: open_state(&options.data_dir, &cc.egui_ctx),
                 screenshot: options.screenshot,
                 screenshot_failed: failed,
                 frames: 0,

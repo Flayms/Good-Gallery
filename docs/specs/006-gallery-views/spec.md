@@ -119,6 +119,6 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 | REQ-006-08 | — | no test |
 | REQ-006-09 | — | no test |
 | REQ-006-10 | `crates/app/tests/snapshots.rs` › first_run_shows_the_no_libraries_empty_state, shows_no_media_found_while_nothing_is_indexed | partial: no libraries and no media; loading and error states come with the gallery (M6) |
-| REQ-006-11 | — | no test |
+| REQ-006-11 | `crates/indexer/src/scan.rs` › writes_read_files_while_the_scan_still_runs; `crates/app/tests/indexing.rs` › refreshes_after_the_first_written_files_and_when_the_scan_ends | partial: library list and counts; the gallery and tag suggestions follow in M6 and M7 |
 | REQ-006-12 | — | no test |
 | REQ-006-13 | — | no test |

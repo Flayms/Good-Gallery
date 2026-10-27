@@ -38,7 +38,9 @@ enum Outcome {
 
 /// `REQ-012-01` in comments, `req_012_01` at the start of test names.
 static REFERENCE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\bREQ-(\d{3})-(\d{2})\b|\breq_(\d{3})_(\d{2})(?:_|\b)").unwrap());
+    LazyLock::new(|| Regex::new(r"\bREQ-(\d{3})-(\d{2})\b|\b(req_\d{3}_\d{2}(?:_req_\d{3}_\d{2})*)(?:_|\b)").unwrap());
+/// One `req_NNN_XX` of a test name's prefix (`req_002_01_req_002_02_…` names several).
+static NAME_REQ: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"req_(\d{3})_(\d{2})").unwrap());
 static HEADING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^###\s+(~~)?\s*(REQ-\d{3}-\d{2})").unwrap());
 static STATUS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^\*\*Status:\*\*\s*(\w+)").unwrap());
 static SPEC_PATH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:^|/)((\d{3})-[^/]+)/spec\.md$").unwrap());
@@ -119,12 +121,12 @@ fn references_in(text: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     REFERENCE
         .captures_iter(text)
-        .map(|c| {
-            let (spec, n) = match (c.get(1), c.get(2)) {
-                (Some(spec), Some(n)) => (spec.as_str(), n.as_str()),
-                _ => (&c[3], &c[4]),
-            };
-            format!("REQ-{spec}-{n}")
+        .flat_map(|c| match (c.get(1), c.get(2)) {
+            (Some(spec), Some(n)) => vec![format!("REQ-{}-{}", spec.as_str(), n.as_str())],
+            _ => NAME_REQ
+                .captures_iter(&c[3])
+                .map(|r| format!("REQ-{}-{}", &r[1], &r[2]))
+                .collect(),
         })
         .filter(|id| seen.insert(id.clone()))
         .collect()
@@ -627,6 +629,11 @@ pub(crate) mod tests {
 
         assert_eq!(references_in(&format!("fn {name}_works() {{}}")), [id.as_str()]);
         assert_eq!(references_in(&format!("fn {name}() {{}}")), [id.as_str()]);
+        let second = req(1, 2).to_lowercase().replace('-', "_");
+        assert_eq!(
+            references_in(&format!("fn {name}_{second}_works() {{}}")),
+            [id.clone(), req(1, 2)]
+        );
         assert_eq!(references_in(&format!("/// {id}: works")), [id.as_str()]);
         assert!(references_in(&format!("/// {id}1 X{id} fn snapshot_{name}()")).is_empty());
     }

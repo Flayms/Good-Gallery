@@ -87,10 +87,14 @@ fn is_unique_violation(error: &db::Error) -> bool {
 
 /// Removes a library with its media items from the index and stops its scans. Files on disk aren't touched.
 pub fn remove(conn: &Connection, id: i64, scans: &dyn ScanRequests) -> Result<()> {
+    if rows::get(conn, id)?.is_none() {
+        return Err(LibraryError::NotFound);
+    }
+    // Stop its scan first (this waits for a running scan to end), so nothing writes rows of a deleted library.
+    scans.remove_library(id);
     if !rows::delete(conn, id)? {
         return Err(LibraryError::NotFound);
     }
-    scans.remove_library(id);
     Ok(())
 }
 

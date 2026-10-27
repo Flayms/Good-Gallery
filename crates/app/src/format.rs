@@ -11,10 +11,32 @@ pub fn medium_date_time(ms: i64) -> String {
     }
 }
 
+/// A count with thousands separators: "12,345". Follows the reference's English output; locale-dependent grouping
+/// comes with REQ-013-13.
+pub fn count(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, digit) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(digit);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::NaiveDate;
+
+    #[test]
+    fn counts_have_thousands_separators() {
+        assert_eq!(count(0), "0");
+        assert_eq!(count(999), "999");
+        assert_eq!(count(1234), "1,234");
+        assert_eq!(count(1_234_567), "1,234,567");
+    }
 
     #[test]
     fn formats_without_seconds() {

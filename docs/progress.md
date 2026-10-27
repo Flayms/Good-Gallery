@@ -10,7 +10,7 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | M2        | Spec audit                             | Done        | [M02](rewrite/milestones/M02-spec-audit.md) |
 | M3        | Database and libraries                 | Done        | [M03](rewrite/milestones/M03-database-libraries.md) |
 | M4a       | Indexing: metadata                     | Done        | [M04](rewrite/milestones/M04-indexing.md) |
-| M4b       | Indexing: scanning                     | Not started | [M04](rewrite/milestones/M04-indexing.md) |
+| M4b       | Indexing: scanning                     | Done        | [M04](rewrite/milestones/M04-indexing.md) |
 | M4c       | Indexing: change detection, oracle     | Not started | [M04](rewrite/milestones/M04-indexing.md) |
 | M5        | Thumbnails                             | Not started | —                                       |
 | M6        | Gallery                                | Not started | —                                       |
@@ -23,6 +23,15 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-26 · M4b · Indexing: scanning
+
+- `indexer::walk` + `retry`, `indexer::scan::scan_root` (full, quick and changes scans on worker threads, batched writes, removals, offline handling), `indexer::Indexer` (scan queue with merging, one scan thread, `catch_unwind` per scan and per file). The reference's scan tests are ported and pass; an end-to-end test indexes a PNG with its sidecar through the real exiftool and checks that no file changed.
+- App: two connections (UI, indexer), indexer started with exiftool from `PATH` / `GOOD_GALLERY_EXIFTOOL` (an error toast if missing), library operations queue real scans, scan progress in the bottom-left corner, counts refreshed after the first written files, every 5 s, and at the end.
+- M4a review fixes went into the M4a commit: exiftool-vendored's real arguments (`-fast`, `struct=1`, `keepUTCTime`, UTF-8 filter), face regions from the region structs (the reference misses them, REQ-004-09 wins), parallel sidecar reads, DST gap, JavaScript whitespace in tag names.
+- check-specs: chained REQ prefixes in test names (`req_002_01_req_002_02_…`).
+- Open: REQ-002-11 has no test (a folder that can't be listed is hard to make on Windows without admin rights); no startup scans yet (M4c).
+- Next: M4c (watcher, changes scans, schedule, oracle).
 
 ### 2026-10-26 · M4a · Indexing: metadata
 

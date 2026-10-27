@@ -96,7 +96,7 @@ Search and sorting rely on the tags, ratings and dates that photo tools (Lightro
 
 | REQ        | Test                                                                                                                                                                | Result                                                                    |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| REQ-004-01 | — | no test |
+| REQ-004-01 | `crates/indexer/tests/end_to_end.rs` › indexes_a_photo_with_its_sidecar_without_touching_files (exiftool) | pass |
 | REQ-004-02 | `crates/media/src/metadata.rs` › swaps_dimensions_for_rotated_images_and_videos | pass |
 | REQ-004-03 | `crates/media/src/metadata.rs` › prefers_embedded_capture_dates…, takes_the_first_valid_date…, uses_offset_tags…, infers_the_zone…, reads_zoneless_video_dates_as_utc, reads_zoneless_photo_dates_in_local_time | partial: zone from the GPS position (geo-tz) not ported, see `docs/architecture.md` |
 | REQ-004-04 | `crates/media/src/metadata.rs` › reads_video_duration | pass |
@@ -105,5 +105,5 @@ Search and sorting rely on the tags, ratings and dates that photo tools (Lightro
 | REQ-004-07 | `crates/media/src/metadata.rs` › keeps_hierarchies…; `crates/db/src/writer.rs` › stores_hierarchies_links_the_leaf_and_refuses_cycles | pass |
 | REQ-004-08 | `crates/db/src/writer.rs` › stores_hierarchies…refuses_cycles, the_first_parent_seen_wins | pass |
 | REQ-004-09 | `crates/media/src/metadata.rs` › adds_face_region_names…, does_not_duplicate_a_face_region… | pass |
-| REQ-004-10 | `crates/domain/src/media.rs` › prefers_the_full_name_sidecar_in_any_letter_case; `crates/media/src/metadata.rs` › reads_dimensions_from_the_file_and_tags_from_its_sidecar (exiftool) | partial: re-reading on a changed sidecar comes with scanning (M4b) |
+| REQ-004-10 | `crates/domain/src/media.rs` › prefers_the_full_name_sidecar…; `crates/media/src/metadata.rs` › reads_dimensions_from_the_file_and_tags_from_its_sidecar; `crates/indexer/src/scan.rs` › rescans_incrementally; `tests/end_to_end.rs` | pass |
 | REQ-004-11 | `crates/domain/src/tags.rs` › trims_collapses…, applies_nfkc…; `crates/db/src/writer.rs` › one_tag_per_normalized_name_with_the_first_spelling | pass |

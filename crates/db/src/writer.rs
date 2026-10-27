@@ -202,7 +202,8 @@ impl IndexWriter {
         }
     }
 
-    fn clear_caches(&mut self) {
+    /// Forgets the tag caches, e.g. after a panic interrupted a write.
+    pub fn clear_caches(&mut self) {
         self.tag_ids.clear();
         self.parents.clear();
     }

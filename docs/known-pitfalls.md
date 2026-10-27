@@ -56,6 +56,10 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 
 ## Indexer
 
+* **exiftool-vendored's real read arguments come from its default options**, not only `ReadTask`: `-fast`, `struct=1`, `keepUTCTime`, `-ignoreMinorErrors` and a UTF-8 repair filter. Check `DefaultExifToolOptions.js` before changing `media::exiftool::read_args`.
+* **Killing the Windows `exiftool.exe` leaves its `perl.exe` child running** with the pipes open; `Process::drop` ends the tree with `taskkill /T /F`.
+* **Folder mtimes need `FILE_FLAG_BACKUP_SEMANTICS`** to open a folder for `set_modified` on Windows (see the scan tests' `set_mtime`).
+
 * **A stat on a hung SMB share blocks its thread for the OS timeout** (often 30–60 s), past our 5 s reachability timeout. `reachability::with_timeout` leaves that thread behind; fine for single checks, but periodic checks of many offline libraries (M4) must not start a new check while the previous one for the same library still runs.
 
 ## Carried over from the reference

@@ -13,6 +13,7 @@ chrono.workspace = true
 db.workspace = true
 egui_extras.workspace = true
 indexer.workspace = true
+media.workspace = true
 rfd.workspace = true
 eframe.workspace = true
 image.workspace = true

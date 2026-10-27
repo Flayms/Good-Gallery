@@ -62,10 +62,10 @@ Too large for one part (≈ 2 000 lines of reference code plus the oracle). Spli
 
 ### M4b
 
-- [ ] 7. `indexer::walk` + `retry` (REQ-002-01, REQ-002-02).
-- [ ] 8. `indexer::scan`: full and quick scans, batches, removals, offline, unreadable files and folders (REQ-002-03 … 06, -09 … 12, REQ-003-08, REQ-001-05).
-- [ ] 9. Scan queue and indexer thread with `catch_unwind` (REQ-002-07, REQ-002-13).
-- [ ] 10. App: indexer started with the index, scan progress shown, counts refreshed (REQ-002-08 partial, REQ-006-11 partial).
+- [x] 7. `indexer::walk` + `retry` (REQ-002-01, REQ-002-02).
+- [x] 8. `indexer::scan`: full and quick scans, batches, removals, offline, unreadable files and folders (REQ-002-03 … 06, -09 … 12, REQ-003-08, REQ-001-05).
+- [x] 9. Scan queue and indexer thread with `catch_unwind` (REQ-002-07, REQ-002-13).
+- [x] 10. App: indexer started with the index, scan progress shown, counts refreshed (REQ-002-08 partial, REQ-006-11 partial).
 
 ### M4c
 

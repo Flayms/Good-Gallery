@@ -60,7 +60,7 @@ Architectural decisions that outlive a milestone, newest last. One entry each: w
 
 ### 2026-10-26 · REQ references in Rust tests (M1)
 
-**Decided:** a test references a REQ at the start of its name (`fn req_012_01_reports_unknown_reqs()`) or in a doc comment directly above it (`/// REQ-012-01: …`). `cargo xtask check-specs` reads `.rs` files below `crates/` and `xtask/` and counts only their test part: from the first `#[cfg(test)]` on, or the whole file below `tests/` or `benches/`. REQs mentioned in production code don't count as coverage. Spec: 012.
+**Decided:** a test references a REQ at the start of its name (`fn req_012_01_reports_unknown_reqs()`, several chained: `fn req_002_01_req_002_02_…()`) or in a doc comment directly above it (`/// REQ-012-01: …`). `cargo xtask check-specs` reads `.rs` files below `crates/` and `xtask/` and counts only their test part: from the first `#[cfg(test)]` on, or the whole file below `tests/` or `benches/`. REQs mentioned in production code don't count as coverage. Spec: 012.
 
 ### 2026-10-26 · Visual checks (M1)
 
@@ -94,6 +94,11 @@ Architectural decisions that outlive a milestone, newest last. One entry each: w
 ### 2026-10-26 · Pure media and tag rules in `domain` (M4a)
 
 **Decided:** file kinds, housekeeping folders, sidecar lookup, tag normalization, `MediaMetadata` and `METADATA_VERSION` live in `domain`; `db` depends on `domain` for the writer, `media` for extraction. `db::writer::IndexWriter` owns the write connection (the indexer thread from M4b on).
+
+### 2026-10-26 · Scans on threads (M4b)
+
+**Decided:** `indexer::scan::scan_root` is the reference's algorithm with threads instead of promises: the calling thread walks the library and owns all index access (lookups, batched writes, removals at the end), `io_concurrency` scoped worker threads stat files and read metadata, connected by a bounded channel (backpressure) and a result channel. Cancelling (library removed) and "offline" are atomic flags. A panic while reading one file costs that file (`catch_unwind` per job); a panic anywhere else ends the scan as `Failed` (`catch_unwind` around the scan), and the next scan runs (REQ-002-13).
+**Indexer:** `indexer::Indexer` holds the scan queue behind a mutex (commands are method calls from any thread, merged as the reference's `IndexerController` does) and one thread with the write connection that runs the scans; it reports `IndexerEvent`s over a channel and wakes the UI through a callback. It implements `ScanRequests`, so library operations queue real scans. The app keeps its own connection for library rows; SQLite's busy timeout serializes the two writers.
 
 ### Open: thumbnail cache layout vs Defender (decide in M5)
 
