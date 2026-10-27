@@ -1,6 +1,6 @@
 # 009 · Media viewer
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Goal
 
@@ -138,11 +138,11 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 | REQ        | Test                                                                                                                                                         | Result                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
 | REQ-009-01 | `crates/app/tests/viewer.rs` › req_009_01_req_009_04_opens_the_clicked_item_with_its_original, req_009_01_opens_the_focused_tile_with_enter, req_009_01_keys_dont_reach_the_window_below | pass |
-| REQ-009-02 | `crates/app/tests/viewer.rs` › req_009_02_steps_through_the_gallery | partial: photos; seeking with ← / → in focused video controls comes with M9 |
+| REQ-009-02 | `crates/app/tests/viewer.rs` › req_009_02_steps_through_the_gallery; `crates/domain/src/video.rs` › req_009_02_seeks_within_the_video; `crates/app/tests/viewer_video.rs` › req_009_02_arrows_seek_while_the_video_controls_have_focus | pass |
 | REQ-009-03 | `crates/app/tests/viewer.rs` › req_009_03_req_007_13_closes_in_every_way_and_keeps_the_search, req_009_03_req_009_16_clicks_on_the_photo_and_double_clicks_dont_close, req_009_03_a_click_beside_a_zoomed_photo_closes | pass |
-| REQ-009-04 | `crates/domain/src/viewer.rs` › req_009_04_fits_large_content_keeping_its_aspect_ratio, req_009_04_never_enlarges_content_beyond_its_own_size; `crates/media/src/original.rs` › req_009_04_decodes_the_whole_photo_upright, req_009_04_shrinks_only_what_exceeds_the_texture_limit; `crates/media/src/ffmpeg.rs` › req_009_04_loads_avif_originals_at_full_size; `crates/app/src/originals.rs` › req_009_04_req_009_13_loads_the_wanted_originals_at_full_size; `crates/app/tests/viewer.rs` › req_009_01_req_009_04_opens_the_clicked_item_with_its_original | partial: photos (capped at the GPU's texture size, 8192 px); videos with M9 |
+| REQ-009-04 | `crates/domain/src/viewer.rs` › req_009_04_fits_large_content_keeping_its_aspect_ratio, req_009_04_never_enlarges_content_beyond_its_own_size; `crates/media/src/original.rs` › req_009_04_decodes_the_whole_photo_upright, req_009_04_shrinks_only_what_exceeds_the_texture_limit; `crates/media/src/ffmpeg.rs` › req_009_04_loads_avif_originals_at_full_size; `crates/app/src/originals.rs` › req_009_04_req_009_13_loads_the_wanted_originals_at_full_size; `crates/app/tests/viewer.rs` › req_009_01_req_009_04_opens_the_clicked_item_with_its_original; `crates/app/tests/viewer_video.rs` › req_009_06_req_009_04_plays_the_shown_video_and_stops_it | pass (photos capped at the GPU's texture size, 8192 px; videos are rendered at the size they take on screen, never larger than decoded) |
 | REQ-009-05 | `crates/domain/src/viewer.rs` › req_009_05_zooms_around_the_point_under_the_pointer, req_009_05_limits_the_scale_between_fitted_and_8x, req_009_05_keeps_zoomed_content_covering_the_viewport, req_009_05_centers_content_smaller_than_the_viewport; `crates/app/tests/viewer.rs` › req_009_05_zooms_and_pans | pass |
-| REQ-009-06 | — | no test |
+| REQ-009-06 | `crates/domain/src/video.rs` › req_009_06_keeps_the_volume_between_0_and_100, req_009_06_steps_the_volume_in_5_percent_steps, req_009_06_turns_rotations_into_quarters_and_swaps_sides, req_009_06_renders_at_the_size_on_screen_but_never_larger_than_the_video; `crates/app/tests/video.rs` › req_009_06_plays_all_four_containers_and_seeks, req_009_06_says_why_a_file_cant_play; `crates/app/tests/viewer_video.rs` › req_009_06_req_009_04_plays_the_shown_video_and_stops_it, req_009_06_controls_play_pause_seek_mute_and_volume, req_009_06_play_at_the_end_starts_over, req_009_06_shows_frames_fitted_and_turned_upright, req_009_06_says_when_a_video_cant_play | pass (`video.rs` needs libmpv and ffmpeg, skipped without them unless `GG_REQUIRE_HELPERS` is set; audio and display-synced playback checked in the running app) |
 | ~~REQ-009-07~~ | — | no test (deprecated) |
 | REQ-009-08 | `crates/db/src/media.rs` › req_009_08_returns_the_details_with_tags_by_category; `crates/app/tests/viewer.rs` › req_009_08_req_013_13_toggles_the_info_panel_with_the_details | pass |
 | REQ-009-09 | `crates/app/tests/viewer.rs` › req_009_09_filters_by_a_tag_from_the_info_panel | pass |

@@ -29,6 +29,7 @@ jiff = { version = "0.2.35", default-features = false, features = ["std"] }
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg"] }
 fast_image_resize = { version = "6.1.0", default-features = false, features = ["image"] }
 jpeg-decoder = { version = "0.3.2", default-features = false }
+libloading = "0.8.9"
 thumbhash = "0.1.0"
 webp = { version = "=0.3.1", default-features = false }
 egui_extras = { version = "=0.37.0", default-features = false, features = ["svg", "datepicker"] }
@@ -44,7 +45,7 @@ tempfile = "3"
 thiserror = "2.0.21"
 tracing = "0.1"
 unicode-normalization = "0.1.26"
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [workspace.lints.rust]

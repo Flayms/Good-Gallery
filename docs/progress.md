@@ -19,13 +19,25 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | M7b       | Search bar, filters and sidebar        | Done        | [M07](rewrite/milestones/M07-search-sidebar.md) |
 | M8a       | Viewer core                            | Done        | [M08](rewrite/milestones/M08-viewer.md) |
 | M8b       | Viewer panels and filmstrip            | Done        | [M08](rewrite/milestones/M08-viewer.md) |
-| M9        | Video                                  | Not started | —                                       |
+| M9        | Video                                  | Done        | [M09](rewrite/milestones/M09-video.md) |
 | M10       | Settings, design polish, glass         | Not started | —                                       |
 | M11       | Packaging and release                  | Not started | —                                       |
 
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-27 · M9 · Video
+
+- Resumed an interrupted session that had written the plan (self-approved), `domain::video` and `media::helpers::{find_mpv, display_refresh_rate}`.
+- `app::video`: libmpv FFI (`video::mpv`, all of the video `unsafe`), `MpvPlayer` (render thread with GPU and egui-texture paths, display-synced timing, event thread, load counting so frames of a video stepped away from never show), the `Playback` trait, `FakePlayback` for tests, `Videos` (player made on first use, or why there is none). The app finds libmpv like ffmpeg.
+- Viewer: plays the shown video from its library file, stops on step, close and missing items; the frame replaces the preview, fitted and turned by its rotation; glass video controls along the video's bottom (play / pause, time, seek slider with keyframe seeks while dragging and an exact one on release, mute, volume); Space plays / pauses, a click on the video too; ← / → seek 5 s and ↑ / ↓ change the volume while the last click was on the video or its controls; a paused video keeps the controls; play at the end starts over; messages when videos can't play here or a file fails.
+- Exit criterion: generated MP4 H.264 + AAC, MOV HEVC + AAC (rotated), MKV H.264 + Opus and WebM VP9 + Opus play and seek exactly through the real player (`crates/app/tests/video.rs`, with the spike's libmpv). Checked in the running app on the M0b fixtures: 1080p and the rotated phone-style MOV play display-synced with controls (player ready in 24 ms).
+- Specs: 009 `Implemented` (REQ-009-02, -04, -06 pass); REQ-013-10 passes. Snapshot `viewer_video`.
+- Code review fixes: the controls no longer cover the message for a file that fails; mute toggles by what it says (it muted at volume 0); mpv properties are read only after the new file has loaded (they were the previous video's) and at most every 100 ms also for files without video; → seeks forward while the duration isn't known yet; ↑ while muted starts from the volume set before; stepping from video to video replaces the file without stopping first (that reopened mpv's outputs); one shared lookup for bundled helpers (`media::helpers::find_helper`, ffmpeg and libmpv).
+- Not changed after review: the refresh rate is Windows' integer rate of the primary display (59 for 59.94 Hz; mpv's display-resample absorbs it), read once; while the window is minimized display-synced playback gets no presented frames (video waits, audio goes on) — revisit if it shows up in practice.
+- Open: (1) audio checked only as "an audio device opened", not by ear, and the controls weren't clicked by hand in the real app (UI tests cover them); (2) `crates/app/tests/video.rs` needs `GOOD_GALLERY_MPV` (CI and packaging bundle libmpv in M11); (3) `thumb_cache::tests::replaces_a_thumbnail_that_is_open_for_a_moment` failed once again in the first run after a rebuild (Defender, see M8b).
+- Next: M10 (Settings, design polish, glass).
 
 ### 2026-10-27 · M8b · Viewer panels and filmstrip
 
@@ -141,7 +153,7 @@ Newest first. One entry per session: date, milestone, what was done, decisions (
 
 - `db`: the reference's migrations byte for byte, drizzle-compatible bookkeeping, pragmas, reader connections, library rows, settings storage. `reference.db` fixture made by the reference's own migrator proves compatibility both ways (REQ-001-08).
 - `indexer::libraries`: add (absolute, normalized, reachable within 5 s, duplicate check, label), remove, rescan behind a `ScanRequests` trait (no-op until M4). `cargo xtask libraries --db <file> list|add|remove|rescan`.
-- `app`: data folder `%APPDATA%good-gallery-rust` (`--data-dir`), Settings page with the *Libraries* section (add, browse, list, rescan, remove with confirmation, toasts), gallery empty states, lucide icons as SVG.
+- `app`: data folder `%APPDATA%good-gallery-rust` (`--data-dir`), Settings page with the _Libraries_ section (add, browse, list, rescan, remove with confirmation, toasts), gallery empty states, lucide icons as SVG.
 - A copy of the real index lists its two libraries (CLI) and the app opens it (20,383 media items).
 - Spec 001 `Implemented` (REQ-001-05 partial until the scan queue exists); REQ-010-01 / -02 partial (storage), REQ-006-10 partial (two of four states).
 - Decisions in `docs/architecture.md`: migrations and compatibility, data folder, icons, UI state and jobs. Pitfalls: parallel wgpu tests crash (serialized), copying from the reference is blocked.
@@ -151,7 +163,7 @@ Newest first. One entry per session: date, milestone, what was done, decisions (
 
 - Specs audited (plan: `docs/rewrite/milestones/M02-spec-audit.md`, self-approved). 011 rewritten: REQ-011-01…07 deprecated (no web page, IPC, protocols), new REQ-011-08 (files only from the index), -09 (helpers can't be steered by file names), -10 (hostile metadata), -11 (no network).
 - New REQs: REQ-001-08 (existing index stays compatible both ways), REQ-005-15 (existing thumbnail cache is used), REQ-006-12 (frame-time budget), REQ-006-13 (thumbnail memory budget). Reworded: REQ-002-13 (indexer failure instead of process crash), REQ-007-13 (search kept while viewing, no URL), REQ-009-02 / -03 / -12 (mouse back button, no viewer URL), REQ-014-01 / -07 (Rust checks, `Cargo.toml`), REQ-015-04.
-- `docs/design.md` in egui terms (tokens in `theme`, own glass pass, Windows settings for the fallbacks); glossary (*Search*, *Indexer*).
+- `docs/design.md` in egui terms (tokens in `theme`, own glass pass, Windows settings for the fallbacks); glossary (_Search_, _Indexer_).
 - Doc-only milestone: no code review run (nothing to review beyond wording); `cargo xtask check-specs` clean.
 - Next: M3 (Database and libraries).
 

@@ -199,6 +199,7 @@ dependencies = [
  "image",
  "indexer",
  "jiff",
+ "libloading",
  "media",
  "rfd",
  "serde_json",

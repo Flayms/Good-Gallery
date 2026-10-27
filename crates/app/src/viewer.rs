@@ -2,11 +2,14 @@
 //! their originals (`originals`) and show their thumbnail until then; they zoom and pan. The gallery keeps drawing
 //! below the scrim and keeps the shown item in view. An info panel (REQ-009-08) and a filmstrip (spec 015) open beside
 //! and below the media; the chrome takes a tint of the item's colors (REQ-013-11), and the photo grows from its tile
-//! and back (REQ-013-12).
+//! and back (REQ-013-12). Videos play in a [`Playback`](crate::video::Playback) with their controls along the bottom of
+//! the video (REQ-009-06).
 
 use crate::gallery::{self, Gallery, MediaAction};
 use crate::icons::Icon;
 use crate::originals::{OriginalRequest, OriginalState, Originals};
+use crate::video::controls::{self as video_controls, Control};
+use crate::video::{PlaybackState, VideoFrame, Videos};
 use crate::{format, info, theme};
 use base64::Engine as _;
 use db::gallery::GalleryItem;
@@ -77,6 +80,28 @@ struct Keys {
     fit: bool,
     info: bool,
     filmstrip: bool,
+    /// Space: play / pause the video.
+    space: bool,
+    /// ↑ / ↓: volume steps.
+    volume: i32,
+}
+
+/// The video the viewer plays (REQ-009-06).
+#[derive(Debug)]
+struct Playing {
+    /// Its media item.
+    id: i64,
+    /// Why it can't play at all (no player, or no file); its preview shows.
+    unavailable: Option<String>,
+    /// This frame's state and frame.
+    state: PlaybackState,
+    frame: Option<VideoFrame>,
+    /// The seek slider's position while it is dragged.
+    dragging: Option<f64>,
+    /// Where the video controls were drawn in the last frame.
+    bar: Option<Rect>,
+    /// What the controls, a click on the video or a key asked for this frame.
+    control: Option<Control>,
 }
 
 /// The chrome's colors: the glass tinted by the shown item (REQ-013-11).
@@ -172,6 +197,9 @@ pub struct Viewer {
     chrome: Chrome,
     /// The media item the chrome was tinted for.
     chrome_for: Option<i64>,
+    playing: Option<Playing>,
+    /// The last click was on the video or its controls: ← / → seek instead of stepping (REQ-009-02).
+    video_focus: bool,
 }
 
 impl Viewer {
@@ -199,6 +227,8 @@ impl Viewer {
             photo: None,
             chrome: Chrome::new(None),
             chrome_for: None,
+            playing: None,
+            video_focus: false,
         }
     }
 
@@ -250,6 +280,38 @@ impl Viewer {
         self.closing.is_some()
     }
 
+    /// The shown video's playback state in the last frame, if it plays.
+    pub fn video(&self) -> Option<&PlaybackState> {
+        self.playing_shown().map(|playing| &playing.state)
+    }
+
+    /// Why the shown video can't play, if it can't.
+    pub fn video_unavailable(&self) -> Option<&str> {
+        self.playing
+            .as_ref()
+            .filter(|playing| playing.id == self.id)
+            .and_then(|playing| playing.unavailable.as_deref())
+    }
+
+    /// Whether ← / → seek the video (the last click was on it or its controls) rather than step (REQ-009-02).
+    pub fn video_focused(&self) -> bool {
+        self.video_focus
+    }
+
+    /// The video being played, if it is the shown item and can play.
+    fn playing_shown(&self) -> Option<&Playing> {
+        self.playing
+            .as_ref()
+            .filter(|playing| playing.id == self.id && playing.unavailable.is_none() && !self.missing)
+    }
+
+    /// Asks the shown video for `control` (applied after the frame is drawn).
+    fn control_video(&mut self, control: Control) {
+        if let Some(playing) = self.playing.as_mut().filter(|playing| playing.unavailable.is_none()) {
+            playing.control = Some(control);
+        }
+    }
+
     /// Whether the shown photo's original was loaded when it came up, so it shows without fading in (REQ-009-14).
     pub fn shows_original_at_once(&self) -> bool {
         self.instant == Some(true)
@@ -292,6 +354,10 @@ impl Viewer {
             input.consume_key(Modifiers::NONE, Key::Tab);
             input.consume_key(Modifiers::SHIFT, Key::Tab);
             if !focus_inside {
+                // Space plays or pauses a video, unless a control has focus (which Space presses).
+                if input.consume_key(Modifiers::NONE, Key::Space) {
+                    self.keys.space = true;
+                }
                 for key in [Key::Enter, Key::Space] {
                     input.consume_key(Modifiers::NONE, key);
                     input.consume_key(Modifiers::SHIFT, key);
@@ -305,6 +371,12 @@ impl Viewer {
             }
             if input.consume_key(Modifiers::NONE, Key::ArrowRight) {
                 self.keys.step += 1;
+            }
+            if input.consume_key(Modifiers::NONE, Key::ArrowUp) {
+                self.keys.volume += 1;
+            }
+            if input.consume_key(Modifiers::NONE, Key::ArrowDown) {
+                self.keys.volume -= 1;
             }
             if input.consume_key(Modifiers::NONE, Key::Plus) || input.consume_key(Modifiers::NONE, Key::Equals) {
                 self.keys.zoom = Some(self.keys.zoom.unwrap_or(1.0) * KEY_ZOOM_STEP);
@@ -332,6 +404,7 @@ impl Viewer {
         self.instant = None;
         self.fade_from = None;
         self.close_at = None;
+        self.video_focus = false;
     }
 
     /// Finds the shown item again after the gallery reloaded (REQ-009-12).
@@ -375,18 +448,41 @@ impl Viewer {
         gallery: &mut Gallery,
         originals: &mut Originals,
         libraries: &[Library],
+        videos: &mut Videos,
     ) -> Option<Action> {
         self.follow(gallery);
         let count = gallery.count().unwrap_or(0);
         let keys = std::mem::take(&mut self.keys);
+        self.track_video_focus(ctx);
         if self.closing.is_none() {
             if keys.close || self.close_at.is_some_and(|at| Instant::now() >= at) {
                 self.close(gallery, Action::Close);
             }
-            if keys.step != 0 {
-                let target = self.index as i64 + i64::from(keys.step.signum());
-                if target >= 0 && (target as usize) < count {
-                    self.go_to(target as usize, gallery);
+            let video = self.playing_shown().map(|playing| playing.state.clone());
+            match &video {
+                // While the video controls have focus, ← / → seek and ↑ / ↓ change the volume (REQ-009-02).
+                Some(state) if self.video_focus && keys.step != 0 => {
+                    let by = f64::from(keys.step.signum()) * domain::video::SEEK_STEP;
+                    self.control_video(Control::Seek(
+                        domain::video::seek_by(state.position, by, state.duration),
+                        true,
+                    ));
+                }
+                _ if keys.step != 0 => {
+                    let target = self.index as i64 + i64::from(keys.step.signum());
+                    if target >= 0 && (target as usize) < count {
+                        self.go_to(target as usize, gallery);
+                    }
+                }
+                _ => {}
+            }
+            if let Some(state) = &video {
+                if keys.space {
+                    self.control_video(Control::PlayPause);
+                }
+                // From the volume set before muting; a step up unmutes.
+                if keys.volume != 0 && self.video_focus {
+                    self.control_video(Control::Volume(domain::video::step_volume(state.volume, keys.volume)));
                 }
             }
             if keys.info {
@@ -418,6 +514,7 @@ impl Viewer {
         if item.is_some() && self.instant.is_none() {
             self.instant = Some(matches!(original, OriginalState::Loaded(_)));
         }
+        self.sync_video(ctx, item.as_ref(), videos, libraries);
         if self.chrome_for != Some(self.id) && item.is_some() {
             self.chrome = Chrome::new(tint_of(item.as_ref().and_then(|item| item.thumbhash.as_deref())));
             self.chrome_for = Some(self.id);
@@ -480,6 +577,7 @@ impl Viewer {
         if let Some(at) = self.close_at {
             ctx.request_repaint_after(at.saturating_duration_since(Instant::now()));
         }
+        self.apply_video_control(videos);
         match action {
             Some(Action::ShowInExplorer(path)) => Some(Action::ShowInExplorer(path)),
             Some(other) => {
@@ -502,8 +600,123 @@ impl Viewer {
         }
     }
 
+    /// A press on the video or its controls gives them focus, a press anywhere else takes it (REQ-009-02).
+    fn track_video_focus(&mut self, ctx: &egui::Context) {
+        let Some(pos) = ctx.input(|input| {
+            input
+                .pointer
+                .any_pressed()
+                .then(|| input.pointer.press_origin())
+                .flatten()
+        }) else {
+            return;
+        };
+        let photo = self.photo;
+        self.video_focus = self.playing_shown().is_some_and(|playing| {
+            playing.bar.is_some_and(|bar| bar.contains(pos)) || photo.is_some_and(|video| video.contains(pos))
+        });
+    }
+
+    /// Plays the shown item if it is a video, and stops a video stepped away from, closed or gone (REQ-009-06). Then
+    /// takes this frame's state and frame from the player.
+    fn sync_video(
+        &mut self,
+        ctx: &egui::Context,
+        item: Option<&GalleryItem>,
+        videos: &mut Videos,
+        libraries: &[Library],
+    ) {
+        let wanted = item.filter(|item| item.kind == MediaKind::Video && self.closing.is_none());
+        if self.playing.as_ref().map(|playing| playing.id) != wanted.map(|item| item.id) {
+            let was_playing = self.playing.take().is_some_and(|playing| playing.unavailable.is_none());
+            self.video_focus = false;
+            let mut unavailable = None;
+            if let Some(item) = wanted {
+                // The original file, from the library (REQ-009-04). Loading replaces a playing video without stopping
+                // first, which would close and reopen mpv's audio and video outputs.
+                unavailable = match (videos.player(), file_in(libraries, item.root_id, &item.rel_path)) {
+                    (Ok(player), Some(path)) => {
+                        player.load(&path);
+                        None
+                    }
+                    (Ok(_), None) => Some("Its library is gone".to_owned()),
+                    (Err(error), _) => Some(error),
+                };
+            }
+            if was_playing && (wanted.is_none() || unavailable.is_some()) {
+                videos.stop();
+            }
+            if let Some(item) = wanted {
+                self.playing = Some(Playing {
+                    id: item.id,
+                    unavailable,
+                    state: PlaybackState::default(),
+                    frame: None,
+                    dragging: None,
+                    bar: None,
+                    control: None,
+                });
+            }
+        }
+        let Some(playing) = self.playing.as_mut().filter(|playing| playing.unavailable.is_none()) else {
+            return;
+        };
+        let Ok(player) = videos.player() else { return };
+        playing.state = player.state();
+        // Frames are rendered at the size the video took on screen in the last frame, unrotated.
+        let render_size = self.photo.zip(playing.state.video_size).map(|(rect, size)| {
+            let on_screen = rect.size() * ctx.pixels_per_point();
+            let on_screen = if playing.state.quarters % 2 == 1 {
+                [on_screen.y, on_screen.x]
+            } else {
+                [on_screen.x, on_screen.y]
+            };
+            domain::video::render_size(on_screen, size)
+        });
+        playing.frame = player.frame(render_size);
+    }
+
+    /// Applies what the video controls, a click on the video or a key asked for.
+    fn apply_video_control(&mut self, videos: &mut Videos) {
+        let Some(playing) = self.playing.as_mut() else { return };
+        let Some(control) = playing.control.take() else { return };
+        let Ok(player) = videos.player() else { return };
+        let state = &playing.state;
+        match control {
+            // At the end, play starts over (as in a browser).
+            Control::PlayPause if state.ended => {
+                player.seek(0.0, true);
+                player.set_paused(false);
+            }
+            Control::PlayPause => player.set_paused(!state.paused),
+            Control::Seek(position, exact) => player.seek(position, exact),
+            Control::Volume(volume) => {
+                player.set_volume(volume);
+                if state.muted && volume > 0.0 {
+                    player.set_muted(false);
+                }
+            }
+            Control::Muted(muted) => player.set_muted(muted),
+        }
+        playing.state = player.state();
+    }
+
     fn explorer_action(item: &GalleryItem, libraries: &[Library]) -> Option<Action> {
         file_in(libraries, item.root_id, &item.rel_path).map(Action::ShowInExplorer)
+    }
+
+    /// Like [`Self::backdrop_clicks`], but only for clicks beside `media`; false for a single click on it.
+    fn backdrop_clicks_beside(&mut self, backdrop: &egui::Response, media: Rect) -> bool {
+        let on_media = backdrop.interact_pointer_pos().is_some_and(|pos| media.contains(pos));
+        if on_media && backdrop.clicked() && !backdrop.double_clicked() {
+            return false;
+        }
+        if !on_media {
+            self.backdrop_clicks(backdrop);
+        } else if backdrop.double_clicked() {
+            self.close_at = None;
+        }
+        true
     }
 
     /// A click on the scrim closes after a moment; a double-click cancels it (REQ-009-03).
@@ -545,7 +758,20 @@ impl Viewer {
             OriginalState::Loaded(loaded) => Some(*loaded),
             _ => None,
         };
+        let playing = self
+            .playing_shown()
+            .filter(|playing| playing.id == item.id)
+            .map(|playing| (playing.state.video_size, playing.state.quarters, playing.frame));
+        let video_size = playing.and_then(|(size, quarters, _)| Some(domain::video::shown_size(size?, quarters)));
         let natural = match (item.width, item.height, loaded, thumbnail) {
+            // A video's own size once the player knows it (turned as it is shown), else its upright thumbnail's.
+            _ if video_size.is_some() => {
+                let [width, height] = video_size.unwrap_or_default();
+                Size::new(width as f32, height as f32)
+            }
+            (_, _, _, Some(thumbnail)) if item.kind == MediaKind::Video => {
+                Size::new(thumbnail.size[0] as f32, thumbnail.size[1] as f32)
+            }
             (Some(width), Some(height), _, _) if width > 0 && height > 0 => Size::new(width as f32, height as f32),
             (_, _, Some(loaded), _) => Size::new(loaded.size[0] as f32, loaded.size[1] as f32),
             (_, _, _, Some(thumbnail)) => Size::new(thumbnail.size[0] as f32, thumbnail.size[1] as f32),
@@ -559,6 +785,12 @@ impl Viewer {
         let over_chrome = backdrop.hover_pos().is_some_and(|pos| layout.is_chrome(pos));
         if photo && !over_chrome {
             self.handle_zoom(ui, backdrop, area, natural, fitted, viewport, keys);
+        } else if playing.is_some() && !over_chrome {
+            // A click on the video plays or pauses it, as in a browser; beside it, it closes (REQ-009-03).
+            let video = photo_rect(area, fitted, FIT);
+            if !self.backdrop_clicks_beside(backdrop, video) {
+                self.control_video(Control::PlayPause);
+            }
         } else if !over_chrome {
             self.backdrop_clicks(backdrop);
         }
@@ -604,8 +836,12 @@ impl Viewer {
             }
             None => 0.0,
         };
+        // A video's frame replaces its preview once the first one has come (not while it grows or shrinks).
+        let frame = playing
+            .and_then(|(_, quarters, frame)| Some((frame?, quarters)))
+            .filter(|_| transition.is_none());
         // The thumbnail stays under the original until it has faded in; the placeholder only without one.
-        if fade < 1.0 {
+        if fade < 1.0 && frame.is_none() {
             match thumbnail {
                 Some(thumbnail) => {
                     painter.image(thumbnail.id, rect, uv, Color32::WHITE);
@@ -623,9 +859,17 @@ impl Viewer {
                 ui.ctx().request_repaint();
             }
         }
+        if let Some((frame, quarters)) = frame {
+            painter.add(rotated_image(frame.id, rect, quarters));
+        }
+        let at = pos2(target.center().x, target.bottom().min(area.bottom()) - 28.0);
         if let OriginalState::Failed(_) = original {
-            let at = pos2(target.center().x, target.bottom().min(area.bottom()) - 28.0);
             message(ui, at, "Can't load the original. Showing a preview.");
+        }
+        if item.kind == MediaKind::Video && self.video_unavailable().is_some() {
+            message(ui, at, "Can't play videos here. Showing a preview.");
+        } else if playing.is_some() && self.video().is_some_and(|state| state.error.is_some()) {
+            message(ui, at, "Can't play this video. Showing a preview.");
         }
         rect
     }
@@ -720,15 +964,27 @@ impl Viewer {
                 Vec2::splat(NAV_SIZE),
             )
         });
+        // The video's controls along its bottom, while it plays here (not for a file that fails).
+        let video_bar = self
+            .playing_shown()
+            .is_some_and(|playing| playing.state.error.is_none())
+            .then_some(self.photo)
+            .flatten()
+            .map(|video| video_controls::bar_rect(video, layout.media));
+        let paused = self
+            .playing_shown()
+            .is_some_and(|playing| playing.state.paused || playing.state.ended);
         let pointer = ctx.pointer_latest_pos();
         let hovering = pointer.is_some_and(|pos| {
             bar.contains(pos)
                 || previous.is_some_and(|r| r.contains(pos))
                 || next.is_some_and(|r| r.contains(pos))
                 || layout.strip.is_some_and(|r| r.contains(pos))
+                || video_bar.is_some_and(|r| r.contains(pos))
         });
         let idle = self.last_activity.elapsed() >= IDLE;
-        let hidden = zoom::controls_hidden(idle, hovering, self.info_open, false);
+        // A paused video keeps them (REQ-013-10).
+        let hidden = zoom::controls_hidden(idle, hovering, self.info_open, paused);
         if !idle {
             ctx.request_repaint_after(IDLE.saturating_sub(self.last_activity.elapsed()));
         }
@@ -743,6 +999,9 @@ impl Viewer {
         {
             action = self.info_panel(ui, panel, gallery);
         }
+        if let Some(playing) = &mut self.playing {
+            playing.bar = video_bar.filter(|_| shown > 0.0);
+        }
         if shown == 0.0 {
             return action;
         }
@@ -750,6 +1009,12 @@ impl Viewer {
         ui.scope(|ui| {
             ui.multiply_opacity(shown);
             let chrome = self.chrome;
+            if let Some(rect) = video_bar
+                && let Some(playing) = &mut self.playing
+                && let Some(control) = video_controls::show(ui, rect, &playing.state, &mut playing.dragging, chrome.bar)
+            {
+                playing.control = Some(control);
+            }
             for (rect, icon, label, by) in [
                 (previous, Icon::ChevronLeft, "Previous", -1),
                 (next, Icon::ChevronRight, "Next", 1),
@@ -991,6 +1256,29 @@ fn photo_rect(area: Rect, fitted: Size, view: ZoomView) -> Rect {
         area.center() + vec2(view.x, view.y),
         vec2(fitted.width, fitted.height) * view.scale,
     )
+}
+
+/// `texture` drawn into `rect` turned clockwise by `quarters` quarter turns: mpv's software renderer leaves frames
+/// unrotated, the GPU turns them for free.
+fn rotated_image(texture: egui::TextureId, rect: Rect, quarters: u8) -> egui::Shape {
+    let corners = [
+        rect.left_top(),
+        rect.right_top(),
+        rect.right_bottom(),
+        rect.left_bottom(),
+    ];
+    let uvs = [pos2(0.0, 0.0), pos2(1.0, 0.0), pos2(1.0, 1.0), pos2(0.0, 1.0)];
+    let mut mesh = egui::Mesh::with_texture(texture);
+    for (i, pos) in corners.into_iter().enumerate() {
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos,
+            uv: uvs[(i + 4 - usize::from(quarters % 4)) % 4],
+            color: Color32::WHITE,
+        });
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    egui::Shape::mesh(mesh)
 }
 
 fn lerp_rect(from: Rect, to: Rect, t: f32) -> Rect {

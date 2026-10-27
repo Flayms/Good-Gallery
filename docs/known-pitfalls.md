@@ -34,6 +34,10 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **The software renderer ignores rotation.** `video-params/rotate` is set, but frames and `dwidth` / `dheight` stay unrotated: rotate the quad.
 * **Default timing judders against our vsync.** With frames timed to the audio clock, a 30 fps video on 60 Hz shows frames for 1 or 3 vblanks in up to 44 % of frames, varying run to run. Use `video-sync=display-resample` + `override-display-fps`, render once per UI frame with `report_swap`, and skip frames whose next-frame info has `REPEAT`.
 * **`libmpv-2.dll` hard-imports `vulkan-1.dll`** (shinchiro builds): without the Vulkan loader it doesn't load. Load at runtime and degrade.
+* **Tests and `cargo run` find libmpv only through `GOOD_GALLERY_MPV`** (or `target\debug\mpv\libmpv-2.dll`, or `PATH`). Point it at the spike's `spikes/video/vendor/mpv/libmpv-2.dll`; without it `crates/app/tests/video.rs` skips and videos show their preview.
+* **A late `FILE_LOADED` belongs to the previous `loadfile`** when the user steps quickly between videos. Count `START_FILE` events against the `loadfile`s sent and accept frames only when they match; a `loadfile` mpv refuses sends no `START_FILE`.
+* **mpv's properties (`dwidth`, `duration`, `eof-reached` …) are the previous file's until the new one's `FILE_LOADED`**; `loadfile` only queues the switch. Read them only after it.
+* **With `keep-open=yes` mpv pauses on the last frame at the end** (`eof-reached`); unpausing does nothing. Seek to 0, then unpause.
 * **wgpu needs `bytes_per_row` aligned to 256**, mpv wants stride and pointer aligned to 64: allocate the frame buffer with a 256-byte-aligned stride and a 64-byte-aligned pointer.
 
 ## Performance measurement
@@ -55,6 +59,7 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **Spike crates are standalone**: run `cargo` inside `spikes/<name>/`; their `results/` and `vendor/` folders are git-ignored.
 * **`cargo` may not be on the agent shell's `PATH`**: prepend `$env:USERPROFILE\.cargo\bin`.
 * **Restoring a file from a backup with `Copy-Item` or `cp` keeps the older mtime**, so cargo doesn't rebuild and keeps testing the mutated code. `touch` the file after restoring (mutation checks for red tests).
+* **Long Git Bash heredocs can fail with "unexpected EOF while looking for matching `'`"** (the content is cut). Write scripts with the Write tool into the scratchpad and run them from there.
 * **Git Bash heredocs here turn `\\` into `\`**, even with a quoted `'EOF'`, which corrupts escapes in scripts (`\0` became a NUL byte in a `.mjs`). Use the Edit tool, or `chr(92)` in Python.
 * **Node's output through `| tail` was lost** when the process was killed by `timeout`; redirect to a file to see what a hanging Node script printed.
 * **exiftool on Windows mangles non-ASCII command-line arguments**; pass tag values through an argument file (`-@ file`, UTF-8). In exiftool's struct syntax, a comma inside a value is escaped with `|`.
@@ -86,6 +91,9 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **Hard links need the same volume**: `cargo xtask gallery-bench` links the cache copy's files, so its data folder must be on that drive.
 
 ## Viewer
+
+* **A video tile's accessible label is "name, video, m:ss"** (e.g. `1.mp4, video, 1:00`), not the file name alone; tests that click a video tile must use it.
+* **egui's `Slider` rail is invisible with our widget visuals** (transparent inactive fill); the video controls draw their own slider.
 
 * **kittest's default step is 0.25 s**, so two clicks a couple of frames apart are no double-click for egui (0.3 s window). Tests of double-clicks build their harness with `with_step_dt(1.0 / 60.0)` (`common::harness_with_step`).
 * **Fades timed with `Instant` never finish in tests** (frames run in microseconds): a snapshot catches a half-transparent photo. Time UI animations with egui's `input.time`, which kittest advances per step.

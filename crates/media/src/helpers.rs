@@ -90,6 +90,48 @@ pub fn show_in_explorer(_file: &std::path::Path) -> std::io::Result<()> {
     Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "only on Windows"))
 }
 
+/// libmpv for video playback (M9): `GOOD_GALLERY_MPV`, `mpv/libmpv-2.dll` next to the app, or on `PATH`.
+pub fn find_mpv() -> Option<std::path::PathBuf> {
+    let name = if cfg!(windows) { "libmpv-2.dll" } else { "libmpv.so.2" };
+    find_helper("GOOD_GALLERY_MPV", "mpv", name)
+}
+
+/// A bundled helper file: the path in the environment variable `env`, else `<folder>/<name>` next to the app, else
+/// `name` on `PATH`.
+pub fn find_helper(env: &str, folder: &str, name: &str) -> Option<std::path::PathBuf> {
+    if let Some(path) = std::env::var_os(env) {
+        return Some(path.into());
+    }
+    let bundled = std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.join(folder).join(name)))
+        .filter(|path| path.is_file());
+    bundled.or_else(|| {
+        std::env::split_paths(&std::env::var_os("PATH")?)
+            .map(|dir| dir.join(name))
+            .find(|path| path.is_file())
+    })
+}
+
+/// The refresh rate of the primary display in Hz, if Windows reports one: video frames are timed to it (M0b).
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub fn display_refresh_rate() -> Option<f64> {
+    use windows_sys::Win32::Graphics::Gdi::{DEVMODEW, ENUM_CURRENT_SETTINGS, EnumDisplaySettingsW};
+    // SAFETY: DEVMODEW is plain data; zeroed with its size set is the documented way to ask.
+    let mut mode: DEVMODEW = unsafe { std::mem::zeroed() };
+    mode.dmSize = size_of::<DEVMODEW>() as u16;
+    // SAFETY: a null device name means the display the calling thread runs on; `mode` lives for the call.
+    let ok = unsafe { EnumDisplaySettingsW(std::ptr::null(), ENUM_CURRENT_SETTINGS, &raw mut mode) };
+    // 0 and 1 mean "the hardware's default".
+    (ok != 0 && mode.dmDisplayFrequency > 1).then_some(f64::from(mode.dmDisplayFrequency))
+}
+
+#[cfg(not(windows))]
+pub fn display_refresh_rate() -> Option<f64> {
+    None
+}
+
 /// Whether Windows' _Animation effects_ are off: animations become instant (`docs/design.md`).
 #[cfg(windows)]
 #[allow(unsafe_code)]

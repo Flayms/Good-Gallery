@@ -15,6 +15,7 @@ pub mod textures;
 pub mod theme;
 pub mod toasts;
 pub mod toolbar;
+pub mod video;
 pub mod viewer;
 
 pub use state::{AppState, FolderPicker, NativeFolderPicker, Page};
@@ -90,7 +91,7 @@ fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
     let originals = state
         .originals
         .get_or_insert_with(|| originals::Originals::new(ctx.clone(), None, None));
-    let action = viewer.show(ctx, gallery, originals, &state.libraries);
+    let action = viewer.show(ctx, gallery, originals, &state.libraries, &mut state.videos);
     let closed = |state: &mut AppState| {
         state.viewer = None;
         if let Some(gallery) = &mut state.gallery {
@@ -100,6 +101,7 @@ fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
         if let Some(originals) = &mut state.originals {
             originals.set(Vec::new());
         }
+        state.videos.stop();
     };
     match action {
         Some(viewer::Action::Close) => closed(state),

@@ -22,19 +22,8 @@ pub enum FfmpegError {
 
 /// The ffmpeg executable: `GOOD_GALLERY_FFMPEG`, `ffmpeg\ffmpeg.exe` next to the app, or `ffmpeg` on `PATH`.
 pub fn find_ffmpeg() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("GOOD_GALLERY_FFMPEG") {
-        return Some(PathBuf::from(path));
-    }
     let name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
-    let bundled = std::env::current_exe()
-        .ok()
-        .and_then(|exe| Some(exe.parent()?.join("ffmpeg").join(name)))
-        .filter(|path| path.is_file());
-    bundled.or_else(|| {
-        std::env::split_paths(&std::env::var_os("PATH")?)
-            .map(|dir| dir.join(name))
-            .find(|path| path.is_file())
-    })
+    crate::helpers::find_helper("GOOD_GALLERY_FFMPEG", "ffmpeg", name)
 }
 
 /// The frame at `position` seconds as a PNG, at most as wide as the largest thumbnail. ffmpeg applies the file's

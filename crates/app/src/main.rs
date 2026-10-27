@@ -288,6 +288,7 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
     );
     // Originals as wgpu textures made on worker threads, like thumbnails (REQ-009-04).
     let originals = app::originals::Originals::new(ctx.clone(), render_state.clone(), media::ffmpeg::find_ffmpeg());
+    let videos = videos(ctx, render_state.clone());
     match render_state {
         Some(render_state) => {
             let cache = thumbnails.cache().clone();
@@ -308,7 +309,8 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
     let state = state
         .with_thumbnails(thumbnails.clone())
         .with_gallery(gallery)
-        .with_originals(originals);
+        .with_originals(originals)
+        .with_videos(videos);
     let Some(exiftool) = exiftool else {
         tracing::error!("exiftool not found: libraries can't be indexed");
         let mut state = state;
@@ -335,6 +337,19 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
         indexer::schedule::OFFLINE_RETRY,
     );
     state.with_indexer(indexer, events).with_scheduler(scheduler)
+}
+
+/// The video player, made when the first video shows (libmpv is large); without libmpv, videos show their preview.
+fn videos(ctx: &egui::Context, render_state: Option<egui_wgpu::RenderState>) -> app::video::Videos {
+    let Some(dll) = media::helpers::find_mpv() else {
+        tracing::error!("libmpv not found: videos can't play");
+        return app::video::Videos::unavailable("libmpv-2.dll not found");
+    };
+    let ctx = ctx.clone();
+    app::video::Videos::new(move || {
+        let player = app::video::MpvPlayer::new(&dll, ctx, render_state, true)?;
+        Ok(Box::new(player) as Box<dyn app::video::Playback>)
+    })
 }
 
 /// The thumbnail cache in the data folder and the service that fills it. Without ffmpeg, videos and AVIF images get

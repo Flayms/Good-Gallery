@@ -101,6 +101,8 @@ pub struct AppState {
     pub file_manager: Arc<dyn FileManager>,
     /// Loads the viewer's originals; made with egui textures on first use unless set with [`Self::with_originals`].
     pub originals: Option<crate::originals::Originals>,
+    /// Plays the viewer's videos (REQ-009-06); unavailable unless set with [`Self::with_videos`].
+    pub videos: crate::video::Videos,
 }
 
 impl AppState {
@@ -176,6 +178,12 @@ impl AppState {
         self
     }
 
+    /// Plays the viewer's videos with `videos` (libmpv in the app, a fake in tests).
+    pub fn with_videos(mut self, videos: crate::video::Videos) -> Self {
+        self.videos = videos;
+        self
+    }
+
     /// The index couldn't be opened: the app shows `error` instead of the gallery.
     pub fn failed(error: String) -> Self {
         let mut state = Self::empty(Arc::new(indexer::NoScans), Arc::new(NativeFolderPicker));
@@ -209,6 +217,7 @@ impl AppState {
             info_sheet: None,
             file_manager: Arc::new(Explorer),
             originals: None,
+            videos: crate::video::Videos::default(),
         }
     }
 
