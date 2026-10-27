@@ -8,8 +8,9 @@ use db::libraries::LibraryStatus;
 use db::rusqlite::Connection;
 use db::writer::{IndexWriter, IndexedFile};
 use domain::media::{MediaKind, MediaMetadata};
+use domain::view::GalleryView;
 use eframe::egui;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use std::sync::{Arc, Mutex};
 
 fn file(name: &str, size: (i64, i64), taken_at: i64, duration: Option<f64>) -> IndexedFile {
@@ -219,4 +220,167 @@ fn req_006_07_req_006_11_keeps_the_first_visible_item_in_view_when_items_are_add
     assert_eq!(gallery(&harness).count(), Some(337));
     let tile = harness.get_by_label(&name).rect();
     assert!((tile.top() - gallery(&harness).content_top()).abs() < 2.0, "{tile:?}");
+}
+
+fn open_view_menu(harness: &mut egui_kittest::Harness<'_, app::AppState>) {
+    harness.get_by_label("View options").click();
+    harness.run_steps(2);
+}
+
+fn stored(harness: &egui_kittest::Harness<'_, app::AppState>, key: &str) -> Option<serde_json::Value> {
+    let db = harness.state().db().unwrap();
+    let conn = db.lock().unwrap();
+    db::settings::value(&conn, key).unwrap()
+}
+
+#[test]
+fn req_006_01_picks_the_view_in_the_view_menu_and_remembers_it() {
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness(index(&photos(6)));
+    settle(&mut harness);
+    assert_eq!(gallery(&harness).view(), GalleryView::Masonry);
+    open_view_menu(&mut harness);
+    harness.snapshot("view_menu");
+
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::Button, "Justified")
+        .click();
+    harness.run_steps(2);
+    assert_eq!(gallery(&harness).view(), GalleryView::Justified);
+    // Clicking the active view keeps it.
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::Button, "Justified")
+        .click();
+    harness.run_steps(2);
+    assert_eq!(gallery(&harness).view(), GalleryView::Justified);
+    assert_eq!(stored(&harness, "gallery.view"), Some("justified".into()));
+
+    // Justified: the first row's tiles are equally tall.
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
+    let heights: Vec<f32> = (0..3)
+        .map(|i| harness.get_by_label(&format!("{i}.jpg")).rect().height())
+        .collect();
+    assert!(heights.windows(2).all(|w| (w[0] - w[1]).abs() < 0.5), "{heights:?}");
+
+    let db = harness.state().db().unwrap();
+    assert_eq!(Gallery::new(db.clone(), db, None).view(), GalleryView::Justified);
+}
+
+#[test]
+fn req_006_06_zooms_with_the_buttons_and_not_in_the_list_view() {
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness(index(&photos(6)));
+    settle(&mut harness);
+    open_view_menu(&mut harness);
+
+    harness.get_by_label("Zoom out").click();
+    harness.run_steps(2);
+    assert_eq!(gallery(&harness).columns, 6);
+    harness.get_by_label("Zoom in").click();
+    harness.get_by_label("Zoom in").click();
+    harness.run_steps(2);
+    assert_eq!(gallery(&harness).columns, 4);
+
+    harness
+        .get_by_role_and_label(egui::accesskit::Role::Button, "List")
+        .click();
+    harness.run_steps(2);
+    assert!(harness.get_by_label("Zoom out").accesskit_node().is_disabled());
+    assert!(
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::Slider, "Zoom")
+            .accesskit_node()
+            .is_disabled()
+    );
+    // The zoom value and the tag indicators say so.
+    assert_eq!(harness.query_all_by_label("Not in the List view").count(), 2);
+}
+
+/// REQ-006-05: the List view has a row per media item, the date taken or, dimmed, the date modified.
+#[test]
+fn req_006_05_shows_a_row_per_media_item_in_the_list_view() {
+    let fixture = Fixture::new();
+    let mut undated = file("undated.jpg", (400, 300), 0, None);
+    undated.metadata.taken_at = None;
+    let conn = index(&[
+        file("beach.jpg", (400, 300), 2_000_000_000_000, None),
+        file("clip.mp4", (1920, 1080), 1_900_000_000_000, Some(65.0)),
+        undated,
+    ]);
+    let mut harness = fixture.harness(conn);
+    settle(&mut harness);
+    harness
+        .state_mut()
+        .gallery
+        .as_mut()
+        .unwrap()
+        .set_view(GalleryView::List);
+    settle(&mut harness);
+
+    let beach = harness.get_by_label("beach.jpg").rect();
+    let clip = harness.get_by_label("clip.mp4, video, 1:05").rect();
+    assert!(beach.top() < clip.top() && (beach.height() - 52.0).abs() < 0.5);
+    harness.snapshot("gallery_list");
+}
+
+#[test]
+fn req_016_02_req_016_03_groups_by_day_until_turned_off() {
+    let fixture = Fixture::new();
+    const DAY: i64 = 24 * 3600 * 1000;
+    let noon = 1_780_000_000_000 / DAY * DAY + DAY / 2;
+    let conn = index(&[
+        file("a.jpg", (400, 300), noon + DAY, None),
+        file("b.jpg", (400, 300), noon + DAY - 1000, None),
+        file("c.mp4", (400, 300), noon, Some(3.0)),
+    ]);
+    let mut harness = fixture.harness(conn);
+    settle(&mut harness);
+    let headings = |harness: &egui_kittest::Harness<'_, app::AppState>| {
+        harness
+            .query_all_by_role(egui::accesskit::Role::Heading)
+            .map(|node| node.accesskit_node().label().unwrap_or_default())
+            .collect::<Vec<_>>()
+    };
+    let shown = headings(&harness);
+    assert_eq!(shown.len(), 2, "{shown:?}");
+    assert!(
+        shown[0].ends_with(", 2 photos") && shown[1].ends_with(", 1 video"),
+        "{shown:?}"
+    );
+
+    open_view_menu(&mut harness);
+    harness.get_by_label("Group by day").click();
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
+    assert!(headings(&harness).is_empty());
+    assert_eq!(stored(&harness, "gallery.groupByDay"), Some("off".into()));
+}
+
+#[test]
+fn req_017_01_req_017_03_shows_the_picked_tag_indicators_once_turned_on() {
+    let fixture = Fixture::new();
+    let mut rated = file("rated.jpg", (400, 300), 1_000, None);
+    rated.metadata.rating = Some(4);
+    rated.metadata.tags = vec![vec!["People".into(), "Anna".into()], vec!["Beach".into()]];
+    let mut harness = fixture.harness(index(&[rated]));
+    settle(&mut harness);
+    harness.get_by_label("rated.jpg");
+
+    open_view_menu(&mut harness);
+    assert!(
+        harness.get_by_label("People").accesskit_node().is_disabled(),
+        "picks wait for the switch"
+    );
+    harness.get_by_label("Tag indicators").click();
+    harness.run_steps(2);
+    harness.get_by_label("People").click();
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
+
+    harness.get_by_label("rated.jpg, Rated 4 out of 5, Has tags");
+    assert_eq!(
+        stored(&harness, "gallery.tagIndicators"),
+        Some(serde_json::json!({"shown": true, "picked": ["rating", "places", "tags"]}))
+    );
 }

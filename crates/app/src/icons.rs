@@ -48,6 +48,9 @@ icons! {
     Images => "images",
     Info => "info",
     Layers => "layers",
+    LayoutDashboard => "layout-dashboard",
+    LayoutGrid => "layout-grid",
+    List => "list",
     LoaderCircle => "loader-circle",
     MapPin => "map-pin",
     Minus => "minus",
@@ -56,6 +59,7 @@ icons! {
     Play => "play",
     Plus => "plus",
     RefreshCw => "refresh-cw",
+    Rows3 => "rows-3",
     Search => "search",
     Settings => "settings",
     SlidersHorizontal => "sliders-horizontal",
@@ -70,6 +74,8 @@ icons! {
     Volume2 => "volume-2",
     VolumeX => "volume-x",
     X => "x",
+    ZoomIn => "zoom-in",
+    ZoomOut => "zoom-out",
 }
 
 impl Icon {

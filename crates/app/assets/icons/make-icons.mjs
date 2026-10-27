@@ -14,6 +14,7 @@ const ICONS = [
   'gallery-horizontal', 'image', 'image-off', 'images', 'info', 'layers', 'loader-circle', 'map-pin', 'minus',
   'panel-left', 'pause', 'play', 'plus', 'refresh-cw', 'search', 'settings', 'sliders-horizontal', 'star',
   'star-off', 'tag', 'trash-2', 'triangle-alert', 'unplug', 'user', 'video', 'volume-2', 'volume-x', 'x',
+  'layout-dashboard', 'layout-grid', 'list', 'rows-3', 'zoom-in', 'zoom-out',
 ]
 
 const reference = resolve(process.argv[2] ?? '../good-gallery')

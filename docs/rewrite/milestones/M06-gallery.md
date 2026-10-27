@@ -1,6 +1,6 @@
 # M06 · Gallery
 
-**Status:** Approved (2026-10-27, self-approved: the user asked to work through the milestones without their input)
+**Status:** Done (approved 2026-10-27, self-approved: the user asked to work through the milestones without their input; M6a and M6b done 2026-10-27)
 **Specs:** 006, 016, 017 (and REQ-005-02, -06, -11 reading side, -14 tiles)
 
 Too large for one part (≈ 1 200 lines of reference UI code, texture streaming, a frame-time benchmark). Split:
@@ -34,7 +34,17 @@ Too large for one part (≈ 1 200 lines of reference UI code, texture streaming,
 
 ### M6b · Views and toolbar
 
-Planned in detail at its start (toolbar per spec 013 and `docs/design.md`, List view per `media-list.tsx`, headers per `date-group-header.tsx`, indicators per `tag-indicators.tsx`), within this plan's tasks.
+**Toolbar (`app::toolbar`).** A 48 px bar over the top of the gallery, Raised until the glass arrives (M10), with the tiles scrolling underneath (content starts 48 + 12 px down). For now it holds the _View_ button and Settings (the sidebar's place, M7); search and filters come in M7, the title-bar integration in M10 (the window keeps its native caption until then). The _View_ button shows the current view's icon, "View" and a chevron, and opens a popup (`egui::Popup`) with the reference's sections: _Layout_ (four toggle buttons named Masonry, Justified, Grid, List), _Zoom_ (zoom out, a slider from 12 to 2 columns, zoom in, "N columns" or "Not in the List view", disabled in the List view), _Group by day_ (a switch, disabled with "Only when sorted by date" for other sorts, which M7 adds), _Tag indicators_ (a switch, and Rating / Places / People / Tags toggles disabled while it is off). _Sort by_ belongs to the search (spec 007) and comes in M7.
+
+**Choices.** Stored in the `settings` table under the reference's `localStorage` keys: `gallery.view` (`"masonry"` …), `gallery.groupByDay` (`"off"` turns it off), `gallery.tagIndicators` (`{"shown": …, "picked": […]}`), parsed as the reference does (`domain::view`).
+
+**List view.** Rows of 52 px (thumbnail 40 px, name with a play icon and duration for videos, folder, date taken or the date modified dimmed with a tooltip, size, dimensions, rating stars) under a 36 px column header that stays at the top, group header rows of 40 px between them. Row positions are arithmetic (`i × 52 + headers before × (40 − 52)`), so no per-row table is needed; the visible range is a binary search. The same data loading and texture streaming as the tiles (40 px thumbnails pick the 400 px width).
+
+**Date groups.** Headers of 40 px with the day ("Monday, 26 October 2026") and the counts ("42 photos · 3 videos"), bottom-aligned, in every view; the layout already places groups. Grouping follows `groups_shown` (on, and a date sort).
+
+**Tag indicators.** `domain::view::indicators_of` (port with tests); a solid badge (`rgb(0 0 0 / 0.6)`) in the tile's bottom-left corner with Star-colored stars and white pin / person / tag icons, clipped so it never covers the video badge; each indicator has a tooltip, and the tile's accessible name lists them (REQ-017-02).
+
+**Spec fix.** REQ-006-02 says "an 8 px gap"; the reference and `docs/design.md` use 4 px from 8 columns on (with 2 px tile corners). The spec is corrected.
 
 ## Reference
 
@@ -58,11 +68,11 @@ Planned in detail at its start (toolbar per spec 013 and `docs/design.md`, List 
 
 ### M6b
 
-- [ ] 10. Toolbar with the _View_ menu; persisted view choice (REQ-006-01, -06 slider and buttons)
-- [ ] 11. List view (REQ-006-05)
-- [ ] 12. Date group headers and _Group by day_ (REQ-016-02 … -06)
-- [ ] 13. Tag indicators (REQ-017-01 … -03)
-- [ ] 14. M6b docs; review; commit
+- [x] 10. Toolbar with the _View_ menu; persisted view choice (REQ-006-01, -06 slider and buttons)
+- [x] 11. List view (REQ-006-05)
+- [x] 12. Date group headers and _Group by day_ (REQ-016-02 … -06)
+- [x] 13. Tag indicators (REQ-017-01 … -03)
+- [x] 14. M6b docs; review; commit
 
 ## Exit criteria
 

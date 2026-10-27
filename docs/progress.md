@@ -14,7 +14,7 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | M4c       | Indexing: change detection, oracle     | Done        | [M04](rewrite/milestones/M04-indexing.md) |
 | M5        | Thumbnails                             | Done        | [M05](rewrite/milestones/M05-thumbnails.md) |
 | M6a       | Gallery: tiles                         | Done        | [M06](rewrite/milestones/M06-gallery.md) |
-| M6b       | Gallery: views and toolbar             | Not started | [M06](rewrite/milestones/M06-gallery.md) |
+| M6b       | Gallery: views and toolbar             | Done        | [M06](rewrite/milestones/M06-gallery.md) |
 | M7        | Search and sidebar                     | Not started | —                                       |
 | M8        | Photo viewer and filmstrip             | Not started | —                                       |
 | M9        | Video                                  | Not started | —                                       |
@@ -24,6 +24,17 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-27 · M6b · Gallery: views and toolbar
+
+- Toolbar over the gallery (Raised until M10) with the _View_ menu: layout (Masonry, Justified, Grid, List), zoom out / slider / zoom in (disabled in the List view), _Group by day_, tag indicators with their picks; Settings moved from the corner into the toolbar. Choices stored under the reference's keys (`domain::view`).
+- List view (`app::gallery::list`): thumbnail, name with play icon and duration, folder, date taken or the dimmed date modified with a tooltip, size, dimensions, rating stars; a column header below the toolbar; group header rows.
+- Date group headers in every view ("Monday, 26 October 2026", "42 photos · 3 videos"); tag indicator badges (stars, pin, person, tag) that leave the video badge's corner free, named in tooltips and in the tile's accessible name.
+- `gallery.rs` became `gallery/{mod, tiles, list}.rs`. Six lucide icons added (layout, list, rows, zoom).
+- Spec fix: REQ-006-02's gap is 8 px, 4 px from 8 columns on (reference and design agree). Specs 006, 016, 017 `Implemented`; open: REQ-006-11 tag suggestions (M7), REQ-016-04 disabled toggle for other sorts (M7), REQ-016-06 scrolling to the viewed item (M8). Snapshots `view_menu`, `gallery_list`.
+- Checked in the app: grouped Masonry with indicators, List view with groups, on the fixture library.
+- Code review fixes: the toolbar and the List view's column header now take the pointer, so hidden tiles and rows under them don't react; the anchor's position is looked up once per new layout instead of every frame (500k-item scan); per-frame clones and label strings avoided (labels built only when AccessKit asks); headers index their group directly; the column header lines up with the rows' width; tag indicator controls are disabled in the List view, like zoom.
+- Next: M7 (Search and sidebar).
 
 ### 2026-10-27 · M6a · Gallery: tiles
 

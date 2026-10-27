@@ -1,6 +1,6 @@
 # 017 · Tag indicators
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Goal
 
@@ -47,6 +47,6 @@ Users who rate and tag their photos in other apps want to see at a glance which 
 
 | REQ        | Test | Result |
 | ---------- | ---- | ------ |
-| REQ-017-01 | `crates/db/src/gallery.rs` › req_017_01_loads_items_with_the_categories_of_their_tags | partial: categories loaded with the tile data; indicators come in M6b |
-| REQ-017-02 | — | no test |
-| REQ-017-03 | — | no test |
+| REQ-017-01 | `crates/domain/src/view.rs` › req_017_01_req_017_02_shows_the_picked_indicators_in_a_fixed_order_with_stars_and_names, req_017_01_leaves_out_what_the_media_item_lacks; `crates/db/src/gallery.rs` › req_017_01_loads_items_with_the_categories_of_their_tags; `crates/app/tests/gallery.rs` › req_017_01_req_017_03_shows_the_picked_tag_indicators_once_turned_on | pass (the badge leaves the video badge's corner free; checked in the app) |
+| REQ-017-02 | `crates/domain/src/view.rs` › req_017_01_req_017_02_shows_the_picked_indicators_in_a_fixed_order_with_stars_and_names; `crates/app/tests/gallery.rs` › req_017_01_req_017_03_shows_the_picked_tag_indicators_once_turned_on | pass (names in the tile's accessible name and as tooltips) |
+| REQ-017-03 | `crates/domain/src/view.rs` › req_017_03_shows_nothing_while_tag_indicators_are_off, req_017_03_is_off_with_all_indicators_picked_until_the_user_changes_it, req_017_03_round_trips_keeping_the_picks_while_off_and_dropping_unknown_ones, req_017_03_toggles_picks_in_their_fixed_order; `crates/app/tests/gallery.rs` › req_017_01_req_017_03_shows_the_picked_tag_indicators_once_turned_on | pass |

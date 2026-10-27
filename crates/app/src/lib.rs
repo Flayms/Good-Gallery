@@ -10,11 +10,11 @@ pub mod state;
 pub mod textures;
 pub mod theme;
 pub mod toasts;
+pub mod toolbar;
 
 pub use state::{AppState, FolderPicker, NativeFolderPicker, Page};
 
 use eframe::egui;
-use icons::{Icon, icon_button};
 
 /// Once per context: theme, fonts and image loaders (icons are SVG).
 pub fn setup(ctx: &egui::Context) {
@@ -53,19 +53,14 @@ fn gallery(ui: &mut egui::Ui, state: &mut AppState) {
     } else if let Some(gallery) = &mut state.gallery {
         gallery.show(ui);
     }
-    // Until the toolbar exists (M6b), Settings is reached from a button in the top-right corner.
-    let corner = egui::Rect::from_min_size(
-        ui.max_rect().right_top() + egui::vec2(-theme::CONTROL_HEIGHT - 8.0, 8.0),
-        egui::Vec2::splat(theme::CONTROL_HEIGHT),
-    );
-    if icon_button(
-        &mut ui.new_child(egui::UiBuilder::new().max_rect(corner)),
-        Icon::Settings,
-        "Settings",
-        "Settings",
-    )
-    .clicked()
-    {
+    // The toolbar floats over the gallery, which scrolls underneath it (REQ-013-03).
+    let area = ui.max_rect();
+    let gallery = if state.libraries.is_empty() {
+        None
+    } else {
+        state.gallery.as_mut()
+    };
+    if toolbar::show(ui, area, gallery) == Some(toolbar::ToolbarAction::OpenSettings) {
         state.page = Page::Settings;
     }
 }

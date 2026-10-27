@@ -5,4 +5,5 @@ pub mod layout;
 pub mod media;
 pub mod tags;
 pub mod thumbs;
+pub mod view;
 pub mod zoom;

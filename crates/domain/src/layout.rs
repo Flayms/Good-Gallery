@@ -339,9 +339,62 @@ pub fn list_index_of_item(groups: &[usize], index: usize) -> usize {
     }
 }
 
+/// Row heights of the List view: media item rows and group header rows (REQ-006-05, REQ-016-05).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ListRows {
+    pub row: f64,
+    pub header: f64,
+}
+
+impl ListRows {
+    /// Group headers before list position `entry`.
+    fn headers_before(groups: &[usize], entry: usize) -> usize {
+        // Header `g` is at position `start + g`.
+        lower_bound(groups.len(), |g| groups[g] + g >= entry)
+    }
+
+    /// Top of the entry at list position `entry`.
+    pub fn top(&self, groups: &[usize], entry: usize) -> f64 {
+        let headers = Self::headers_before(groups, entry);
+        (entry - headers) as f64 * self.row + headers as f64 * self.header
+    }
+
+    /// Height of the whole list of `count` media items.
+    pub fn total(&self, groups: &[usize], count: usize) -> f64 {
+        self.top(groups, count + groups.len())
+    }
+
+    /// The list position at height `y` (the last one below the end).
+    pub fn entry_at(&self, groups: &[usize], count: usize, y: f64) -> usize {
+        let entries = count + groups.len();
+        lower_bound(entries, |entry| self.top(groups, entry + 1) > y).min(entries.saturating_sub(1))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn req_006_05_req_016_05_places_list_rows_and_group_header_rows() {
+        let rows = ListRows {
+            row: 52.0,
+            header: 40.0,
+        };
+        // Entries: header 0, item 0, item 1, header 1, item 2.
+        let groups = [0, 2];
+        let tops: Vec<f64> = (0..5).map(|entry| rows.top(&groups, entry)).collect();
+        assert_eq!(tops, [0.0, 40.0, 92.0, 144.0, 184.0]);
+        assert_eq!(rows.total(&groups, 3), 236.0);
+        assert_eq!(rows.entry_at(&groups, 3, 0.0), 0);
+        assert_eq!(rows.entry_at(&groups, 3, 39.9), 0);
+        assert_eq!(rows.entry_at(&groups, 3, 40.0), 1);
+        assert_eq!(rows.entry_at(&groups, 3, 150.0), 3);
+        assert_eq!(rows.entry_at(&groups, 3, 1e9), 4);
+        // Without groups: plain rows.
+        assert_eq!(rows.top(&[], 3), 156.0);
+        assert_eq!(rows.entry_at(&[], 10, 157.0), 3);
+    }
 
     fn options<'a>(view: TileView, aspects: &'a [f64], groups: &'a [usize]) -> LayoutOptions<'a> {
         LayoutOptions {

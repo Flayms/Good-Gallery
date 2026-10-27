@@ -1,6 +1,6 @@
 # 006 · Gallery views
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Goal
 
@@ -19,7 +19,7 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 
 - **Given** the Masonry view
 - **When** it is shown
-- **Then** tiles are placed in columns of equal width, each tile into the currently shortest column, with an 8 px gap
+- **Then** tiles are placed in columns of equal width, each tile into the currently shortest column, with an 8 px gap (4 px from 8 columns on)
 - **And** each tile keeps its media item's aspect ratio, limited to between 3:1 landscape and 1:3 portrait (cropped beyond that), and is square if the dimensions are unknown
 
 ### REQ-006-03 · Justified view
@@ -109,16 +109,16 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 
 | REQ        | Test                                                                                                                                                         | Result                                                                    |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| REQ-006-01 | — | no test |
+| REQ-006-01 | `crates/domain/src/view.rs` › req_006_01_remembers_the_view_default_masonry; `crates/app/tests/gallery.rs` › req_006_01_picks_the_view_in_the_view_menu_and_remembers_it (snapshot `view_menu`) | pass |
 | REQ-006-02 | `crates/domain/src/layout.rs` › req_006_02_clamps_aspects_and_treats_unknown_sizes_as_squares, req_006_02_splits_columns_and_scales_tiles, req_006_02_places_each_masonry_tile_into_the_shortest_column; `crates/app/tests/gallery.rs` › req_006_08_req_006_09_shows_a_tile_per_media_item_and_video_durations | pass |
-| REQ-006-03 | `crates/domain/src/layout.rs` › req_006_03_fills_rows_to_the_container_width_and_keeps_the_last_row_at_the_target_height, req_006_03_gives_an_over_wide_panorama_a_row_of_its_own, req_006_03_ends_full_rows_flush, req_006_03_req_016_05_fills_justified_rows_per_group_and_keeps_the_last_row_unstretched | partial: layout; choosing the view comes with the toolbar (M6b) |
-| REQ-006-04 | `crates/domain/src/layout.rs` › req_006_04_req_016_05_lays_out_the_grid_as_squares_each_group_starting_a_new_row | partial: layout; choosing the view comes with the toolbar (M6b) |
-| REQ-006-05 | — | no test |
-| REQ-006-06 | `crates/domain/src/zoom.rs` › req_006_06_turns_a_wheel_notch_into_one_step, req_006_06_collects_small_touchpad_deltas_until_they_add_up_to_a_step, req_006_06_splits_large_deltas_and_drops_the_remainder_when_the_direction_changes, req_006_06_zooms_between_2_and_12_columns_default_5; `crates/app/tests/gallery.rs` › req_006_06_ctrl_wheel_zooms_in_steps_and_remembers_the_level | partial: Ctrl + wheel; slider, buttons and the List view come with the toolbar (M6b) |
+| REQ-006-03 | `crates/domain/src/layout.rs` › req_006_03_fills_rows_to_the_container_width_and_keeps_the_last_row_at_the_target_height, req_006_03_gives_an_over_wide_panorama_a_row_of_its_own, req_006_03_ends_full_rows_flush, req_006_03_req_016_05_fills_justified_rows_per_group_and_keeps_the_last_row_unstretched; `crates/app/tests/gallery.rs` › req_006_01_picks_the_view_in_the_view_menu_and_remembers_it | pass |
+| REQ-006-04 | `crates/domain/src/layout.rs` › req_006_04_req_016_05_lays_out_the_grid_as_squares_each_group_starting_a_new_row | pass |
+| REQ-006-05 | `crates/domain/src/layout.rs` › req_006_05_req_016_05_places_list_rows_and_group_header_rows; `crates/app/src/gallery/list.rs` › req_006_05_splits_the_width_into_columns; `crates/app/tests/gallery.rs` › req_006_05_shows_a_row_per_media_item_in_the_list_view (snapshot `gallery_list`) | pass |
+| REQ-006-06 | `crates/domain/src/zoom.rs` › req_006_06_turns_a_wheel_notch_into_one_step, req_006_06_collects_small_touchpad_deltas_until_they_add_up_to_a_step, req_006_06_splits_large_deltas_and_drops_the_remainder_when_the_direction_changes, req_006_06_zooms_between_2_and_12_columns_default_5; `crates/app/tests/gallery.rs` › req_006_06_ctrl_wheel_zooms_in_steps_and_remembers_the_level, req_006_06_zooms_with_the_buttons_and_not_in_the_list_view | pass |
 | REQ-006-07 | `crates/app/tests/gallery.rs` › req_006_07_keeps_the_first_visible_item_in_view_when_zooming, req_006_07_req_006_11_keeps_the_first_visible_item_in_view_when_items_are_added_above | pass (a resize changes the same layout key, once the width settles) |
 | REQ-006-08 | `crates/domain/src/layout.rs` › req_006_08_finds_no_items_before_the_width_is_known; `crates/db/src/gallery.rs` › req_006_08_req_016_01_lists_every_match_in_date_order_with_aspects_and_groups; `crates/app/tests/gallery.rs` › req_006_08_req_006_09_shows_a_tile_per_media_item_and_video_durations | pass |
 | REQ-006-09 | `crates/app/src/format.rs` › req_006_09_formats_durations_as_minutes_or_hours; `crates/app/tests/gallery.rs` › req_006_08_req_006_09_shows_a_tile_per_media_item_and_video_durations (snapshot `gallery`) | pass |
-| REQ-006-10 | `crates/app/tests/snapshots.rs` › req_006_10_first_run_shows_the_no_libraries_empty_state, req_006_10_shows_no_media_found_while_nothing_is_indexed; `crates/app/tests/gallery.rs` › req_006_10_shows_skeleton_tiles_while_loading_and_the_error_when_loading_fails | partial: skeleton rows of the List view come with it (M6b) |
+| REQ-006-10 | `crates/app/tests/snapshots.rs` › req_006_10_first_run_shows_the_no_libraries_empty_state, req_006_10_shows_no_media_found_while_nothing_is_indexed; `crates/app/tests/gallery.rs` › req_006_10_shows_skeleton_tiles_while_loading_and_the_error_when_loading_fails | pass (skeleton rows of the List view checked in the app) |
 | REQ-006-11 | `crates/indexer/src/scan.rs` › writes_read_files_while_the_scan_still_runs; `crates/app/tests/indexing.rs` › refreshes_after_the_first_written_files_and_when_the_scan_ends; `crates/app/tests/gallery.rs` › req_006_11_shows_media_items_written_while_indexing | partial: library list, counts and gallery; tag suggestions follow in M7 |
 | REQ-006-12 | `cargo xtask gallery-bench` (100,000 items, 12 columns, vsync off, AMD iGPU, mains power, 2026-10-27) | no test (measured: p95 4.4 ms, p99 5.3 ms, max 11.9 ms) |
 | REQ-006-13 | `crates/app/src/textures.rs` › req_006_13_frees_least_recently_shown_textures_down_to_90_percent_of_the_budget, req_006_13_keeps_textures_shown_or_requested_in_this_or_the_last_frame; `cargo xtask gallery-bench` (at most 511 MB of a 512 MB budget) | pass |
