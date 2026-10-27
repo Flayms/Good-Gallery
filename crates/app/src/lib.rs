@@ -2,10 +2,12 @@
 
 pub mod empty_state;
 pub mod format;
+pub mod gallery;
 pub mod icons;
 pub mod indexer_progress;
 pub mod settings_page;
 pub mod state;
+pub mod textures;
 pub mod theme;
 pub mod toasts;
 
@@ -42,9 +44,16 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     state.toasts.show(&ctx);
 }
 
-/// The gallery. Until M6 it only has its empty states.
+/// The gallery, or its empty state without libraries.
 fn gallery(ui: &mut egui::Ui, state: &mut AppState) {
-    // Until the toolbar exists (M6), Settings is reached from a button in the top-right corner.
+    if state.libraries.is_empty() {
+        if empty_state::no_libraries(ui).clicked() {
+            state.page = Page::Settings;
+        }
+    } else if let Some(gallery) = &mut state.gallery {
+        gallery.show(ui);
+    }
+    // Until the toolbar exists (M6b), Settings is reached from a button in the top-right corner.
     let corner = egui::Rect::from_min_size(
         ui.max_rect().right_top() + egui::vec2(-theme::CONTROL_HEIGHT - 8.0, 8.0),
         egui::Vec2::splat(theme::CONTROL_HEIGHT),
@@ -58,19 +67,5 @@ fn gallery(ui: &mut egui::Ui, state: &mut AppState) {
     .clicked()
     {
         state.page = Page::Settings;
-    }
-    if state.libraries.is_empty() {
-        if empty_state::no_libraries(ui).clicked() {
-            state.page = Page::Settings;
-        }
-    } else if state.media_count == 0 {
-        empty_state::no_media(ui);
-    } else {
-        empty_state::message(
-            ui,
-            Icon::Images,
-            &format!("{} media items indexed", state.media_count),
-            None,
-        );
     }
 }

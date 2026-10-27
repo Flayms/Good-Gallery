@@ -1,6 +1,7 @@
 //! The index: an SQLite database shared with Good Gallery's Electron version (same schema, same migrations, same
 //! migration bookkeeping), so either app can open an index the other one wrote.
 
+pub mod gallery;
 pub mod libraries;
 mod migrate;
 pub mod settings;

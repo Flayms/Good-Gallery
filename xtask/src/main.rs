@@ -1,6 +1,7 @@
 //! Repository tasks, run with `cargo xtask <task>`.
 
 mod check_specs;
+mod gallery_bench;
 mod libraries;
 mod oracle;
 mod oracle_thumbs;
@@ -32,6 +33,13 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Some("gallery-bench") => match gallery_bench::run(&args[1..]) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("error: {error:#}");
+                ExitCode::FAILURE
+            }
+        },
         Some("thumbs") => match thumbs::run(&args[1..]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
@@ -40,7 +48,9 @@ fn main() -> ExitCode {
             }
         },
         _ => {
-            eprintln!("usage: cargo xtask check-specs [--summary] | libraries … | oracle … | thumbs …");
+            eprintln!(
+                "usage: cargo xtask check-specs [--summary] | libraries … | oracle … | thumbs … | gallery-bench …"
+            );
             ExitCode::FAILURE
         }
     }

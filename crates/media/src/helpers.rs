@@ -48,6 +48,21 @@ pub fn end_helpers_with_app() -> std::io::Result<()> {
     Ok(())
 }
 
+/// Runs the calling thread below normal priority, so background work (thumbnail decoding) doesn't take time from the
+/// UI thread. Measured in M0: more or higher-priority decode threads cost frame time on an integrated GPU.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub fn lower_thread_priority() {
+    use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL};
+    // SAFETY: the pseudo handle of the current thread is always valid.
+    unsafe {
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+    }
+}
+
+#[cfg(not(windows))]
+pub fn lower_thread_priority() {}
+
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;

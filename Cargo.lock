@@ -189,8 +189,10 @@ name = "app"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "base64",
  "chrono",
  "db",
+ "domain",
  "eframe",
  "egui_extras",
  "egui_kittest",
@@ -198,9 +200,12 @@ dependencies = [
  "indexer",
  "media",
  "rfd",
+ "serde_json",
  "tempfile",
+ "thumbhash",
  "tracing",
  "tracing-subscriber",
+ "webp",
 ]
 
 [[package]]
@@ -878,6 +883,7 @@ dependencies = [
 name = "domain"
 version = "0.0.0"
 dependencies = [
+ "chrono",
  "unicode-normalization",
 ]
 

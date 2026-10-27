@@ -47,6 +47,6 @@ Users who rate and tag their photos in other apps want to see at a glance which 
 
 | REQ        | Test | Result |
 | ---------- | ---- | ------ |
-| REQ-017-01 | — | no test |
+| REQ-017-01 | `crates/db/src/gallery.rs` › req_017_01_loads_items_with_the_categories_of_their_tags | partial: categories loaded with the tile data; indicators come in M6b |
 | REQ-017-02 | — | no test |
 | REQ-017-03 | — | no test |

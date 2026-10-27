@@ -1,5 +1,6 @@
 //! App state and the background jobs that feed it.
 
+use crate::gallery::Gallery;
 use crate::toasts::Toasts;
 use db::libraries::Library;
 use db::rusqlite::Connection;
@@ -71,16 +72,31 @@ pub struct AppState {
     written_since_refresh: bool,
     /// Kept alive for the app's lifetime; dropping it stops the schedule.
     scheduler: Option<indexer::schedule::Scheduler>,
-    /// Renders thumbnails in the background; the gallery's tiles request theirs from it (M6).
+    /// Renders thumbnails in the background; the gallery's tiles request theirs from it.
     thumbnails: Option<Arc<indexer::thumbnails::ThumbnailService>>,
+    /// `None` if the index couldn't be opened.
+    pub gallery: Option<Gallery>,
 }
 
 impl AppState {
     pub fn new(conn: Connection, scans: Arc<dyn ScanRequests>, picker: Arc<dyn FolderPicker>) -> Self {
         let mut state = Self::empty(scans, picker);
-        state.db = Some(Arc::new(Mutex::new(conn)));
+        let db = Arc::new(Mutex::new(conn));
+        state.db = Some(db.clone());
         state.refresh();
+        state.gallery = Some(Gallery::new(db.clone(), db, None));
         state
+    }
+
+    /// The UI's write connection, for parts that store choices through it.
+    pub fn db(&self) -> Option<Arc<Mutex<Connection>>> {
+        self.db.clone()
+    }
+
+    /// Replaces the gallery, e.g. with one that reads through its own connection and streams thumbnails.
+    pub fn with_gallery(mut self, gallery: Gallery) -> Self {
+        self.gallery = Some(gallery);
+        self
     }
 
     /// Sends scan requests to `indexer` and shows what it reports.
@@ -128,6 +144,7 @@ impl AppState {
             written_since_refresh: false,
             scheduler: None,
             thumbnails: None,
+            gallery: None,
         }
     }
 
@@ -160,7 +177,13 @@ impl AppState {
                 Ok((libraries, count))
             });
         match result {
-            Ok((libraries, count)) => (self.libraries, self.media_count) = (libraries, count),
+            Ok((libraries, count)) => {
+                (self.libraries, self.media_count) = (libraries, count);
+                // New media items while indexing, or a library removed (REQ-006-11).
+                if let Some(gallery) = &mut self.gallery {
+                    gallery.reload();
+                }
+            }
             Err(error) => self.toasts.error(error),
         }
     }
@@ -260,7 +283,10 @@ impl AppState {
 
     /// Whether the UI must keep polling (jobs or a scan running).
     pub fn is_active(&self) -> bool {
-        self.is_busy() || self.indexer_status.current.is_some() || self.written_since_refresh
+        self.is_busy()
+            || self.indexer_status.current.is_some()
+            || self.written_since_refresh
+            || self.gallery.as_ref().is_some_and(Gallery::is_loading)
     }
 
     /// Waits for all background jobs and applies them (tests, before stepping the UI).
@@ -268,6 +294,9 @@ impl AppState {
         while self.pending_jobs > 0 {
             let event = self.events.1.recv().expect("job sender dropped");
             self.apply(event);
+        }
+        if let Some(gallery) = &mut self.gallery {
+            gallery.wait_for_loads();
         }
     }
 

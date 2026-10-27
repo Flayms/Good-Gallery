@@ -1,7 +1,7 @@
 //! User settings, stored as JSON values in the `settings` table under the reference's keys.
 
 use crate::{Error, Result};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -97,9 +97,36 @@ pub fn save(conn: &Connection, settings: &Settings) -> Result<()> {
     Ok(())
 }
 
+/// A stored value outside the settings above, e.g. a view choice of the gallery (`gallery.columns`). The Electron
+/// version ignores keys it doesn't know and keeps them. `None` if missing or unreadable.
+pub fn value(conn: &Connection, key: &str) -> Result<Option<Value>> {
+    let text: Option<String> = conn
+        .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| row.get(0))
+        .optional()?;
+    Ok(text.and_then(|text| serde_json::from_str(&text).ok()))
+}
+
+pub fn set_value(conn: &Connection, key: &str, value: &Value) -> Result<()> {
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        (key, value.to_string()),
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stores_other_values_under_their_own_keys() {
+        let conn = crate::open_in_memory().unwrap();
+        assert_eq!(value(&conn, "gallery.columns").unwrap(), None);
+        set_value(&conn, "gallery.columns", &Value::from(7)).unwrap();
+        set_value(&conn, "gallery.columns", &Value::from(8)).unwrap();
+        assert_eq!(value(&conn, "gallery.columns").unwrap(), Some(Value::from(8)));
+        assert_eq!(load(&conn).unwrap(), Settings::default());
+    }
 
     #[test]
     fn req_010_01_starts_with_defaults_and_persists_updates() {

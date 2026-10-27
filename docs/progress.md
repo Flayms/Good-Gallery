@@ -13,7 +13,8 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | M4b       | Indexing: scanning                     | Done        | [M04](rewrite/milestones/M04-indexing.md) |
 | M4c       | Indexing: change detection, oracle     | Done        | [M04](rewrite/milestones/M04-indexing.md) |
 | M5        | Thumbnails                             | Done        | [M05](rewrite/milestones/M05-thumbnails.md) |
-| M6        | Gallery                                | Not started | —                                       |
+| M6a       | Gallery: tiles                         | Done        | [M06](rewrite/milestones/M06-gallery.md) |
+| M6b       | Gallery: views and toolbar             | Not started | [M06](rewrite/milestones/M06-gallery.md) |
 | M7        | Search and sidebar                     | Not started | —                                       |
 | M8        | Photo viewer and filmstrip             | Not started | —                                       |
 | M9        | Video                                  | Not started | —                                       |
@@ -23,6 +24,17 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-27 · M6a · Gallery: tiles
+
+- Plan written and self-approved (`docs/rewrite/milestones/M06-gallery.md`), split into M6a (tiles) and M6b (views, toolbar).
+- Done, tests seen red then green: tasks 1–7. `domain::{layout, date_groups, zoom}`, `db::gallery` (layout + items with tag categories), `db::settings::{value, set_value}`, `app::textures` (spike streamer, LRU budget), `app::gallery` (loader thread, Masonry tiles, ThumbHash placeholders, fade-in, video badge, failed icon, Ctrl + wheel zoom stored as `gallery.columns`, scroll anchoring, live reload, skeleton and error states), `crates/app/tests/gallery.rs` + snapshots `gallery`, `gallery_loading`. Checked in the app: fixture library, on-demand rendering, and a copy of the real index with the Electron cache.
+- Frame-time budget (REQ-006-12): `cargo xtask gallery-bench` builds a data folder with 100,000 items whose thumbnails are hard links into a cache copy and runs the app with `--bench-scroll` (vsync off, a warming pass, then 20 s at 1,440 pt/s, 12 columns). Result on mains power: p50 3.0 ms, p95 4.4 ms, p99 5.3 ms, max 11.9 ms. The first run showed textures at 324 MB, over the planned 256 MB budget: at 12 columns the visible tiles and the prefetch band alone take ≈ 330 MB, so the budget is 512 MB (as in M0); the second run peaked at 511 MB.
+- Specs: 006 REQ-006-02, -07, -08, -09, -13 pass, -03, -04, -06, -10, -11 partial (view choice, slider, List view in M6b; tag suggestions M7), -12 measured; 016 -01, -04 … -06 partial (headers in M6b); 017 -01 partial; 005 -06, -14 tiles checked in the app (no automated tile test without the GPU streamer).
+- Code review fixes: chunks forgotten with the remembered items (or loaded from a stale layout during a reload) were never asked for again; a reload laid out twice and snapped the view to the old position, so the anchor is now the media item (test: items added above stay out of the way); the gallery `AppState::new` builds now loads lazily, so the one `main` replaces never queries; a window resize lays out once the width settles (120 ms); loaded textures keep their LRU protection when a larger width is missing; missing thumbnails are looked for again after a reload; a usage string gap.
+- Decisions in `docs/architecture.md` (gallery data and textures); pitfalls (egui Ctrl + wheel, per-frame layout clone, hard links).
+- Open: (1) the Settings button sits in the top-right corner until the toolbar (M6b). (2) Thumbnail rendering still runs at normal priority; the bench ran with all thumbnails cached, so rendering while scrolling isn't measured.
+- Next: M6b (toolbar with the View menu, List view, date group headers, tag indicators).
 
 ### 2026-10-27 · M5 · Thumbnails
 
