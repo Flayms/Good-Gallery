@@ -810,6 +810,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 name = "db"
 version = "0.0.0"
 dependencies = [
+ "chrono",
  "domain",
  "rusqlite",
  "serde",
@@ -4703,6 +4704,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "base64",
+ "chrono",
  "db",
  "domain",
  "image",

@@ -243,14 +243,14 @@ impl ThumbCache {
 }
 
 /// Windows refuses to replace a file someone has open (a reader, or Defender scanning the file just written), so a
-/// refused rename is retried for a moment.
+/// refused rename is retried for a moment (≈ 1.4 s; under load, Defender holds new files that long).
 fn rename_replacing(from: &Path, to: &Path) -> io::Result<()> {
     let mut attempt = 0;
     loop {
         match std::fs::rename(from, to) {
-            Err(error) if error.kind() == io::ErrorKind::PermissionDenied && attempt < 5 => {
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied && attempt < 10 => {
                 attempt += 1;
-                std::thread::sleep(Duration::from_millis(20 * attempt));
+                std::thread::sleep(Duration::from_millis(25 * attempt));
             }
             result => return result,
         }

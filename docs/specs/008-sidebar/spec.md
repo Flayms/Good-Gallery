@@ -76,9 +76,9 @@ The user browses by structure rather than by typing: libraries and their folders
 | REQ        | Test                                                                                                                                                         | Result                                                                    |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
 | REQ-008-01 | — | no test |
-| REQ-008-02 | — | no test |
-| REQ-008-03 | — | no test |
-| REQ-008-04 | — | no test |
-| REQ-008-05 | — | no test |
-| REQ-008-06 | — | no test |
+| REQ-008-02 | `crates/domain/src/folders.rs` › req_008_02_adds_intermediate_folders_sums_counts_and_sorts_naturally, req_008_02_sorts_naturally_ignoring_letter_case, req_008_02_lists_the_path_and_its_ancestors; `crates/db/src/tags.rs` › req_008_02_lists_folders_with_direct_media_counts; `cargo xtask oracle` (30 searches against the reference) | partial: query; the sidebar comes in M7b |
+| REQ-008-03 | `crates/domain/src/folders.rs` › req_008_03_nests_tags_under_their_parent_in_the_given_order; `crates/db/src/tags.rs` › req_008_03_groups_by_the_top_level_tag_whatever_its_exact_name_with_counts_including_descendants, req_008_03_keeps_the_hierarchy_below_the_root; `cargo xtask oracle` (30 searches against the reference) | partial: query; the sidebar comes in M7b |
+| REQ-008-04 | `crates/db/src/tags.rs` › req_008_04_counts_media_per_rating_0_meaning_unrated; `cargo xtask oracle` (30 searches against the reference) | partial: query; the sidebar comes in M7b |
+| REQ-008-05 | `crates/db/src/tags.rs` › req_008_05_excludes_category_tags_and_their_roots; `cargo xtask oracle` (30 searches against the reference) | partial: query; the sidebar comes in M7b |
+| REQ-008-06 | `crates/domain/src/search.rs` › req_007_05_req_008_06_adds_moves_and_removes_tags_case_insensitively | partial: query; the sidebar comes in M7b |
 | REQ-008-07 | — | no test |

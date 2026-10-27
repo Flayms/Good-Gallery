@@ -15,7 +15,8 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | M5        | Thumbnails                             | Done        | [M05](rewrite/milestones/M05-thumbnails.md) |
 | M6a       | Gallery: tiles                         | Done        | [M06](rewrite/milestones/M06-gallery.md) |
 | M6b       | Gallery: views and toolbar             | Done        | [M06](rewrite/milestones/M06-gallery.md) |
-| M7        | Search and sidebar                     | Not started | —                                       |
+| M7a       | Search: model and queries              | Done        | [M07](rewrite/milestones/M07-search-sidebar.md) |
+| M7b       | Search bar, filters and sidebar        | Not started | [M07](rewrite/milestones/M07-search-sidebar.md) |
 | M8        | Photo viewer and filmstrip             | Not started | —                                       |
 | M9        | Video                                  | Not started | —                                       |
 | M10       | Settings, design polish, glass         | Not started | —                                       |
@@ -24,6 +25,17 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-27 · M7a · Search: model and queries
+
+- Plan written and self-approved (`docs/rewrite/milestones/M07-search-sidebar.md`), split into M7a (model and queries) and M7b (search bar, filters, sidebar).
+- `domain::search` (search state, tag include / exclude / remove, filter count, local day range), `domain::folders` (folder tree with natural order, ancestors, tag trees), `db::gallery::layout` with every filter and the reference's tag conditions (plan pins kept), `db::tags` (suggestions, People / Places, popular, rating counts, library folders). The reference's router tests are ported.
+- Oracle: 30 searches, 6 suggestion prefixes and 5 sidebar lists identical to the reference's router on the same index. `cargo xtask oracle-search` runs that part alone.
+- REQ-007-14 measured with `cargo xtask search-bench` (500k items): narrow searches 1–18 ms p95, broad ones 0.25–0.7 s, suggestions 13.9 ms. Read connections now use memory-mapped reads and a 64 MB cache (4–8× faster).
+- Also: the thumbnail cache's rename retry widened to ≈ 1.4 s after a full-suite flake.
+- Code review fixes: \`oracle-search\` works on a temp copy (the reference migrates what it opens); natural order ignores accents like the reference's collator; tags whose parents form a cycle reach the tag tree; a day without a local midnight falls back to UTC midnight instead of 1970; ratings above 5 are ignored; searches without tags use the statement cache; the bench refuses a reused index that isn't complete. Kept: memory-mapped reads (an I/O error becomes a crash, but the index is on the local disk).
+- **Open (user decision):** REQ-007-14's 50 ms for broad searches needs a covering index or rows stored in sort order, a change of the schema shared with the Electron version.
+- Next: M7b (search bar, filters, sort, sidebar).
 
 ### 2026-10-27 · M6b · Gallery: views and toolbar
 

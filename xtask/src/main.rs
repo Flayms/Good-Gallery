@@ -4,7 +4,9 @@ mod check_specs;
 mod gallery_bench;
 mod libraries;
 mod oracle;
+mod oracle_search;
 mod oracle_thumbs;
+mod search_bench;
 mod thumbs;
 
 use std::path::Path;
@@ -40,6 +42,35 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Some("oracle-search") => match args.get(1..=2) {
+            Some([flag, index]) if flag == "--index" => {
+                let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+                let reference = root.join("..").join("good-gallery");
+                match std::path::absolute(&reference)
+                    .map_err(anyhow::Error::from)
+                    .and_then(|reference| oracle_search::run_on_copy(&reference, Path::new(index)))
+                {
+                    Ok(true) => ExitCode::SUCCESS,
+                    Ok(false) => ExitCode::FAILURE,
+                    Err(error) => {
+                        eprintln!("error: {error:#}");
+                        ExitCode::FAILURE
+                    }
+                }
+            }
+            _ => {
+                eprintln!("usage: cargo xtask oracle-search --index <reference index of the fixture library>");
+                ExitCode::FAILURE
+            }
+        },
+        Some("search-bench") => match search_bench::run(&args[1..]) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(error) => {
+                eprintln!("error: {error:#}");
+                ExitCode::FAILURE
+            }
+        },
         Some("thumbs") => match thumbs::run(&args[1..]) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
@@ -49,7 +80,7 @@ fn main() -> ExitCode {
         },
         _ => {
             eprintln!(
-                "usage: cargo xtask check-specs [--summary] | libraries … | oracle … | thumbs … | gallery-bench …"
+                "usage: cargo xtask check-specs [--summary] | libraries … | oracle … | thumbs … | oracle-search … | gallery-bench … | search-bench …"
             );
             ExitCode::FAILURE
         }

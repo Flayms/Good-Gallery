@@ -16,7 +16,7 @@ const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const here = dirname(fileURLToPath(import.meta.url))
 const isLocal = (id) => id.startsWith('.') || id.startsWith('@ref') || id.startsWith('@shared') || /^([A-Za-z]:|\/|\0)/.test(id)
 // ESM-only packages: Node can require them, but the bundle's CommonJS interop then misses their default export.
-const bundled = new Set(['p-queue', 'thumbhash'])
+const bundled = new Set(['p-queue', 'thumbhash', 'superjson'])
 
 await build({
   configFile: false,

@@ -272,7 +272,7 @@ impl Gallery {
         self.generation += 1;
         self.loader.send(Request::Layout {
             generation: self.generation,
-            search: self.search,
+            search: self.search.clone(),
         });
     }
 

@@ -85,6 +85,11 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **Don't clone the tile layout per frame**: at 100k items it is ≈ 3 MB of `Vec<f64>`. Take it out of the struct for the frame and put it back.
 * **Hard links need the same volume**: `cargo xtask gallery-bench` links the cache copy's files, so its data folder must be on that drive.
 
+## Search
+
+* **A sort-index walk with SQLite's default page cache is a read call per row.** On a 200 MB index, listing 500k items took 5 s; memory-mapped reads plus a 64 MB cache bring it to 0.7 s (`db::open_reader`). Benchmarks must also run in release: the debug build doubled the times.
+* **One full `cargo xtask oracle` run stalled after the reference's search script had finished** (xtask waiting, no Node process left); it didn't happen again in the next run or in `cargo xtask oracle-search`. If it recurs, look for a process holding the inherited stdout pipe.
+
 ## Carried over from the reference
 
 These still apply to the Rust implementation. The reference's own `docs/known-pitfalls.md` has the Electron-specific rest.

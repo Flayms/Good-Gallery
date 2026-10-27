@@ -1,7 +1,7 @@
 //! `cargo xtask oracle [--reference <dir>] [--keep <dir>]`: generates a fixture library, indexes it with the reference
 //! (`xtask/oracle/reference-index.ts`, bundled with the reference's vite and run with Node) and with this indexer, and
 //! diffs the two indexes, ignoring ids and scan times. Documented deviations are listed but don't fail the run. Then
-//! compares thumbnails rendered by both (`oracle_thumbs`).
+//! compares searches (`oracle_search`) and thumbnails rendered by both (`oracle_thumbs`).
 
 use anyhow::{Context as _, bail};
 use db::libraries::{self, LibraryStatus};
@@ -564,11 +564,12 @@ pub fn run(args: &[String]) -> anyhow::Result<bool> {
         documented.len(),
         unexpected.len()
     );
+    let searches_match = crate::oracle_search::run(&reference, &work, &reference_index)?;
     let thumbnails_match = crate::oracle_thumbs::run(&reference, &work, &exiftool)?;
     if let Some(dir) = &keep {
         println!("kept in {}", dir.display());
     }
-    Ok(unexpected.is_empty() && thumbnails_match)
+    Ok(unexpected.is_empty() && searches_match && thumbnails_match)
 }
 
 #[cfg(test)]

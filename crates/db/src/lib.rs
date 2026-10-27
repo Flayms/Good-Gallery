@@ -5,6 +5,7 @@ pub mod gallery;
 pub mod libraries;
 mod migrate;
 pub mod settings;
+pub mod tags;
 pub mod thumbs;
 pub mod writer;
 
@@ -39,8 +40,19 @@ pub fn open_reader(path: &Path) -> Result<Connection> {
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     conn.pragma_update(None, "busy_timeout", 5000)?;
+    // Searches walk a sort index and look up each row in the table: with the default 2 MB page cache every lookup is
+    // a read call. Memory-mapped reads and a larger cache make a 500k-row search 4–8× faster (M7a, search-bench).
+    // Memory-mapped reads turn an I/O error into a crash instead of an error; the index lives on a local disk (the
+    // user profile), where that doesn't happen in practice.
+    conn.pragma_update(None, "mmap_size", READER_MMAP)?;
+    conn.pragma_update(None, "cache_size", READER_CACHE)?;
     Ok(conn)
 }
+
+/// Memory-mapped size of read connections, bytes (the index of 500k media items is ≈ 200 MB).
+const READER_MMAP: i64 = 512 << 20;
+/// Page cache of read connections; negative means KiB.
+const READER_CACHE: i64 = -65_536;
 
 /// A migrated in-memory index, for tests.
 pub fn open_in_memory() -> Result<Connection> {

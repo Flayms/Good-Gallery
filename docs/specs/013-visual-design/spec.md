@@ -140,7 +140,7 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 | REQ-013-05 | — | no test |
 | REQ-013-06 | — | no test |
 | REQ-013-07 | — | no test |
-| REQ-013-08 | — | no test |
+| REQ-013-08 | `crates/domain/src/search.rs` › req_013_08_counts_and_clears_only_the_filters_under_filters | partial: filter count and clearing; the Filters menu comes in M7b, the toolbar at 800 × 600 is checked with it |
 | ~~REQ-013-09~~ | — | no test (deprecated) |
 | REQ-013-10 | — | no test |
 | REQ-013-11 | — | no test |
