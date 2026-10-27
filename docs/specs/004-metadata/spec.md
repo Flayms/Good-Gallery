@@ -1,6 +1,6 @@
 # 004 · Metadata
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Goal
 
@@ -98,7 +98,7 @@ Search and sorting rely on the tags, ratings and dates that photo tools (Lightro
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | REQ-004-01 | `crates/indexer/tests/end_to_end.rs` › indexes_a_photo_with_its_sidecar_without_touching_files (exiftool) | pass |
 | REQ-004-02 | `crates/media/src/metadata.rs` › swaps_dimensions_for_rotated_images_and_videos | pass |
-| REQ-004-03 | `crates/media/src/metadata.rs` › prefers_embedded_capture_dates…, takes_the_first_valid_date…, uses_offset_tags…, infers_the_zone…, reads_zoneless_video_dates_as_utc, reads_zoneless_photo_dates_in_local_time | partial: zone from the GPS position (geo-tz) not ported, see `docs/architecture.md` |
+| REQ-004-03 | `crates/media/src/metadata.rs` › prefers_embedded_capture_dates…, takes_the_first_valid_date…, uses_offset_tags…, infers_the_zone…, reads_zoneless_video_dates_as_utc, reads_zoneless_photo_dates_in_local_time; `cargo xtask oracle` | partial: zone from the GPS position (geo-tz) not ported, documented deviation (`docs/architecture.md`) |
 | REQ-004-04 | `crates/media/src/metadata.rs` › reads_video_duration | pass |
 | REQ-004-05 | `crates/media/src/metadata.rs` › normalizes_the_rating_falling_back_to_the_sidecar | pass |
 | REQ-004-06 | `crates/media/src/metadata.rs` › merges_keyword_fields…, accepts_numeric_keywords | pass |

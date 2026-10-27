@@ -280,6 +280,13 @@ impl ExifTool {
         drop(surplus);
     }
 
+    /// Process ids of the idle processes.
+    #[cfg(test)]
+    pub(crate) fn process_ids(&self) -> Vec<u32> {
+        let pool = self.pool.lock().unwrap_or_else(|p| p.into_inner());
+        pool.idle.iter().map(|process| process.child.id()).collect()
+    }
+
     /// All tags of `file` as exiftool-vendored reads them: one JSON object.
     pub fn read(&self, file: &Path) -> Result<serde_json::Map<String, serde_json::Value>, ExifToolError> {
         let mut process = self.acquire()?;

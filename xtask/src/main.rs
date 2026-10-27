@@ -2,6 +2,7 @@
 
 mod check_specs;
 mod libraries;
+mod oracle;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -21,8 +22,16 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Some("oracle") => match oracle::run(&args[1..]) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(error) => {
+                eprintln!("error: {error:#}");
+                ExitCode::FAILURE
+            }
+        },
         _ => {
-            eprintln!("usage: cargo xtask check-specs [--summary] | libraries …");
+            eprintln!("usage: cargo xtask check-specs [--summary] | libraries … | oracle …");
             ExitCode::FAILURE
         }
     }

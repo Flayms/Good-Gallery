@@ -11,7 +11,7 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | M3        | Database and libraries                 | Done        | [M03](rewrite/milestones/M03-database-libraries.md) |
 | M4a       | Indexing: metadata                     | Done        | [M04](rewrite/milestones/M04-indexing.md) |
 | M4b       | Indexing: scanning                     | Done        | [M04](rewrite/milestones/M04-indexing.md) |
-| M4c       | Indexing: change detection, oracle     | Not started | [M04](rewrite/milestones/M04-indexing.md) |
+| M4c       | Indexing: change detection, oracle     | Done        | [M04](rewrite/milestones/M04-indexing.md) |
 | M5        | Thumbnails                             | Not started | —                                       |
 | M6        | Gallery                                | Not started | —                                       |
 | M7        | Search and sidebar                     | Not started | —                                       |
@@ -23,6 +23,19 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-27 · M4c · Indexing: change detection, oracle
+
+- Picked up an interrupted session: the watcher and schedule (committed with M4b) were half wired in. Now finished: the indexer starts a watcher after a completed scan and stops it when the library goes offline or is removed, and reports become changes or quick scans. The app runs the schedule (quick scans at startup and every interval, offline libraries every minute, full scans for outdated rows).
+- Tests for REQ-003-05 (5,000-path limit when queueing), -06 (failed watch), -07, -10 (watched again after a reconnect). Spec 003 `Implemented`, 004 `Implemented` (REQ-004-03 partial: GPS zone deviation), REQ-001-05 and REQ-002-05 pass.
+- Spec fix: REQ-003-06 no longer queues a scan when watching can't start (it would follow every completed scan); the schedule retries.
+- `cargo xtask oracle`: fixture library (16 media items, 19 tags: offsets, sub-seconds, hierarchies, both face-region formats, orientations, both sidecar namings, GPS, Unicode and whitespace tags, a broken file, a video, housekeeping files), indexed by the reference (bundled with its vite, run with Node) and by this indexer, then diffed. 5 documented differences (face regions, GPS zone), 0 unexpected.
+- Bug found while checking the app: exiftool outlived the app (two processes per pool slot). The app now puts itself into a kill-on-close job object (`media::helpers`, the first `unsafe`); the test saw the leak fail, then pass.
+- Checked in the running app: a new data folder with the fixture library, where only the startup schedule indexes it (16 items, online); no exiftool left behind.
+- Code review fixes: the scheduler's read-only connection opened before the index was created, so a fresh data folder couldn't start (checked in the app afterwards); a library removed while its scan completed could be watched again; watchers are no longer dropped under the state lock or started under the watcher lock; the job object allows breakaway for programs opened for the user; a REQ-003-07 test no longer sleeps; `--screenshot-after` rejects bad numbers.
+- Not changed after review: watching starts after the first completed scan, so changes during a library's first scan in folders already walked wait for the next quick scan (as in the reference; REQ-003-07 is about watched libraries). `Scheduler::set_interval` has no caller yet because the setting has no UI; wire it in M10 (REQ-010-03).
+- Open: (1) exiftool processes left over from this session's runs before the fix (PIDs started 08:35–09:47) couldn't be killed from the agent shell (blocked); end them in Task Manager. (2) REQ-002-11 still has no test. (3) Oracle needs Node, the reference's `node_modules` and ffmpeg; not in CI.
+- Next: M5 (Thumbnails), starting with its plan and the open thumbnail cache layout decision.
 
 ### 2026-10-26 · M4b · Indexing: scanning
 

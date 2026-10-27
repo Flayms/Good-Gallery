@@ -4,14 +4,23 @@ A desktop gallery for large photo and video libraries (50k–500k files), with l
 
 This is a work-in-progress rewrite of Good Gallery (the Electron app, checked out next to this repo as `../good-gallery`) in Rust (eframe / egui on wgpu). Progress: [docs/progress.md](docs/progress.md). Plan: [docs/rewrite/plan.md](docs/rewrite/plan.md).
 
+## Status
+
+The app opens existing Good Gallery indexes and manages libraries (Settings → Libraries). It indexes them in the background: files, capture dates, ratings and tags (keywords, hierarchies, face regions, XMP sidecars). It watches them for changes, re-checks them on a schedule and notices when a network share goes offline and comes back. The gallery itself (thumbnails, views, search) comes next. For now the window shows the number of indexed media items:
+
+![The app after indexing a library](docs/screenshots/indexed-library.png)
+
 ## Development
 
-Requirements: Rust (pinned in `rust-toolchain.toml`, installed through rustup) and, on Windows, the MSVC C++ build tools.
+Requirements: Rust (pinned in `rust-toolchain.toml`, installed through rustup) and, on Windows, the MSVC C++ build tools. Indexing needs exiftool on `PATH` (or `GOOD_GALLERY_EXIFTOOL`).
 
 ```sh
+cargo run -p app
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
+cargo xtask check-specs
+cargo xtask oracle   # compares indexing with the reference; needs Node, ffmpeg and ../good-gallery with node_modules
 ```
 
 ## License

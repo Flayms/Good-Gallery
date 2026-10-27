@@ -2000,6 +2000,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4597,7 +4598,9 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "db",
+ "image",
  "indexer",
+ "media",
  "regex",
  "tempfile",
 ]

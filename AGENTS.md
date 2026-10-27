@@ -6,16 +6,17 @@ This repo is a **rewrite** of the Electron app in `../good-gallery` (the **refer
 
 ## Orientation
 
-| Document                       | Why                                                                                     |
-| ------------------------------ | --------------------------------------------------------------------------------------- |
-| `docs/progress.md`             | **Read first.** Milestone status, current milestone, handoff log of previous sessions   |
-| `docs/rewrite/plan.md`         | Master plan: target architecture, compatibility rules, milestones and their exit criteria |
-| `docs/rewrite/milestones/`     | One plan per milestone (approach + tasks), written at the start of the milestone        |
-| `docs/architecture.md`         | Target architecture and the decisions that outlive a milestone                          |
-| `docs/glossary.md`             | Domain terms. Use them in code, tests and UI                                            |
-| `docs/known-pitfalls.md`       | Add every pitfall you hit, so the next session avoids it                                |
-| `docs/specs/`                  | Feature specs, ported from the reference. The contract for every milestone                |
-| `docs/design.md`               | Visual design (adapted to egui in M2). Read before any UI work                   |
+| Document                   | Why                                                                                       |
+| -------------------------- | ----------------------------------------------------------------------------------------- |
+| `docs/progress.md`         | **Read first.** Milestone status, current milestone, handoff log of previous sessions     |
+| `docs/rewrite/plan.md`     | Master plan: target architecture, compatibility rules, milestones and their exit criteria |
+| `docs/rewrite/milestones/` | One plan per milestone (approach + tasks), written at the start of the milestone          |
+| `README.md`                | User facing description. Keep up to date with screenshots.                                |
+| `docs/architecture.md`     | Target architecture and the decisions that outlive a milestone                            |
+| `docs/glossary.md`         | Domain terms. Use them in code, tests and UI                                              |
+| `docs/known-pitfalls.md`   | Add every pitfall you hit, so the next session avoids it                                  |
+| `docs/specs/`              | Feature specs, ported from the reference. The contract for every milestone                |
+| `docs/design.md`           | Visual design (adapted to egui in M2). Read before any UI work                            |
 
 ## The reference (`../good-gallery`)
 

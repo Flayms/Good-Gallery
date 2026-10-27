@@ -122,7 +122,7 @@ Every library is mirrored in a local index, so browsing and searching 50k–500k
 | REQ-002-02 | `crates/domain/src/media.rs` › skips_dotfiles…; `crates/indexer/src/walk.rs` › walks_depth_first_and_skips_housekeeping, skips_symbolic_links; `scan.rs` › indexes_media_recursively… | pass |
 | REQ-002-03 | `crates/indexer/src/scan.rs` › indexes_media_recursively_and_skips_housekeeping_files | pass |
 | REQ-002-04 | `crates/indexer/src/scan.rs` › rescans_incrementally; `crates/db/src/writer.rs` › removes_vanished_folders_with_everything_below | pass |
-| REQ-002-05 | `crates/indexer/src/scan.rs` › rereads_files_from_an_older_metadata_extractor | partial: the full scan instead of a quick one for such libraries comes with the schedule (M4c) |
+| REQ-002-05 | `crates/indexer/src/scan.rs` › rereads_files_from_an_older_metadata_extractor; `crates/indexer/src/schedule.rs` › scans_libraries_with_outdated_rows_fully_and_others_quickly | pass |
 | REQ-002-06 | `crates/indexer/src/scan.rs` › writes_read_files_while_the_scan_still_runs | pass |
 | REQ-002-07 | `crates/indexer/src/indexer.rs` › merges_scopes_keeping_the_more_thorough_kind, runs_scans_one_at_a_time_in_request_order | pass |
 | REQ-002-08 | `crates/app/tests/indexing.rs` › shows_which_library_is_scanned_with_counts_and_waiting_scans | partial: shown in a corner until the sidebar exists (M7); the spinner on the library entry comes with it |

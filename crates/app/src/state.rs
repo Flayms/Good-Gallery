@@ -69,6 +69,8 @@ pub struct AppState {
     /// When written files were last shown; `None` until the running scan wrote its first files.
     last_written_refresh: Option<Instant>,
     written_since_refresh: bool,
+    /// Kept alive for the app's lifetime; dropping it stops the schedule.
+    scheduler: Option<indexer::schedule::Scheduler>,
 }
 
 impl AppState {
@@ -83,6 +85,12 @@ impl AppState {
     pub fn with_indexer(mut self, indexer: Arc<dyn ScanRequests>, events: Receiver<IndexerEvent>) -> Self {
         self.scans = indexer;
         self.indexer_events = Some(events);
+        self
+    }
+
+    /// Runs scheduled scans for as long as the app runs.
+    pub fn with_scheduler(mut self, scheduler: indexer::schedule::Scheduler) -> Self {
+        self.scheduler = Some(scheduler);
         self
     }
 
@@ -110,6 +118,7 @@ impl AppState {
             indexer_status: IndexerStatus::default(),
             last_written_refresh: None,
             written_since_refresh: false,
+            scheduler: None,
         }
     }
 

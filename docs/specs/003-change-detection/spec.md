@@ -1,6 +1,6 @@
 # 003 · Change detection
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Goal
 
@@ -43,9 +43,10 @@ Files that are added, changed, renamed or deleted in a library show up in the ga
 ### REQ-003-06 · Watcher failure
 
 - **Given** a watched library
-- **When** watching fails (e.g. the share disconnects) or can't start
+- **When** watching fails (e.g. the share disconnects)
 - **Then** watching stops and a quick scan is queued, which also detects whether the library went offline
 - **And** the next completed scan starts watching again
+- **And** when watching can't start after a completed scan, nothing is queued (nothing was missed yet); the next scheduled quick scan (REQ-003-09) tries again
 
 ### REQ-003-07 · Changes during a scan
 
@@ -89,13 +90,13 @@ Files that are added, changed, renamed or deleted in a library show up in the ga
 
 | REQ        | Test                                                                                                                                                             | Result                                                          |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| REQ-003-01 | `crates/indexer/src/watcher.rs` › reports_new_files_in_a_watched_folder | partial: the watcher itself; started and stopped by the indexer in M4c |
+| REQ-003-01 | `crates/indexer/src/watcher.rs` › reports_new_files_in_a_watched_folder; `crates/indexer/src/indexer.rs` › watches_after_a_completed_scan_and_scans_reported_changes, stops_watching_an_offline_library_and_watches_it_again_after_a_reconnect | pass |
 | REQ-003-02 | `crates/indexer/src/watcher.rs` › reports_the_changed_paths_once_changes_settle, reports_within_the_maximum_delay… | pass |
 | REQ-003-03 | `crates/indexer/src/watcher.rs` › normalizes_separators_and_skips_housekeeping_paths | pass |
-| REQ-003-04 | `crates/indexer/src/scan.rs` › checks_only_reported_files_of_changed_folders | partial: the scan itself; reported by the watcher in M4c |
-| REQ-003-05 | `crates/indexer/src/watcher.rs` › reports_unknown_changes_when_events_were_lost | partial: the 5,000-path limit is checked when queueing (M4c) |
-| REQ-003-06 | — | no test |
-| REQ-003-07 | — | no test |
+| REQ-003-04 | `crates/indexer/src/scan.rs` › checks_only_reported_files_of_changed_folders; `crates/indexer/src/indexer.rs` › watches_after_a_completed_scan_and_scans_reported_changes | pass |
+| REQ-003-05 | `crates/indexer/src/watcher.rs` › reports_unknown_changes_when_events_were_lost; `crates/indexer/src/indexer.rs` › more_than_5000_changed_paths_queue_a_quick_scan | pass |
+| REQ-003-06 | `crates/indexer/src/indexer.rs` › a_failed_watch_stops_and_queues_a_quick_scan_that_watches_again | pass |
+| REQ-003-07 | `crates/indexer/src/indexer.rs` › changes_during_a_scan_are_scanned_after_it | pass |
 | REQ-003-08 | `crates/indexer/src/scan.rs` › quick_scans_only_relist_folders_whose_entries_changed, falls_back_to_a_full_scan_without_stored_folders | pass |
-| REQ-003-09 | `crates/indexer/src/schedule.rs` › scans_at_startup_and_offline_libraries…, quick_checks_every_interval… | partial: the schedule itself; started by the app in M4c |
-| REQ-003-10 | `crates/indexer/src/schedule.rs` › scans_at_startup_and_offline_libraries_again_and_again | partial: the schedule itself; watching again after the reconnect in M4c |
+| REQ-003-09 | `crates/indexer/src/schedule.rs` › scans_at_startup_and_offline_libraries…, quick_checks_every_interval…; started by `crates/app/src/main.rs` (checked in the running app) | pass |
+| REQ-003-10 | `crates/indexer/src/schedule.rs` › scans_at_startup_and_offline_libraries_again_and_again; `crates/indexer/src/indexer.rs` › stops_watching_an_offline_library_and_watches_it_again_after_a_reconnect | pass |

@@ -37,6 +37,7 @@ tempfile = "3"
 thiserror = "2.0.21"
 tracing = "0.1"
 unicode-normalization = "0.1.26"
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
 [workspace.lints.rust]

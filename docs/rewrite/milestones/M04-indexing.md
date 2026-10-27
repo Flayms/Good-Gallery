@@ -1,6 +1,6 @@
 # M04 · Indexing, change detection, metadata
 
-**Status:** Approved (2026-10-26, self-approved: the user asked to work through the milestones without their input)
+**Status:** Done (approved 2026-10-26, self-approved: the user asked to work through the milestones without their input; M4c done 2026-10-27)
 **Specs:** 002, 003, 004 (and REQ-011-08 … 10, REQ-001-05 rest)
 
 Too large for one part (≈ 2 000 lines of reference code plus the oracle). Split:
@@ -39,6 +39,10 @@ Too large for one part (≈ 2 000 lines of reference code plus the oracle). Spli
 
 **Schedule** (`indexer::schedule`): quick scan of all libraries at startup and every quick check interval (full scan for libraries with rows behind `METADATA_VERSION`), offline libraries re-checked every minute (one check at a time per library, see `docs/known-pitfalls.md`).
 
+**Difference from the spec (fixed in the spec):** REQ-003-06 said a watcher that *can't start* queues a quick scan. Since watchers start after every completed scan, a library whose watch can't start would then be scanned forever. The reference only logs it, and the spec now says the next scheduled quick scan tries again.
+
+**Found on the way:** the app left its exiftool processes running after it exited, so it now ends them through a job object (`media::helpers`, see `docs/architecture.md`).
+
 **Oracle** (`cargo xtask oracle`): generates a fixture library (images with EXIF / IPTC / XMP keywords, hierarchies, face regions, ratings, dates with and without offsets, sidecars of both namings, rotated images, a video, housekeeping folders, dotfiles), indexes it with the reference (its `scanRoot` + `IndexWriter` + exiftool source, bundled with the reference's own vite into one script and run with Node) and with this indexer, and diffs the databases ignoring ids and timestamps. Exit: no differences, apart from documented deviations.
 
 ## Reference
@@ -69,14 +73,14 @@ Too large for one part (≈ 2 000 lines of reference code plus the oracle). Spli
 
 ### M4c
 
-- [ ] 11. Watcher with debounce and filtering (REQ-003-01 … 03, -05, -06).
-- [ ] 12. Changes scans and changes during a scan (REQ-003-04, REQ-003-07).
-- [ ] 13. Schedule: startup and periodic quick scans, metadata-version upgrades, offline re-checks (REQ-003-09, REQ-003-10, REQ-002-05).
-- [ ] 14. Oracle harness and diff on the fixture library.
-- [ ] 15. Docs: spec Verification tables, architecture, pitfalls, progress.
+- [x] 11. Watcher with debounce and filtering (REQ-003-01 … 03, -05, -06). A watcher that can't start queues nothing (spec corrected, see Approach).
+- [x] 12. Changes scans and changes during a scan (REQ-003-04, REQ-003-07).
+- [x] 13. Schedule: startup and periodic quick scans, metadata-version upgrades, offline re-checks (REQ-003-09, REQ-003-10, REQ-002-05).
+- [x] 14. Oracle harness and diff on the fixture library (`cargo xtask oracle`: 5 documented, 0 unexpected differences).
+- [x] 15. Docs: spec Verification tables, architecture, pitfalls, progress.
 
 ## Exit criteria
 
 From `docs/rewrite/plan.md`: oracle diff is empty on the fixture library; 002–004 REQs pass.
 
-Here: empty apart from the documented GPS time-zone deviation (if the fixtures exercise it).
+Here: empty apart from the documented GPS time-zone deviation (if the fixtures exercise it). Met on 2026-10-27: 5 documented differences (face regions: 2 tags and 2 links missing in the reference; GPS zone: one `taken_at`), 0 unexpected.

@@ -3,9 +3,11 @@
 //! back as [`IndexerEvent`]s.
 
 use crate::scan::{MAX_CHANGED_PATHS, ScanDeps, ScanOptions, ScanOutcome, ScanProgress, ScanScope, scan_root};
+use crate::watcher::{LibraryWatcher, WatchEvent};
 use crate::{ScanKind, ScanRequests};
 use db::writer::IndexWriter;
 use media::metadata::MetadataSource;
+use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -111,9 +113,85 @@ struct Shared {
     /// Tells the UI to look at the events (e.g. requests a repaint).
     notify: Box<dyn Fn() + Send + Sync>,
     concurrency: AtomicUsize,
+    watchers: Mutex<HashMap<i64, LibraryWatcher>>,
 }
 
 impl Shared {
+    fn enqueue(&self, library: i64, scope: ScanScope, coverable: bool) {
+        let mut state = self.lock();
+        // Changes may be in folders the running scan already passed, so only other requests can be covered by it.
+        if let Some(running) = &state.running
+            && running.library == library
+            && coverable
+            && running.kind >= scope.kind()
+        {
+            return;
+        }
+        if let Some(queued) = state.jobs.iter_mut().find(|job| job.library == library) {
+            let current = std::mem::replace(&mut queued.scope, ScanScope::Full);
+            queued.scope = merge_scopes(current, scope);
+            return;
+        }
+        state.jobs.push(Job { library, scope });
+        let status = state.status();
+        drop(state);
+        self.wake.notify_all();
+        self.send(IndexerEvent::Status(status));
+    }
+
+    /// Starts watching a library after a completed scan; its reports become changes scans (REQ-003-01, -04, -05,
+    /// -06). Failing to start leaves only the scheduled quick scans to notice changes.
+    /// Runs on the indexer thread only, so no other start can race this one.
+    fn watch(self: &Arc<Self>, library: i64, root: &Path) {
+        if self
+            .watchers
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains_key(&library)
+        {
+            return;
+        }
+        let weak = Arc::downgrade(self);
+        // Not under the lock: setting up a recursive watch on a slow share takes a while.
+        let started = LibraryWatcher::start(root, move |event| {
+            if let Some(shared) = weak.upgrade() {
+                shared.on_watch_event(library, event);
+            }
+        });
+        match started {
+            Ok(watcher) => {
+                self.watchers
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .insert(library, watcher);
+            }
+            // Queueing a scan here would follow every completed scan; the next scheduled quick scan tries again
+            // (REQ-003-06).
+            Err(error) => tracing::warn!("Indexer: can't watch {}: {error}", root.display()),
+        }
+    }
+
+    /// Turns a watcher's report into a scan (REQ-003-04 … 06).
+    fn on_watch_event(&self, library: i64, event: WatchEvent) {
+        match event {
+            WatchEvent::Changed(Some(paths)) if !paths.is_empty() && paths.len() <= MAX_CHANGED_PATHS => {
+                self.enqueue(library, ScanScope::Changes(paths), false);
+            }
+            WatchEvent::Changed(_) => self.enqueue(library, ScanScope::Quick, false),
+            WatchEvent::Failed(error) => {
+                tracing::warn!("Indexer: watching library {library} failed: {error}");
+                self.unwatch(library);
+                // Changes may have been missed; the scan also notices if the library went offline.
+                self.enqueue(library, ScanScope::Quick, false);
+            }
+        }
+    }
+
+    fn unwatch(&self, library: i64) {
+        let watcher = self.watchers.lock().unwrap_or_else(|p| p.into_inner()).remove(&library);
+        drop(watcher);
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|p| p.into_inner())
     }
@@ -149,6 +227,7 @@ impl Indexer {
             events: Mutex::new(tx),
             notify: deps.notify,
             concurrency: AtomicUsize::new(deps.concurrency.max(1)),
+            watchers: Mutex::new(HashMap::new()),
         });
         let worker_shared = shared.clone();
         let (writer, metadata, is_reachable) = (deps.writer, deps.metadata, deps.is_reachable);
@@ -183,25 +262,17 @@ impl Indexer {
     }
 
     fn enqueue(&self, library: i64, scope: ScanScope, coverable: bool) {
-        let mut state = self.shared.lock();
-        // Changes may be in folders the running scan already passed, so only other requests can be covered by it.
-        if let Some(running) = &state.running
-            && running.library == library
-            && coverable
-            && running.kind >= scope.kind()
-        {
-            return;
-        }
-        if let Some(queued) = state.jobs.iter_mut().find(|job| job.library == library) {
-            let current = std::mem::replace(&mut queued.scope, ScanScope::Full);
-            queued.scope = merge_scopes(current, scope);
-            return;
-        }
-        state.jobs.push(Job { library, scope });
-        let status = state.status();
-        drop(state);
-        self.shared.wake.notify_all();
-        self.shared.send(IndexerEvent::Status(status));
+        self.shared.enqueue(library, scope, coverable);
+    }
+
+    /// Whether the library is being watched for changes (after a completed scan).
+    #[cfg(test)]
+    fn is_watching(&self, library: i64) -> bool {
+        self.shared
+            .watchers
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains_key(&library)
     }
 
     /// Parallel file reads of the next scan; a running scan keeps its value (REQ-010-04).
@@ -237,6 +308,9 @@ impl ScanRequests for Indexer {
             })
             .unwrap_or_else(|p| p.into_inner());
         drop(state);
+        // After the scan: one that completed anyway has started its watcher by now. Not under the state lock, since
+        // ending a watch can block.
+        self.shared.unwatch(library);
         self.shared.send(IndexerEvent::Status(status));
     }
 }
@@ -267,7 +341,7 @@ impl Drop for Indexer {
 
 /// The indexer thread: takes the next job, runs it, reports, repeats.
 fn run(
-    shared: &Shared,
+    shared: &Arc<Shared>,
     mut writer: IndexWriter,
     metadata: &dyn MetadataSource,
     is_reachable: &(dyn Fn(&Path) -> bool + Sync),
@@ -337,6 +411,16 @@ fn run(
             Ok(Err(error)) => ScanResult::Failed(error.to_string()),
             Err(panic) => ScanResult::Failed(panic_message(&panic)),
         };
+        match &result {
+            // A cancelled library is being removed: don't watch it again.
+            ScanResult::Completed if !cancel.load(Ordering::Relaxed) => {
+                if let Ok(Some(library)) = writer.root(job.library) {
+                    shared.watch(job.library, Path::new(&library.path));
+                }
+            }
+            ScanResult::Offline => shared.unwatch(job.library),
+            _ => {}
+        }
         if let ScanResult::Failed(error) = &result {
             tracing::error!("Indexer: scan of library {} failed: {error}", job.library);
             // A panic may have left the writer's tag caches out of step with the rolled-back transaction.
@@ -539,6 +623,148 @@ mod tests {
 
         assert_eq!(f.done(1), [(f.libraries[0], ScanResult::Completed)]);
         assert_eq!(f.media_count(), 1);
+    }
+
+    #[test]
+    fn req_003_01_req_003_04_watches_after_a_completed_scan_and_scans_reported_changes() {
+        let f = Fixture::new(1);
+        let library = f.libraries[0];
+        f.indexer.request(library, ScanScope::Full);
+        f.done(1);
+        assert!(f.indexer.is_watching(library));
+
+        std::fs::write(f.dirs[0].path().join("b.jpg"), "x").unwrap();
+
+        // Settles after 2 s, then a changes scan picks the file up.
+        let mut kinds = Vec::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        loop {
+            let event = f
+                .events
+                .recv_timeout(deadline - std::time::Instant::now())
+                .expect("no changes scan");
+            match event {
+                IndexerEvent::Status(status) => kinds.extend(status.current.map(|current| current.kind)),
+                IndexerEvent::Done(_, ScanResult::Completed) => break,
+                _ => {}
+            }
+        }
+        assert!(kinds.contains(&ScanKind::Changes), "{kinds:?}");
+        assert_eq!(f.media_count(), 2);
+
+        f.indexer.remove_library(library);
+        assert!(!f.indexer.is_watching(library));
+    }
+
+    #[test]
+    fn req_003_01_req_003_10_stops_watching_an_offline_library_and_watches_it_again_after_a_reconnect() {
+        let online = Arc::new(AtomicBool::new(true));
+        let check = online.clone();
+        let f = Fixture::with_reachability(1, Arc::new(move |_: &Path| check.load(Ordering::Relaxed)));
+        let library = f.libraries[0];
+        f.indexer.request(library, ScanScope::Full);
+        f.done(1);
+        assert!(f.indexer.is_watching(library));
+
+        online.store(false, Ordering::Relaxed);
+        f.indexer.request(library, ScanScope::Quick);
+
+        assert_eq!(f.done(1), [(library, ScanResult::Offline)]);
+        assert!(!f.indexer.is_watching(library));
+
+        online.store(true, Ordering::Relaxed);
+        f.indexer.request(library, ScanScope::Quick);
+        assert_eq!(f.done(1), [(library, ScanResult::Completed)]);
+        assert!(f.indexer.is_watching(library));
+    }
+
+    /// Kinds of the scans started until `n` scans finished.
+    fn started_kinds(f: &Fixture, n: usize) -> Vec<ScanKind> {
+        let (mut kinds, mut done) = (Vec::new(), 0);
+        while done < n {
+            match f.events.recv_timeout(Duration::from_secs(10)).expect("indexer stalled") {
+                IndexerEvent::Status(status) => {
+                    if let Some(current) = status.current
+                        && kinds.last() != Some(&current.kind)
+                    {
+                        kinds.push(current.kind);
+                    }
+                }
+                IndexerEvent::Done(..) => done += 1,
+                _ => {}
+            }
+        }
+        kinds
+    }
+
+    #[test]
+    fn req_003_06_a_failed_watch_stops_and_queues_a_quick_scan_that_watches_again() {
+        let f = Fixture::new(2);
+        let (library, busy) = (f.libraries[0], f.libraries[1]);
+        f.indexer.request(library, ScanScope::Full);
+        f.done(1);
+        assert!(f.indexer.is_watching(library));
+        // A scan of another library keeps the indexer busy until released.
+        let (tx, rx) = std::sync::mpsc::channel();
+        *f.metadata.gate.lock().unwrap() = Some(rx);
+        std::fs::write(f.dirs[1].path().join("slow.jpg"), "x").unwrap();
+        f.indexer.request(busy, ScanScope::Full);
+
+        f.indexer
+            .shared
+            .on_watch_event(library, WatchEvent::Failed("share disconnected".into()));
+        assert!(!f.indexer.is_watching(library));
+        // The busy scan may not have started yet.
+        assert_eq!(f.indexer.status().queue.last(), Some(&library));
+        tx.send(()).unwrap();
+
+        assert_eq!(started_kinds(&f, 2), [ScanKind::Full, ScanKind::Quick]);
+        assert!(f.indexer.is_watching(library));
+    }
+
+    #[test]
+    fn req_003_05_more_than_5000_changed_paths_queue_a_quick_scan() {
+        let f = Fixture::new(1);
+        let library = f.libraries[0];
+        let many: Vec<String> = (0..=MAX_CHANGED_PATHS).map(|i| format!("{i}.jpg")).collect();
+
+        f.indexer
+            .shared
+            .on_watch_event(library, WatchEvent::Changed(Some(many)));
+        assert_eq!(started_kinds(&f, 1), [ScanKind::Quick]);
+
+        f.indexer.shared.on_watch_event(library, WatchEvent::Changed(None));
+        assert_eq!(started_kinds(&f, 1), [ScanKind::Quick]);
+
+        f.indexer
+            .shared
+            .on_watch_event(library, WatchEvent::Changed(Some(vec!["a.jpg".into()])));
+        assert_eq!(started_kinds(&f, 1), [ScanKind::Changes]);
+    }
+
+    /// REQ-003-07: changes reported while the library is being scanned queue a changes scan after it.
+    #[test]
+    fn req_003_07_changes_during_a_scan_are_scanned_after_it() {
+        let f = Fixture::new(1);
+        let (tx, rx) = std::sync::mpsc::channel();
+        *f.metadata.gate.lock().unwrap() = Some(rx);
+        std::fs::write(f.dirs[0].path().join("slow.jpg"), "x").unwrap();
+        let library = f.libraries[0];
+        f.indexer.request(library, ScanScope::Full);
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while f.indexer.status().current.is_none() {
+            assert!(std::time::Instant::now() < deadline, "the scan didn't start");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        f.indexer.request(library, ScanScope::Changes(vec!["a.jpg".into()]));
+        assert_eq!(f.indexer.status().queue, [library]);
+        tx.send(()).unwrap();
+
+        assert_eq!(
+            f.done(2),
+            [(library, ScanResult::Completed), (library, ScanResult::Completed)]
+        );
     }
 
     #[test]

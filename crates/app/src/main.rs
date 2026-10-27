@@ -1,7 +1,8 @@
 //! Good Gallery.
 //!
 //! Options: `--data-dir <folder>` (index and settings; default `%APPDATA%\good-gallery-rust`), `--screenshot
-//! <file.png>` (saves a screenshot of the window after a few frames and exits).
+//! <file.png>` (saves a screenshot of the window after a few frames and exits), `--screenshot-after <seconds>` (waits
+//! that long before the screenshot, e.g. for scans or thumbnails).
 
 use anyhow::Context as _;
 use app::{AppState, NativeFolderPicker};
@@ -20,6 +21,7 @@ const DATA_FOLDER: &str = "good-gallery-rust";
 struct Options {
     data_dir: PathBuf,
     screenshot: Option<PathBuf>,
+    screenshot_after: std::time::Duration,
 }
 
 struct GalleryApp {
@@ -27,7 +29,10 @@ struct GalleryApp {
     screenshot: Option<PathBuf>,
     /// Set when `--screenshot` couldn't be saved, so the process exits with an error.
     screenshot_failed: Arc<AtomicBool>,
+    /// When the screenshot is due, at the earliest.
+    screenshot_at: std::time::Instant,
     frames: u32,
+    screenshot_taken: bool,
 }
 
 impl eframe::App for GalleryApp {
@@ -35,7 +40,11 @@ impl eframe::App for GalleryApp {
         app::ui(ui, &mut self.state);
         self.frames += 1;
         if let Some(path) = &self.screenshot {
-            if self.frames == SCREENSHOT_AFTER_FRAMES {
+            if !self.screenshot_taken
+                && self.frames >= SCREENSHOT_AFTER_FRAMES
+                && std::time::Instant::now() >= self.screenshot_at
+            {
+                self.screenshot_taken = true;
                 let (path, ctx, failed) = (path.clone(), ui.ctx().clone(), self.screenshot_failed.clone());
                 ui.ctx().request_screenshot(move |image: Arc<egui::ColorImage>| {
                     match save_png(&path, &image) {
@@ -75,14 +84,19 @@ fn default_data_dir() -> anyhow::Result<PathBuf> {
 }
 
 fn parse_args() -> anyhow::Result<Options> {
-    const USAGE: &str = "usage: app [--data-dir <folder>] [--screenshot <file.png>]";
+    const USAGE: &str = "usage: app [--data-dir <folder>] [--screenshot <file.png> [--screenshot-after <seconds>]]";
     let mut args = std::env::args().skip(1);
     let mut data_dir = None;
     let mut screenshot = None;
+    let mut screenshot_after = std::time::Duration::ZERO;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--data-dir" => data_dir = Some(args.next().context(USAGE)?.into()),
             "--screenshot" => screenshot = Some(args.next().context(USAGE)?.into()),
+            "--screenshot-after" => {
+                let seconds: f64 = args.next().context(USAGE)?.parse().context(USAGE)?;
+                screenshot_after = std::time::Duration::try_from_secs_f64(seconds).context(USAGE)?;
+            }
             other => anyhow::bail!("unknown argument {other} ({USAGE})"),
         }
     }
@@ -90,7 +104,11 @@ fn parse_args() -> anyhow::Result<Options> {
         Some(dir) => dir,
         None => default_data_dir()?,
     };
-    Ok(Options { data_dir, screenshot })
+    Ok(Options {
+        data_dir,
+        screenshot,
+        screenshot_after,
+    })
 }
 
 /// Opens the index in the data folder (one connection for the UI, one for the indexer) and starts the indexer, or
@@ -101,9 +119,12 @@ fn open_state(data_dir: &Path, ctx: &egui::Context) -> AppState {
         .and_then(|()| {
             let path = data_dir.join("gallery.db");
             let open = || db::open(&path).with_context(|| format!("can't open {}", path.display()));
-            Ok((open()?, open()?))
+            let (conn, writer) = (open()?, open()?);
+            // Read-only: only after `open` has created and migrated the index.
+            let reader = db::open_reader(&path).with_context(|| format!("can't open {}", path.display()))?;
+            Ok((conn, writer, reader))
         });
-    let (conn, writer) = match opened {
+    let (conn, writer, schedule_conn) = match opened {
         Ok(connections) => connections,
         Err(error) => {
             tracing::error!("{error:#}");
@@ -131,13 +152,25 @@ fn open_state(data_dir: &Path, ctx: &egui::Context) -> AppState {
         concurrency,
         notify: Box::new(move || ctx.request_repaint()),
     });
-    state.with_indexer(Arc::new(indexer), events)
+    let indexer = Arc::new(indexer);
+    // Quick scans at startup and every quick check interval; offline libraries every minute.
+    let scheduler = indexer::schedule::Scheduler::start(
+        schedule_conn,
+        indexer.clone(),
+        settings.quick_check_interval_minutes,
+        indexer::schedule::OFFLINE_RETRY,
+    );
+    state.with_indexer(indexer, events).with_scheduler(scheduler)
 }
 
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .init();
+    // exiftool (and later ffmpeg) must not outlive the app, however it ends.
+    if let Err(error) = media::helpers::end_helpers_with_app() {
+        tracing::warn!("helper processes may outlive the app: {error}");
+    }
     let options = parse_args()?;
     let screenshot_failed = Arc::new(AtomicBool::new(false));
     let failed = screenshot_failed.clone();
@@ -157,6 +190,8 @@ fn main() -> anyhow::Result<()> {
                 state: open_state(&options.data_dir, &cc.egui_ctx),
                 screenshot: options.screenshot,
                 screenshot_failed: failed,
+                screenshot_at: std::time::Instant::now() + options.screenshot_after,
+                screenshot_taken: false,
                 frames: 0,
             }))
         }),

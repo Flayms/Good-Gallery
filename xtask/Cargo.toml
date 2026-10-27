@@ -1,6 +1,6 @@
 [package]
 name = "xtask"
-description = "Repository tasks: check-specs, library operations."
+description = "Repository tasks: check-specs, library operations, indexer oracle."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,10 +10,10 @@ publish.workspace = true
 [dependencies]
 anyhow.workspace = true
 db.workspace = true
+image.workspace = true
 indexer.workspace = true
+media.workspace = true
 regex.workspace = true
-
-[dev-dependencies]
 tempfile.workspace = true
 
 [lints]

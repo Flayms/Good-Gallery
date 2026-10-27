@@ -53,14 +53,23 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **`python` may not run at all** (a mise shim points to a missing install). Use `node` for small scripts (`spikes/video/summarize.js`).
 * **Running a spike that loads a downloaded binary** (e.g. `libmpv-2.dll`) is blocked by auto mode until the user approves it. Ask before the first run.
 * **Spike crates are standalone**: run `cargo` inside `spikes/<name>/`; their `results/` and `vendor/` folders are git-ignored.
+* **`cargo` may not be on the agent shell's `PATH`**: prepend `$env:USERPROFILE\.cargo\bin`.
+* **Restoring a file from a backup with `Copy-Item` or `cp` keeps the older mtime**, so cargo doesn't rebuild and keeps testing the mutated code. `touch` the file after restoring (mutation checks for red tests).
+* **Git Bash heredocs here turn `\\` into `\`**, even with a quoted `'EOF'`, which corrupts escapes in scripts (`\0` became a NUL byte in a `.mjs`). Use the Edit tool, or `chr(92)` in Python.
+* **Node's output through `| tail` was lost** when the process was killed by `timeout`; redirect to a file to see what a hanging Node script printed.
+* **exiftool on Windows mangles non-ASCII command-line arguments**; pass tag values through an argument file (`-@ file`, UTF-8). In exiftool's struct syntax, a comma inside a value is escaped with `|`.
+* **Node bundles of the reference**: `require()` of an ESM-only package (p-queue) works in Node 24, but the bundle's CommonJS interop then misses its default export. Bundle such packages and their dependencies (pnpm doesn't hoist them for `NODE_PATH`), and end the script with `process.exit`, since exiftool-vendored's timers keep Node alive.
 
 ## Indexer
 
 * **exiftool-vendored's real read arguments come from its default options**, not only `ReadTask`: `-fast`, `struct=1`, `keepUTCTime`, `-ignoreMinorErrors` and a UTF-8 repair filter. Check `DefaultExifToolOptions.js` before changing `media::exiftool::read_args`.
-* **Killing the Windows `exiftool.exe` leaves its `perl.exe` child running** with the pipes open; `Process::drop` ends the tree with `taskkill /T /F`.
+* **Killing the Windows `exiftool.exe` leaves its `perl.exe` child running** with the pipes open; `Process::drop` ends the tree with `taskkill /T /F`. That isn't enough when the app exits: each drop takes ≈ 1.1 s (the indexer gets 2 s), and the PAR-packed exiftool 12.83 survived even a finished taskkill. The app's job object (`media::helpers`) is what ends them. Leftover exiftool processes also keep the stdout pipe of whoever started them open, so `cargo run … | Select-Object` seems to hang after the app has exited.
+* **`db::open_reader` can't create or migrate the index**: open it only after `db::open`. App checks on a data folder made by `cargo xtask libraries` don't catch this; also start once on an empty one.
+* **A watcher that can't start must not queue a scan**: it would follow every completed scan, so scans would run forever. Leave the retry to the schedule.
+* **Watcher tests that wait for a quick scan race the folder mtime**: a file written within the folder's stored mtime tick isn't seen by the quick scan. Keep the indexer busy with a gated scan of another library instead of relying on the new file.
 * **Folder mtimes need `FILE_FLAG_BACKUP_SEMANTICS`** to open a folder for `set_modified` on Windows (see the scan tests' `set_mtime`).
 
-* **A stat on a hung SMB share blocks its thread for the OS timeout** (often 30–60 s), past our 5 s reachability timeout. `reachability::with_timeout` leaves that thread behind; fine for single checks, but periodic checks of many offline libraries (M4) must not start a new check while the previous one for the same library still runs.
+* **A stat on a hung SMB share blocks its thread for the OS timeout** (often 30–60 s), past our 5 s reachability timeout. `reachability::with_timeout` leaves that thread behind; fine for single checks, but periodic checks of many offline libraries (M4) must not start a new check while the previous one for the same library still runs. (M4c: scans run one at a time and queued scans merge per library, so the minute-by-minute re-checks leave at most one stuck thread behind per hung library.)
 
 ## Carried over from the reference
 
