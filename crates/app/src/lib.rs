@@ -5,7 +5,9 @@ pub mod format;
 pub mod gallery;
 pub mod icons;
 pub mod indexer_progress;
+pub mod search_bar;
 pub mod settings_page;
+pub mod sidebar;
 pub mod state;
 pub mod textures;
 pub mod theme;
@@ -35,17 +37,37 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     if let Some(error) = &state.error {
         empty_state::error(ui, "Couldn't open the index", error);
     } else {
-        match state.page {
-            Page::Gallery => gallery(ui, state),
-            Page::Settings => settings_page::ui(ui, state),
+        let input = sidebar::SidebarInput {
+            libraries: &state.libraries,
+            scanning: state.indexer_status.current.map(|scan| scan.library),
+            page: &mut state.page,
+            db: state.db.clone(),
+        };
+        // The sidebar's data comes with the gallery, also while the Settings page shows.
+        if let Some(gallery) = &mut state.gallery {
+            gallery.poll();
         }
+        let gallery = if state.libraries.is_empty() {
+            None
+        } else {
+            state.gallery.as_mut()
+        };
+        egui::Panel::left("sidebar")
+            .exact_size(sidebar::WIDTH)
+            .resizable(false)
+            .frame(egui::Frame::new().fill(theme::RECESS).inner_margin(8))
+            .show(ui, |ui| sidebar::show(ui, &mut state.sidebar, gallery, input));
+        egui::CentralPanel::no_frame().show(ui, |ui| match state.page {
+            Page::Gallery => gallery_page(ui, state),
+            Page::Settings => settings_page::ui(ui, state),
+        });
     }
     indexer_progress::show(&ctx, state);
     state.toasts.show(&ctx);
 }
 
 /// The gallery, or its empty state without libraries.
-fn gallery(ui: &mut egui::Ui, state: &mut AppState) {
+fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
     if state.libraries.is_empty() {
         if empty_state::no_libraries(ui).clicked() {
             state.page = Page::Settings;
@@ -60,7 +82,5 @@ fn gallery(ui: &mut egui::Ui, state: &mut AppState) {
     } else {
         state.gallery.as_mut()
     };
-    if toolbar::show(ui, area, gallery) == Some(toolbar::ToolbarAction::OpenSettings) {
-        state.page = Page::Settings;
-    }
+    toolbar::show(ui, area, gallery, &mut state.search_bar);
 }

@@ -87,6 +87,11 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 
 ## Search
 
+* **egui popups lose their open state when their button's id changes.** A button's automatic id moves with its own look (a frame or text that appears) and with the number of widgets before it (an empty gallery draws none), so the menu closes. Give popups fixed ids (`Popup::id`), as `toolbar::menu` does.
+* **A single-line `TextEdit` gives up focus on Enter and Escape in that same frame**: check `lost_focus()` too before handling the keys. A suggestions `Area` lies outside the toolbar's clip rect, so `ui.rect_contains_pointer` is false over it; compare with `pointer_latest_pos()`.
+* **egui 0.37's default fonts have no emoji or `★`**, and `egui_kittest` panics on missing glyphs. Write ratings in words or draw icons; turn off `DatePickerButton::show_icon` (📆).
+* **Labels repeat across the window** (a library in the sidebar and on the Settings page, "5 stars" in the sidebar and in Filters): query tests by role and label, or take the last match for a menu that opens on top.
+
 * **A sort-index walk with SQLite's default page cache is a read call per row.** On a 200 MB index, listing 500k items took 5 s; memory-mapped reads plus a 64 MB cache bring it to 0.7 s (`db::open_reader`). Benchmarks must also run in release: the debug build doubled the times.
 * **One full `cargo xtask oracle` run stalled after the reference's search script had finished** (xtask waiting, no Node process left); it didn't happen again in the next run or in `cargo xtask oracle-search`. If it recurs, look for a process holding the inherited stdout pipe.
 

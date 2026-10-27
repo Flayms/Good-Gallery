@@ -11,7 +11,10 @@ use crate::{empty_state, theme};
 use base64::Engine as _;
 use db::gallery::{GalleryItem, GalleryLayout, GallerySearch, ThumbStatus};
 use db::rusqlite::Connection;
+use db::tags::TagCount;
+use domain::folders::{FolderNode, TagNode, build_folder_tree, build_tag_tree};
 use domain::layout::{LayoutOptions, ListEntry, TileLayout, list_entry_at, list_index_of_item, tile_layout};
+use domain::tags::TagCategory;
 use domain::thumbs::{ThumbKey, pick_thumb_width};
 use domain::view::{GalleryView, TagIndicatorChoice, group_by_day_value, groups_shown, is_grouped_by_day};
 use domain::zoom;
@@ -60,6 +63,13 @@ enum Request {
         chunk: usize,
         ids: Vec<i64>,
     },
+    Sidebar {
+        library: Option<i64>,
+    },
+    Suggest {
+        prefix: String,
+        limit: usize,
+    },
 }
 
 enum Loaded {
@@ -72,6 +82,40 @@ enum Loaded {
         chunk: usize,
         result: Result<Vec<GalleryItem>, String>,
     },
+    Sidebar(Result<SidebarData, String>),
+    Suggest {
+        prefix: String,
+        result: Result<Vec<TagCount>, String>,
+    },
+}
+
+/// What the sidebar lists (spec 008), loaded with the gallery.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SidebarData {
+    pub people: Vec<TagNode>,
+    pub places: Vec<TagNode>,
+    /// Media items per rating, highest first, `0` = unrated.
+    pub ratings: Vec<(u8, u64)>,
+    pub popular: Vec<TagCount>,
+    /// The folder tree of the selected library.
+    pub folders: Option<(i64, Vec<FolderNode>)>,
+}
+
+/// Most used tags outside both categories in the sidebar (REQ-008-05).
+const POPULAR_TAGS: usize = 15;
+
+fn load_sidebar(conn: &Connection, library: Option<i64>) -> db::Result<SidebarData> {
+    let folders = match library {
+        Some(library) => Some((library, build_folder_tree(&db::tags::library_folders(conn, library)?))),
+        None => None,
+    };
+    Ok(SidebarData {
+        people: build_tag_tree(&db::tags::category(conn, TagCategory::People)?),
+        places: build_tag_tree(&db::tags::category(conn, TagCategory::Places)?),
+        ratings: db::tags::rating_counts(conn)?,
+        popular: db::tags::popular(conn, POPULAR_TAGS)?,
+        folders,
+    })
 }
 
 /// Runs the gallery's queries on its own thread, so a 500k-row layout never stalls a frame.
@@ -100,6 +144,13 @@ impl Loader {
                             generation,
                             chunk,
                             result: db::gallery::items(&conn, &ids).map_err(|e| e.to_string()),
+                        },
+                        Request::Sidebar { library } => {
+                            Loaded::Sidebar(load_sidebar(&conn, library).map_err(|e| e.to_string()))
+                        }
+                        Request::Suggest { prefix, limit } => Loaded::Suggest {
+                            result: db::tags::autocomplete(&conn, &prefix, limit).map_err(|e| e.to_string()),
+                            prefix,
                         },
                     };
                     drop(conn);
@@ -188,6 +239,8 @@ pub struct Gallery {
     anchor_version: u64,
     /// Width of the List view's rows, for the column header above them.
     list_width: f32,
+    sidebar: Option<SidebarData>,
+    suggestions: Option<(String, Vec<TagCount>)>,
     /// A new width waiting to settle: a resize lays out the whole result only once it stopped.
     pending_width: Option<(f32, Instant)>,
     wheel: f32,
@@ -240,6 +293,8 @@ impl Gallery {
             anchor_version: 0,
             list_width: 0.0,
             pending_width: None,
+            sidebar: None,
+            suggestions: None,
             wheel: 0.0,
             placeholders: HashMap::new(),
             thumbnails: None,
@@ -273,6 +328,14 @@ impl Gallery {
         self.loader.send(Request::Layout {
             generation: self.generation,
             search: self.search.clone(),
+        });
+        // Counts and new tags while indexing (REQ-006-11).
+        self.reload_sidebar();
+    }
+
+    fn reload_sidebar(&mut self) {
+        self.loader.send(Request::Sidebar {
+            library: self.search.library,
         });
     }
 
@@ -320,6 +383,55 @@ impl Gallery {
 
     pub fn tag_indicators(&self) -> &TagIndicatorChoice {
         &self.indicators
+    }
+
+    pub fn search(&self) -> &GallerySearch {
+        &self.search
+    }
+
+    /// Shows another search, from the top (spec 007).
+    pub fn set_search(&mut self, search: GallerySearch) {
+        if search == self.search {
+            return;
+        }
+        let library_changed = search.library != self.search.library;
+        self.search = search;
+        self.anchor = 0;
+        self.anchor_id = None;
+        self.scroll_to = Some(0.0);
+        if !self.started {
+            return;
+        }
+        self.generation += 1;
+        self.loader.send(Request::Layout {
+            generation: self.generation,
+            search: self.search.clone(),
+        });
+        // The sidebar's lists don't depend on the filters, only its folder tree on the library.
+        if library_changed {
+            self.reload_sidebar();
+        }
+    }
+
+    /// The sidebar's lists, once loaded.
+    pub fn sidebar(&self) -> Option<&SidebarData> {
+        self.sidebar.as_ref()
+    }
+
+    /// Asks for tag suggestions for `prefix` (REQ-007-04); answered in [`Self::suggestions`].
+    pub fn request_suggestions(&mut self, prefix: &str, limit: usize) {
+        self.start();
+        self.loader.send(Request::Suggest {
+            prefix: prefix.to_string(),
+            limit,
+        });
+    }
+
+    /// The latest suggestions and the prefix they are for.
+    pub fn suggestions(&self) -> Option<(&str, &[TagCount])> {
+        self.suggestions
+            .as_ref()
+            .map(|(prefix, tags)| (prefix.as_str(), tags.as_slice()))
     }
 
     /// Whether the gallery is sorted by a date, so it can be grouped by day (REQ-016-04).
@@ -419,6 +531,14 @@ impl Gallery {
                     Err(error) => self.error = Some(error),
                 }
             }
+            Loaded::Sidebar(result) => match result {
+                Ok(data) => self.sidebar = Some(data),
+                Err(error) => tracing::error!("can't load the sidebar: {error}"),
+            },
+            Loaded::Suggest { prefix, result } => match result {
+                Ok(tags) => self.suggestions = Some((prefix, tags)),
+                Err(error) => tracing::error!("can't load tag suggestions: {error}"),
+            },
             Loaded::Items {
                 generation,
                 chunk,

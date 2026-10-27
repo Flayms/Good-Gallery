@@ -55,7 +55,7 @@ pub struct SettingsPage {
 pub struct AppState {
     pub page: Page,
     /// The write connection. `None` if the index couldn't be opened; `error` says why.
-    db: Option<Arc<Mutex<Connection>>>,
+    pub(crate) db: Option<Arc<Mutex<Connection>>>,
     pub error: Option<String>,
     pub libraries: Vec<Library>,
     pub media_count: i64,
@@ -76,6 +76,8 @@ pub struct AppState {
     thumbnails: Option<Arc<indexer::thumbnails::ThumbnailService>>,
     /// `None` if the index couldn't be opened.
     pub gallery: Option<Gallery>,
+    pub search_bar: crate::search_bar::SearchBar,
+    pub sidebar: crate::sidebar::SidebarState,
 }
 
 impl AppState {
@@ -145,6 +147,8 @@ impl AppState {
             scheduler: None,
             thumbnails: None,
             gallery: None,
+            search_bar: Default::default(),
+            sidebar: Default::default(),
         }
     }
 
@@ -181,6 +185,14 @@ impl AppState {
                 (self.libraries, self.media_count) = (libraries, count);
                 // New media items while indexing, or a library removed (REQ-006-11).
                 if let Some(gallery) = &mut self.gallery {
+                    // A removed library leaves the search, so the gallery doesn't stay empty without a reason.
+                    if let Some(library) = gallery.search().library
+                        && !self.libraries.iter().any(|known| known.id == library)
+                    {
+                        let mut search = gallery.search().clone();
+                        (search.library, search.folder) = (None, None);
+                        gallery.set_search(search);
+                    }
                     gallery.reload();
                 }
             }

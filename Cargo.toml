@@ -25,12 +25,13 @@ anyhow = "1.0.104"
 base64 = "0.22.1"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 crossbeam-channel = "0.5.17"
+jiff = { version = "0.2.35", default-features = false, features = ["std"] }
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg"] }
 fast_image_resize = { version = "6.1.0", default-features = false, features = ["image"] }
 jpeg-decoder = { version = "0.3.2", default-features = false }
 thumbhash = "0.1.0"
 webp = { version = "=0.3.1", default-features = false }
-egui_extras = { version = "=0.37.0", default-features = false, features = ["svg"] }
+egui_extras = { version = "=0.37.0", default-features = false, features = ["svg", "datepicker"] }
 rfd = "0.17.2"
 rusqlite = { version = "0.41.0", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

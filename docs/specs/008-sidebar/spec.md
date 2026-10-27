@@ -1,6 +1,6 @@
 # 008 · Sidebar
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Goal
 
@@ -75,10 +75,10 @@ The user browses by structure rather than by typing: libraries and their folders
 
 | REQ        | Test                                                                                                                                                         | Result                                                                    |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
-| REQ-008-01 | — | no test |
-| REQ-008-02 | `crates/domain/src/folders.rs` › req_008_02_adds_intermediate_folders_sums_counts_and_sorts_naturally, req_008_02_sorts_naturally_ignoring_letter_case, req_008_02_lists_the_path_and_its_ancestors; `crates/db/src/tags.rs` › req_008_02_lists_folders_with_direct_media_counts; `cargo xtask oracle` (30 searches against the reference) | partial: query; the sidebar comes in M7b |
-| REQ-008-03 | `crates/domain/src/folders.rs` › req_008_03_nests_tags_under_their_parent_in_the_given_order; `crates/db/src/tags.rs` › req_008_03_groups_by_the_top_level_tag_whatever_its_exact_name_with_counts_including_descendants, req_008_03_keeps_the_hierarchy_below_the_root; `cargo xtask oracle` (30 searches against the reference) | partial: query; the sidebar comes in M7b |
-| REQ-008-04 | `crates/db/src/tags.rs` › req_008_04_counts_media_per_rating_0_meaning_unrated; `cargo xtask oracle` (30 searches against the reference) | partial: query; the sidebar comes in M7b |
-| REQ-008-05 | `crates/db/src/tags.rs` › req_008_05_excludes_category_tags_and_their_roots; `cargo xtask oracle` (30 searches against the reference) | partial: query; the sidebar comes in M7b |
-| REQ-008-06 | `crates/domain/src/search.rs` › req_007_05_req_008_06_adds_moves_and_removes_tags_case_insensitively | partial: query; the sidebar comes in M7b |
-| REQ-008-07 | — | no test |
+| REQ-008-01 | `crates/app/tests/search.rs` › req_008_01_req_008_02_req_007_10_limits_the_gallery_to_a_library_and_its_folders | pass (the spinner while scanned checked in the app) |
+| REQ-008-02 | `crates/domain/src/folders.rs` › req_008_02_adds_intermediate_folders_sums_counts_and_sorts_naturally, req_008_02_sorts_naturally_ignoring_letter_case, req_008_02_sorts_accented_names_with_their_base_letters, req_008_02_lists_the_path_and_its_ancestors; `crates/db/src/tags.rs` › req_008_02_lists_folders_with_direct_media_counts; `crates/app/tests/search.rs` › req_008_01_req_008_02_req_007_10_limits_the_gallery_to_a_library_and_its_folders; `cargo xtask oracle` (30 searches against the reference) | pass |
+| REQ-008-03 | `crates/domain/src/folders.rs` › req_008_03_nests_tags_under_their_parent_in_the_given_order, req_008_03_keeps_tags_whose_parents_form_a_cycle; `crates/db/src/tags.rs` › req_008_03_groups_by_the_top_level_tag_whatever_its_exact_name_with_counts_including_descendants, req_008_03_keeps_the_hierarchy_below_the_root; `crates/app/tests/search.rs` › req_008_03_req_008_06_filters_by_clicking_people_places_and_tags (snapshot `sidebar`); `cargo xtask oracle` (30 searches against the reference) | pass (Show all / Show less checked in the app) |
+| REQ-008-04 | `crates/db/src/tags.rs` › req_008_04_counts_media_per_rating_0_meaning_unrated; `crates/app/tests/search.rs` › req_008_04_req_008_07_toggles_ratings_and_remembers_collapsed_groups; `cargo xtask oracle` (30 searches against the reference) | pass |
+| REQ-008-05 | `crates/db/src/tags.rs` › req_008_05_excludes_category_tags_and_their_roots; `crates/app/tests/search.rs` › req_008_03_req_008_06_filters_by_clicking_people_places_and_tags; `cargo xtask oracle` (30 searches against the reference) | pass |
+| REQ-008-06 | `crates/domain/src/search.rs` › req_007_05_req_008_06_adds_moves_and_removes_tags_case_insensitively; `crates/app/tests/search.rs` › req_008_03_req_008_06_filters_by_clicking_people_places_and_tags | pass |
+| REQ-008-07 | `crates/app/tests/search.rs` › req_008_04_req_008_07_toggles_ratings_and_remembers_collapsed_groups | pass |

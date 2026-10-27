@@ -57,6 +57,35 @@ pub fn group_count(photos: u32, videos: u32) -> String {
     parts.join(" · ")
 }
 
+/// A rating in words: "Unrated", "1 star", "4 stars" (the bundled fonts have no star glyph).
+pub fn rating(rating: u8) -> String {
+    match rating {
+        0 => "Unrated".into(),
+        1 => "1 star".into(),
+        n => format!("{n} stars"),
+    }
+}
+
+/// The rating filter: "Any rating", "Unrated", "3 and 5 stars", "Unrated and 2 stars" (REQ-007-09).
+pub fn ratings(ratings: &[u8]) -> String {
+    let mut stars: Vec<u8> = ratings.iter().copied().filter(|&r| r > 0).collect();
+    stars.sort_unstable();
+    let stars = match stars.as_slice() {
+        [] => None,
+        [one] => Some(rating(*one)),
+        [rest @ .., last] => Some(format!(
+            "{} and {last} stars",
+            rest.iter().map(u8::to_string).collect::<Vec<_>>().join(", ")
+        )),
+    };
+    match (ratings.contains(&0), stars) {
+        (false, None) => "Any rating".into(),
+        (true, None) => "Unrated".into(),
+        (false, Some(stars)) => stars,
+        (true, Some(stars)) => format!("Unrated and {stars}"),
+    }
+}
+
 /// Binary units with one decimal from KB on: "1.5 MB".
 pub fn bytes(bytes: i64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
@@ -93,6 +122,16 @@ mod tests {
         assert_eq!(group_count(1, 3), "1 photo · 3 videos");
         assert_eq!(group_count(1234, 0), "1,234 photos");
         assert_eq!(group_count(0, 0), "0 photos");
+    }
+
+    #[test]
+    fn req_007_09_names_the_rating_filter() {
+        assert_eq!(ratings(&[]), "Any rating");
+        assert_eq!(ratings(&[0]), "Unrated");
+        assert_eq!(ratings(&[1]), "1 star");
+        assert_eq!(ratings(&[5, 3]), "3 and 5 stars");
+        assert_eq!(ratings(&[0, 3]), "Unrated and 3 stars");
+        assert_eq!(ratings(&[2, 4, 5]), "2, 4 and 5 stars");
     }
 
     #[test]

@@ -120,6 +120,17 @@ impl GallerySearch {
         }
     }
 
+    /// Adds a rating to the rating filter, or removes it if it is there; kept in order, so the same selection is the
+    /// same search (REQ-007-09, REQ-008-04).
+    pub fn toggle_rating(&mut self, rating: u8) {
+        match self.ratings.binary_search(&rating) {
+            Ok(at) => {
+                self.ratings.remove(at);
+            }
+            Err(at) => self.ratings.insert(at, rating),
+        }
+    }
+
     /// How many of the filters under _Filters_ are set: media kind, date range (once), rating (REQ-013-08).
     pub fn active_filter_count(&self) -> usize {
         [
@@ -183,6 +194,17 @@ mod tests {
             (vec!["Paris".to_string()], vec![])
         );
         assert_eq!(search.tag_mode("Rome"), None);
+    }
+
+    #[test]
+    fn req_007_09_toggles_ratings_in_order() {
+        let mut search = GallerySearch::default();
+        for rating in [5, 0, 3] {
+            search.toggle_rating(rating);
+        }
+        assert_eq!(search.ratings, [0, 3, 5]);
+        search.toggle_rating(3);
+        assert_eq!(search.ratings, [0, 5]);
     }
 
     #[test]

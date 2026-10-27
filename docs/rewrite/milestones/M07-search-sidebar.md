@@ -1,6 +1,6 @@
 # M07 · Search and sidebar
 
-**Status:** Approved (2026-10-27, self-approved: the user asked to work through the milestones without their input)
+**Status:** Done (approved 2026-10-27, self-approved: the user asked to work through the milestones without their input; M7a and M7b done 2026-10-27)
 **Specs:** 007, 008 (and REQ-006-11 tag suggestions, REQ-016-04 the toggle for other sorts)
 
 Too large for one part. Split:
@@ -40,6 +40,12 @@ Too large for one part. Split:
 - `cargo xtask search-bench` (release, 500k items, 2k tags, 995,814 links, dates in random order to the ids): p95 rare tag 1.0 ms, tag with 3k items 12 ms, two tags 13 ms, tag + exclusion 18 ms, tag by name 6.5 ms, rating 5 (30k) 71 ms, videos of a year 52 ms, tag root with 39k items 255 ms, tag with 94k items 459 ms, file name over all items 692 ms, all items 695 ms; suggestions 13.9 ms. Before the reader pragmas (memory-mapped reads, 64 MB cache) the broad ones took 1.2–4.5 s; the reference's unconfigured connection takes ≈ 5 s for all items on the same file.
 - **Budget missed for broad searches** (REQ-007-14: 50 ms, suggestions 10 ms). Their cost is one table lookup per matching row while walking the sort index. A covering index or rows stored in sort order would change the shared schema, which needs the user's decision (open issue).
 
+## Differences (M7b)
+
+- **Sort fields as toggles** in the _View_ menu instead of a drop-down: a combo box opens a popup inside the menu's popup, which closed the menu.
+- **Ratings in words** ("3 and 5 stars"): egui 0.37's default fonts no longer bundle an emoji font, and the app's font has no `★`. REQ-007-09's example is updated; the sidebar and tiles draw star icons.
+- **Date range:** two `egui_extras` date pickers; an unset day shows _Any day_, which sets it to the other day or today. Moving one day past the other moves the other along (the reference's inputs refuse it).
+
 ## Reference
 
 - `src/main/db/tag-search.ts` (plan pins, thresholds), `src/main/db/tag-categories.ts`, `src/main/trpc/routers/{media,tags,libraries}.ts`, `src/main/trpc/router.test.ts` (layout, tags, ratings, name, folders tests ported).
@@ -59,11 +65,11 @@ Too large for one part. Split:
 
 ### M7b
 
-- [ ] 8. Search bar with chips and suggestions (REQ-007-04 … -06)
-- [ ] 9. Filters menu (REQ-007-07 … -09) and sort in the View menu (REQ-007-12, REQ-016-04)
-- [ ] 10. Sidebar: libraries and folder tree (REQ-008-01, -02, REQ-007-10)
-- [ ] 11. Sidebar: People, Places, Ratings, Tags, clicking tags, collapsed groups (REQ-008-03 … -07)
-- [ ] 12. M7b docs, review, commit
+- [x] 8. Search bar with chips and suggestions (REQ-007-04 … -06)
+- [x] 9. Filters menu (REQ-007-07 … -09) and sort in the View menu (REQ-007-12, REQ-016-04)
+- [x] 10. Sidebar: libraries and folder tree (REQ-008-01, -02, REQ-007-10)
+- [x] 11. Sidebar: People, Places, Ratings, Tags, clicking tags, collapsed groups (REQ-008-03 … -07)
+- [x] 12. M7b docs, review, commit
 
 ## Exit criteria
 

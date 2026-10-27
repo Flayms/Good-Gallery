@@ -34,7 +34,7 @@ fn req_001_01_adds_a_typed_path_and_confirms() {
     settle(&mut harness);
 
     harness.get_by_label("Added Holidays, indexing…");
-    harness.get_by_label("Holidays");
+    harness.get_by_role_and_label(Role::Label, "Holidays");
     harness.get_by_label("online");
     let library = harness.state().libraries[0].clone();
     assert_eq!(

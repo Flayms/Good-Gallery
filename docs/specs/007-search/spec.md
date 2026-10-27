@@ -1,6 +1,6 @@
 # 007 · Search
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Goal
 
@@ -65,7 +65,7 @@ The user finds media items by the tags already embedded in their files, combined
 - **Given** the _Rating_ section under _Filters_
 - **When** the user selects any combination of _Unrated_ and 1–5 stars
 - **Then** only media items with exactly one of the selected ratings are shown
-- **And** the section shows "Any rating", "Unrated" or the selected stars (e.g. "3★, 5★"), and _Clear_ removes the filter
+- **And** the section shows "Any rating", "Unrated" or the selected stars (e.g. "3 and 5 stars"), and _Clear_ removes the filter
 
 ### REQ-007-10 · Library and folder
 
@@ -115,17 +115,17 @@ The user finds media items by the tags already embedded in their files, combined
 
 | REQ        | Test                                                                                                                                                         | Result                                                                                       |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| REQ-007-01 | `crates/db/src/gallery.rs` › req_007_01_requires_all_included_tags_matching_descendants, req_007_01_common_tags_take_the_other_query_shapes_with_the_same_result; `cargo xtask oracle` (30 searches against the reference) | partial: query and state; the search bar, filters and sort controls come in M7b |
-| REQ-007-02 | `crates/db/src/gallery.rs` › req_007_02_excludes_tags_with_their_descendants; `cargo xtask oracle` (30 searches against the reference) | partial: query and state; the search bar, filters and sort controls come in M7b |
+| REQ-007-01 | `crates/db/src/gallery.rs` › req_007_01_requires_all_included_tags_matching_descendants, req_007_01_common_tags_take_the_other_query_shapes_with_the_same_result; `crates/app/tests/search.rs` › req_007_04_req_007_05_suggests_tags_and_adds_them_as_included_or_excluded; `cargo xtask oracle` (30 searches against the reference) | pass |
+| REQ-007-02 | `crates/db/src/gallery.rs` › req_007_02_excludes_tags_with_their_descendants; `crates/app/tests/search.rs` › req_007_04_req_007_05_suggests_tags_and_adds_them_as_included_or_excluded; `cargo xtask oracle` (30 searches against the reference) | pass |
 | REQ-007-03 | `crates/db/src/gallery.rs` › req_007_03_matches_nothing_for_unknown_included_tags_and_ignores_unknown_exclusions; `cargo xtask oracle` (30 searches against the reference) | pass |
-| REQ-007-04 | `crates/db/src/tags.rs` › req_007_04_matches_normalized_prefixes_ordered_by_usage, req_002_14_req_007_04_counts_descendants_and_follows_deletions; `cargo xtask oracle` (30 searches against the reference) | partial: query and state; the search bar, filters and sort controls come in M7b |
-| REQ-007-05 | `crates/domain/src/search.rs` › req_007_05_req_008_06_adds_moves_and_removes_tags_case_insensitively | partial: query and state; the search bar, filters and sort controls come in M7b |
-| REQ-007-06 | `crates/db/src/gallery.rs` › req_007_06_req_007_11_matches_a_case_insensitive_file_name_substring_combined_with_other_filters; `cargo xtask oracle` (30 searches against the reference) | partial: query and state; the search bar, filters and sort controls come in M7b |
-| REQ-007-07 | `crates/db/src/gallery.rs` › req_007_07_req_007_10_falls_back_to_mtime_and_filters_by_kind_and_library; `cargo xtask oracle` (30 searches against the reference) | partial: query and state; the search bar, filters and sort controls come in M7b |
-| REQ-007-08 | `crates/domain/src/search.rs` › req_007_08_turns_inclusive_local_days_into_a_half_open_range; `crates/db/src/gallery.rs` › req_007_08_filters_by_local_days_both_inclusive; `cargo xtask oracle` (30 searches against the reference) | partial: query and state; the search bar, filters and sort controls come in M7b |
-| REQ-007-09 | `crates/db/src/gallery.rs` › req_007_09_filters_by_exact_rating_0_meaning_unrated; `cargo xtask oracle` (30 searches against the reference) | partial: query and state; the search bar, filters and sort controls come in M7b |
-| REQ-007-10 | `crates/domain/src/search.rs` › req_007_10_drops_the_folder_without_a_library; `crates/db/src/gallery.rs` › req_007_10_filters_by_folder_including_subfolders, req_007_07_req_007_10_falls_back_to_mtime_and_filters_by_kind_and_library; `cargo xtask oracle` (30 searches against the reference) | partial: query; choosing a library or folder comes with the sidebar in M7b |
+| REQ-007-04 | `crates/db/src/tags.rs` › req_007_04_matches_normalized_prefixes_ordered_by_usage, req_002_14_req_007_04_counts_descendants_and_follows_deletions; `crates/app/tests/search.rs` › req_007_04_req_007_05_suggests_tags_and_adds_them_as_included_or_excluded (snapshot `search_suggestions`); `cargo xtask oracle` (30 searches against the reference) | pass |
+| REQ-007-05 | `crates/domain/src/search.rs` › req_007_05_req_008_06_adds_moves_and_removes_tags_case_insensitively; `crates/app/tests/search.rs` › req_007_04_req_007_05_suggests_tags_and_adds_them_as_included_or_excluded | pass (Escape clears the input or leaves it; checked in the app) |
+| REQ-007-06 | `crates/db/src/gallery.rs` › req_007_06_req_007_11_matches_a_case_insensitive_file_name_substring_combined_with_other_filters; `crates/app/tests/search.rs` › req_007_06_filters_by_file_name_from_the_search_bar; `cargo xtask oracle` (30 searches against the reference) | pass |
+| REQ-007-07 | `crates/db/src/gallery.rs` › req_007_07_req_007_10_falls_back_to_mtime_and_filters_by_kind_and_library; `crates/app/tests/search.rs` › req_007_07_req_007_09_req_013_08_filters_by_kind_and_rating_and_counts_active_filters; `cargo xtask oracle` (30 searches against the reference) | pass |
+| REQ-007-08 | `crates/domain/src/search.rs` › req_007_08_turns_inclusive_local_days_into_a_half_open_range; `crates/db/src/gallery.rs` › req_007_08_filters_by_local_days_both_inclusive; `crates/app/tests/search.rs` › req_007_08_sets_a_date_range_from_the_filters; `cargo xtask oracle` (30 searches against the reference) | pass (the end is kept from the start by moving the other day) |
+| REQ-007-09 | `crates/db/src/gallery.rs` › req_007_09_filters_by_exact_rating_0_meaning_unrated; `crates/app/tests/search.rs` › req_007_07_req_007_09_req_013_08_filters_by_kind_and_rating_and_counts_active_filters; `cargo xtask oracle` (30 searches against the reference) | pass |
+| REQ-007-10 | `crates/domain/src/search.rs` › req_007_10_drops_the_folder_without_a_library; `crates/db/src/gallery.rs` › req_007_10_filters_by_folder_including_subfolders, req_007_07_req_007_10_falls_back_to_mtime_and_filters_by_kind_and_library; `crates/app/tests/search.rs` › req_008_01_req_008_02_req_007_10_limits_the_gallery_to_a_library_and_its_folders; `cargo xtask oracle` (30 searches against the reference) | pass |
 | REQ-007-11 | `crates/db/src/gallery.rs` › req_007_06_req_007_11_matches_a_case_insensitive_file_name_substring_combined_with_other_filters; `cargo xtask oracle` (30 searches against the reference) | pass |
-| REQ-007-12 | `crates/db/src/gallery.rs` › req_007_12_orders_by_date_taken_newest_first_with_the_id_as_tie_breaker, req_007_12_sorts_by_every_field_in_both_directions; `cargo xtask oracle` (30 searches against the reference) | partial: query and state; the search bar, filters and sort controls come in M7b |
-| REQ-007-13 | — | no test |
+| REQ-007-12 | `crates/db/src/gallery.rs` › req_007_12_orders_by_date_taken_newest_first_with_the_id_as_tie_breaker, req_007_12_sorts_by_every_field_in_both_directions; `crates/app/tests/search.rs` › req_007_12_sorts_from_the_view_menu; `cargo xtask oracle` (30 searches against the reference) | pass |
+| REQ-007-13 | — | no test (the search lives in the app state; the viewer comes in M8) |
 | REQ-007-14 | `cargo xtask search-bench` (500k items, 2k tags, ≈ 1M links, release build, 2026-10-27) | no test (measured: searches matching up to a few thousand items 1–18 ms p95; a tag on 94k items 459 ms, a file name over all items 692 ms, all items 695 ms; suggestions 13.9 ms. Broad searches miss the budget, open issue in docs/progress.md) |

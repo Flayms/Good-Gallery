@@ -16,7 +16,7 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | M6a       | Gallery: tiles                         | Done        | [M06](rewrite/milestones/M06-gallery.md) |
 | M6b       | Gallery: views and toolbar             | Done        | [M06](rewrite/milestones/M06-gallery.md) |
 | M7a       | Search: model and queries              | Done        | [M07](rewrite/milestones/M07-search-sidebar.md) |
-| M7b       | Search bar, filters and sidebar        | Not started | [M07](rewrite/milestones/M07-search-sidebar.md) |
+| M7b       | Search bar, filters and sidebar        | Done        | [M07](rewrite/milestones/M07-search-sidebar.md) |
 | M8        | Photo viewer and filmstrip             | Not started | —                                       |
 | M9        | Video                                  | Not started | —                                       |
 | M10       | Settings, design polish, glass         | Not started | —                                       |
@@ -25,6 +25,17 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-27 · M7b · Search bar, filters and sidebar
+
+- Search bar in the toolbar: chips for included (tag icon), excluded (struck through) tags and the file name filter, tag suggestions with counts while focused (`-` excludes, _File name contains "…"_), arrow keys, Enter, Backspace and Escape as REQ-007-05.
+- _Filters_ (media type, date range with date pickers, ratings, _Clear_ per section, _Clear filters_, count on the button) and sort fields and direction in _View_; _Group by day_ disabled for other sorts.
+- Sidebar: _All libraries_ and libraries (offline badge, spinner while scanned), the selected library's folder tree, People and Places trees with _Show all_, Ratings, the 15 most used Tags; clicking filters, collapsed groups remembered; Settings at the bottom (moved out of the toolbar).
+- Specs 007, 008 `Implemented`; REQ-006-11 and REQ-016-04 now pass; REQ-007-13 waits for the viewer (M8), REQ-013-08 partial (minimum window size with M10). REQ-007-09's example reads "3 and 5 stars" (no star glyph in the fonts). Snapshots `search_suggestions`, `filters_menu`, `sidebar`.
+- Found while testing: menus closed when their button's look or the widgets before it changed (fixed ids now), Enter and Escape were lost because the input drops focus in that frame, clicks on suggestions were lost to a clip-rect check, missing glyphs (★, 📆).
+- Code review fixes: suggestions only count for the current input (an older answer could put the wrong tag under Enter); the sidebar doesn't block the UI thread on the database lock; a removed library leaves the search; the sidebar's data is polled on the Settings page too and reloads only when it can change (not on every filter click); ratings have one wording ("Unrated and 3 stars", "1 star") and are kept sorted (`GallerySearch::toggle_rating`); no per-frame copy of the sidebar data; the suggestions don't count as a menu's overlay.
+- Session note: the C: drive filled up with temporary build folders (made because a running app window locked `target\debug\app.exe`); they were deleted.
+- Next: M8 (Photo viewer and filmstrip).
 
 ### 2026-10-27 · M7a · Search: model and queries
 

@@ -369,12 +369,17 @@ fn req_017_01_req_017_03_shows_the_picked_tag_indicators_once_turned_on() {
 
     open_view_menu(&mut harness);
     assert!(
-        harness.get_by_label("People").accesskit_node().is_disabled(),
+        harness
+            .query_all_by_label("People")
+            .last()
+            .unwrap()
+            .accesskit_node()
+            .is_disabled(),
         "picks wait for the switch"
     );
     harness.get_by_label("Tag indicators").click();
     harness.run_steps(2);
-    harness.get_by_label("People").click();
+    harness.query_all_by_label("People").last().unwrap().click();
     harness.key_press(egui::Key::Escape);
     settle(&mut harness);
 
