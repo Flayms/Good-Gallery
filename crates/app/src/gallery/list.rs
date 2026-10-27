@@ -93,7 +93,7 @@ impl Gallery {
                 }
                 ListEntry::Item(index) => {
                     let rect = Rect::from_min_size(pos2(origin.x, top), vec2(width, ROWS.row as f32));
-                    self.draw_row(ui, rect, data.ids[index], &mut frame);
+                    self.draw_row(ui, rect, index, data.ids[index], &mut frame);
                 }
             }
         }
@@ -120,8 +120,12 @@ impl Gallery {
         self.request_textures(wanted, ui.ctx().pixels_per_point());
     }
 
-    fn draw_row(&mut self, ui: &mut egui::Ui, rect: Rect, id: i64, frame: &mut FrameState) {
+    fn draw_row(&mut self, ui: &mut egui::Ui, rect: Rect, index: usize, id: i64, frame: &mut FrameState) {
         let response = ui.interact(rect, ui.make_persistent_id(("row", id)), egui::Sense::click());
+        // A click, or Enter on the focused row, opens the viewer (REQ-009-01).
+        if response.clicked() {
+            self.opened = Some(index);
+        }
         let Some(item) = self.items.get(&id) else {
             let bar = Rect::from_min_max(rect.min + vec2(PADDING, 6.0), rect.max - vec2(PADDING, 6.0));
             ui.painter().rect_filled(bar, theme::RADIUS_CONTROL, theme::RAISED);

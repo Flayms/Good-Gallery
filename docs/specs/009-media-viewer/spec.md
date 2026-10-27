@@ -137,19 +137,19 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 
 | REQ        | Test                                                                                                                                                         | Result                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| REQ-009-01 | — | no test |
-| REQ-009-02 | — | no test |
-| REQ-009-03 | — | no test |
-| REQ-009-04 | — | no test |
-| REQ-009-05 | — | no test |
+| REQ-009-01 | `crates/app/tests/viewer.rs` › req_009_01_req_009_04_opens_the_clicked_item_with_its_original, req_009_01_opens_the_focused_tile_with_enter, req_009_01_keys_dont_reach_the_window_below | pass |
+| REQ-009-02 | `crates/app/tests/viewer.rs` › req_009_02_steps_through_the_gallery | partial: photos; seeking with ← / → in focused video controls comes with M9 |
+| REQ-009-03 | `crates/app/tests/viewer.rs` › req_009_03_req_007_13_closes_in_every_way_and_keeps_the_search, req_009_03_req_009_16_clicks_on_the_photo_and_double_clicks_dont_close, req_009_03_a_click_beside_a_zoomed_photo_closes | pass |
+| REQ-009-04 | `crates/domain/src/viewer.rs` › req_009_04_fits_large_content_keeping_its_aspect_ratio, req_009_04_never_enlarges_content_beyond_its_own_size; `crates/media/src/original.rs` › req_009_04_decodes_the_whole_photo_upright, req_009_04_shrinks_only_what_exceeds_the_texture_limit; `crates/media/src/ffmpeg.rs` › req_009_04_loads_avif_originals_at_full_size; `crates/app/src/originals.rs` › req_009_04_req_009_13_loads_the_wanted_originals_at_full_size; `crates/app/tests/viewer.rs` › req_009_01_req_009_04_opens_the_clicked_item_with_its_original | partial: photos (capped at the GPU's texture size, 8192 px); videos with M9 |
+| REQ-009-05 | `crates/domain/src/viewer.rs` › req_009_05_zooms_around_the_point_under_the_pointer, req_009_05_limits_the_scale_between_fitted_and_8x, req_009_05_keeps_zoomed_content_covering_the_viewport, req_009_05_centers_content_smaller_than_the_viewport; `crates/app/tests/viewer.rs` › req_009_05_zooms_and_pans | pass |
 | REQ-009-06 | — | no test |
 | ~~REQ-009-07~~ | — | no test (deprecated) |
 | REQ-009-08 | — | no test |
 | REQ-009-09 | — | no test |
 | REQ-009-10 | — | no test |
 | REQ-009-11 | — | no test |
-| REQ-009-12 | — | no test |
-| REQ-009-13 | — | no test |
-| REQ-009-14 | — | no test |
-| REQ-009-15 | — | no test |
-| REQ-009-16 | — | no test |
+| REQ-009-12 | `crates/app/tests/viewer.rs` › req_009_12_shows_media_not_found_for_a_removed_item, req_009_15_says_when_the_original_fails | pass |
+| REQ-009-13 | `crates/domain/src/viewer.rs` › req_009_13_lists_the_items_up_to_two_places_around_nearest_first, req_009_13_stops_at_the_ends_of_the_gallery; `crates/app/src/originals.rs` › req_009_13_frees_originals_that_are_no_longer_wanted, req_009_13_drops_photos_that_stopped_being_wanted_before_they_loaded, req_009_13_loads_a_photo_wanted_again_while_its_cancelled_load_finishes; `crates/app/tests/viewer.rs` › req_009_13_req_009_14_preloads_two_places_around | pass |
+| REQ-009-14 | `crates/app/tests/viewer.rs` › req_009_13_req_009_14_preloads_two_places_around | partial: a preloaded original shows without a fade; the thumbnail preview needs the GPU streamer, checked in the running app |
+| REQ-009-15 | `crates/media/src/original.rs` › req_009_15_fails_for_missing_and_broken_files_and_avif_without_ffmpeg; `crates/app/src/originals.rs` › req_009_15_remembers_failures_until_wanted_anew; `crates/app/tests/viewer.rs` › req_009_15_says_when_the_original_fails | pass |
+| REQ-009-16 | `crates/domain/src/viewer.rs` › req_009_16_toggles_between_fitted_and_actual_pixels_at_least_2x; `crates/app/tests/viewer.rs` › req_009_16_click_toggles_between_fitted_and_actual_pixels, req_009_03_req_009_16_clicks_on_the_photo_and_double_clicks_dont_close | pass |

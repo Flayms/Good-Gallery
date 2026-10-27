@@ -17,7 +17,8 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | M6b       | Gallery: views and toolbar             | Done        | [M06](rewrite/milestones/M06-gallery.md) |
 | M7a       | Search: model and queries              | Done        | [M07](rewrite/milestones/M07-search-sidebar.md) |
 | M7b       | Search bar, filters and sidebar        | Done        | [M07](rewrite/milestones/M07-search-sidebar.md) |
-| M8        | Photo viewer and filmstrip             | Not started | —                                       |
+| M8a       | Viewer core                            | Done        | [M08](rewrite/milestones/M08-viewer.md) |
+| M8b       | Viewer panels and filmstrip            | Not started | [M08](rewrite/milestones/M08-viewer.md) |
 | M9        | Video                                  | Not started | —                                       |
 | M10       | Settings, design polish, glass         | Not started | —                                       |
 | M11       | Packaging and release                  | Not started | —                                       |
@@ -25,6 +26,19 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-27 · M8a · Viewer core
+
+- M8 split into M8a (viewer core) and M8b (info panel, Explorer, context menus, filmstrip, tinted chrome, tile ↔ viewer transition); plan `M08-viewer.md`, self-approved.
+- Viewer over the darkened window: opens from a tile or row (click or Enter), steps with ← / → and _Previous_ / _Next_, closes with Escape, _Close_, Alt + ←, the mouse's back button or a click on the scrim (delayed so a double-click zooms instead). Control bar with file name, date and rating; controls and pointer step aside after 2.5 s.
+- Originals decoded from the library on two worker threads straight into mipped wgpu textures (`app::originals`, `media::original`, AVIF through ffmpeg); the shown photo and two places either way preload, the rest is dropped. The thumbnail (else the placeholder) stands in until the original fades in; a preloaded one shows at once. Failures say "Can't load the original. Showing a preview."; a removed item says "Media not found".
+- Zoom and pan as the reference (wheel around the pointer, `+` `-` `0`, click and double-click toggle fitted ↔ actual pixels, drag, 1×–8×, clamped), pure logic in `domain::viewer`.
+- The gallery keeps the shown item in view, so closing lands on it (REQ-016-06 now passes); REQ-007-13 passes.
+- Specs: 009-01, -03, -05, -12, -13, -15, -16 pass; -02, -04, -14 partial (video parts with M9; the thumbnail preview needs the GPU and was checked in the running app); REQ-013-10, -14 partial. New `--view <position>` option opens the viewer for screenshots.
+- Code review fixes: a photo cancelled while it loaded and wanted again right after was taken as failed (now re-queued); a scrim click waits egui's whole double-click window (0.3 s), so a slower double-click zooms instead of closing; Tab, Enter and Space no longer reach the widgets under the viewer (they opened Settings); clicks where a zoomed photo is clipped away close instead of zooming; items taller than the gallery's view don't pin its scroll; failures are logged once; the originals' workers are detached, so a stalled network read can't hold up closing; the bar's text is laid out once per frame.
+- Open: originals are turned upright by their EXIF orientation as the `image` crate reads it; a photo oriented only in XMP would show sideways (exiftool's orientation could be passed in).
+- Session note: `target\debug\deps` and `incremental` had grown to 41 GB with 1.3 GB free on C:; deleted them (the user had OK'd it) and built with `CARGO_INCREMENTAL=0` afterwards.
+- Next: M8b (viewer panels and filmstrip).
 
 ### 2026-10-27 · M7b · Search bar, filters and sidebar
 

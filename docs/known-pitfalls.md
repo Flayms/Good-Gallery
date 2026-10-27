@@ -85,6 +85,13 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **Don't clone the tile layout per frame**: at 100k items it is ≈ 3 MB of `Vec<f64>`. Take it out of the struct for the frame and put it back.
 * **Hard links need the same volume**: `cargo xtask gallery-bench` links the cache copy's files, so its data folder must be on that drive.
 
+## Viewer
+
+* **kittest's default step is 0.25 s**, so two clicks a couple of frames apart are no double-click for egui (0.3 s window). Tests of double-clicks build their harness with `with_step_dt(1.0 / 60.0)` (`common::harness_with_step`).
+* **Fades timed with `Instant` never finish in tests** (frames run in microseconds): a snapshot catches a half-transparent photo. Time UI animations with egui's `input.time`, which kittest advances per step.
+* **A new `egui::Area` is invisible in its first frame** (a sizing pass) unless its state exists from an earlier frame. The viewer's area keeps one fixed id, so only the very first opening loses a frame.
+* **Screenshots look brighter than they are** when read downscaled; measure pixel values before chasing a "missing" scrim.
+
 ## Search
 
 * **egui popups lose their open state when their button's id changes.** A button's automatic id moves with its own look (a frame or text that appears) and with the number of widgets before it (an empty gallery draws none), so the menu closes. Give popups fixed ids (`Popup::id`), as `toolbar::menu` does.

@@ -142,9 +142,9 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 | REQ-013-07 | — | no test |
 | REQ-013-08 | `crates/domain/src/search.rs` › req_013_08_counts_and_clears_only_the_filters_under_filters; `crates/app/tests/search.rs` › req_007_07_req_007_09_req_013_08_filters_by_kind_and_rating_and_counts_active_filters | partial: Filters with count and Clear filters, View with view, zoom and sort; the minimum window size is checked with the title bar in M10 |
 | ~~REQ-013-09~~ | — | no test (deprecated) |
-| REQ-013-10 | — | no test |
+| REQ-013-10 | `crates/domain/src/viewer.rs` › req_013_10_hides_the_controls_only_when_idle_and_nothing_keeps_them; `crates/app/tests/viewer.rs` › req_013_10_controls_step_aside_while_idle | partial: the info panel (M8b) and paused videos (M9) don't keep them yet |
 | REQ-013-11 | — | no test |
 | REQ-013-12 | — | no test |
 | REQ-013-13 | — | no test |
-| REQ-013-14 | — | no test |
+| REQ-013-14 | `crates/app/tests/viewer.rs` › req_009_01_req_009_04_opens_the_clicked_item_with_its_original (snapshot `viewer`) | partial: the window stays visible behind a darker scrim; the blur comes with the glass in M10 |
 | REQ-013-15 | — | no test |

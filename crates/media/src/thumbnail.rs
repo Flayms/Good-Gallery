@@ -24,7 +24,7 @@ const PREVIEW_ASPECT_TOLERANCE: f64 = 0.02;
 /// default (512 MiB) would fail on large panoramas the Electron version renders.
 const MAX_DECODE_BYTES: u64 = 268_402_689 * 4;
 
-fn limits() -> image::Limits {
+pub(crate) fn limits() -> image::Limits {
     let mut limits = image::Limits::default();
     limits.max_alloc = Some(MAX_DECODE_BYTES);
     limits
@@ -66,7 +66,7 @@ pub enum RenderError {
     Encode(String),
 }
 
-fn decode_error(error: impl std::fmt::Display) -> RenderError {
+pub(crate) fn decode_error(error: impl std::fmt::Display) -> RenderError {
     RenderError::Decode(error.to_string())
 }
 
@@ -234,7 +234,7 @@ fn decode_jpeg(data: &[u8], orientation: Option<Orientation>) -> Result<DynamicI
 }
 
 /// Any other format the `image` crate knows (PNG, GIF's first frame, WebP), by content, upright.
-fn decode_any(reader: impl std::io::BufRead + std::io::Seek) -> Result<DynamicImage, RenderError> {
+pub(crate) fn decode_any(reader: impl std::io::BufRead + std::io::Seek) -> Result<DynamicImage, RenderError> {
     let mut reader = ImageReader::new(reader).with_guessed_format()?;
     reader.limits(limits());
     let mut decoder = reader.into_decoder().map_err(decode_error)?;
@@ -245,14 +245,14 @@ fn decode_any(reader: impl std::io::BufRead + std::io::Seek) -> Result<DynamicIm
 }
 
 /// The size of `width` × `height` scaled to fit into `max_width` × `max_height`, keeping its aspect ratio.
-fn fit_inside(width: u32, height: u32, max_width: u32, max_height: u32, enlarge: bool) -> (u32, u32) {
+pub(crate) fn fit_inside(width: u32, height: u32, max_width: u32, max_height: u32, enlarge: bool) -> (u32, u32) {
     let scale = (f64::from(max_width) / f64::from(width)).min(f64::from(max_height) / f64::from(height));
     let scale = if enlarge { scale } else { scale.min(1.0) };
     let side = |n: u32| ((f64::from(n) * scale).round() as u32).max(1);
     (side(width), side(height))
 }
 
-fn resize(image: &DynamicImage, width: u32, height: u32) -> Result<DynamicImage, RenderError> {
+pub(crate) fn resize(image: &DynamicImage, width: u32, height: u32) -> Result<DynamicImage, RenderError> {
     if (image.width(), image.height()) == (width, height) {
         return Ok(image.clone());
     }

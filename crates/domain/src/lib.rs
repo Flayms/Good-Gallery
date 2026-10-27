@@ -8,4 +8,5 @@ pub mod search;
 pub mod tags;
 pub mod thumbs;
 pub mod view;
+pub mod viewer;
 pub mod zoom;

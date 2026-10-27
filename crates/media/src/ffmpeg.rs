@@ -40,18 +40,26 @@ pub fn find_ffmpeg() -> Option<PathBuf> {
 /// The frame at `position` seconds as a PNG, at most as wide as the largest thumbnail. ffmpeg applies the file's
 /// rotation itself. `file` must be absolute, so it can't be taken as an option (REQ-011-09).
 pub fn extract_frame(ffmpeg: &Path, file: &Path, position: f64) -> Result<Vec<u8>, FfmpegError> {
+    frame_png(ffmpeg, file, position, Some(MAX_THUMB_WIDTH))
+}
+
+/// The first frame at its full size as a PNG (an AVIF image's picture).
+pub fn extract_full_frame(ffmpeg: &Path, file: &Path) -> Result<Vec<u8>, FfmpegError> {
+    frame_png(ffmpeg, file, 0.0, None)
+}
+
+fn frame_png(ffmpeg: &Path, file: &Path, position: f64, max_width: Option<u32>) -> Result<Vec<u8>, FfmpegError> {
     let mut command = Command::new(ffmpeg);
     command
         .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
         // Input seeking (before `-i`) reads only around the target frame.
         .args(["-ss", &format!("{position:.3}"), "-i"])
         .arg(file)
-        .args([
-            "-frames:v",
-            "1",
-            "-vf",
-            &format!("scale='min({MAX_THUMB_WIDTH},iw)':-2"),
-        ])
+        .args(["-frames:v", "1"]);
+    if let Some(max_width) = max_width {
+        command.args(["-vf", &format!("scale='min({max_width},iw)':-2")]);
+    }
+    command
         .args(["-f", "image2pipe", "-c:v", "png", "pipe:1"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -192,6 +200,31 @@ pub(crate) mod tests {
         assert_eq!(sizes(&thumbnails)[0], (400, (300, 200)));
         let [r, g, b] = average_color(&thumbnails);
         assert!(g > 100 && r < 50 && b < 50, "green: {r} {g} {b}");
+    }
+
+    /// REQ-009-04: AVIF originals come through ffmpeg at their full size, wider than any thumbnail.
+    #[test]
+    fn req_009_04_loads_avif_originals_at_full_size() {
+        let Some(ffmpeg) = ffmpeg() else { return };
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.avif");
+        let source = ["-f", "lavfi", "-i", "color=c=green:s=1200x600", "-frames:v", "1"];
+        let made = ["libaom-av1", "libsvtav1"].into_iter().any(|codec| {
+            make(
+                &ffmpeg,
+                &[&source[..], &["-c:v", codec, "-still-picture", "1"]].concat(),
+                &file,
+            )
+        });
+        if !made {
+            eprintln!("skipped: this ffmpeg can't encode AVIF");
+            return;
+        }
+
+        let image = crate::original::load_original(&file, Some(&ffmpeg), 8192).unwrap();
+
+        assert_eq!(image.dimensions(), (1200, 600));
+        assert!(image.get_pixel(600, 300)[1] > 100);
     }
 
     #[test]

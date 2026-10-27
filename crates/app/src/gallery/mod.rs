@@ -255,6 +255,12 @@ pub struct Gallery {
     /// The scroll offset of the last frame, and one to apply in the next.
     offset: f32,
     scroll_to: Option<f32>,
+    /// Height of the visible content below the toolbar in the last frame.
+    view_height: f32,
+    /// A tile or row clicked this frame: the viewer opens it.
+    opened: Option<usize>,
+    /// The item shown in the viewer: kept in view (REQ-016-06), its thumbnail wanted first (REQ-009-14).
+    viewed: Option<(usize, i64)>,
 }
 
 impl Gallery {
@@ -303,6 +309,9 @@ impl Gallery {
             content_top: 0.0,
             offset: 0.0,
             scroll_to: None,
+            view_height: 0.0,
+            opened: None,
+            viewed: None,
         }
     }
 
@@ -498,6 +507,57 @@ impl Gallery {
                 self.failed.insert(ready.media);
             }
         }
+    }
+
+    /// The gallery position a click or Enter asked to open in the viewer this frame (REQ-009-01).
+    pub fn take_opened(&mut self) -> Option<usize> {
+        self.opened.take()
+    }
+
+    /// Changes whenever a new result arrived, so positions may have moved.
+    pub fn data_version(&self) -> u64 {
+        self.data_version
+    }
+
+    /// The media id at a gallery position.
+    pub fn id_at(&self, index: usize) -> Option<i64> {
+        self.data.as_ref()?.ids.get(index).copied()
+    }
+
+    /// Where a media item is in the current result, if it is in it.
+    pub fn position_of(&self, id: i64) -> Option<usize> {
+        self.data.as_ref()?.ids.iter().position(|&other| other == id)
+    }
+
+    /// The tile data of the item at `index`, loading it and its neighbours' if needed.
+    pub fn item(&mut self, index: usize) -> Option<&GalleryItem> {
+        let id = self.id_at(index)?;
+        if !self.items.contains_key(&id) {
+            self.load_range(
+                index.saturating_sub(domain::viewer::PRELOAD_RADIUS),
+                index + domain::viewer::PRELOAD_RADIUS + 1,
+            );
+        }
+        self.items.get(&id)
+    }
+
+    /// The item the viewer shows, or none once it closed: the gallery keeps it in view and wants its thumbnail first.
+    pub fn set_viewed(&mut self, viewed: Option<(usize, i64)>) {
+        self.viewed = viewed;
+    }
+
+    /// The loaded thumbnail of a media item, if any.
+    pub fn thumbnail(&mut self, id: i64) -> Option<crate::textures::Loaded> {
+        self.thumbnails.as_mut()?.streamer.get(id)
+    }
+
+    /// The ThumbHash placeholder of a loaded item (REQ-005-06).
+    pub fn placeholder(&mut self, ctx: &egui::Context, id: i64) -> Option<egui::TextureId> {
+        if let Some(texture) = self.placeholders.get(&id) {
+            return Some(texture.id());
+        }
+        let item = self.items.get(&id)?;
+        make_placeholder(&mut self.placeholders, ctx, item)
     }
 
     /// Waits for all queries sent so far and applies them (tests).
@@ -699,6 +759,28 @@ impl Gallery {
         }
     }
 
+    /// The scroll offset that brings item `index` into view below the toolbar, if it isn't (REQ-016-06).
+    fn reveal(&self, arranged: &Arranged, index: usize, count: usize) -> Option<f32> {
+        if index >= count {
+            return None;
+        }
+        let (top, height) = if self.view == GalleryView::List {
+            let entry = list_index_of_item(&arranged.groups, index);
+            (list::ROWS.top(&arranged.groups, entry), list::ROWS.row)
+        } else {
+            (arranged.tiles.top[index], arranged.tiles.height[index])
+        };
+        let (top, bottom) = (top as f32, (top + height) as f32);
+        let (view_top, view_bottom) = (self.offset, self.offset + self.view_height);
+        // An item taller than the view counts as shown while it covers part of it; else it would be scrolled every frame.
+        let visible = if bottom - top > self.view_height {
+            top < view_bottom && bottom > view_top
+        } else {
+            top >= view_top && bottom <= view_bottom
+        };
+        (!visible).then_some(top)
+    }
+
     /// The first item at height `y` of the content.
     fn item_at(&self, arranged: &Arranged, count: usize, y: f64) -> usize {
         if self.view == GalleryView::List {
@@ -779,9 +861,12 @@ impl Gallery {
         }
         if let Some(offset) = scroll_to {
             scroll = scroll.vertical_scroll_offset(offset);
+        } else if let Some(top) = self.viewed.and_then(|(index, _)| self.reveal(&arranged, index, count)) {
+            scroll = scroll.vertical_scroll_offset(top);
         }
         scroll.show_viewport(ui, |ui, viewport| {
             self.offset = viewport.min.y;
+            self.view_height = viewport.height() - inset_top;
             ui.set_min_height(total + inset_top + PADDING);
             self.anchor = self.item_at(&arranged, count, f64::from(viewport.min.y));
             self.anchor_id = self.data.as_ref().and_then(|data| data.ids.get(self.anchor).copied());
@@ -849,6 +934,18 @@ impl Gallery {
         let Some(data) = self.data.clone() else { return };
         let Some(thumbnails) = &mut self.thumbnails else { return };
         let mut requests = Vec::new();
+        // The viewer's preview first: the largest thumbnail, unless one is loaded already (REQ-009-14).
+        if let Some((_, id)) = self.viewed
+            && let Some(item) = self.items.get(&id)
+            && item.thumb_status != ThumbStatus::Error
+            && thumbnails.streamer.get(id).is_none()
+        {
+            requests.push(TextureRequest {
+                media: id,
+                path: thumbnails.cache.path(&key_of(item), domain::thumbs::MAX_THUMB_WIDTH),
+                width: domain::thumbs::MAX_THUMB_WIDTH,
+            });
+        }
         for (index, points) in wanted {
             let Some(item) = data.ids.get(index).and_then(|id| self.items.get(id)) else {
                 continue;

@@ -4,4 +4,5 @@ pub mod exiftool;
 pub mod ffmpeg;
 pub mod helpers;
 pub mod metadata;
+pub mod original;
 pub mod thumbnail;

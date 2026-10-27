@@ -74,8 +74,14 @@ impl Fixture {
 }
 
 pub fn harness(state: AppState) -> Harness<'static, AppState> {
+    harness_with_step(state, 0.25)
+}
+
+/// A harness whose steps advance time by `step_dt` seconds (kittest's default is 0.25 s, too slow for double-clicks).
+pub fn harness_with_step(state: AppState, step_dt: f32) -> Harness<'static, AppState> {
     Harness::builder()
         .with_size([900.0, 600.0])
+        .with_step_dt(step_dt)
         .with_context_setup(app::setup)
         .wgpu()
         .build_ui_state(app::ui, state)

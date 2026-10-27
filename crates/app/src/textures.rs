@@ -150,22 +150,7 @@ impl TextureStreamer {
             texture.destroy();
             return;
         }
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let id = self
-            .render_state
-            .renderer
-            .write()
-            .register_native_texture_with_sampler_options(
-                &self.render_state.device,
-                &view,
-                wgpu::SamplerDescriptor {
-                    label: Some("thumbnail"),
-                    mag_filter: wgpu::FilterMode::Linear,
-                    min_filter: wgpu::FilterMode::Linear,
-                    mipmap_filter: wgpu::MipmapFilterMode::Linear,
-                    ..Default::default()
-                },
-            );
+        let id = register(&self.render_state, &texture);
         // A smaller version from before zooming in: the new one takes over without fading in again.
         let loaded_at = match self.entries.remove(&media) {
             Some(old) => {
@@ -408,9 +393,34 @@ pub fn mip_chain([width, height]: [u32; 2], level0: Vec<u8>) -> Vec<Vec<u8>> {
     levels
 }
 
-fn upload(device: &wgpu::Device, queue: &wgpu::Queue, [width, height]: [u32; 2], levels: &[Vec<u8>]) -> wgpu::Texture {
+/// Makes a texture egui can draw, sampled linearly between its mips.
+pub(crate) fn register(render_state: &egui_wgpu::RenderState, texture: &wgpu::Texture) -> TextureId {
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    render_state
+        .renderer
+        .write()
+        .register_native_texture_with_sampler_options(
+            &render_state.device,
+            &view,
+            wgpu::SamplerDescriptor {
+                label: Some("media"),
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::MipmapFilterMode::Linear,
+                ..Default::default()
+            },
+        )
+}
+
+/// Creates a texture from its mip chain (level 0 first).
+pub(crate) fn upload(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    [width, height]: [u32; 2],
+    levels: &[Vec<u8>],
+) -> wgpu::Texture {
     let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("thumbnail"),
+        label: Some("media"),
         size: wgpu::Extent3d {
             width,
             height,

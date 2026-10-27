@@ -3,7 +3,8 @@
 //! Options: `--data-dir <folder>` (index and settings; default `%APPDATA%\good-gallery-rust`), `--screenshot
 //! <file.png>` (saves a screenshot of the window after a few frames and exits), `--screenshot-after <seconds>` (waits
 //! that long before the screenshot, e.g. for scans or thumbnails), `--bench-scroll <seconds>` (vsync off; scrolls the
-//! gallery once to warm the files, then again while measuring frame times, prints them and exits; REQ-006-12).
+//! gallery once to warm the files, then again while measuring frame times, prints them and exits; REQ-006-12), `--view
+//! <position>` (opens the viewer at that gallery position once the gallery has loaded, e.g. for a screenshot).
 
 use anyhow::Context as _;
 use app::{AppState, NativeFolderPicker};
@@ -24,6 +25,7 @@ struct Options {
     screenshot: Option<PathBuf>,
     screenshot_after: std::time::Duration,
     bench_scroll: Option<f32>,
+    view: Option<usize>,
 }
 
 /// Scrolling speed of `--bench-scroll`, points per second (as in the M0 spike).
@@ -126,12 +128,22 @@ struct GalleryApp {
     frames: u32,
     screenshot_taken: bool,
     bench: Option<Bench>,
+    /// `--view`: the gallery position to open in the viewer once it has loaded.
+    view: Option<usize>,
 }
 
 impl eframe::App for GalleryApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         app::ui(ui, &mut self.state);
         self.frames += 1;
+        if let Some(index) = self.view
+            && let Some(gallery) = &self.state.gallery
+            && let Some(id) = gallery.id_at(index)
+        {
+            self.view = None;
+            self.state.viewer = Some(app::viewer::Viewer::new(index, id, gallery.data_version()));
+            ui.ctx().request_repaint();
+        }
         if let Some(bench) = &mut self.bench {
             if bench.advance(&mut self.state) {
                 bench.report();
@@ -186,12 +198,13 @@ fn default_data_dir() -> anyhow::Result<PathBuf> {
 
 fn parse_args() -> anyhow::Result<Options> {
     const USAGE: &str = "usage: app [--data-dir <folder>] [--screenshot <file.png> [--screenshot-after <seconds>]] \
-                         [--bench-scroll <seconds>]";
+                         [--bench-scroll <seconds>] [--view <position>]";
     let mut args = std::env::args().skip(1);
     let mut data_dir = None;
     let mut screenshot = None;
     let mut screenshot_after = std::time::Duration::ZERO;
     let mut bench_scroll = None;
+    let mut view = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--data-dir" => data_dir = Some(args.next().context(USAGE)?.into()),
@@ -205,6 +218,7 @@ fn parse_args() -> anyhow::Result<Options> {
                 anyhow::ensure!(seconds > 0.0, USAGE);
                 bench_scroll = Some(seconds);
             }
+            "--view" => view = Some(args.next().context(USAGE)?.parse().context(USAGE)?),
             other => anyhow::bail!("unknown argument {other} ({USAGE})"),
         }
     }
@@ -217,6 +231,7 @@ fn parse_args() -> anyhow::Result<Options> {
         screenshot,
         screenshot_after,
         bench_scroll,
+        view,
     })
 }
 
@@ -271,6 +286,8 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
         settings_db,
         Some(ctx.clone()),
     );
+    // Originals as wgpu textures made on worker threads, like thumbnails (REQ-009-04).
+    let originals = app::originals::Originals::new(ctx.clone(), render_state.clone(), media::ffmpeg::find_ffmpeg());
     match render_state {
         Some(render_state) => {
             let cache = thumbnails.cache().clone();
@@ -288,7 +305,10 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
         }
         None => tracing::error!("no wgpu renderer: the gallery shows no thumbnails"),
     }
-    let state = state.with_thumbnails(thumbnails.clone()).with_gallery(gallery);
+    let state = state
+        .with_thumbnails(thumbnails.clone())
+        .with_gallery(gallery)
+        .with_originals(originals);
     let Some(exiftool) = exiftool else {
         tracing::error!("exiftool not found: libraries can't be indexed");
         let mut state = state;
@@ -385,6 +405,7 @@ fn main() -> anyhow::Result<()> {
                 screenshot_taken: false,
                 frames: 0,
                 bench: options.bench_scroll.map(Bench::new),
+                view: options.view,
             }))
         }),
     )

@@ -78,6 +78,10 @@ pub struct AppState {
     pub gallery: Option<Gallery>,
     pub search_bar: crate::search_bar::SearchBar,
     pub sidebar: crate::sidebar::SidebarState,
+    /// The open viewer, over the gallery.
+    pub viewer: Option<crate::viewer::Viewer>,
+    /// Loads the viewer's originals; made with egui textures on first use unless set with [`Self::with_originals`].
+    pub originals: Option<crate::originals::Originals>,
 }
 
 impl AppState {
@@ -120,6 +124,12 @@ impl AppState {
         self
     }
 
+    /// Loads the viewer's originals with `originals` (wgpu textures in the app).
+    pub fn with_originals(mut self, originals: crate::originals::Originals) -> Self {
+        self.originals = Some(originals);
+        self
+    }
+
     /// The index couldn't be opened: the app shows `error` instead of the gallery.
     pub fn failed(error: String) -> Self {
         let mut state = Self::empty(Arc::new(indexer::NoScans), Arc::new(NativeFolderPicker));
@@ -149,6 +159,8 @@ impl AppState {
             gallery: None,
             search_bar: Default::default(),
             sidebar: Default::default(),
+            viewer: None,
+            originals: None,
         }
     }
 
