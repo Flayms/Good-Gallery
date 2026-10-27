@@ -63,6 +63,49 @@ pub fn lower_thread_priority() {
 #[cfg(not(windows))]
 pub fn lower_thread_priority() {}
 
+/// Opens Explorer on the folder of `file` with the file selected (REQ-009-10). Started outside the app's job object,
+/// so the window stays when the app ends.
+#[cfg(windows)]
+pub fn show_in_explorer(file: &std::path::Path) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    // Explorer wants `/select,"path"` as one argument with its own quotes; Windows paths can't contain `"`.
+    let start = |flags: u32| {
+        std::process::Command::new("explorer.exe")
+            .raw_arg(format!("/select,\"{}\"", file.display()))
+            .creation_flags(flags)
+            .spawn()
+            .map(drop)
+    };
+    // A job above the app's own (a launcher, a terminal) may forbid breaking away; explorer.exe hands the window to
+    // the shell and exits anyway.
+    start(CREATE_BREAKAWAY_FROM_JOB).or_else(|error| match error.kind() {
+        std::io::ErrorKind::PermissionDenied => start(0),
+        _ => Err(error),
+    })
+}
+
+#[cfg(not(windows))]
+pub fn show_in_explorer(_file: &std::path::Path) -> std::io::Result<()> {
+    Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "only on Windows"))
+}
+
+/// Whether Windows' _Animation effects_ are off: animations become instant (`docs/design.md`).
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub fn reduced_motion() -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SPI_GETCLIENTAREAANIMATION, SystemParametersInfoW};
+    let mut on: i32 = 1;
+    // SAFETY: SPI_GETCLIENTAREAANIMATION writes one BOOL to the pointer, which lives for the call.
+    let ok = unsafe { SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, (&raw mut on).cast(), 0) };
+    ok != 0 && on == 0
+}
+
+#[cfg(not(windows))]
+pub fn reduced_motion() -> bool {
+    false
+}
+
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;

@@ -92,6 +92,11 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **A new `egui::Area` is invisible in its first frame** (a sizing pass) unless its state exists from an earlier frame. The viewer's area keeps one fixed id, so only the very first opening loses a frame.
 * **Screenshots look brighter than they are** when read downscaled; measure pixel values before chasing a "missing" scrim.
 
+* **kittest's `click()` sends real pointer events at the node's center**, so a node outside the window (a long panel) never gets the click. Make the harness tall enough (`set_size`) or scroll first.
+* **`WidgetInfo::selected` reaches AccessKit as `toggled`**, not `selected`: query `accesskit_node().toggled()`.
+* **An `egui::Button` with a `fill` draws its frame** even with `.frame(false)`; set the fill only when the frame should show.
+* **A widget's `hovered()` is false while another widget on top of it is hovered** (the filmstrip under its thumbnails): use `ui.rect_contains_pointer(rect)` for wheel handling over an area.
+
 ## Search
 
 * **egui popups lose their open state when their button's id changes.** A button's automatic id moves with its own look (a frame or text that appears) and with the number of widgets before it (an empty gallery draws none), so the menu closes. Give popups fixed ids (`Popup::id`), as `toolbar::menu` does.

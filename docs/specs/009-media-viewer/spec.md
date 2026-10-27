@@ -144,10 +144,10 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 | REQ-009-05 | `crates/domain/src/viewer.rs` › req_009_05_zooms_around_the_point_under_the_pointer, req_009_05_limits_the_scale_between_fitted_and_8x, req_009_05_keeps_zoomed_content_covering_the_viewport, req_009_05_centers_content_smaller_than_the_viewport; `crates/app/tests/viewer.rs` › req_009_05_zooms_and_pans | pass |
 | REQ-009-06 | — | no test |
 | ~~REQ-009-07~~ | — | no test (deprecated) |
-| REQ-009-08 | — | no test |
-| REQ-009-09 | — | no test |
-| REQ-009-10 | — | no test |
-| REQ-009-11 | — | no test |
+| REQ-009-08 | `crates/db/src/media.rs` › req_009_08_returns_the_details_with_tags_by_category; `crates/app/tests/viewer.rs` › req_009_08_req_013_13_toggles_the_info_panel_with_the_details | pass |
+| REQ-009-09 | `crates/app/tests/viewer.rs` › req_009_09_filters_by_a_tag_from_the_info_panel | pass |
+| REQ-009-10 | `crates/app/tests/viewer.rs` › req_009_10_shows_the_file_in_explorer_or_says_it_is_gone, req_009_11_context_menus_show_in_explorer_and_information | pass (Explorer itself checked by hand: `explorer.exe /select` outside the app's job object) |
+| REQ-009-11 | `crates/app/tests/viewer.rs` › req_009_11_context_menus_show_in_explorer_and_information | pass |
 | REQ-009-12 | `crates/app/tests/viewer.rs` › req_009_12_shows_media_not_found_for_a_removed_item, req_009_15_says_when_the_original_fails | pass |
 | REQ-009-13 | `crates/domain/src/viewer.rs` › req_009_13_lists_the_items_up_to_two_places_around_nearest_first, req_009_13_stops_at_the_ends_of_the_gallery; `crates/app/src/originals.rs` › req_009_13_frees_originals_that_are_no_longer_wanted, req_009_13_drops_photos_that_stopped_being_wanted_before_they_loaded, req_009_13_loads_a_photo_wanted_again_while_its_cancelled_load_finishes; `crates/app/tests/viewer.rs` › req_009_13_req_009_14_preloads_two_places_around | pass |
 | REQ-009-14 | `crates/app/tests/viewer.rs` › req_009_13_req_009_14_preloads_two_places_around | partial: a preloaded original shows without a fade; the thumbnail preview needs the GPU streamer, checked in the running app |

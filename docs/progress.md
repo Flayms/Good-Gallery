@@ -18,7 +18,7 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | M7a       | Search: model and queries              | Done        | [M07](rewrite/milestones/M07-search-sidebar.md) |
 | M7b       | Search bar, filters and sidebar        | Done        | [M07](rewrite/milestones/M07-search-sidebar.md) |
 | M8a       | Viewer core                            | Done        | [M08](rewrite/milestones/M08-viewer.md) |
-| M8b       | Viewer panels and filmstrip            | Not started | [M08](rewrite/milestones/M08-viewer.md) |
+| M8b       | Viewer panels and filmstrip            | Done        | [M08](rewrite/milestones/M08-viewer.md) |
 | M9        | Video                                  | Not started | —                                       |
 | M10       | Settings, design polish, glass         | Not started | —                                       |
 | M11       | Packaging and release                  | Not started | —                                       |
@@ -26,6 +26,17 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-27 · M8b · Viewer panels and filmstrip
+
+- Info panel in the viewer (`i`, _Info_) and info sheet beside the gallery (context menu _Information_) with file, location (selectable), library, dates, dimensions, duration, size, rating and tags grouped into People, Places and Tags; a click on a tag closes the viewer and filters by it. `db::media::detail` as the reference's `media.byId`.
+- _Show in Explorer_ in the control bar and in the context menus of tiles, rows and the viewer's media; a missing file gets an error toast.
+- Filmstrip (`f`, _Filmstrip_, remembered as `viewer.filmstrip`): one row of the gallery's thumbnails below the media, shown item outlined, toggled for assistive technology and centered, click or Enter jumps, the wheel scrolls sideways, play symbol on videos, fades with the controls.
+- Chrome tinted by the item's ThumbHash average (OKLCH clamp as the reference); the photo grows from its tile and shrinks back on close (fades without a tile on screen), instant with Windows' animation effects off.
+- Specs: 009 all pass but -02 / -04 / -14 (video parts, M9); 015 `Implemented`; REQ-013-11, -12 pass; REQ-013-10 partial (paused videos, M9); REQ-013-13 partial (locale, M10).
+- Code review fixes: the info sheet hides while the viewer is open (sheet and panel took turns asking for their item's details every frame and never showed them); Show in Explorer checks and starts Explorer on a job thread (an offline share froze the window) and retries without breaking away from the app's job when a parent job forbids it; the filmstrip centers again when its width changes and keeps within the row; one lookup of an item's file (`db::media::file_in`; a missing library no longer falls back to a relative path); the tint is computed once per item; details are forgotten when no info view shows them; the play symbol stays inside the filmstrip.
+- Open: `thumb_cache::tests::replaces_a_thumbnail_that_is_open_for_a_moment` fails now and then in the first full test run after a rebuild (Defender scanning new files holds the temporary thumbnail longer than the ≈ 1.4 s of rename retries); it passes on its own and in later runs.
+- Next: M9 (Video).
 
 ### 2026-10-27 · M8a · Viewer core
 

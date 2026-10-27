@@ -1,6 +1,6 @@
 # M08 · Photo viewer and filmstrip
 
-**Status:** Approved (2026-10-27, self-approved: the user asked to work through the milestones without their input; M8a done 2026-10-27)
+**Status:** Done (approved 2026-10-27, self-approved: the user asked to work through the milestones without their input; M8a and M8b done 2026-10-27)
 **Specs:** 009 (without REQ-009-06 video playback, M9), 015, REQ-013-10 … 14, REQ-016-06 (scroll to the viewed item)
 
 Too large for one part. Split:
@@ -49,6 +49,11 @@ Differences from the reference: no `byId` query, the viewer reads the item from 
 - Running app on the user's library (`--view <position> --screenshot …`): 12 MP phone JPEGs open at full resolution, fitted, the window behind darkened (sidebar background 31 → 5); controls step aside after 2.5 s.
 - Differences found while testing: kittest's default step of 0.25 s puts two clicks two frames apart outside egui's double-click window, so the viewer tests run at 60 fps; fades are timed by egui's frame time, not the wall clock, so tests and screenshots see them finish.
 
+## Results (M8b)
+
+- 10 more kittest tests (`crates/app/tests/viewer.rs`), snapshots `viewer_info`, `viewer_filmstrip`, `info_sheet`; the running app on the user's library shows the filmstrip with GPU thumbnails, the shown one outlined and centered, and the bar tinted by the photo.
+- Differences: the viewer is an `Order::Middle` area, so context menus and tooltips (foreground) open above it. The filmstrip jumps to the shown item instead of scrolling smoothly. Tab doesn't move focus into the viewer (it is kept from the window below); a filmstrip thumbnail focused by assistive technology still opens with Enter. Info panel and sheet are scrollable; the sheet is a right panel beside the gallery.
+
 ## Reference
 
 - `src/renderer/src/lib/zoom.ts`, `zoom.test.ts`: `clampView`, `zoomTo`, `fitSize`, MIN/MAX scale; tests ported.
@@ -71,12 +76,12 @@ Differences from the reference: no `byId` query, the viewer reads the item from 
 
 ### M8b
 
-- [ ] 9. `db::media::detail` query and the info panel / sheet (REQ-009-08, REQ-013-13)
-- [ ] 10. Filter by tag from the panel (REQ-009-09)
-- [ ] 11. Show in Explorer and context menus (REQ-009-10, REQ-009-11)
-- [ ] 12. Filmstrip (REQ-015-01 … -07)
-- [ ] 13. Photo-tinted chrome (REQ-013-11) and tile ↔ viewer transition (REQ-013-12)
-- [ ] 14. UI tests, snapshots, running-app check, docs
+- [x] 9. `db::media::detail` query and the info panel / sheet (REQ-009-08, REQ-013-13)
+- [x] 10. Filter by tag from the panel (REQ-009-09)
+- [x] 11. Show in Explorer and context menus (REQ-009-10, REQ-009-11)
+- [x] 12. Filmstrip (REQ-015-01 … -07)
+- [x] 13. Photo-tinted chrome (REQ-013-11) and tile ↔ viewer transition (REQ-013-12)
+- [x] 14. UI tests, snapshots, running-app check, docs
 
 ## Exit criteria
 

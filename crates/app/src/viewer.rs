@@ -1,18 +1,22 @@
 //! The viewer (spec 009): one media item over the whole window, stepped through in the gallery's order. Photos load
 //! their originals (`originals`) and show their thumbnail until then; they zoom and pan. The gallery keeps drawing
-//! below the scrim and keeps the shown item in view.
+//! below the scrim and keeps the shown item in view. An info panel (REQ-009-08) and a filmstrip (spec 015) open beside
+//! and below the media; the chrome takes a tint of the item's colors (REQ-013-11), and the photo grows from its tile
+//! and back (REQ-013-12).
 
-use crate::format;
-use crate::gallery::Gallery;
+use crate::gallery::{self, Gallery, MediaAction};
 use crate::icons::Icon;
 use crate::originals::{OriginalRequest, OriginalState, Originals};
-use crate::theme;
+use crate::{format, info, theme};
+use base64::Engine as _;
 use db::gallery::GalleryItem;
 use db::libraries::Library;
+use db::media::file_in;
+use domain::ambient::{self, Rgb};
 use domain::media::MediaKind;
-use domain::viewer::{self as zoom, FIT, Size, ZoomView};
+use domain::viewer::{self as zoom, FILMSTRIP_KEY, FILMSTRIP_THUMB, FIT, Size, Strip, ZoomView};
 use eframe::egui::{self, Color32, CursorIcon, Key, Modifiers, Pos2, Rect, Vec2, pos2, vec2};
-use std::path::Path;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 /// The controls step aside after this long without pointer movement or key presses (REQ-013-10).
@@ -27,10 +31,42 @@ const TOP_SPACE: f32 = 48.0;
 const CONTROLS_SPACE: f32 = 80.0;
 const BAR_HEIGHT: f32 = 48.0;
 const NAV_SIZE: f32 = 40.0;
+/// Distance of floating chrome from the window's edges.
+const INSET: f32 = 12.0;
+const STRIP: Strip = Strip {
+    size: FILMSTRIP_THUMB,
+    gap: 4.0,
+    padding: 6.0,
+};
+const STRIP_HEIGHT: f32 = FILMSTRIP_THUMB + 12.0;
+/// Room the filmstrip takes below the media and the control bar (REQ-015-01).
+const STRIP_SPACE: f32 = STRIP_HEIGHT + INSET;
 /// The window behind the viewer, darkened. The design's 0.5 needs the blur of M10 (REQ-013-14).
 const SCRIM: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 204);
-/// `GLASS_BAR` without its blur (M10).
-const GLASS_BAR: Color32 = Color32::from_rgba_premultiplied(20, 20, 20, 184);
+/// `GLASS_BAR` and `GLASS_PANEL` without their blur (M10), before the item's tint.
+const GLASS_BAR: Rgb = Rgb {
+    r: 28.0,
+    g: 28.0,
+    b: 28.0,
+};
+const GLASS_BAR_ALPHA: f32 = 0.72;
+const GLASS_PANEL: Rgb = Rgb {
+    r: 36.0,
+    g: 36.0,
+    b: 36.0,
+};
+const GLASS_PANEL_ALPHA: f32 = 0.86;
+
+/// What the viewer asks the app for.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Action {
+    /// It closed.
+    Close,
+    /// It closed to filter the gallery by this tag (REQ-009-09).
+    FilterByTag(String),
+    /// Explorer should show this file (REQ-009-10); the viewer stays.
+    ShowInExplorer(PathBuf),
+}
 
 /// What the keys and the mouse's back button asked for since the last frame.
 #[derive(Debug, Default)]
@@ -39,6 +75,68 @@ struct Keys {
     step: i32,
     zoom: Option<f32>,
     fit: bool,
+    info: bool,
+    filmstrip: bool,
+}
+
+/// The chrome's colors: the glass tinted by the shown item (REQ-013-11).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Chrome {
+    pub bar: Color32,
+    pub panel: Color32,
+}
+
+impl Chrome {
+    fn new(tint: Option<Rgb>) -> Self {
+        let glass = |base: Rgb, alpha: f32| {
+            let Rgb { r, g, b } = match tint {
+                Some(tint) => ambient::tint_glass(base, tint, ambient::AMOUNT),
+                None => base,
+            };
+            Color32::from_rgba_unmultiplied(r as u8, g as u8, b as u8, (alpha * 255.0).round() as u8)
+        };
+        Self {
+            bar: glass(GLASS_BAR, GLASS_BAR_ALPHA),
+            panel: glass(GLASS_PANEL, GLASS_PANEL_ALPHA),
+        }
+    }
+}
+
+/// The tint of an item with a ThumbHash: a dark, muted version of its average color.
+fn tint_of(thumbhash: Option<&str>) -> Option<Rgb> {
+    let hash = base64::engine::general_purpose::STANDARD.decode(thumbhash?).ok()?;
+    let (r, g, b, _) = thumbhash::thumb_hash_to_average_rgba(&hash).ok()?;
+    Some(ambient::ambient_tint(Rgb {
+        r: r * 255.0,
+        g: g * 255.0,
+        b: b * 255.0,
+    }))
+}
+
+/// The tile ↔ viewer transition (REQ-013-12): from when, and from or to which tile.
+#[derive(Debug, Clone, Copy)]
+struct Transition {
+    /// egui's time when it started; `None` until the first frame.
+    start: Option<f64>,
+    /// The tile's rect; `None` fades instead.
+    tile: Option<Rect>,
+}
+
+impl Transition {
+    /// Progress 0 → 1, eased; 1 at once without motion.
+    fn progress(&mut self, ctx: &egui::Context) -> f32 {
+        if !theme::motion(ctx) {
+            return 1.0;
+        }
+        let now = ctx.input(|input| input.time);
+        let start = *self.start.get_or_insert(now);
+        let t = ((now - start) as f32 / theme::DURATION_HERO).clamp(0.0, 1.0);
+        if t < 1.0 {
+            ctx.request_repaint();
+        }
+        // Ease out (cubic).
+        1.0 - (1.0 - t).powi(3)
+    }
 }
 
 pub struct Viewer {
@@ -59,10 +157,27 @@ pub struct Viewer {
     /// A scrim click waiting to close the viewer, unless a second click comes first.
     close_at: Option<Instant>,
     keys: Keys,
+    info_open: bool,
+    filmstrip: bool,
+    /// The filmstrip's scroll offset, and the position it was last centered on (REQ-015-03).
+    strip_offset: f32,
+    strip_centered: Option<usize>,
+    /// Width of the filmstrip when it was last drawn: a new width centers it again.
+    strip_width: f32,
+    opening: Transition,
+    /// Closing: the transition back, and what the app is told once it ends.
+    closing: Option<(Transition, Action)>,
+    /// Where the photo was drawn in the last frame.
+    photo: Option<Rect>,
+    chrome: Chrome,
+    /// The media item the chrome was tinted for.
+    chrome_for: Option<i64>,
 }
 
 impl Viewer {
-    pub fn new(index: usize, id: i64, version: u64) -> Self {
+    /// Opens the viewer on gallery position `index` (media item `id`) of result `version`, growing from `tile` if it is
+    /// on screen; the filmstrip shows if the user left it shown (REQ-015-02).
+    pub fn new(index: usize, id: i64, version: u64, tile: Option<Rect>, filmstrip: bool) -> Self {
         Self {
             index,
             id,
@@ -74,7 +189,30 @@ impl Viewer {
             last_activity: Instant::now(),
             close_at: None,
             keys: Keys::default(),
+            info_open: false,
+            filmstrip,
+            strip_offset: 0.0,
+            strip_centered: None,
+            strip_width: 0.0,
+            opening: Transition { start: None, tile },
+            closing: None,
+            photo: None,
+            chrome: Chrome::new(None),
+            chrome_for: None,
         }
+    }
+
+    /// Opens the viewer on gallery position `index` as the user left the filmstrip, growing from its tile.
+    pub fn open(gallery: &Gallery, index: usize) -> Option<Self> {
+        let id = gallery.id_at(index)?;
+        let filmstrip = zoom::is_filmstrip_shown(gallery.setting(FILMSTRIP_KEY).as_deref());
+        Some(Self::new(
+            index,
+            id,
+            gallery.data_version(),
+            gallery.tile_rect(index),
+            filmstrip,
+        ))
     }
 
     pub fn index(&self) -> usize {
@@ -89,18 +227,51 @@ impl Viewer {
         self.view
     }
 
+    pub fn info_open(&self) -> bool {
+        self.info_open
+    }
+
+    pub fn filmstrip_shown(&self) -> bool {
+        self.filmstrip
+    }
+
+    /// The chrome's colors in the last frame (REQ-013-11).
+    pub fn chrome(&self) -> Chrome {
+        self.chrome
+    }
+
+    /// Where the photo was drawn in the last frame.
+    pub fn photo_rect(&self) -> Option<Rect> {
+        self.photo
+    }
+
+    /// Whether it is closing (shrinking back into its tile or fading).
+    pub fn is_closing(&self) -> bool {
+        self.closing.is_some()
+    }
+
     /// Whether the shown photo's original was loaded when it came up, so it shows without fading in (REQ-009-14).
     pub fn shows_original_at_once(&self) -> bool {
         self.instant == Some(true)
     }
 
+    fn layer() -> egui::LayerId {
+        egui::LayerId::new(egui::Order::Middle, egui::Id::NULL.with("viewer"))
+    }
+
     /// Takes the viewer's keys before anything else sees them; call at the start of the frame.
     pub fn input(&mut self, ctx: &egui::Context) {
-        ctx.memory_mut(|memory| {
-            if let Some(focused) = memory.focused() {
-                memory.surrender_focus(focused);
-            }
-        });
+        // Focus stays in the viewer (the filmstrip's thumbnails); nothing under it takes focus or acts on Enter or
+        // Space.
+        let focused = ctx.memory(|memory| memory.focused());
+        let focus_inside = focused
+            .and_then(|id| ctx.read_response(id))
+            .is_some_and(|response| response.layer_id == Self::layer());
+        if let Some(focused) = focused
+            && !focus_inside
+        {
+            ctx.memory_mut(|memory| memory.surrender_focus(focused));
+        }
         ctx.input_mut(|input| {
             let active = input.pointer.delta() != Vec2::ZERO
                 || input.pointer.any_pressed()
@@ -118,10 +289,13 @@ impl Viewer {
             {
                 self.keys.close = true;
             }
-            // Nothing under the viewer may take focus or act on Enter or Space.
-            for key in [Key::Tab, Key::Enter, Key::Space] {
-                input.consume_key(Modifiers::NONE, key);
-                input.consume_key(Modifiers::SHIFT, key);
+            input.consume_key(Modifiers::NONE, Key::Tab);
+            input.consume_key(Modifiers::SHIFT, Key::Tab);
+            if !focus_inside {
+                for key in [Key::Enter, Key::Space] {
+                    input.consume_key(Modifiers::NONE, key);
+                    input.consume_key(Modifiers::SHIFT, key);
+                }
             }
             if input.modifiers.ctrl || input.modifiers.alt || input.modifiers.command {
                 return;
@@ -140,6 +314,12 @@ impl Viewer {
             }
             if input.consume_key(Modifiers::NONE, Key::Num0) {
                 self.keys.fit = true;
+            }
+            if input.consume_key(Modifiers::NONE, Key::I) {
+                self.keys.info ^= true;
+            }
+            if input.consume_key(Modifiers::NONE, Key::F) {
+                self.keys.filmstrip ^= true;
             }
         });
     }
@@ -169,28 +349,62 @@ impl Viewer {
         }
     }
 
-    /// Draws the viewer over the window; false once it closed.
+    /// Starts closing: the photo shrinks back into its tile, or the viewer fades (REQ-013-12).
+    fn close(&mut self, gallery: &Gallery, action: Action) {
+        if self.closing.is_none() {
+            let tile = if self.missing {
+                None
+            } else {
+                gallery.tile_rect(self.index)
+            };
+            self.closing = Some((Transition { start: None, tile }, action));
+        }
+    }
+
+    fn toggle_filmstrip(&mut self, gallery: &Gallery) {
+        self.filmstrip = !self.filmstrip;
+        self.strip_centered = None;
+        gallery.store_setting(FILMSTRIP_KEY, if self.filmstrip { "shown" } else { "hidden" });
+    }
+
+    /// Draws the viewer over the window. Returns what the app should do: [`Action::Close`] and
+    /// [`Action::FilterByTag`] once it has closed.
     pub fn show(
         &mut self,
         ctx: &egui::Context,
         gallery: &mut Gallery,
         originals: &mut Originals,
         libraries: &[Library],
-    ) -> bool {
+    ) -> Option<Action> {
         self.follow(gallery);
         let count = gallery.count().unwrap_or(0);
         let keys = std::mem::take(&mut self.keys);
-        if keys.close {
-            return false;
-        }
-        if keys.step != 0 {
-            let target = self.index as i64 + i64::from(keys.step.signum());
-            if target >= 0 && (target as usize) < count {
-                self.go_to(target as usize, gallery);
+        if self.closing.is_none() {
+            if keys.close || self.close_at.is_some_and(|at| Instant::now() >= at) {
+                self.close(gallery, Action::Close);
+            }
+            if keys.step != 0 {
+                let target = self.index as i64 + i64::from(keys.step.signum());
+                if target >= 0 && (target as usize) < count {
+                    self.go_to(target as usize, gallery);
+                }
+            }
+            if keys.info {
+                self.info_open = !self.info_open;
+            }
+            if keys.filmstrip {
+                self.toggle_filmstrip(gallery);
             }
         }
-        if self.close_at.is_some_and(|at| Instant::now() >= at) {
-            return false;
+        // How far the viewer is open: grows in, shrinks back out.
+        let (progress, tile) = match &mut self.closing {
+            Some((transition, _)) => (1.0 - transition.progress(ctx), transition.tile),
+            None => (self.opening.progress(ctx), self.opening.tile),
+        };
+        if let Some((_, action)) = &self.closing
+            && progress <= 0.0
+        {
+            return Some(action.clone());
         }
 
         preload(gallery, originals, libraries, self.index, count);
@@ -204,46 +418,92 @@ impl Viewer {
         if item.is_some() && self.instant.is_none() {
             self.instant = Some(matches!(original, OriginalState::Loaded(_)));
         }
+        if self.chrome_for != Some(self.id) && item.is_some() {
+            self.chrome = Chrome::new(tint_of(item.as_ref().and_then(|item| item.thumbhash.as_deref())));
+            self.chrome_for = Some(self.id);
+        }
 
         let screen = ctx.content_rect();
-        let mut open = true;
-        egui::Area::new(egui::Id::NULL.with("viewer"))
-            .order(egui::Order::Foreground)
+        let layout = Layout::new(screen, self.info_open, self.filmstrip);
+        let mut action = None;
+        egui::Area::new(Self::layer().id)
+            .order(Self::layer().order)
             .fixed_pos(screen.min)
             .constrain(false)
             .show(ctx, |ui| {
                 ui.set_min_size(screen.size());
-                ui.painter().rect_filled(screen, 0.0, SCRIM);
-                let media = Rect::from_min_max(
-                    screen.min + vec2(SIDE_SPACE, TOP_SPACE),
-                    screen.max - vec2(SIDE_SPACE, CONTROLS_SPACE),
-                );
+                // Without a tile to grow from, the whole viewer fades in and out.
+                if tile.is_none() {
+                    ui.set_opacity(progress);
+                }
+                ui.painter().rect_filled(screen, 0.0, SCRIM.gamma_multiply(progress));
                 let backdrop = ui.interact(screen, ui.make_persistent_id("backdrop"), egui::Sense::click_and_drag());
                 let label = item
                     .as_ref()
                     .map_or("Media viewer", |item| item.file_name.as_str())
                     .to_owned();
                 backdrop.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Dialog, true, &label));
+                let closing = self.closing.is_some();
+                // The context menu's choice (REQ-009-11).
+                if !closing && let Some(item) = &item {
+                    backdrop.context_menu(|ui| match gallery::context_menu(ui) {
+                        Some(MediaAction::ShowInExplorer) => action = Self::explorer_action(item, libraries),
+                        Some(MediaAction::Information) => self.info_open = true,
+                        None => {}
+                    });
+                }
                 match &item {
                     Some(item) => {
-                        self.media(ui, &backdrop, media, item, gallery, &original, keys);
+                        let keys = if closing { Keys::default() } else { keys };
+                        let transition = tile.filter(|_| progress < 1.0).map(|tile| (tile, progress));
+                        let drawn = self.media(ui, &backdrop, &layout, item, gallery, &original, keys, transition);
+                        self.photo = Some(drawn);
                     }
                     None if self.missing => {
-                        message(ui, media.center(), "Media not found");
+                        message(ui, layout.media.center(), "Media not found");
                         self.backdrop_clicks(&backdrop);
                     }
                     None => {
                         self.backdrop_clicks(&backdrop);
                     }
                 }
-                if !self.controls(ui, screen, item.as_ref(), count) {
-                    open = false;
+                if closing {
+                    return;
                 }
+                ui.scope(|ui| {
+                    ui.multiply_opacity(progress);
+                    if let Some(chosen) = self.controls(ui, &layout, item.as_ref(), count, gallery, libraries) {
+                        action = Some(chosen);
+                    }
+                });
             });
         if let Some(at) = self.close_at {
             ctx.request_repaint_after(at.saturating_duration_since(Instant::now()));
         }
-        open
+        match action {
+            Some(Action::ShowInExplorer(path)) => Some(Action::ShowInExplorer(path)),
+            Some(other) => {
+                self.close(gallery, other);
+                // Without motion it closes at once.
+                if !theme::motion(ctx) {
+                    return self.closing.take().map(|(_, action)| action);
+                }
+                ctx.request_repaint();
+                None
+            }
+            None => {
+                if !theme::motion(ctx)
+                    && let Some((_, action)) = self.closing.take()
+                {
+                    return Some(action);
+                }
+                None
+            }
+        }
+    }
+
+    fn explorer_action(item: &GalleryItem, libraries: &[Library]) -> Option<Action> {
+        file_in(libraries, item.root_id, &item.rel_path).map(Action::ShowInExplorer)
     }
 
     /// A click on the scrim closes after a moment; a double-click cancels it (REQ-009-03).
@@ -264,18 +524,22 @@ impl Viewer {
         self.close_at = Some(Instant::now() + Duration::from_secs_f64(delay));
     }
 
-    /// The photo (or a video's preview), fitted into `area`, zoomed and panned (REQ-009-05, REQ-009-14 … -16).
+    /// The photo (or a video's preview), fitted into the media area, zoomed and panned (REQ-009-05, REQ-009-14 …
+    /// -16). During the tile ↔ viewer transition (`transition`: the tile and how far it is open) it is drawn between
+    /// its tile and its place (REQ-013-12). Returns where it was drawn.
     #[expect(clippy::too_many_arguments, reason = "one frame's inputs of the media area")]
     fn media(
         &mut self,
         ui: &mut egui::Ui,
         backdrop: &egui::Response,
-        area: Rect,
+        layout: &Layout,
         item: &GalleryItem,
         gallery: &mut Gallery,
         original: &OriginalState,
         keys: Keys,
-    ) {
+        transition: Option<(Rect, f32)>,
+    ) -> Rect {
+        let area = layout.media;
         let thumbnail = gallery.thumbnail(item.id);
         let loaded = match original {
             OriginalState::Loaded(loaded) => Some(*loaded),
@@ -291,15 +555,34 @@ impl Viewer {
         let fitted = zoom::fit_size(natural, viewport);
         let photo = item.kind == MediaKind::Image;
 
-        if photo {
+        // Not over the chrome: its own widgets take those clicks and wheel turns.
+        let over_chrome = backdrop.hover_pos().is_some_and(|pos| layout.is_chrome(pos));
+        if photo && !over_chrome {
             self.handle_zoom(ui, backdrop, area, natural, fitted, viewport, keys);
-        } else {
+        } else if !over_chrome {
             self.backdrop_clicks(backdrop);
         }
         let view = self.view;
-        let rect = photo_rect(area, fitted, view);
-        if photo && let Some(pos) = backdrop.hover_pos() {
-            let icon = if !rect.intersect(area).contains(pos) {
+        let target = photo_rect(area, fitted, view);
+        // During the transition the photo moves between its tile and its place, over the whole window.
+        // Cropped like the tile at first, uncropped once open.
+        let full = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+        let (rect, clip, uv) = match transition {
+            Some((tile, progress)) => {
+                let cover = gallery::cover_uv([natural.width as u32, natural.height as u32], tile.size());
+                (
+                    lerp_rect(tile, target, progress),
+                    ui.clip_rect(),
+                    lerp_rect(cover, full, progress),
+                )
+            }
+            None => (target, area, full),
+        };
+        if photo
+            && !over_chrome
+            && let Some(pos) = backdrop.hover_pos()
+        {
+            let icon = if !target.intersect(area).contains(pos) {
                 CursorIcon::Default
             } else if !view.is_zoomed() {
                 CursorIcon::ZoomIn
@@ -311,8 +594,7 @@ impl Viewer {
             ui.ctx().set_cursor_icon(icon);
         }
 
-        let painter = ui.painter().with_clip_rect(area);
-        let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+        let painter = ui.painter().with_clip_rect(clip);
         let fade = match loaded {
             Some(_) if self.instant == Some(true) => 1.0,
             Some(_) => {
@@ -342,9 +624,10 @@ impl Viewer {
             }
         }
         if let OriginalState::Failed(_) = original {
-            let at = pos2(rect.center().x, rect.bottom().min(area.bottom()) - 28.0);
+            let at = pos2(target.center().x, target.bottom().min(area.bottom()) - 28.0);
             message(ui, at, "Can't load the original. Showing a preview.");
         }
+        rect
     }
 
     #[expect(clippy::too_many_arguments, reason = "one frame's inputs of the media area")]
@@ -374,23 +657,7 @@ impl Viewer {
             self.view = zoom::zoom_to(self.view, self.view.scale * factor, (0.0, 0.0), content, viewport);
         }
         if backdrop.hovered() {
-            let delta: f32 = ui.input(|input| {
-                input
-                    .raw
-                    .events
-                    .iter()
-                    .filter_map(|event| match event {
-                        egui::Event::MouseWheel {
-                            unit, delta, modifiers, ..
-                        } if !modifiers.ctrl => Some(match unit {
-                            egui::MouseWheelUnit::Point => delta.y,
-                            egui::MouseWheelUnit::Line => delta.y * WHEEL_LINE,
-                            egui::MouseWheelUnit::Page => delta.y.signum() * WHEEL_LINE,
-                        }),
-                        _ => None,
-                    })
-                    .sum()
-            });
+            let delta = wheel(ui).y;
             // egui's delta is positive when scrolling up, a browser's deltaY then negative: up zooms in.
             if delta != 0.0
                 && let Some(pos) = backdrop.hover_pos()
@@ -426,29 +693,42 @@ impl Viewer {
         }
     }
 
-    /// _Previous_ / _Next_ and the control bar, faded out while idle (REQ-013-10); false when _Close_ was clicked.
-    fn controls(&mut self, ui: &mut egui::Ui, screen: Rect, item: Option<&GalleryItem>, count: usize) -> bool {
+    /// _Previous_ / _Next_, the control bar, the info panel and the filmstrip; the controls and the filmstrip fade out
+    /// while idle (REQ-013-10, REQ-015-06). Returns what a control asked for.
+    fn controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        layout: &Layout,
+        item: Option<&GalleryItem>,
+        count: usize,
+        gallery: &mut Gallery,
+        libraries: &[Library],
+    ) -> Option<Action> {
         let ctx = ui.ctx().clone();
+        let screen = layout.screen;
         let text = bar_text(ui, screen, item);
-        let bar = control_bar_rect(screen, &text);
+        let bar = control_bar_rect(layout, &text);
         let previous = (self.index > 0).then(|| {
             Rect::from_center_size(
-                pos2(screen.left() + 12.0 + NAV_SIZE / 2.0, screen.center().y),
+                pos2(screen.left() + INSET + NAV_SIZE / 2.0, layout.media.center().y),
                 Vec2::splat(NAV_SIZE),
             )
         });
         let next = (self.index + 1 < count).then(|| {
             Rect::from_center_size(
-                pos2(screen.right() - 12.0 - NAV_SIZE / 2.0, screen.center().y),
+                pos2(layout.right - INSET - NAV_SIZE / 2.0, layout.media.center().y),
                 Vec2::splat(NAV_SIZE),
             )
         });
         let pointer = ctx.pointer_latest_pos();
         let hovering = pointer.is_some_and(|pos| {
-            bar.contains(pos) || previous.is_some_and(|r| r.contains(pos)) || next.is_some_and(|r| r.contains(pos))
+            bar.contains(pos)
+                || previous.is_some_and(|r| r.contains(pos))
+                || next.is_some_and(|r| r.contains(pos))
+                || layout.strip.is_some_and(|r| r.contains(pos))
         });
         let idle = self.last_activity.elapsed() >= IDLE;
-        let hidden = zoom::controls_hidden(idle, hovering, false, false);
+        let hidden = zoom::controls_hidden(idle, hovering, self.info_open, false);
         if !idle {
             ctx.request_repaint_after(IDLE.saturating_sub(self.last_activity.elapsed()));
         }
@@ -456,34 +736,253 @@ impl Viewer {
         if hidden && pointer.is_some_and(|pos| screen.contains(pos)) {
             ctx.set_cursor_icon(CursorIcon::None);
         }
-        if shown == 0.0 {
-            return true;
-        }
 
-        let mut open = true;
-        let mut step = 0;
+        let mut action = None;
+        if self.info_open
+            && let Some(panel) = layout.info
+        {
+            action = self.info_panel(ui, panel, gallery);
+        }
+        if shown == 0.0 {
+            return action;
+        }
+        let mut step = None;
         ui.scope(|ui| {
-            ui.set_opacity(shown);
+            ui.multiply_opacity(shown);
+            let chrome = self.chrome;
             for (rect, icon, label, by) in [
                 (previous, Icon::ChevronLeft, "Previous", -1),
                 (next, Icon::ChevronRight, "Next", 1),
             ] {
                 let Some(rect) = rect else { continue };
                 let tooltip = if by < 0 { "Previous (←)" } else { "Next (→)" };
-                if round_button(ui, rect, icon, label, tooltip).clicked() {
-                    step = by;
+                if round_button(ui, rect, icon, label, tooltip, chrome.bar).clicked() {
+                    step = Some((self.index as i64 + by).max(0) as usize);
                 }
             }
-            if control_bar(ui, bar, text) {
-                open = false;
+            if let Some(strip) = layout.strip
+                && let Some(index) = self.filmstrip(ui, strip, count, gallery)
+            {
+                step = Some(index);
+            }
+            match control_bar(ui, bar, text, chrome.bar, self.info_open, self.filmstrip) {
+                Some(BarButton::ShowInExplorer) => {
+                    if let Some(item) = item {
+                        action = Self::explorer_action(item, libraries);
+                    }
+                }
+                Some(BarButton::Info) => self.info_open = !self.info_open,
+                Some(BarButton::Filmstrip) => self.toggle_filmstrip(gallery),
+                Some(BarButton::Close) => action = Some(Action::Close),
+                None => {}
             }
         });
-        if step != 0 {
-            self.keys.step = step;
+        if !self.filmstrip {
+            gallery.set_strip(0..0);
+        }
+        if let Some(index) = step
+            && index < count
+            && index != self.index
+        {
+            self.go_to(index, gallery);
             ctx.request_repaint();
         }
-        open
+        action
     }
+
+    /// The info panel at the right (REQ-009-08); a click on a tag filters the gallery by it (REQ-009-09).
+    fn info_panel(&mut self, ui: &mut egui::Ui, rect: Rect, gallery: &mut Gallery) -> Option<Action> {
+        ui.painter().rect(
+            rect,
+            theme::RADIUS_PANEL,
+            self.chrome.panel,
+            egui::Stroke::new(1.0, theme::RIM),
+            egui::StrokeKind::Inside,
+        );
+        // Clicks and wheel turns on the panel stay in it.
+        ui.interact(rect, ui.make_persistent_id("info panel"), egui::Sense::click());
+        let mut clicked = None;
+        let inner = rect.shrink(16.0);
+        let mut panel = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(inner)
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        panel.set_clip_rect(inner);
+        egui::ScrollArea::vertical()
+            .id_salt("info panel")
+            .auto_shrink(false)
+            .show(&mut panel, |ui| {
+                clicked = info::show_loaded(ui, gallery.detail(self.id))
+            });
+        clicked.map(Action::FilterByTag)
+    }
+
+    /// The filmstrip (spec 015): thumbnails of the whole gallery in one row, the shown item highlighted and centered;
+    /// the wheel scrolls it. Returns a clicked position.
+    fn filmstrip(&mut self, ui: &mut egui::Ui, rect: Rect, count: usize, gallery: &mut Gallery) -> Option<usize> {
+        let view = rect.width();
+        if (self.strip_centered != Some(self.index) || self.strip_width != view) && !self.missing {
+            self.strip_offset = STRIP.centered(self.index, count, view);
+            self.strip_centered = Some(self.index);
+        }
+        self.strip_width = view;
+        self.strip_offset = STRIP.clamp(self.strip_offset, count, view);
+        let response = ui.interact(rect, ui.make_persistent_id("filmstrip"), egui::Sense::click());
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Navigation, true, "Filmstrip"));
+        // Over the thumbnails too, which lie on top of the strip.
+        if ui.rect_contains_pointer(rect) {
+            let delta = wheel(ui);
+            // egui's deltas point the other way than a browser's.
+            let sideways = -zoom::sideways_delta(delta.x, delta.y);
+            if sideways != 0.0 {
+                self.strip_offset = STRIP.clamp(self.strip_offset + sideways, count, view);
+            }
+        }
+        ui.painter().rect(
+            rect,
+            theme::RADIUS_PANEL,
+            self.chrome.bar,
+            egui::Stroke::new(1.0, theme::RIM),
+            egui::StrokeKind::Inside,
+        );
+        // A short row stays centered.
+        let left = rect.left() + ((view - STRIP.width(count)) / 2.0).max(0.0) - self.strip_offset;
+        let visible = STRIP.visible(count, self.strip_offset, view);
+        gallery.set_strip(visible.clone());
+        let painter = ui.painter().with_clip_rect(rect.shrink(1.0));
+        let mut clicked = None;
+        for index in visible {
+            let thumb = Rect::from_min_size(
+                pos2(left + STRIP.left(index), rect.top() + STRIP.padding),
+                Vec2::splat(STRIP.size),
+            );
+            let Some(item) = gallery.item(index) else {
+                painter.rect_filled(thumb, 2.0, theme::RAISED);
+                continue;
+            };
+            let (id, video, name) = (item.id, item.kind == MediaKind::Video, item.file_name.clone());
+            let current = index == self.index && !self.missing;
+            let response = ui.interact(
+                thumb.intersect(rect),
+                ui.make_persistent_id(("filmstrip item", id)),
+                egui::Sense::click(),
+            );
+            response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, current, &name));
+            let response = response.on_hover_text(&name);
+            if response.clicked() {
+                clicked = Some(index);
+            }
+            let tint = if current || response.hovered() {
+                Color32::WHITE
+            } else {
+                Color32::WHITE.gamma_multiply(0.6)
+            };
+            match (gallery.thumbnail(id), gallery.placeholder(ui.ctx(), id)) {
+                (Some(texture), _) => {
+                    painter.add(
+                        egui::epaint::RectShape::filled(thumb, 2, tint)
+                            .with_texture(texture.id, gallery::cover_uv(texture.size, thumb.size())),
+                    );
+                }
+                (None, Some(placeholder)) => {
+                    painter.add(
+                        egui::epaint::RectShape::filled(thumb, 2, tint)
+                            .with_texture(placeholder, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0))),
+                    );
+                }
+                (None, None) => {
+                    painter.rect_filled(thumb, 2.0, theme::RAISED);
+                }
+            }
+            // The tile's duration badge doesn't fit; a play symbol still marks videos (REQ-015-07).
+            if video {
+                let badge = Rect::from_center_size(thumb.center(), Vec2::splat(24.0));
+                painter.circle_filled(badge.center(), 12.0, Color32::from_black_alpha(153));
+                let icon = Rect::from_center_size(badge.center() + vec2(1.0, 0.0), Vec2::splat(12.0));
+                // Images paint unclipped: only while the symbol is inside the strip.
+                if rect.contains_rect(icon) {
+                    Icon::Play.image(12.0, Color32::WHITE).paint_at(ui, icon);
+                }
+                let marker = ui.interact(icon, ui.make_persistent_id(("video marker", id)), egui::Sense::hover());
+                marker.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, "Video"));
+            }
+            if current {
+                painter.rect_stroke(thumb, 2, egui::Stroke::new(2.0, theme::PAPER), egui::StrokeKind::Inside);
+            }
+        }
+        clicked
+    }
+}
+
+/// Where everything goes in the window: the media area shrinks for the info panel and the filmstrip, so they never
+/// cover it (REQ-009-08, REQ-015-01).
+struct Layout {
+    screen: Rect,
+    media: Rect,
+    info: Option<Rect>,
+    strip: Option<Rect>,
+    /// Right edge of the area for the media, the arrows, the bar and the filmstrip.
+    right: f32,
+    /// How far the control bar sits above the window's bottom.
+    bar_bottom: f32,
+}
+
+impl Layout {
+    fn new(screen: Rect, info_open: bool, filmstrip: bool) -> Self {
+        let info = info_open.then(|| {
+            Rect::from_min_max(
+                pos2(screen.right() - INSET - info::WIDTH, screen.top() + INSET),
+                pos2(screen.right() - INSET, screen.bottom() - INSET),
+            )
+        });
+        let right = info.map_or(screen.right(), |panel| panel.left());
+        let below = if filmstrip { STRIP_SPACE } else { 0.0 };
+        let strip = filmstrip.then(|| {
+            Rect::from_min_max(
+                pos2(screen.left() + INSET, screen.bottom() - INSET - STRIP_HEIGHT),
+                pos2(right - INSET, screen.bottom() - INSET),
+            )
+        });
+        let media = Rect::from_min_max(
+            pos2(screen.left() + SIDE_SPACE, screen.top() + TOP_SPACE),
+            pos2(right - SIDE_SPACE, screen.bottom() - CONTROLS_SPACE - below),
+        );
+        Self {
+            screen,
+            media,
+            info,
+            strip,
+            right,
+            bar_bottom: 16.0 + below,
+        }
+    }
+
+    /// Whether `pos` is over the info panel or the filmstrip.
+    fn is_chrome(&self, pos: Pos2) -> bool {
+        self.info.is_some_and(|r| r.contains(pos)) || self.strip.is_some_and(|r| r.contains(pos))
+    }
+}
+
+/// This frame's wheel movement in points (lines count 100), without Ctrl.
+fn wheel(ui: &egui::Ui) -> Vec2 {
+    ui.input(|input| {
+        input
+            .raw
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                egui::Event::MouseWheel {
+                    unit, delta, modifiers, ..
+                } if !modifiers.ctrl => Some(match unit {
+                    egui::MouseWheelUnit::Point => *delta,
+                    egui::MouseWheelUnit::Line => *delta * WHEEL_LINE,
+                    egui::MouseWheelUnit::Page => vec2(delta.x.signum(), delta.y.signum()) * WHEEL_LINE,
+                }),
+                _ => None,
+            })
+            .fold(Vec2::ZERO, |sum, delta| sum + delta)
+    })
 }
 
 /// Where the photo is drawn: fitted into `area`, scaled and moved by `view`; parts outside `area` are clipped.
@@ -494,6 +993,10 @@ fn photo_rect(area: Rect, fitted: Size, view: ZoomView) -> Rect {
     )
 }
 
+fn lerp_rect(from: Rect, to: Rect, t: f32) -> Rect {
+    Rect::from_min_max(from.min.lerp(to.min, t), from.max.lerp(to.max, t))
+}
+
 /// Asks for the originals of the shown photo and its neighbours, nearest first (REQ-009-13).
 fn preload(gallery: &mut Gallery, originals: &mut Originals, libraries: &[Library], index: usize, count: usize) {
     let mut wanted = Vec::new();
@@ -502,13 +1005,10 @@ fn preload(gallery: &mut Gallery, originals: &mut Originals, libraries: &[Librar
         if item.kind != MediaKind::Image {
             continue;
         }
-        let Some(library) = libraries.iter().find(|library| library.id == item.root_id) else {
+        let Some(path) = file_in(libraries, item.root_id, &item.rel_path) else {
             continue;
         };
-        wanted.push(OriginalRequest {
-            media: item.id,
-            path: Path::new(&library.path).join(&item.rel_path),
-        });
+        wanted.push(OriginalRequest { media: item.id, path });
     }
     originals.set(wanted);
 }
@@ -519,7 +1019,8 @@ fn message(ui: &mut egui::Ui, at: Pos2, text: &str) {
         .painter()
         .layout_no_wrap(text.into(), egui::FontId::proportional(theme::SIZE_BODY), theme::PAPER);
     let rect = Rect::from_center_size(at, galley.size() + vec2(32.0, 12.0));
-    ui.painter().rect_filled(rect, rect.height() / 2.0, GLASS_BAR);
+    ui.painter()
+        .rect_filled(rect, rect.height() / 2.0, Chrome::new(None).bar);
     ui.painter()
         .galley(rect.center() - galley.size() / 2.0, galley, theme::PAPER);
     // Hover only: clicks still reach the photo and the scrim below.
@@ -527,12 +1028,19 @@ fn message(ui: &mut egui::Ui, at: Pos2, text: &str) {
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, text));
 }
 
-fn round_button(ui: &mut egui::Ui, rect: Rect, icon: Icon, label: &str, tooltip: &str) -> egui::Response {
+fn round_button(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    icon: Icon,
+    label: &str,
+    tooltip: &str,
+    fill: Color32,
+) -> egui::Response {
     let response = ui
         .put(
             rect,
             egui::Button::image(icon.image(20.0, theme::PAPER))
-                .fill(GLASS_BAR)
+                .fill(fill)
                 .stroke(egui::Stroke::new(1.0, theme::RIM))
                 .corner_radius(NAV_SIZE / 2.0),
         )
@@ -557,7 +1065,7 @@ fn bar_text(ui: &egui::Ui, screen: Rect, item: Option<&GalleryItem>) -> BarText 
         theme::PAPER,
     );
     job.wrap = egui::text::TextWrapping {
-        max_width: (screen.width() * 0.4).max(80.0),
+        max_width: (screen.width() * 0.3).max(80.0),
         max_rows: 1,
         break_anywhere: true,
         overflow_character: Some('…'),
@@ -579,7 +1087,33 @@ fn bar_text(ui: &egui::Ui, screen: Rect, item: Option<&GalleryItem>) -> BarText 
 const BAR_GAP: f32 = 12.0;
 const STAR_SIZE: f32 = 14.0;
 
-fn control_bar_rect(screen: Rect, text: &BarText) -> Rect {
+/// The control bar's buttons, right of the separator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BarButton {
+    ShowInExplorer,
+    Info,
+    Filmstrip,
+    Close,
+}
+
+const BAR_BUTTONS: [(BarButton, Icon, &str, &str); 4] = [
+    (
+        BarButton::ShowInExplorer,
+        Icon::FolderOpen,
+        "Show in Explorer",
+        "Show in Explorer",
+    ),
+    (BarButton::Info, Icon::Info, "Info", "Info (i)"),
+    (
+        BarButton::Filmstrip,
+        Icon::GalleryHorizontal,
+        "Filmstrip",
+        "Filmstrip (f)",
+    ),
+    (BarButton::Close, Icon::X, "Close", "Close (Esc)"),
+];
+
+fn control_bar_rect(layout: &Layout, text: &BarText) -> Rect {
     let mut width = 20.0 + text.name.size().x + BAR_GAP;
     if let Some(date) = &text.date {
         width += date.size().x + BAR_GAP;
@@ -587,28 +1121,42 @@ fn control_bar_rect(screen: Rect, text: &BarText) -> Rect {
     if text.stars > 0 {
         width += text.stars as f32 * (STAR_SIZE + 2.0) + BAR_GAP;
     }
-    // Separator, _Close_ and the right padding.
-    width += 1.0 + BAR_GAP + theme::CONTROL_HEIGHT + 6.0;
-    let width = width.min(screen.width() - 32.0);
+    // Separator, the buttons and the right padding.
+    width += 1.0 + BAR_GAP + BAR_BUTTONS.len() as f32 * theme::CONTROL_HEIGHT + 6.0;
+    let room = layout.right - layout.screen.left();
+    let width = width.min(room - 32.0);
     Rect::from_center_size(
-        pos2(screen.center().x, screen.bottom() - 16.0 - BAR_HEIGHT / 2.0),
+        pos2(
+            layout.screen.left() + room / 2.0,
+            layout.screen.bottom() - layout.bar_bottom - BAR_HEIGHT / 2.0,
+        ),
         vec2(width, BAR_HEIGHT),
     )
 }
 
-/// File name, date, rating and _Close_ in a pill at the bottom (REQ-009-01); true when _Close_ was clicked.
-fn control_bar(ui: &mut egui::Ui, rect: Rect, text: BarText) -> bool {
+/// File name, date, rating and the buttons in a pill at the bottom (REQ-009-01); the button clicked, if any.
+fn control_bar(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    text: BarText,
+    fill: Color32,
+    info_open: bool,
+    filmstrip: bool,
+) -> Option<BarButton> {
     let painter = ui.painter();
     painter.rect(
         rect,
         rect.height() / 2.0,
-        GLASS_BAR,
+        fill,
         egui::Stroke::new(1.0, theme::RIM),
         egui::StrokeKind::Inside,
     );
     // Clicks on the bar's background don't reach the scrim behind it.
     ui.interact(rect, ui.make_persistent_id("control bar"), egui::Sense::click());
     let y = rect.center().y;
+    let buttons_width = BAR_BUTTONS.len() as f32 * theme::CONTROL_HEIGHT + 6.0;
+    let text_clip = Rect::from_min_max(rect.min, pos2(rect.right() - buttons_width - BAR_GAP, rect.bottom()));
+    let painter = ui.painter().with_clip_rect(text_clip);
     let mut x = rect.left() + 20.0;
     let name_width = text.name.size().x;
     painter.galley(pos2(x, y - text.name.size().y / 2.0), text.name, theme::PAPER);
@@ -621,28 +1169,44 @@ fn control_bar(ui: &mut egui::Ui, rect: Rect, text: BarText) -> bool {
     if text.stars > 0 {
         for _ in 0..text.stars {
             let star = Rect::from_min_size(pos2(x, y - STAR_SIZE / 2.0), Vec2::splat(STAR_SIZE));
-            Icon::Star.image(STAR_SIZE, theme::STAR).paint_at(ui, star);
+            if text_clip.contains_rect(star) {
+                Icon::Star.image(STAR_SIZE, theme::STAR).paint_at(ui, star);
+            }
             x += STAR_SIZE + 2.0;
         }
-        x += BAR_GAP - 2.0;
     }
+    let separator = rect.right() - buttons_width - BAR_GAP / 2.0;
     ui.painter()
-        .vline(x, (y - 10.0)..=(y + 10.0), egui::Stroke::new(1.0, theme::RIM));
-    let close = Rect::from_min_size(
-        pos2(
-            rect.right() - 6.0 - theme::CONTROL_HEIGHT,
-            y - theme::CONTROL_HEIGHT / 2.0,
-        ),
-        Vec2::splat(theme::CONTROL_HEIGHT),
-    );
-    let response = ui
-        .put(
-            close,
-            egui::Button::image(Icon::X.small())
-                .frame(false)
-                .corner_radius(theme::CONTROL_HEIGHT / 2.0),
-        )
-        .on_hover_text("Close (Esc)");
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Close"));
-    response.clicked()
+        .vline(separator, (y - 10.0)..=(y + 10.0), egui::Stroke::new(1.0, theme::RIM));
+    let mut clicked = None;
+    for (i, (button, icon, label, tooltip)) in BAR_BUTTONS.into_iter().enumerate() {
+        let at = Rect::from_min_size(
+            pos2(
+                rect.right() - 6.0 - (BAR_BUTTONS.len() - i) as f32 * theme::CONTROL_HEIGHT,
+                y - theme::CONTROL_HEIGHT / 2.0,
+            ),
+            Vec2::splat(theme::CONTROL_HEIGHT),
+        );
+        let pressed = match button {
+            BarButton::Info => Some(info_open),
+            BarButton::Filmstrip => Some(filmstrip),
+            _ => None,
+        };
+        let mut widget = egui::Button::image(icon.small())
+            .frame(false)
+            .corner_radius(theme::CONTROL_HEIGHT / 2.0);
+        // A pressed toggle is filled; a fill turns the frame on.
+        if pressed == Some(true) {
+            widget = widget.fill(theme::SELECTED).stroke(egui::Stroke::NONE);
+        }
+        let response = ui.put(at, widget).on_hover_text(tooltip);
+        response.widget_info(|| match pressed {
+            Some(pressed) => egui::WidgetInfo::selected(egui::Role::Button, true, pressed, label),
+            None => egui::WidgetInfo::labeled(egui::Role::Button, true, label),
+        });
+        if response.clicked() {
+            clicked = Some(button);
+        }
+    }
+    clicked
 }

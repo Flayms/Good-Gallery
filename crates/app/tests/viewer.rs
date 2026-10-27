@@ -9,8 +9,9 @@ use db::libraries::LibraryStatus;
 use db::rusqlite::Connection;
 use db::writer::{IndexWriter, IndexedFile};
 use domain::media::{MediaKind, MediaMetadata};
+use eframe::egui::accesskit::{Role, Toggled};
 use eframe::egui::{self, Key, Modifiers, PointerButton, pos2};
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 type App = egui_kittest::Harness<'static, app::AppState>;
 
@@ -487,4 +488,435 @@ fn req_009_01_keys_dont_reach_the_window_below() {
     assert_eq!(shown(&harness).as_deref(), Some("1.png"));
     assert_eq!(harness.state().page, app::Page::Gallery);
     assert_eq!(viewer(&harness).view(), domain::viewer::FIT);
+}
+
+/// Records which files Explorer was asked to show.
+#[derive(Default)]
+struct RecordedExplorer(std::sync::Mutex<Vec<std::path::PathBuf>>);
+
+impl app::state::FileManager for RecordedExplorer {
+    fn show_in_folder(&self, file: &std::path::Path) -> std::io::Result<()> {
+        self.0.lock().unwrap().push(file.to_path_buf());
+        Ok(())
+    }
+}
+
+fn indexed(i: i64, name: &str, kind: MediaKind, tags: &[&[&str]], rating: Option<i64>) -> IndexedFile {
+    IndexedFile {
+        rel_path: name.into(),
+        file_name: name.into(),
+        kind,
+        size: 2048,
+        mtime: 1_000,
+        sidecar_mtime: None,
+        metadata: MediaMetadata {
+            width: Some(400),
+            height: Some(300),
+            taken_at: Some(2_000_000 - i),
+            rating,
+            tags: tags
+                .iter()
+                .map(|path| path.iter().map(|s| s.to_string()).collect())
+                .collect(),
+            ..Default::default()
+        },
+    }
+}
+
+/// `0.png` tagged Beach, People › Anna and Places › Italy › Rome, rated 4, with a reddish ThumbHash; `1.png`;
+/// `2.mp4`, a video; `3.png`. Photos are on disk, the video isn't.
+fn tagged_app(fixture: &Fixture, explorer: std::sync::Arc<RecordedExplorer>) -> App {
+    use base64::Engine as _;
+    let dir = fixture.folder("photos");
+    let conn = db::open_in_memory().unwrap();
+    let root = db::libraries::insert(&conn, &dir, "Photos", LibraryStatus::Online)
+        .unwrap()
+        .id;
+    let files = [
+        indexed(
+            0,
+            "0.png",
+            MediaKind::Image,
+            &[&["Beach"], &["People", "Anna"], &["Places", "Italy", "Rome"]],
+            Some(4),
+        ),
+        indexed(1, "1.png", MediaKind::Image, &[], None),
+        indexed(2, "2.mp4", MediaKind::Video, &[], None),
+        indexed(3, "3.png", MediaKind::Image, &[], None),
+    ];
+    for name in ["0.png", "1.png", "3.png"] {
+        image::RgbImage::from_pixel(400, 300, image::Rgb([200, 40, 40]))
+            .save(std::path::Path::new(&dir).join(name))
+            .unwrap();
+    }
+    let mut writer = IndexWriter::new(conn);
+    writer.write(root, &files).unwrap();
+    let conn: Connection = writer.into();
+    let red = image::RgbaImage::from_pixel(16, 12, image::Rgba([220, 30, 30, 255]));
+    let hash = thumbhash::rgba_to_thumb_hash(16, 12, red.as_raw());
+    conn.execute(
+        "UPDATE media SET thumbhash = ?1 WHERE file_name = '0.png'",
+        [base64::engine::general_purpose::STANDARD.encode(hash)],
+    )
+    .unwrap();
+    let state = fixture.state(conn).with_file_manager(explorer);
+    let mut harness = common::harness_with_step(state, 1.0 / 60.0);
+    // Tall enough for the whole info panel.
+    harness.set_size(egui::vec2(900.0, 760.0));
+    settle(&mut harness);
+    harness
+}
+
+fn right_click_at(harness: &mut App, pos: egui::Pos2) {
+    harness.hover_at(pos);
+    harness.run_steps(1);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos,
+            button: PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+        harness.run_steps(1);
+    }
+    harness.run_steps(2);
+}
+
+/// A tag in the info panel, at the right of the window (the sidebar lists tags too).
+fn panel_chip<'a>(harness: &'a App, name: &'a str) -> egui_kittest::Node<'a> {
+    harness
+        .query_all_by_role_and_label(Role::Button, name)
+        .find(|node| node.rect().left() > 500.0)
+        .unwrap_or_else(|| panic!("{name} in the info panel"))
+}
+
+/// Hides the file's location, which lies in a temporary folder named differently on every run.
+fn mask_location(harness: &mut App) {
+    let location = harness.get_by_label_contains("photos\\").rect();
+    harness.mask(location);
+}
+
+fn search(harness: &App) -> domain::search::GallerySearch {
+    harness.state().gallery.as_ref().unwrap().search().clone()
+}
+
+/// REQ-009-08, REQ-013-13: `i` and _Info_ toggle the info panel with the file's details and its tags by category; the
+/// photo moves aside, so the panel never covers it.
+#[test]
+fn req_009_08_req_013_13_toggles_the_info_panel_with_the_details() {
+    let fixture = Fixture::new();
+    let mut harness = tagged_app(&fixture, Default::default());
+    open(&mut harness, "0.png");
+
+    harness.key_press(Key::I);
+    settle(&mut harness);
+    assert!(viewer(&harness).info_open());
+    for label in [
+        "File",
+        "Location",
+        "Library",
+        "Taken",
+        "Modified",
+        "Dimensions",
+        "Size",
+        "Rating",
+    ] {
+        assert!(harness.query_by_label(label).is_some(), "{label}");
+    }
+    assert!(harness.query_by_label("400 × 300").is_some());
+    assert!(harness.query_by_label("2.0 KB").is_some());
+    assert!(harness.query_by_label("Rated 4 out of 5").is_some());
+    // The sidebar names People, Places and tags too; the panel is at the right.
+    let anna = panel_chip(&harness, "Anna").rect();
+    let rome = panel_chip(&harness, "Rome").rect();
+    let beach = panel_chip(&harness, "Beach").rect();
+    assert!(
+        anna.top() < rome.top() && rome.top() < beach.top(),
+        "People, Places, Tags"
+    );
+    let photo = viewer(&harness).photo_rect().unwrap();
+    assert!(photo.right() < anna.left(), "the photo stays beside the panel");
+    // Past the original's fade-in; the temporary folder's name changes with every run.
+    settle_viewer(&mut harness);
+    harness.run_steps(20);
+    mask_location(&mut harness);
+    harness.snapshot("viewer_info");
+
+    harness.get_by_label("Info").click();
+    settle(&mut harness);
+    assert!(!viewer(&harness).info_open());
+}
+
+/// REQ-009-09: a click on a tag in the info panel closes the viewer and filters the gallery by it, keeping the other
+/// filters.
+#[test]
+fn req_009_09_filters_by_a_tag_from_the_info_panel() {
+    let fixture = Fixture::new();
+    let mut harness = tagged_app(&fixture, Default::default());
+    let mut filtered = search(&harness);
+    filtered.name = Some("png".into());
+    harness.state_mut().gallery.as_mut().unwrap().set_search(filtered);
+    settle(&mut harness);
+    open(&mut harness, "0.png");
+    harness.key_press(Key::I);
+    settle(&mut harness);
+
+    panel_chip(&harness, "Beach").click();
+    settle(&mut harness);
+
+    assert!(harness.state().viewer.is_none());
+    assert_eq!(search(&harness).tags, ["Beach"]);
+    assert_eq!(search(&harness).name.as_deref(), Some("png"));
+}
+
+/// REQ-009-10: _Show in Explorer_ asks Explorer to show the file; a file that's gone gets an error toast instead.
+#[test]
+fn req_009_10_shows_the_file_in_explorer_or_says_it_is_gone() {
+    let fixture = Fixture::new();
+    let explorer = std::sync::Arc::new(RecordedExplorer::default());
+    let mut harness = tagged_app(&fixture, explorer.clone());
+    open(&mut harness, "0.png");
+    harness.get_by_label("Show in Explorer").click();
+    settle(&mut harness);
+    let file = std::path::Path::new(&fixture.folder("photos")).join("0.png");
+    assert_eq!(*explorer.0.lock().unwrap(), [file]);
+    assert!(harness.state().viewer.is_some(), "the viewer stays");
+
+    // The video's file isn't on disk.
+    for _ in 0..2 {
+        harness.key_press(Key::ArrowRight);
+        harness.run_steps(1);
+    }
+    settle(&mut harness);
+    assert_eq!(shown(&harness).as_deref(), Some("2.png"));
+    harness.get_by_label("Show in Explorer").click();
+    settle(&mut harness);
+    assert_eq!(explorer.0.lock().unwrap().len(), 1);
+    let toasts = harness.state().toasts.current();
+    assert!(
+        toasts
+            .last()
+            .is_some_and(|toast| toast.text.contains("no longer exists")),
+        "{toasts:?}"
+    );
+}
+
+/// REQ-009-11: a tile's context menu shows the file in Explorer or opens the info sheet beside the gallery; the
+/// viewer's opens its info panel.
+#[test]
+fn req_009_11_context_menus_show_in_explorer_and_information() {
+    let fixture = Fixture::new();
+    let explorer = std::sync::Arc::new(RecordedExplorer::default());
+    let mut harness = tagged_app(&fixture, explorer.clone());
+    let tile = harness.get_by_role_and_label(Role::Image, "1.png").rect().center();
+
+    right_click_at(&mut harness, tile);
+    harness.get_by_label("Show in Explorer").click();
+    settle(&mut harness);
+    assert_eq!(explorer.0.lock().unwrap().len(), 1);
+
+    right_click_at(&mut harness, tile);
+    harness.get_by_label("Information").click();
+    settle(&mut harness);
+    assert!(harness.state().viewer.is_none(), "without opening the viewer");
+    assert!(harness.query_by_label("Close information").is_some());
+    assert!(harness.query_by_label("Dimensions").is_some());
+    mask_location(&mut harness);
+    harness.snapshot("info_sheet");
+    harness.get_by_label("Close information").click();
+    settle(&mut harness);
+    assert!(harness.state().info_sheet.is_none());
+
+    // The sheet steps aside for the viewer, which has its own panel.
+    right_click_at(&mut harness, tile);
+    harness.get_by_label("Information").click();
+    settle(&mut harness);
+    open(&mut harness, "0.png");
+    assert!(harness.query_by_label("Close information").is_none());
+    right_click_at(&mut harness, CENTER);
+    harness.get_by_label("Information").click();
+    settle(&mut harness);
+    assert!(viewer(&harness).info_open());
+    assert!(
+        panel_chip(&harness, "Beach").rect().left() > 500.0,
+        "details of the shown item"
+    );
+}
+
+fn strip_item<'a>(harness: &'a App, name: &'a str) -> egui_kittest::Node<'a> {
+    harness.get_by_role_and_label(Role::Button, name)
+}
+
+fn filmstrip(harness: &App) -> Option<egui::Rect> {
+    harness
+        .query_by_role_and_label(Role::Navigation, "Filmstrip")
+        .map(|node| node.rect())
+}
+
+/// REQ-015-01, REQ-015-02, REQ-015-03: `f` and _Filmstrip_ toggle a row of the gallery's thumbnails below the photo,
+/// which fits above it; the choice is remembered; the shown item is selected and centered.
+#[test]
+fn req_015_01_req_015_02_req_015_03_toggles_and_remembers_the_filmstrip() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture, 40, &[]);
+    open(&mut harness, "20.png");
+    assert!(filmstrip(&harness).is_none(), "hidden until the user shows it");
+
+    harness.key_press(Key::F);
+    settle(&mut harness);
+    let strip = filmstrip(&harness).expect("shown");
+    assert!(
+        viewer(&harness).photo_rect().unwrap().bottom() <= strip.top(),
+        "the photo fits above the filmstrip"
+    );
+    let current = strip_item(&harness, "20.png");
+    assert_eq!(current.accesskit_node().toggled(), Some(Toggled::True));
+    assert!((current.rect().center().x - strip.center().x).abs() < 1.0, "centered");
+    assert_eq!(
+        strip_item(&harness, "21.png").accesskit_node().toggled(),
+        Some(Toggled::False)
+    );
+    // Past the original's fade-in.
+    settle_viewer(&mut harness);
+    harness.run_steps(20);
+    harness.snapshot("viewer_filmstrip");
+
+    harness.key_press(Key::ArrowRight);
+    settle(&mut harness);
+    assert_eq!(
+        strip_item(&harness, "21.png").accesskit_node().toggled(),
+        Some(Toggled::True)
+    );
+    // The info panel narrows the filmstrip: the shown item is centered again.
+    harness.key_press(Key::I);
+    settle(&mut harness);
+    let narrower = filmstrip(&harness).unwrap();
+    assert!(narrower.width() < strip.width());
+    let center = strip_item(&harness, "21.png").rect().center().x;
+    assert!((center - narrower.center().x).abs() < 1.0, "{center} in {narrower:?}");
+    harness.key_press(Key::I);
+    settle(&mut harness);
+
+    // Remembered for the next viewer.
+    harness.key_press(Key::Escape);
+    settle(&mut harness);
+    open(&mut harness, "3.png");
+    assert!(viewer(&harness).filmstrip_shown());
+    harness.get_by_role_and_label(Role::Button, "Filmstrip").click();
+    settle(&mut harness);
+    assert!(filmstrip(&harness).is_none());
+    let stored = {
+        let db = harness.state().db().unwrap();
+        let conn = db.lock().unwrap();
+        db::settings::value(&conn, domain::viewer::FILMSTRIP_KEY).unwrap()
+    };
+    assert_eq!(stored, Some(serde_json::json!("hidden")));
+}
+
+/// REQ-015-04, REQ-015-05: a click on a thumbnail shows that item and preloads around it; the wheel scrolls the
+/// filmstrip sideways without changing the shown item.
+#[test]
+fn req_015_04_req_015_05_jumps_to_and_browses_the_filmstrip() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture, 40, &[]);
+    open(&mut harness, "20.png");
+    harness.key_press(Key::F);
+    settle(&mut harness);
+
+    strip_item(&harness, "23.png").click();
+    settle_viewer(&mut harness);
+    assert_eq!(shown(&harness).as_deref(), Some("23.png"));
+    assert!(
+        matches!(original(&harness, 24), OriginalState::Loaded(_)),
+        "preloads around it"
+    );
+
+    // Focused (by assistive technology) and Enter.
+    strip_item(&harness, "25.png").focus();
+    harness.run_steps(1);
+    harness.key_press(Key::Enter);
+    settle_viewer(&mut harness);
+    assert_eq!(shown(&harness).as_deref(), Some("25.png"));
+    strip_item(&harness, "23.png").click();
+    settle_viewer(&mut harness);
+
+    let before = strip_item(&harness, "23.png").rect();
+    let strip = filmstrip(&harness).unwrap();
+    wheel_at(&mut harness, strip.center(), -2.0);
+    let after = strip_item(&harness, "23.png").rect();
+    assert!(after.left() < before.left() - 100.0, "{before:?} → {after:?}");
+    assert_eq!(shown(&harness).as_deref(), Some("23.png"));
+    assert_eq!(viewer(&harness).view(), domain::viewer::FIT, "the photo didn't zoom");
+}
+
+/// REQ-015-06: the filmstrip steps aside with the controls; the photo stays where it is.
+#[test]
+fn req_015_06_the_filmstrip_steps_aside_with_the_controls() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture, 5, &[]);
+    open(&mut harness, "1.png");
+    harness.key_press(Key::F);
+    harness.hover_at(pos2(450.0, 200.0));
+    settle(&mut harness);
+    let photo = viewer(&harness).photo_rect();
+    assert!(filmstrip(&harness).is_some());
+
+    std::thread::sleep(std::time::Duration::from_millis(2600));
+    harness.run_steps(30);
+    assert!(filmstrip(&harness).is_none());
+    assert_eq!(viewer(&harness).photo_rect(), photo, "the photo doesn't move");
+}
+
+/// REQ-015-07: videos in the filmstrip carry a play symbol; photos don't.
+#[test]
+fn req_015_07_marks_videos_in_the_filmstrip() {
+    let fixture = Fixture::new();
+    let mut harness = tagged_app(&fixture, Default::default());
+    open(&mut harness, "0.png");
+    harness.key_press(Key::F);
+    settle(&mut harness);
+    assert_eq!(harness.query_all_by_label("Video").count(), 1);
+    let video = strip_item(&harness, "2.mp4").rect();
+    assert!(video.contains(harness.get_by_label("Video").rect().center()));
+}
+
+/// REQ-013-11: the chrome takes a dark tint of the item's colors, and the tint follows when stepping.
+#[test]
+fn req_013_11_tints_the_chrome_with_the_items_colors() {
+    let fixture = Fixture::new();
+    let mut harness = tagged_app(&fixture, Default::default());
+    open(&mut harness, "0.png");
+    let red = viewer(&harness).chrome().bar;
+    assert!(red.r() > red.g() + 5, "{red:?}");
+    harness.key_press(Key::ArrowRight);
+    settle(&mut harness);
+    let plain = viewer(&harness).chrome().bar;
+    assert_eq!(plain.r(), plain.g(), "{plain:?}");
+}
+
+/// REQ-013-12: the photo grows from its tile into the viewer and shrinks back on close.
+#[test]
+fn req_013_12_the_photo_grows_from_its_tile_and_back() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture, 3, &[]);
+    harness.ctx.all_styles_mut(|style| style.animation_time = 0.12);
+    let tile = harness.get_by_role_and_label(Role::Image, "1.png").rect();
+
+    harness.get_by_role_and_label(Role::Image, "1.png").click();
+    harness.run_steps(2);
+    let start = viewer(&harness).photo_rect().unwrap();
+    assert!(
+        (start.center() - tile.center()).length() < 40.0,
+        "{start:?} near {tile:?}"
+    );
+    harness.run_steps(30);
+    let open = viewer(&harness).photo_rect().unwrap();
+    assert!((open.center() - CENTER).length() < 1.0, "{open:?}");
+
+    harness.key_press(Key::Escape);
+    harness.run_steps(3);
+    assert!(viewer(&harness).is_closing());
+    assert!(viewer(&harness).photo_rect().unwrap().width() < open.width());
+    harness.run_steps(30);
+    assert!(harness.state().viewer.is_none());
 }

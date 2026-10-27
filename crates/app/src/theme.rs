@@ -58,6 +58,11 @@ pub fn numbers_semibold() -> FontFamily {
     FontFamily::Name(NUMBERS_SEMIBOLD.into())
 }
 
+/// Whether transitions animate: off with Windows' animation effects off (and in tests).
+pub fn motion(ctx: &egui::Context) -> bool {
+    ctx.global_style().animation_time > 0.0
+}
+
 /// Installs fonts and style. Call once per context.
 pub fn install(ctx: &egui::Context) {
     ctx.set_fonts(fonts());
@@ -110,7 +115,12 @@ fn style(style: &mut egui::Style) {
     style.spacing.item_spacing = egui::vec2(2.0 * SPACE, 2.0 * SPACE);
     style.spacing.button_padding = egui::vec2(3.0 * SPACE, 1.5 * SPACE);
     style.spacing.interact_size.y = CONTROL_HEIGHT;
-    style.animation_time = DURATION_FAST;
+    // With Windows' animation effects off, transitions are instant (`docs/design.md`); see [`motion`].
+    style.animation_time = if media::helpers::reduced_motion() {
+        0.0
+    } else {
+        DURATION_FAST
+    };
 
     let v = &mut style.visuals;
     v.dark_mode = true;

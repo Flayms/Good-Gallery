@@ -33,11 +33,27 @@ impl FolderPicker for NativeFolderPicker {
     }
 }
 
+/// Explorer, or a fake in tests (REQ-009-10).
+pub trait FileManager: Send + Sync {
+    /// Opens the folder of `file` with the file selected.
+    fn show_in_folder(&self, file: &std::path::Path) -> std::io::Result<()>;
+}
+
+pub struct Explorer;
+
+impl FileManager for Explorer {
+    fn show_in_folder(&self, file: &std::path::Path) -> std::io::Result<()> {
+        media::helpers::show_in_explorer(file)
+    }
+}
+
 /// Results of background jobs, applied on the UI thread.
 enum Event {
     LibraryAdded(Result<Library, String>),
     LibraryRemoved(Result<(), String>),
     FolderPicked(Option<PathBuf>),
+    /// Explorer couldn't show a file: why.
+    ExplorerFailed(Option<String>),
     /// The job panicked; its flags are reset and the user gets an error.
     Failed,
 }
@@ -80,6 +96,9 @@ pub struct AppState {
     pub sidebar: crate::sidebar::SidebarState,
     /// The open viewer, over the gallery.
     pub viewer: Option<crate::viewer::Viewer>,
+    /// The media item whose details the info sheet beside the gallery shows (REQ-009-11).
+    pub info_sheet: Option<i64>,
+    pub file_manager: Arc<dyn FileManager>,
     /// Loads the viewer's originals; made with egui textures on first use unless set with [`Self::with_originals`].
     pub originals: Option<crate::originals::Originals>,
 }
@@ -124,6 +143,33 @@ impl AppState {
         self
     }
 
+    /// Shows files in `file_manager` instead of Explorer.
+    pub fn with_file_manager(mut self, file_manager: Arc<dyn FileManager>) -> Self {
+        self.file_manager = file_manager;
+        self
+    }
+
+    /// Opens Explorer on a media file, or says why it can't (REQ-009-10). In the background: on an offline share the
+    /// check alone may take many seconds.
+    pub fn show_in_explorer(&mut self, file: PathBuf) {
+        let file_manager = self.file_manager.clone();
+        self.spawn(move || {
+            if !file.exists() {
+                return Event::ExplorerFailed(Some(format!("{} no longer exists.", file.display())));
+            }
+            Event::ExplorerFailed(file_manager.show_in_folder(&file).err().map(|error| {
+                tracing::error!("can't open Explorer on {}: {error}", file.display());
+                format!("Couldn't open Explorer: {error}")
+            }))
+        });
+    }
+
+    /// The file of the media item at gallery position `index`, if its data is loaded.
+    pub fn file_at(&mut self, index: usize) -> Option<PathBuf> {
+        let item = self.gallery.as_mut()?.item(index)?;
+        db::media::file_in(&self.libraries, item.root_id, &item.rel_path)
+    }
+
     /// Loads the viewer's originals with `originals` (wgpu textures in the app).
     pub fn with_originals(mut self, originals: crate::originals::Originals) -> Self {
         self.originals = Some(originals);
@@ -160,6 +206,8 @@ impl AppState {
             search_bar: Default::default(),
             sidebar: Default::default(),
             viewer: None,
+            info_sheet: None,
+            file_manager: Arc::new(Explorer),
             originals: None,
         }
     }
@@ -348,6 +396,11 @@ impl AppState {
                 self.settings_page.picking = false;
                 if let Some(folder) = folder {
                     self.add_library(folder.to_string_lossy().into_owned());
+                }
+            }
+            Event::ExplorerFailed(error) => {
+                if let Some(error) = error {
+                    self.toasts.error(error);
                 }
             }
             Event::Failed => {

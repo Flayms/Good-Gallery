@@ -126,6 +126,11 @@ impl Gallery {
         if response.clicked() {
             self.opened = Some(index);
         }
+        response.context_menu(|ui| {
+            if let Some(action) = super::context_menu(ui) {
+                self.menu_action = Some((index, action));
+            }
+        });
         let Some(item) = self.items.get(&id) else {
             let bar = Rect::from_min_max(rect.min + vec2(PADDING, 6.0), rect.max - vec2(PADDING, 6.0));
             ui.painter().rect_filled(bar, theme::RADIUS_CONTROL, theme::RAISED);

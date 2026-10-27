@@ -138,10 +138,10 @@ impl eframe::App for GalleryApp {
         self.frames += 1;
         if let Some(index) = self.view
             && let Some(gallery) = &self.state.gallery
-            && let Some(id) = gallery.id_at(index)
+            && let Some(viewer) = app::viewer::Viewer::open(gallery, index)
         {
             self.view = None;
-            self.state.viewer = Some(app::viewer::Viewer::new(index, id, gallery.data_version()));
+            self.state.viewer = Some(viewer);
             ui.ctx().request_repaint();
         }
         if let Some(bench) = &mut self.bench {

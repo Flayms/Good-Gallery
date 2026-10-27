@@ -113,6 +113,64 @@ pub fn controls_hidden(idle: bool, hovering: bool, info_open: bool, video_paused
     idle && !hovering && !info_open && !video_paused
 }
 
+/// Size of the filmstrip's square thumbnails, points.
+pub const FILMSTRIP_THUMB: f32 = 56.0;
+
+/// Settings key of the filmstrip choice (REQ-015-02), as the Electron version's `localStorage` key.
+pub const FILMSTRIP_KEY: &str = "viewer.filmstrip";
+
+/// Whether the stored choice shows the filmstrip; it is hidden until the user shows it.
+pub fn is_filmstrip_shown(stored: Option<&str>) -> bool {
+    stored == Some("shown")
+}
+
+/// How far the filmstrip scrolls sideways for a wheel movement: the mouse wheel scrolls it, as does a touchpad swipe.
+pub fn sideways_delta(dx: f32, dy: f32) -> f32 {
+    if dx.abs() > dy.abs() { dx } else { dy }
+}
+
+/// The filmstrip's thumbnails: `size` wide with `gap` between them and `padding` at both ends.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Strip {
+    pub size: f32,
+    pub gap: f32,
+    pub padding: f32,
+}
+
+impl Strip {
+    /// Width of the whole row of `count` thumbnails.
+    pub fn width(&self, count: usize) -> f32 {
+        if count == 0 {
+            return 2.0 * self.padding;
+        }
+        2.0 * self.padding + count as f32 * self.size + (count - 1) as f32 * self.gap
+    }
+
+    /// Left edge of thumbnail `index` in the row.
+    pub fn left(&self, index: usize) -> f32 {
+        self.padding + index as f32 * (self.size + self.gap)
+    }
+
+    /// The thumbnails at least partly within `offset .. offset + view`.
+    pub fn visible(&self, count: usize, offset: f32, view: f32) -> std::ops::Range<usize> {
+        let step = self.size + self.gap;
+        let first = ((offset - self.padding - self.size) / step).ceil().max(0.0) as usize;
+        let end = (((offset + view - self.padding) / step).ceil().max(0.0) as usize).min(count);
+        first.min(end)..end
+    }
+
+    /// The scroll offset that centers thumbnail `index` in a `view` wide strip, as far as the ends allow (REQ-015-03).
+    pub fn centered(&self, index: usize, count: usize, view: f32) -> f32 {
+        let center = self.left(index) + self.size / 2.0;
+        self.clamp(center - view / 2.0, count, view)
+    }
+
+    /// Keeps a scroll offset within the row.
+    pub fn clamp(&self, offset: f32, count: usize, view: f32) -> f32 {
+        offset.clamp(0.0, (self.width(count) - view).max(0.0))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,6 +240,45 @@ mod tests {
         assert_eq!(neighbours(6, 0), [1, 2]);
         assert_eq!(neighbours(6, 5), [4, 3]);
         assert!(neighbours(6, 9).is_empty());
+    }
+
+    #[test]
+    fn req_015_02_shows_the_filmstrip_only_once_the_user_showed_it() {
+        assert!(is_filmstrip_shown(Some("shown")));
+        assert!(!is_filmstrip_shown(Some("hidden")));
+        assert!(!is_filmstrip_shown(None));
+    }
+
+    #[test]
+    fn req_015_05_turns_the_vertical_wheel_into_sideways_scrolling_and_keeps_touchpad_swipes() {
+        assert_eq!(sideways_delta(0.0, 120.0), 120.0);
+        assert_eq!(sideways_delta(0.0, -120.0), -120.0);
+        assert_eq!(sideways_delta(-40.0, 3.0), -40.0);
+    }
+
+    const STRIP: Strip = Strip {
+        size: 56.0,
+        gap: 4.0,
+        padding: 6.0,
+    };
+
+    #[test]
+    fn req_015_03_centers_the_shown_thumbnail_as_far_as_the_ends_allow() {
+        // 100 thumbnails: 6 + 100 · 56 + 99 · 4 + 6 = 6008 wide; thumbnail 50 is centered at 6 + 50 · 60 + 28.
+        assert_eq!(STRIP.width(100), 6008.0);
+        assert_eq!(STRIP.centered(50, 100, 600.0), 3034.0 - 300.0);
+        assert_eq!(STRIP.centered(1, 100, 600.0), 0.0);
+        assert_eq!(STRIP.centered(99, 100, 600.0), 6008.0 - 600.0);
+        assert_eq!(STRIP.centered(2, 5, 600.0), 0.0, "a short row doesn't scroll");
+    }
+
+    #[test]
+    fn req_015_05_finds_the_thumbnails_in_view() {
+        assert_eq!(STRIP.visible(100, 0.0, 600.0), 0..10);
+        // From 3000: thumbnail 49 ends at 6 + 49 · 60 + 56 = 3002, still in view.
+        assert_eq!(STRIP.visible(100, 3000.0, 600.0), 49..60);
+        assert_eq!(STRIP.visible(100, 5800.0, 600.0), 96..100);
+        assert_eq!(STRIP.visible(0, 0.0, 600.0), 0..0);
     }
 
     #[test]

@@ -10,6 +10,7 @@ use crate::textures::{TextureRequest, TextureStreamer};
 use crate::{empty_state, theme};
 use base64::Engine as _;
 use db::gallery::{GalleryItem, GalleryLayout, GallerySearch, ThumbStatus};
+use db::media::MediaDetail;
 use db::rusqlite::Connection;
 use db::tags::TagCount;
 use domain::folders::{FolderNode, TagNode, build_folder_tree, build_tag_tree};
@@ -70,6 +71,9 @@ enum Request {
         prefix: String,
         limit: usize,
     },
+    Detail {
+        id: i64,
+    },
 }
 
 enum Loaded {
@@ -87,7 +91,21 @@ enum Loaded {
         prefix: String,
         result: Result<Vec<TagCount>, String>,
     },
+    Detail {
+        id: i64,
+        result: Result<Option<MediaDetail>, String>,
+    },
 }
+
+/// What a tile's, row's or the viewer's context menu asks for (REQ-009-11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaAction {
+    ShowInExplorer,
+    Information,
+}
+
+/// A media item's details as loaded: `Ok(None)` when it isn't indexed (any more).
+pub type DetailResult = Result<Option<MediaDetail>, String>;
 
 /// What the sidebar lists (spec 008), loaded with the gallery.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -151,6 +169,10 @@ impl Loader {
                         Request::Suggest { prefix, limit } => Loaded::Suggest {
                             result: db::tags::autocomplete(&conn, &prefix, limit).map_err(|e| e.to_string()),
                             prefix,
+                        },
+                        Request::Detail { id } => Loaded::Detail {
+                            id,
+                            result: db::media::detail(&conn, id).map_err(|e| e.to_string()),
                         },
                     };
                     drop(conn);
@@ -261,6 +283,14 @@ pub struct Gallery {
     opened: Option<usize>,
     /// The item shown in the viewer: kept in view (REQ-016-06), its thumbnail wanted first (REQ-009-14).
     viewed: Option<(usize, i64)>,
+    /// Positions shown in the viewer's filmstrip: their thumbnails are wanted after the viewer's own (REQ-015-05).
+    strip: std::ops::Range<usize>,
+    /// The media item whose details were asked for last, and what came back.
+    detail: Option<(i64, Option<DetailResult>)>,
+    /// A context menu's choice this frame.
+    menu_action: Option<(usize, MediaAction)>,
+    /// Where the tiles were drawn in the last frame: the content's origin and the visible area (REQ-013-12).
+    tiles_frame: Option<(egui::Pos2, Rect)>,
 }
 
 impl Gallery {
@@ -312,6 +342,10 @@ impl Gallery {
             view_height: 0.0,
             opened: None,
             viewed: None,
+            strip: 0..0,
+            detail: None,
+            menu_action: None,
+            tiles_frame: None,
         }
     }
 
@@ -541,6 +575,57 @@ impl Gallery {
         self.items.get(&id)
     }
 
+    /// What a context menu asked for this frame, and for which gallery position (REQ-009-11).
+    pub fn take_menu_action(&mut self) -> Option<(usize, MediaAction)> {
+        self.menu_action.take()
+    }
+
+    /// The details of media item `id` (REQ-009-08), asked for on first use and again after each reload; `None` while
+    /// loading.
+    pub fn detail(&mut self, id: i64) -> Option<&DetailResult> {
+        if self.detail.as_ref().is_none_or(|(asked, _)| *asked != id) {
+            self.detail = Some((id, None));
+            self.loader.send(Request::Detail { id });
+        }
+        self.detail.as_ref()?.1.as_ref()
+    }
+
+    /// Forgets the details asked for last: no info view shows them any more.
+    pub fn forget_detail(&mut self) {
+        self.detail = None;
+    }
+
+    /// The gallery positions the viewer's filmstrip shows (REQ-015-05).
+    pub fn set_strip(&mut self, strip: std::ops::Range<usize>) {
+        self.strip = strip;
+    }
+
+    /// Where the tile of item `index` is on screen, if it was drawn in the last frame and is at least partly visible
+    /// (REQ-013-12). `None` in the List view.
+    pub fn tile_rect(&self, index: usize) -> Option<Rect> {
+        let (origin, visible) = self.tiles_frame?;
+        let arranged = self.arranged.as_ref()?;
+        if self.view == GalleryView::List || index >= arranged.tiles.top.len() {
+            return None;
+        }
+        let rect = tiles::tile_rect(&arranged.tiles, index, origin);
+        visible.intersects(rect).then_some(rect)
+    }
+
+    /// A stored view choice, e.g. whether the viewer shows its filmstrip.
+    pub fn setting(&self, key: &str) -> Option<String> {
+        let conn = self.settings.lock().unwrap_or_else(|p| p.into_inner());
+        db::settings::value(&conn, key)
+            .ok()
+            .flatten()
+            .and_then(|value| value.as_str().map(String::from))
+    }
+
+    /// Stores a view choice.
+    pub fn store_setting(&self, key: &str, value: &str) {
+        self.store(key, value.into());
+    }
+
     /// The item the viewer shows, or none once it closed: the gallery keeps it in view and wants its thumbnail first.
     pub fn set_viewed(&mut self, viewed: Option<(usize, i64)>) {
         self.viewed = viewed;
@@ -587,6 +672,9 @@ impl Gallery {
                         if let Some(thumbnails) = &mut self.thumbnails {
                             thumbnails.streamer.retry_all();
                         }
+                        if let Some((id, _)) = self.detail {
+                            self.loader.send(Request::Detail { id });
+                        }
                     }
                     Err(error) => self.error = Some(error),
                 }
@@ -595,6 +683,16 @@ impl Gallery {
                 Ok(data) => self.sidebar = Some(data),
                 Err(error) => tracing::error!("can't load the sidebar: {error}"),
             },
+            Loaded::Detail { id, result } => {
+                if let Some((asked, loaded)) = &mut self.detail
+                    && *asked == id
+                {
+                    if let Err(error) = &result {
+                        tracing::error!("can't load the details of media item {id}: {error}");
+                    }
+                    *loaded = Some(result);
+                }
+            }
             Loaded::Suggest { prefix, result } => match result {
                 Ok(tags) => self.suggestions = Some((prefix, tags)),
                 Err(error) => tracing::error!("can't load tag suggestions: {error}"),
@@ -808,6 +906,7 @@ impl Gallery {
             return;
         }
         let list = self.view == GalleryView::List;
+        self.tiles_frame = None;
         let Some(count) = self.count() else {
             if list {
                 list::skeleton(ui);
@@ -946,7 +1045,8 @@ impl Gallery {
                 width: domain::thumbs::MAX_THUMB_WIDTH,
             });
         }
-        for (index, points) in wanted {
+        let strip = self.strip.clone().map(|index| (index, domain::viewer::FILMSTRIP_THUMB));
+        for (index, points) in strip.chain(wanted) {
             let Some(item) = data.ids.get(index).and_then(|id| self.items.get(id)) else {
                 continue;
             };
@@ -973,6 +1073,21 @@ impl Gallery {
             }
         }
     }
+}
+
+/// _Show in Explorer_ and _Information_ in a context menu (REQ-009-11); what was chosen.
+pub fn context_menu(ui: &mut egui::Ui) -> Option<MediaAction> {
+    let mut action = None;
+    if ui.button("Show in Explorer").clicked() {
+        action = Some(MediaAction::ShowInExplorer);
+    }
+    if ui.button("Information").clicked() {
+        action = Some(MediaAction::Information);
+    }
+    if action.is_some() {
+        ui.close();
+    }
+    action
 }
 
 /// The ThumbHash placeholder of an item as a small texture (REQ-005-06).

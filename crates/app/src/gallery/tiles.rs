@@ -29,6 +29,10 @@ impl Gallery {
     ) {
         let Some(data) = self.data.clone() else { return };
         let layout = &arranged.tiles;
+        // Below the toolbar floating over the gallery.
+        let mut visible = ui.clip_rect();
+        visible.min.y += TOOLBAR_HEIGHT;
+        self.tiles_frame = Some((origin, visible));
         let view_top = f64::from(viewport.min.y - inset_top);
         let view_bottom = f64::from(viewport.max.y - inset_top);
         let overscan = f64::from(OVERSCAN);
@@ -65,6 +69,11 @@ impl Gallery {
             if response.clicked() {
                 self.opened = Some(index);
             }
+            response.context_menu(|ui| {
+                if let Some(action) = super::context_menu(ui) {
+                    self.menu_action = Some((index, action));
+                }
+            });
             let indicators = self
                 .items
                 .get(&id)
@@ -113,7 +122,7 @@ impl Gallery {
     }
 }
 
-fn tile_rect(layout: &TileLayout, index: usize, origin: egui::Pos2) -> Rect {
+pub(super) fn tile_rect(layout: &TileLayout, index: usize, origin: egui::Pos2) -> Rect {
     Rect::from_min_size(
         origin + vec2(layout.left[index] as f32, layout.top[index] as f32),
         vec2(layout.width[index] as f32, layout.height[index] as f32),

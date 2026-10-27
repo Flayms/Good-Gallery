@@ -3,6 +3,7 @@
 
 pub mod gallery;
 pub mod libraries;
+pub mod media;
 mod migrate;
 pub mod settings;
 pub mod tags;
