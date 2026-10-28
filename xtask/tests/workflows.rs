@@ -42,6 +42,24 @@ fn ci_runs_every_check_on_main_and_pull_requests() {
     assert!(!ci.contains("continue-on-error"), "a failing check must fail the run");
 }
 
+/// REQ-014-01: a release commit pushed to `main` skips CI, since its tag's release run checks the same commit.
+#[test]
+fn ci_leaves_release_commits_to_the_release_run() {
+    let ci = workflow("ci.yml");
+    let skip = "if: github.ref != 'refs/heads/main' || !startsWith(github.event.head_commit.message, 'chore(release)')";
+    for job in ["lint:", "test:"] {
+        let start = ci
+            .find(&format!("\n  {job}"))
+            .unwrap_or_else(|| panic!("ci.yml has no {job} job"));
+        // The job's settings before its steps.
+        let header = &ci[start..start + ci[start..].find("steps:").expect("a job without steps")];
+        assert!(
+            header.contains(skip),
+            "ci.yml's {job} job also runs for release commits"
+        );
+    }
+}
+
 /// REQ-014-08: a version tag runs the checks, builds both downloads and publishes them with the changelog's notes.
 #[test]
 fn release_publishes_both_downloads_after_the_checks() {
