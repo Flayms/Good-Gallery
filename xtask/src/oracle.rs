@@ -468,11 +468,11 @@ fn index_with_reference(reference: &Path, work: &Path, library: &Path, index: &P
     )
 }
 
-/// Indexes `library` into `index` with this indexer.
-fn index_with_ours(exiftool: PathBuf, library: &Path, index: &Path) -> anyhow::Result<()> {
+/// Indexes `library` into `index` with this indexer, as a library labelled `label`.
+pub fn index_with_ours(exiftool: PathBuf, library: &Path, index: &Path, label: &str) -> anyhow::Result<()> {
     let conn = db::open(index)?;
     let path = library.to_str().context("library path isn't UTF-8")?;
-    let id = libraries::insert(&conn, path, "Fixtures", LibraryStatus::Unknown)?.id;
+    let id = libraries::insert(&conn, path, label, LibraryStatus::Unknown)?.id;
     let mut writer = IndexWriter::new(conn);
     let metadata = ExifTool::new(exiftool, 2);
     let cancel = AtomicBool::new(false);
@@ -527,7 +527,7 @@ pub fn run(args: &[String]) -> anyhow::Result<bool> {
 
     let (reference_index, our_index) = (work.join("reference.db"), work.join("ours.db"));
     index_with_reference(&reference, &work, &library, &reference_index)?;
-    index_with_ours(exiftool.clone(), &library, &our_index)?;
+    index_with_ours(exiftool.clone(), &library, &our_index, "Fixtures")?;
 
     let reference_rows = snapshot(&db::open_reader(&reference_index)?)?;
     let our_rows = snapshot(&db::open_reader(&our_index)?)?;

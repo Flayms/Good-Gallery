@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>Good Gallery</title>
+  <rect width="512" height="512" rx="112" fill="#1F1F1F"/>
+  <g fill="#F2F2F2">
+    <rect x="96" y="96" width="92" height="180" rx="20"/>
+    <rect x="96" y="296" width="92" height="120" rx="20" opacity="0.55"/>
+    <rect x="210" y="96" width="92" height="110" rx="20" opacity="0.55"/>
+    <rect x="210" y="226" width="92" height="190" rx="20"/>
+    <rect x="324" y="96" width="92" height="150" rx="20"/>
+    <rect x="324" y="266" width="92" height="150" rx="20" opacity="0.55"/>
+  </g>
+</svg>

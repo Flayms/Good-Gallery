@@ -133,3 +133,15 @@ These still apply to the Rust implementation. The reference's own `docs/known-pi
 * **Migrations:** the schema source of truth is the reference's `drizzle/*.sql` (statements separated by `--> statement-breakpoint`, each chunk prepared as one statement) plus its `__drizzle_migrations` bookkeeping. Keep both compatible so databases move between the two apps. Expression indexes were avoided in favor of generated columns.
 * **EXIF orientation:** the reference pins its mapping with a test against `sharp.autoOrient()` (`src/indexer/thumbnail.test.ts`). Port the expected results, not the sharp call order.
 * **The user's real data** (`%APPDATA%\good-gallery\gallery.db`, `thumbs\`) must never be opened in place: an open with WAL writes `-shm` / `-wal` files and migrations would change the schema. Copy first.
+
+## Packaging and releases
+
+* **Git Bash's `tar` is GNU tar**, which can't write zip or read 7z. Call Windows' own `%SystemRoot%\System32\tar.exe` (bsdtar) by its full path; it writes zip with `-a` and reads 7z, but has no `-s` (rename while extracting): use `--strip-components` and copy afterwards.
+* **Freshly unpacked executables can't be moved or renamed right away** ("access denied"): Defender holds them open while it scans. Copy them instead, and retry the delete of the original.
+* **`git add` right after appending to a file through a still-open handle stages nothing** on Windows (the release tests): close the file before calling git.
+* **The release tests need git-cliff**: set `GIT_CLIFF` (the reference has one in `node_modules\git-cliff-windows-x64\bin\git-cliff.exe`) or install it; without it they skip, with `CI` or `GG_REQUIRE_HELPERS` set they fail.
+* **NSIS's uninstaller copies itself to a temp folder and returns at once.** Run it with `/S _?=<install folder>` to make it wait (the smoke test does); it then can't delete itself, so remove the folder afterwards.
+* **NSIS: `/D=<folder>` must be the last argument and unquoted**, even with spaces.
+* **makensis locally:** electron-builder keeps an NSIS copy in `%LOCALAPPDATA%\electron-builder\Cache\nsis\nsis-3.0.4.1-nsis-3.0.4.1\Bin\makensis.exe`; point `MAKENSIS` at it.
+* **The packaged app (`--features packaged`, as `cargo xtask dist` builds it) has no console**: its output only shows when the caller redirects stdout / stderr, so look at `logs\app.log` in the data folder instead. Never start it without `--data-dir` during development: it opens the real `%APPDATA%\good-gallery`.
+* **A zip in `target/dist` can stay locked for minutes** after it was written (Defender or an open Explorer window), so `cargo xtask dist` fails with "used by another process": pass another `--out`.

@@ -1,0 +1,93 @@
+# Publishes a GitHub release with the Windows installer and the portable zip for every version tag pushed by
+# `cargo xtask release` (xtask/src/release.rs, docs/specs/014-ci-release).
+name: Release
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  checks:
+    name: Checks
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: Build and publish
+    needs: checks
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # git-cliff needs the tags and commits since the previous release.
+          fetch-depth: 0
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff@2.14.2
+
+      - name: Check the version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "app") | .version')
+          if [ "v$version" != "$TAG" ]; then
+            echo "::error::Cargo.toml has version $version, but the tag is $TAG."
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Fetch exiftool, ffmpeg and libmpv
+        shell: pwsh
+        run: ./packaging/fetch-helpers.ps1
+
+      - name: Build the installer and the portable zip
+        run: cargo xtask dist
+
+      - name: Smoke test the installed app
+        shell: pwsh
+        run: ./packaging/smoke-test.ps1 -Installer "target/dist/good-gallery-$env:VERSION-setup.exe"
+
+      - name: Write the release notes
+        run: |
+          # The release title already names the version, so drop the section heading.
+          git-cliff --current --strip all | tail -n +2 > release-notes.md
+          cat >> release-notes.md <<NOTES
+
+          ### 📥 Download
+
+          | File | For |
+          | --- | --- |
+          | **good-gallery-$VERSION-setup.exe** | Installer: pick the folder, installs for your user |
+          | **good-gallery-$VERSION-portable.zip** | Portable: extract anywhere and run \`good-gallery.exe\` |
+
+          Both use the same data folder as Good Gallery's Electron version (\`%APPDATA%\\good-gallery\`), so an existing index and thumbnail cache are picked up as they are.
+
+          The downloads aren't code-signed yet, so Windows SmartScreen may warn about them. For the installer choose _More info_ → _Run anyway_. For the zip, right-click it → _Properties_ → _Unblock_ before extracting.
+          NOTES
+          cat release-notes.md
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" \
+            "target/dist/good-gallery-$VERSION-setup.exe" \
+            "target/dist/good-gallery-$VERSION-portable.zip" \
+            --title "Good Gallery $VERSION" \
+            --notes-file release-notes.md \
+            --verify-tag

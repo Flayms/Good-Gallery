@@ -1,0 +1,26 @@
+Good Gallery is free software under the GNU General Public License version 3 (LICENSE.txt).
+Source code: https://github.com/Flayms/Good-Gallery
+
+It bundles these programs, unchanged, as separate helper programs:
+
+exiftool 13.59 (exiftool\)
+  Reads the metadata of photos and videos. Copyright Phil Harvey.
+  License: the same terms as Perl itself (Artistic License or GPL). See exiftool\README.txt.
+  Source: https://exiftool.org
+
+FFmpeg 6.1.1, "essentials" build by gyan.dev, as distributed by ffmpeg-static b6.1.1 (ffmpeg\ffmpeg.exe)
+  Renders video thumbnails and AVIF images.
+  License: GNU General Public License version 3 (this build includes GPL components).
+  Source: https://ffmpeg.org, build: https://www.gyan.dev/ffmpeg/builds/, https://github.com/eugeneware/ffmpeg-static
+
+libmpv, mpv-winbuild-cmake build 20261021 by shinchiro (mpv\libmpv-2.dll)
+  Plays videos. It links FFmpeg and other libraries statically.
+  License: GNU General Public License version 2 or later (this build includes GPL components).
+  Source: https://github.com/mpv-player/mpv, build: https://github.com/shinchiro/mpv-winbuild-cmake
+
+And, built into good-gallery.exe:
+
+Atkinson Hyperlegible Next, the typeface. Copyright the Braille Institute of America.
+  License: SIL Open Font License 1.1.
+Lucide icons. License: ISC.
+Rust crates as listed in the source's Cargo.lock, under their licenses (mostly MIT and Apache-2.0).

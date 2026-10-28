@@ -22,8 +22,8 @@ pub enum FfmpegError {
 
 /// The ffmpeg executable: `GOOD_GALLERY_FFMPEG`, `ffmpeg\ffmpeg.exe` next to the app, or `ffmpeg` on `PATH`.
 pub fn find_ffmpeg() -> Option<PathBuf> {
-    let name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
-    crate::helpers::find_helper("GOOD_GALLERY_FFMPEG", "ffmpeg", name)
+    let (folder, name) = crate::helpers::FFMPEG_BUNDLED;
+    crate::helpers::find_helper("GOOD_GALLERY_FFMPEG", folder, name)
 }
 
 /// The frame at `position` seconds as a PNG, at most as wide as the largest thumbnail. ffmpeg applies the file's

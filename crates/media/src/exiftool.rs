@@ -43,7 +43,10 @@ pub fn find_exiftool() -> Option<PathBuf> {
     }
     let bundled = std::env::current_exe()
         .ok()
-        .and_then(|exe| Some(exe.parent()?.join("exiftool").join("exiftool.exe")))
+        .and_then(|exe| {
+            let (folder, file) = crate::helpers::EXIFTOOL_BUNDLED;
+            Some(exe.parent()?.join(folder).join(file))
+        })
         .filter(|path| path.is_file());
     bundled.or_else(|| {
         // On Windows only the executable: an extensionless `exiftool` there is the Perl script, which can't be run.

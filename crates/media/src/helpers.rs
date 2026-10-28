@@ -90,10 +90,17 @@ pub fn show_in_explorer(_file: &std::path::Path) -> std::io::Result<()> {
     Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "only on Windows"))
 }
 
+/// Where a bundled helper lies next to the app's executable: `(folder, file)`. The package (`cargo xtask dist`)
+/// puts the helpers there.
+pub type Bundled = (&'static str, &'static str);
+pub const EXIFTOOL_BUNDLED: Bundled = ("exiftool", "exiftool.exe");
+pub const FFMPEG_BUNDLED: Bundled = ("ffmpeg", if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" });
+pub const MPV_BUNDLED: Bundled = ("mpv", if cfg!(windows) { "libmpv-2.dll" } else { "libmpv.so.2" });
+
 /// libmpv for video playback (M9): `GOOD_GALLERY_MPV`, `mpv/libmpv-2.dll` next to the app, or on `PATH`.
 pub fn find_mpv() -> Option<std::path::PathBuf> {
-    let name = if cfg!(windows) { "libmpv-2.dll" } else { "libmpv.so.2" };
-    find_helper("GOOD_GALLERY_MPV", "mpv", name)
+    let (folder, name) = MPV_BUNDLED;
+    find_helper("GOOD_GALLERY_MPV", folder, name)
 }
 
 /// A bundled helper file: the path in the environment variable `env`, else `<folder>/<name>` next to the app, else

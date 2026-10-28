@@ -8,21 +8,21 @@ All specs were ported from the reference (`../good-gallery/docs/specs/`) on 2026
 | -------------------------------------------------------- | ---------------------------------------------------------------- | -------- | --------- |
 | [001-library-management](001-library-management/spec.md) | Add, remove and rescan libraries                                 | Implemented | M3        |
 | [002-indexing](002-indexing/spec.md)                     | Scanning libraries into the index, scan queue, offline libraries | Approved | M4        |
-| [003-change-detection](003-change-detection/spec.md)     | Watcher, quick scans, scheduled checks                           | Approved | M4        |
-| [004-metadata](004-metadata/spec.md)                     | Dates, dimensions, ratings and tags from files and sidecars      | Approved | M4        |
-| [005-thumbnails](005-thumbnails/spec.md)                 | Thumbnail rendering, placeholders, thumbnail cache               | Approved | M5        |
-| [006-gallery-views](006-gallery-views/spec.md)           | Masonry, Justified, Grid and List views, zoom                    | Approved | M6        |
-| [007-search](007-search/spec.md)                         | Tag, file name, date, rating, kind and folder filters, sorting   | Approved | M7        |
-| [008-sidebar](008-sidebar/spec.md)                       | Libraries, folder tree, People, Places, Ratings, Tags            | Approved | M7        |
-| [009-media-viewer](009-media-viewer/spec.md)             | Viewer, zoom and pan, info panel, context menu                   | Approved | M8, M9    |
-| [010-settings](010-settings/spec.md)                     | Indexing and thumbnail cache settings                            | Approved | M10       |
-| [011-security](011-security/spec.md)                     | File access, helper programs, hostile metadata, no network       | Approved | M4, M5, M8 |
+| [003-change-detection](003-change-detection/spec.md)     | Watcher, quick scans, scheduled checks                           | Implemented | M4        |
+| [004-metadata](004-metadata/spec.md)                     | Dates, dimensions, ratings and tags from files and sidecars      | Implemented | M4        |
+| [005-thumbnails](005-thumbnails/spec.md)                 | Thumbnail rendering, placeholders, thumbnail cache               | Implemented | M5        |
+| [006-gallery-views](006-gallery-views/spec.md)           | Masonry, Justified, Grid and List views, zoom                    | Implemented | M6        |
+| [007-search](007-search/spec.md)                         | Tag, file name, date, rating, kind and folder filters, sorting   | Implemented | M7        |
+| [008-sidebar](008-sidebar/spec.md)                       | Libraries, folder tree, People, Places, Ratings, Tags            | Implemented | M7        |
+| [009-media-viewer](009-media-viewer/spec.md)             | Viewer, zoom and pan, info panel, context menu                   | Implemented | M8, M9    |
+| [010-settings](010-settings/spec.md)                     | Indexing and thumbnail cache settings                            | Implemented | M10       |
+| [011-security](011-security/spec.md)                     | File access, helper programs, hostile metadata, no network       | Implemented | M4, M5, M8 |
 | [012-spec-consistency](012-spec-consistency/spec.md)     | Check that specs and tests reference each other                  | Implemented | M1        |
-| [013-visual-design](013-visual-design/spec.md)           | Glass chrome, typeface, compact toolbar, viewer over the blur    | Approved | M10       |
-| [014-ci-release](014-ci-release/spec.md)                 | CI checks, release script, changelog and GitHub releases         | Approved | M1, M11   |
-| [015-filmstrip](015-filmstrip/spec.md)                   | Row of thumbnails in the viewer to jump through the gallery      | Approved | M8        |
-| [016-date-groups](016-date-groups/spec.md)               | Group the gallery by day, with date and count headers            | Approved | M6        |
-| [017-tag-indicators](017-tag-indicators/spec.md)         | Rating, Places, People and Tags icons over tiles                 | Approved | M6        |
+| [013-visual-design](013-visual-design/spec.md)           | Glass chrome, typeface, compact toolbar, viewer over the blur    | Implemented | M10       |
+| [014-ci-release](014-ci-release/spec.md)                 | CI checks, release script, changelog and GitHub releases         | Implemented | M1, M11   |
+| [015-filmstrip](015-filmstrip/spec.md)                   | Row of thumbnails in the viewer to jump through the gallery      | Implemented | M8        |
+| [016-date-groups](016-date-groups/spec.md)               | Group the gallery by day, with date and count headers            | Implemented | M6        |
+| [017-tag-indicators](017-tag-indicators/spec.md)         | Rating, Places, People and Tags icons over tiles                 | Implemented | M6        |
 
 ## Conventions
 

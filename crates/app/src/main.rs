@@ -1,11 +1,17 @@
 //! Good Gallery.
 //!
-//! Options: `--data-dir <folder>` (index and settings; default `%APPDATA%\good-gallery-rust`), `--screenshot
+//! Options: `--data-dir <folder>` (index, settings, thumbnails and logs; default `%APPDATA%\good-gallery` in the packaged
+//! app, the Electron version's, and `%APPDATA%\good-gallery-rust` otherwise), `--screenshot
 //! <file.png>` (saves a screenshot of the window after a few frames and exits), `--screenshot-after <seconds>` (waits
 //! that long before the screenshot, e.g. for scans or thumbnails), `--bench-scroll <seconds>` (vsync off; scrolls the
 //! gallery once to warm the files, then again while measuring frame times, prints them and exits; REQ-006-12), `--view
-//! <position>` (opens the viewer at that gallery position once the gallery has loaded, e.g. for a screenshot), `--scroll
+//! <position>` (opens the viewer at that gallery position once the gallery has loaded, e.g. for a screenshot; with
+//! `--info` its info panel too), `--scroll
 //! <points>` (scrolls the gallery that far once it has loaded, e.g. to show the glass toolbar over tiles).
+
+// The packaged app (`cargo xtask dist` builds it with the `packaged` feature) opens no console window; the log goes to
+// `logs\app.log` in the data folder.
+#![cfg_attr(feature = "packaged", windows_subsystem = "windows")]
 
 use anyhow::Context as _;
 use app::{AppState, NativeFolderPicker};
@@ -17,16 +23,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// Frames to render before a `--screenshot` is taken, so fonts, icons and layout have settled.
 const SCREENSHOT_AFTER_FRAMES: u32 = 5;
 
-/// During the rewrite the app keeps its own data folder, so it never touches the index of the Electron version
-/// (`%APPDATA%\good-gallery`). Sharing it is a packaging decision (M11).
-const DATA_FOLDER: &str = "good-gallery-rust";
-
 struct Options {
     data_dir: PathBuf,
     screenshot: Option<PathBuf>,
     screenshot_after: std::time::Duration,
     bench_scroll: Option<f32>,
     view: Option<usize>,
+    info: bool,
     scroll: Option<f32>,
 }
 
@@ -132,6 +135,8 @@ struct GalleryApp {
     bench: Option<Bench>,
     /// `--view`: the gallery position to open in the viewer once it has loaded.
     view: Option<usize>,
+    /// `--info`: the viewer opens with its info panel.
+    info: bool,
     /// `--scroll`: how far to scroll the gallery once it has loaded.
     scroll: Option<f32>,
     /// Windows' animation and transparency effects, followed while the app runs.
@@ -145,9 +150,10 @@ impl eframe::App for GalleryApp {
         self.frames += 1;
         if let Some(index) = self.view
             && let Some(gallery) = &self.state.gallery
-            && let Some(viewer) = app::viewer::Viewer::open(gallery, index)
+            && let Some(mut viewer) = app::viewer::Viewer::open(gallery, index)
         {
             self.view = None;
+            viewer.set_info_open(self.info);
             self.state.viewer = Some(viewer);
             ui.ctx().request_repaint();
         }
@@ -208,18 +214,22 @@ fn save_png(path: &Path, image: &egui::ColorImage) -> anyhow::Result<()> {
 
 fn default_data_dir() -> anyhow::Result<PathBuf> {
     let base = std::env::var_os("APPDATA").context("APPDATA isn't set; pass --data-dir")?;
-    Ok(PathBuf::from(base).join(DATA_FOLDER))
+    Ok(app::startup::default_data_dir(
+        Path::new(&base),
+        cfg!(feature = "packaged"),
+    ))
 }
 
 fn parse_args() -> anyhow::Result<Options> {
     const USAGE: &str = "usage: app [--data-dir <folder>] [--screenshot <file.png> [--screenshot-after <seconds>]] \
-                         [--bench-scroll <seconds>] [--view <position>] [--scroll <points>]";
+                         [--bench-scroll <seconds>] [--view <position> [--info]] [--scroll <points>]";
     let mut args = std::env::args().skip(1);
     let mut data_dir = None;
     let mut screenshot = None;
     let mut screenshot_after = std::time::Duration::ZERO;
     let mut bench_scroll = None;
     let mut view = None;
+    let mut info = false;
     let mut scroll = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -235,6 +245,7 @@ fn parse_args() -> anyhow::Result<Options> {
                 bench_scroll = Some(seconds);
             }
             "--view" => view = Some(args.next().context(USAGE)?.parse().context(USAGE)?),
+            "--info" => info = true,
             "--scroll" => scroll = Some(args.next().context(USAGE)?.parse().context(USAGE)?),
             other => anyhow::bail!("unknown argument {other} ({USAGE})"),
         }
@@ -249,6 +260,7 @@ fn parse_args() -> anyhow::Result<Options> {
         screenshot_after,
         bench_scroll,
         view,
+        info,
         scroll,
     })
 }
@@ -318,8 +330,10 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
     let settings = db::settings::load(&conn).unwrap_or_default();
     let mut state = AppState::new(conn, Arc::new(indexer::NoScans), Arc::new(NativeFolderPicker));
     let concurrency = settings.io_concurrency as usize;
-    let exiftool =
-        media::exiftool::find_exiftool().map(|path| Arc::new(media::exiftool::ExifTool::new(path, concurrency)));
+    let exiftool = media::exiftool::find_exiftool().map(|path| {
+        tracing::info!("exiftool: {}", path.display());
+        Arc::new(media::exiftool::ExifTool::new(path, concurrency))
+    });
     let is_reachable =
         Arc::new(|path: &Path| indexer::reachability::is_reachable_directory(path, indexer::reachability::TIMEOUT));
     let (ready_tx, ready) = std::sync::mpsc::channel();
@@ -417,6 +431,7 @@ fn videos(ctx: &egui::Context, render_state: Option<egui_wgpu::RenderState>) -> 
         tracing::error!("libmpv not found: videos can't play");
         return app::video::Videos::unavailable("libmpv-2.dll not found");
     };
+    tracing::info!("libmpv: {}", dll.display());
     let ctx = ctx.clone();
     app::video::Videos::new(move || {
         let player = app::video::MpvPlayer::new(&dll, ctx, render_state, true)?;
@@ -436,7 +451,9 @@ fn start_thumbnails(
     state: &mut AppState,
 ) -> indexer::thumbnails::ThumbnailService {
     let ffmpeg = media::ffmpeg::find_ffmpeg();
-    if ffmpeg.is_none() {
+    if let Some(path) = &ffmpeg {
+        tracing::info!("ffmpeg: {}", path.display());
+    } else {
         tracing::error!("ffmpeg not found: videos get no thumbnails");
         state
             .toasts
@@ -457,22 +474,84 @@ fn start_thumbnails(
     })
 }
 
-fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+/// Logs to stderr and, when it can be opened, to `logs\app.log` in the data folder.
+fn init_logging(data_dir: &Path) {
+    use tracing_subscriber::layer::SubscriberExt as _;
+    use tracing_subscriber::util::SubscriberInitExt as _;
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into());
+    let log = app::startup::open_log(data_dir);
+    let (file, problem) = match log {
+        Ok(file) => (Some(file), None),
+        Err(error) => (None, Some(error)),
+    };
+    let file_layer = file.map(|file| {
+        tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_writer(std::sync::Mutex::new(file))
+    });
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+        .with(file_layer)
         .init();
-    // exiftool (and later ffmpeg) must not outlive the app, however it ends.
+    // The packaged app has no console: panics go to the log too.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!("panic: {info}");
+        default_hook(info);
+    }));
+    match problem {
+        None => tracing::info!("Good Gallery {} in {}", env!("CARGO_PKG_VERSION"), data_dir.display()),
+        Some(error) => tracing::warn!("no log file in {}: {error}", data_dir.display()),
+    }
+}
+
+/// Reports a failure; the packaged app has no console, so an interactive run also gets a message box.
+fn report_failure(error: &anyhow::Error, interactive: bool) {
+    tracing::error!("{error:#}");
+    if interactive && cfg!(feature = "packaged") {
+        rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Error)
+            .set_title("Good Gallery")
+            .set_description(format!("Good Gallery couldn't start.\n\n{error:#}"))
+            .show();
+    }
+}
+
+fn main() -> std::process::ExitCode {
+    let options = match parse_args() {
+        Ok(options) => options,
+        Err(error) => {
+            eprintln!("error: {error:#}");
+            report_failure(&error, true);
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+    init_logging(&options.data_dir);
+    // Automated runs (screenshots, benchmarks) must not wait for someone to close a message box.
+    let interactive = options.screenshot.is_none() && options.bench_scroll.is_none();
+    match run(options) {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            report_failure(&error, interactive);
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn run(options: Options) -> anyhow::Result<()> {
+    // exiftool and ffmpeg must not outlive the app, however it ends.
     if let Err(error) = media::helpers::end_helpers_with_app() {
         tracing::warn!("helper processes may outlive the app: {error}");
     }
-    let options = parse_args()?;
     let screenshot_failed = Arc::new(AtomicBool::new(false));
     let failed = screenshot_failed.clone();
     let mut native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Good Gallery")
             .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([800.0, 600.0]),
+            .with_min_inner_size([800.0, 600.0])
+            .with_icon(app::startup::window_icon()),
         ..Default::default()
     };
     if options.bench_scroll.is_some() {
@@ -497,6 +576,7 @@ fn main() -> anyhow::Result<()> {
                 frames: 0,
                 bench: options.bench_scroll.map(Bench::new),
                 view: options.view,
+                info: options.info,
                 scroll: options.scroll,
                 preferences: Default::default(),
             }))

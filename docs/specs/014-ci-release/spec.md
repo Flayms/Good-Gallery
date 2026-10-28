@@ -1,6 +1,6 @@
 # 014 · CI and releases
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Goal
 
@@ -56,6 +56,14 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 - **When** the release workflow runs
 - **Then** it runs the checks of REQ-014-01, builds the Windows installer (`setup.exe`) and the portable zip, and publishes a GitHub release named after the version, whose notes are the version's changelog section plus download instructions and which has both attached
 
+### REQ-014-09 · Installer and portable app
+
+- **Given** the installer or the portable zip of a release
+- **When** a user installs it (for their own user, without admin rights, into a folder they can change) or extracts the zip
+- **Then** the app runs without anything else installed: exiftool, ffmpeg and the video player come with it
+- **And** the installer adds a Start menu shortcut and an entry under Windows' installed apps
+- **And** uninstalling removes the program, its shortcut and its entry, but keeps the data folder (index, settings, thumbnails)
+
 ## Out of scope
 
 - Code signing (Windows SmartScreen warns about unsigned downloads). Free option for later: SignPath Foundation.
@@ -68,16 +76,18 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) (`feat: …`, `fix(scope): …`, `feat!: …` / `BREAKING CHANGE:` for breaking changes).
 - Merge protection is a GitHub branch protection rule (or ruleset) on `main` that requires the CI checks; it lives in the repository settings, not in the repository.
+- git-cliff (2.14.2 in CI) is installed where the release script runs, and NSIS where the installer is built (GitHub's Windows images have it).
 
 ## Verification
 
 | REQ        | Test                                                                                       | Result  |
 | ---------- | ------------------------------------------------------------------------------------------ | ------- |
-| REQ-014-01 | — | no test |
-| REQ-014-02 | — | no test |
-| REQ-014-03 | — | no test |
-| REQ-014-04 | — | no test |
-| REQ-014-05 | — | no test |
-| REQ-014-06 | — | no test |
-| REQ-014-07 | — | no test |
-| REQ-014-08 | — | no test |
+| REQ-014-01 | `xtask/tests/workflows.rs` › ci_runs_every_check_on_pushes_and_pull_requests (the workflow itself runs on GitHub) | pass |
+| REQ-014-02 | — (branch protection rule in the repository settings; set up by the user) | no test |
+| REQ-014-03 | `xtask/src/release.rs` › req_014_03_derives_the_next_version_from_the_commits | pass |
+| REQ-014-04 | `xtask/src/release.rs` › req_014_04_parses_overrides, req_014_04_overrides_the_bump_or_the_version | pass |
+| REQ-014-05 | `xtask/src/release.rs` › req_014_05_lists_failed_preconditions, req_014_05_stops_when_a_precondition_fails, req_014_05_undoes_a_release_whose_push_fails | pass |
+| REQ-014-06 | `xtask/src/release.rs` › req_014_06_writes_the_changelog | pass |
+| REQ-014-07 | `xtask/src/release.rs` › req_014_07_sets_the_workspace_version, req_014_07_commits_tags_and_pushes_the_release; `cargo xtask release --dry-run` on this repository (M11) | pass |
+| REQ-014-08 | `xtask/tests/workflows.rs` › release_publishes_both_downloads_after_the_checks; `xtask/src/dist.rs` › stages_the_helpers_where_the_app_finds_them, names_the_downloads_after_the_version; `cargo xtask dist` built both locally (M11) | partial (publishing runs with the first release) |
+| REQ-014-09 | `xtask/src/dist.rs` › stages_the_helpers_where_the_app_finds_them; `packaging/smoke-test.ps1` (release workflow; run locally in M11: silent install, app run, uninstall keeps the data folder) | pass |

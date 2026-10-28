@@ -22,11 +22,25 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | M9        | Video                                  | Done        | [M09](rewrite/milestones/M09-video.md) |
 | M10a      | Settings and rules                     | Done        | [M10](rewrite/milestones/M10-settings-design.md) |
 | M10b      | Glass and title bar                    | Done        | [M10](rewrite/milestones/M10-settings-design.md) |
-| M11       | Packaging and release                  | Not started | —                                       |
+| M11       | Packaging and release                  | Done        | [M11](rewrite/milestones/M11-packaging-release.md) |
 
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-28 · M11 · Packaging and release
+
+- Plan `M11-packaging-release.md` written and self-approved, one part.
+- `cargo xtask release`: the reference's `release.ts` in Rust with its tests (throwaway repo with a bare `origin` and a tiny Cargo workspace); version in `[workspace.package]`, `Cargo.lock` refreshed and committed with it; git-cliff with the reference's `cliff.toml`.
+- `.github/workflows/release.yml` (tag → `ci.yml` → version check → helpers → `cargo xtask dist` → smoke test → git-cliff notes → `gh release create`); CI installs git-cliff and fetches the bundled exiftool and ffmpeg so their tests run (libmpv left out: Vulkan loader on the runners unknown). `xtask/tests/workflows.rs` guards both workflows.
+- `packaging/fetch-helpers.ps1` (exiftool 13.59, ffmpeg-static b6.1.1, libmpv 20261021, SHA-256 pinned; fresh download checked), `cargo xtask dist` (staging from the shared `media::helpers::*_BUNDLED` layout, zip with Windows' tar, NSIS installer `packaging/windows/installer.nsi`), `packaging/smoke-test.ps1`. Local result: setup.exe 68.6 MB, portable zip 94.2 MB.
+- App: the packaged app (feature `packaged`, set by `cargo xtask dist`) uses `%APPDATA%\good-gallery` (new REQ-001-09), other builds `good-gallery-rust`; no console when packaged, startup errors in a message box, panics logged, `logs\app.log` (+ `app.old.log`), helper paths logged; app icon (reference's) in the exe (`winresource`) and the window; `--info` for viewer screenshots.
+- Exit criteria: the silent install, a run of the installed app on a copy of the user's real index (sidebar with People / Places, thumbnails rendered from the libraries, all three helpers found in the install folder, no errors in the log) and the uninstall (data folder kept, shortcut and registry entry gone) passed through the smoke test. The full test suite also passed with the bundled helper versions (`GG_REQUIRE_HELPERS=1`). Release dry run: see below.
+- `cargo xtask screenshots` (the reference's demo library, on a `subst` drive) rendered `docs/screenshots/{masonry,justified,grid,list,viewer}.png`; README rewritten (features, install, development, releases).
+- Specs: 014 `Implemented` (REQ-014-01, -03 … -07, -09 pass; -08 partial until the first published release; -02 is a repository setting), new REQ-014-09 (installer and portable app). Spec index statuses synced.
+- Code review fixes: the installer's folder could be a shared one whose `ffmpeg` / `mpv` / `exiftool` folders it deleted (a non-empty picked folder now gets `Good Gallery` appended; checked with a silent install); a failed push left a local release commit and tag that blocked the next run (now undone, test with a rejecting hook); `cargo run --release` would have opened the real index (the shared folder now needs the `packaged` feature); panics and argument errors were invisible in the packaged app (logged, message box); a log held open no longer costs the run its log; `xtask screenshots --keep` indexed the library twice on reruns; the smoke test compared full paths that may differ in 8.3 form; helpers aren't cached twice in CI; one exit-code helper in xtask's dispatcher.
+- Open: (1) publish the first release (`cargo xtask release`, pushes `main` and the tag; the workflow has never run on GitHub); (2) branch protection on `main` requiring CI (REQ-014-02); (3) a run on a really clean Windows machine (here: this machine, temp install folder) — especially whether `libmpv-2.dll` finds `vulkan-1.dll` without GPU drivers; (4) code signing (out of scope); (5) `thumb_cache::tests::req_005_13_writes_leave_no_temp_files` failed once in the first run after a rebuild (Defender, as M8b/M9) and passed in the next.
+- Next: the rewrite's milestones are done. "After the rewrite" in `docs/rewrite/plan.md`: move the roadmap into `docs/roadmap.md`, archive the reference.
 
 ### 2026-10-28 · M10a + M10b · Settings, design polish, glass
 

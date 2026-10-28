@@ -253,6 +253,11 @@ impl Viewer {
         self.info_open
     }
 
+    /// Opens or closes the info panel, as `i` does.
+    pub fn set_info_open(&mut self, open: bool) {
+        self.info_open = open;
+    }
+
     pub fn filmstrip_shown(&self) -> bool {
         self.filmstrip
     }

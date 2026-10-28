@@ -61,6 +61,13 @@ The user decides which folders make up the gallery: folders on local disks or ne
 - **Then** it opens without re-indexing, with all libraries, media items, tags and settings
 - **And** the Electron version can still open the index afterwards (same schema and migration bookkeeping)
 
+### REQ-001-09 · Shared data folder
+
+- **Given** the installed or portable app of a release
+- **When** it starts without a data folder given on the command line
+- **Then** it uses the Electron version's data folder (`%APPDATA%\good-gallery`), so its index, settings and thumbnail cache are picked up as they are
+- **And** builds made for development use a folder of their own (`%APPDATA%\good-gallery-rust`), so they never touch it
+
 ## Out of scope
 
 - Renaming a library's label in the UI (the label is always derived from the folder name).
@@ -86,3 +93,4 @@ The user decides which folders make up the gallery: folders on local disks or ne
 | REQ-001-06 | `crates/indexer/src/libraries.rs` › rescan_queues_a_full_scan; `crates/app/tests/libraries.rs` › rescan_queues_a_full_scan_and_confirms | pass |
 | REQ-001-07 | `crates/app/tests/libraries.rs` › lists_libraries_with_status_path_and_last_indexed_time, says_when_there_are_no_libraries | pass |
 | REQ-001-08 | `crates/db/src/lib.rs` › opens_an_index_written_by_the_reference, leaves_the_reference_bookkeeping_alone, creates_the_reference_schema_and_bookkeeping | pass |
+| REQ-001-09 | `crates/app/src/startup.rs` › release_builds_share_the_electron_data_folder; installed app run on a copy of the real index (M11) | pass |

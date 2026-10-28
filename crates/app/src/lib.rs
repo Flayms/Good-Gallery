@@ -11,6 +11,7 @@ pub mod originals;
 pub mod search_bar;
 pub mod settings_page;
 pub mod sidebar;
+pub mod startup;
 pub mod state;
 pub mod textures;
 pub mod theme;
