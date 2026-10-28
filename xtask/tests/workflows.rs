@@ -18,13 +18,18 @@ fn commands(workflow: &str) -> Vec<&str> {
         .collect()
 }
 
-/// REQ-014-01: every push and pull request checks formatting, clippy, the specs and all tests.
+/// REQ-014-01: pushes to `main` and pull requests check formatting, clippy, the specs and all tests.
 #[test]
-fn ci_runs_every_check_on_pushes_and_pull_requests() {
+fn ci_runs_every_check_on_main_and_pull_requests() {
     let ci = workflow("ci.yml");
-    for trigger in ["push:", "branches: ['**']", "pull_request:", "workflow_call:"] {
+    for trigger in ["push:", "branches: [main]", "pull_request:", "workflow_call:"] {
         assert!(ci.contains(trigger), "ci.yml lacks {trigger}");
     }
+    // A push to a pull request's branch would otherwise run the checks twice, once per trigger.
+    assert!(
+        !ci.contains("branches: ['**']"),
+        "ci.yml runs on pushes to every branch"
+    );
     let commands = commands(&ci);
     for check in [
         "cargo fmt --all --check",

@@ -51,7 +51,7 @@ Requirements: Rust (pinned in `rust-toolchain.toml`, installed through rustup) a
 | `cargo xtask dist`                  | Build the installer and the portable zip into `target/dist/` (needs the helpers and NSIS)                       |
 | `cargo xtask release`               | Cut a release: bump the version, update `CHANGELOG.md`, tag and push (`--dry-run` previews; needs git-cliff)   |
 
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) checks formatting, clippy, the specs and all tests on every push and pull request.
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) checks formatting, clippy, the specs and all tests on pull requests and on pushes to `main`.
 
 ### Releases
 
