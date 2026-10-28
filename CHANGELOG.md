@@ -1,6 +1,19 @@
 # Changelog
 
 All notable changes to Good Gallery. Versions follow [Semantic Versioning](https://semver.org), entries are generated from [Conventional Commits](https://www.conventionalcommits.org).
+## [0.1.1](https://github.com/Flayms/Good-Gallery/releases/tag/v0.1.1) · 2026-10-28
+
+### 🐛 Bug fixes
+
+- **thumbnails:** Keep temp files of writes in progress during the startup walk ([`37c22f5`](https://github.com/Flayms/Good-Gallery/commit/37c22f531aff53a3146e2a1a8231021295f9f603))
+
+### 🔧 Maintenance
+
+- Pin the time zone so snapshots match on every machine ([`490833f`](https://github.com/Flayms/Good-Gallery/commit/490833f0e0f52c4bdbd62fb07fd197dc6faa2152))
+- Mask the whole location row in viewer snapshots ([`03a7e00`](https://github.com/Flayms/Good-Gallery/commit/03a7e009454dc151a7221b38e1f4196a395c81c2))
+- Shrink dev debug info, remove merged worktrees ([`ecb95f1`](https://github.com/Flayms/Good-Gallery/commit/ecb95f172956befc8b40b82f3c4e84e720d57b28))
+
+**Full changelog:** [v0.1.0...v0.1.1](https://github.com/Flayms/Good-Gallery/compare/v0.1.0...v0.1.1)
 ## [0.1.0](https://github.com/Flayms/Good-Gallery/releases/tag/v0.1.0) · 2026-10-28
 
 ### ✨ Features
