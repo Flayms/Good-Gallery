@@ -12,5 +12,18 @@
       "Bash(cargo tree:*)",
       "Bash(cargo metadata:*)"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/tidy-worktrees.sh\""
+          }
+        ]
+      }
+    ]
   }
 }
