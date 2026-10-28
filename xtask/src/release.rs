@@ -609,7 +609,11 @@ mod tests {
     fn req_014_05_undoes_a_release_whose_push_fails() {
         let Some(repo) = Repo::new() else { return };
         repo.commit("feat: search");
-        std::fs::write(repo.remote.join("hooks/pre-receive"), "#!/bin/sh\nexit 1\n").unwrap();
+        let hook = repo.remote.join("hooks/pre-receive");
+        std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+        // Git runs only executable hooks outside Windows.
+        #[cfg(unix)]
+        std::fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         let start = git(&repo.repo, &["rev-parse", "HEAD"]).unwrap();
 
         let problem = repo.run(&["--yes"]).unwrap_err().0;

@@ -163,7 +163,7 @@ fn req_009_01_req_009_04_opens_the_clicked_item_with_its_original() {
     );
     // Past the original's fade-in.
     harness.run_steps(20);
-    harness.snapshot("viewer");
+    harness.snapshot(common::snapshot_name("viewer"));
 }
 
 /// REQ-009-01: Enter on a focused tile opens it too.
@@ -593,7 +593,9 @@ fn panel_chip<'a>(harness: &'a App, name: &'a str) -> egui_kittest::Node<'a> {
 /// Hides the file's location, which lies in a temporary folder named differently on every run and machine. Up to the
 /// window's edge: the label is only as wide as the path, which differs between machines.
 fn mask_location(harness: &mut App) {
-    let location = harness.get_by_label_contains("photos\\").rect();
+    let location = harness
+        .get_by_label_contains(&format!("photos{}", std::path::MAIN_SEPARATOR))
+        .rect();
     let right = harness.ctx.content_rect().right();
     harness.mask(egui::Rect::from_min_max(
         location.min,
@@ -645,7 +647,7 @@ fn req_009_08_req_013_13_toggles_the_info_panel_with_the_details() {
     settle_viewer(&mut harness);
     harness.run_steps(20);
     mask_location(&mut harness);
-    harness.snapshot("viewer_info");
+    harness.snapshot(common::snapshot_name("viewer_info"));
 
     harness.get_by_label("Info").click();
     settle(&mut harness);
@@ -681,7 +683,7 @@ fn req_009_10_shows_the_file_in_explorer_or_says_it_is_gone() {
     let explorer = std::sync::Arc::new(RecordedExplorer::default());
     let mut harness = tagged_app(&fixture, explorer.clone());
     open(&mut harness, "0.png");
-    harness.get_by_label("Show in Explorer").click();
+    harness.get_by_label(app::state::SHOW_IN_FOLDER).click();
     settle(&mut harness);
     let file = std::path::Path::new(&fixture.folder("photos")).join("0.png");
     assert_eq!(*explorer.0.lock().unwrap(), [file]);
@@ -694,7 +696,7 @@ fn req_009_10_shows_the_file_in_explorer_or_says_it_is_gone() {
     }
     settle(&mut harness);
     assert_eq!(shown(&harness).as_deref(), Some("2.png"));
-    harness.get_by_label("Show in Explorer").click();
+    harness.get_by_label(app::state::SHOW_IN_FOLDER).click();
     settle(&mut harness);
     assert_eq!(explorer.0.lock().unwrap().len(), 1);
     let toasts = harness.state().toasts.current();
@@ -716,7 +718,7 @@ fn req_009_11_context_menus_show_in_explorer_and_information() {
     let tile = harness.get_by_role_and_label(Role::Image, "1.png").rect().center();
 
     right_click_at(&mut harness, tile);
-    harness.get_by_label("Show in Explorer").click();
+    harness.get_by_label(app::state::SHOW_IN_FOLDER).click();
     settle(&mut harness);
     assert_eq!(explorer.0.lock().unwrap().len(), 1);
 
@@ -727,7 +729,7 @@ fn req_009_11_context_menus_show_in_explorer_and_information() {
     assert!(harness.query_by_label("Close information").is_some());
     assert!(harness.query_by_label("Dimensions").is_some());
     mask_location(&mut harness);
-    harness.snapshot("info_sheet");
+    harness.snapshot(common::snapshot_name("info_sheet"));
     harness.get_by_label("Close information").click();
     settle(&mut harness);
     assert!(harness.state().info_sheet.is_none());
@@ -784,7 +786,7 @@ fn req_015_01_req_015_02_req_015_03_toggles_and_remembers_the_filmstrip() {
     // Past the original's fade-in.
     settle_viewer(&mut harness);
     harness.run_steps(20);
-    harness.snapshot("viewer_filmstrip");
+    harness.snapshot(common::snapshot_name("viewer_filmstrip"));
 
     harness.key_press(Key::ArrowRight);
     settle(&mut harness);

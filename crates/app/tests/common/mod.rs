@@ -101,3 +101,13 @@ pub fn settle(harness: &mut Harness<'_, AppState>) {
     harness.state_mut().wait_for_jobs();
     harness.run_steps(3);
 }
+
+/// A snapshot's name on this platform. Linux draws its own caption buttons and keeps less room for them (REQ-018-04),
+/// so its snapshots of the window are files of their own (`<name>_linux.png`).
+pub fn snapshot_name(name: &str) -> String {
+    if cfg!(target_os = "linux") {
+        format!("{name}_linux")
+    } else {
+        name.to_owned()
+    }
+}

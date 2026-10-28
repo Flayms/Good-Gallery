@@ -47,7 +47,7 @@ fn ci_runs_every_check_on_main_and_pull_requests() {
 fn ci_leaves_release_commits_to_the_release_run() {
     let ci = workflow("ci.yml");
     let skip = "if: github.ref != 'refs/heads/main' || !startsWith(github.event.head_commit.message, 'chore(release)')";
-    for job in ["lint:", "test:"] {
+    for job in ["lint:", "test:", "test-linux:"] {
         let start = ci
             .find(&format!("\n  {job}"))
             .unwrap_or_else(|| panic!("ci.yml has no {job} job"));
@@ -67,7 +67,9 @@ fn release_publishes_both_downloads_after_the_checks() {
     assert!(release.contains("tags: ['v[0-9]+.[0-9]+.[0-9]+']"));
     assert!(release.contains("uses: ./.github/workflows/ci.yml"));
     assert!(release.contains("needs: checks"));
-    let commands = commands(&release);
+    // The Windows job; the Linux archive's job runs `cargo xtask dist` too, without NSIS.
+    let windows = &release[release.find("\n  release:").expect("no release job")..];
+    let commands = commands(windows);
     let dist = commands.iter().position(|line| *line == "cargo xtask dist");
     // windows-2025 images don't come with NSIS, and the installer can't be built without it.
     let nsis = commands.iter().position(|line| line.starts_with("choco install nsis"));
@@ -81,10 +83,37 @@ fn release_publishes_both_downloads_after_the_checks() {
     for part in [
         "good-gallery-$VERSION-setup.exe",
         "good-gallery-$VERSION-portable.zip",
+        "good-gallery-$VERSION-linux-x86_64.tar.gz",
         "--title \"Good Gallery $VERSION\"",
         "--notes-file release-notes.md",
     ] {
         assert!(publish.contains(part), "the release doesn't get {part}");
     }
     assert!(!release.contains("continue-on-error"));
+}
+
+/// REQ-018-01, REQ-018-09: CI checks Linux as well as Windows, and the release builds the Linux archive there.
+#[test]
+fn req_018_01_req_018_09_ci_and_the_release_cover_linux() {
+    let ci = workflow("ci.yml");
+    assert!(ci.contains("os: [windows-latest, ubuntu-latest]"), "lint runs on both");
+    let tests = &ci[ci.find("  test-linux:").expect("no Linux test job")..];
+    // The release the Linux snapshots were rendered on.
+    assert!(tests.contains("container: ubuntu:26.04"));
+    assert!(tests.contains("libimage-exiftool-perl ffmpeg libmpv2 mesa-vulkan-drivers"));
+    assert!(commands(tests).contains(&"cargo test --workspace --no-fail-fast"));
+    assert!(tests.contains("GG_REQUIRE_HELPERS: '1'"));
+    // The ruleset on main requires "Lint" and "Test" (REQ-014-02): jobs of those names report every platform's result.
+    for (name, needs) in [("Lint", "needs: [lint]"), ("Test", "needs: [test, test-linux]")] {
+        let job = &ci[ci
+            .find(&format!("    name: {name}\n"))
+            .unwrap_or_else(|| panic!("no job named {name}"))..];
+        let job = &job[..job.find("\n\n").unwrap_or(job.len())];
+        assert!(job.contains(needs) && job.contains("if: always() &&"), "{job}");
+    }
+    let release = workflow("release.yml");
+    let linux = &release[release.find("  linux:").expect("no linux job")..release.find("  release:").unwrap()];
+    assert!(linux.contains("runs-on: ubuntu-latest") && linux.contains("needs: checks"));
+    assert!(commands(linux).contains(&"cargo xtask dist"));
+    assert!(release.contains("needs: [checks, linux]"));
 }

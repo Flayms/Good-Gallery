@@ -36,9 +36,13 @@ exiftool, ffmpeg and libmpv come with both. The downloads aren't code-signed yet
 
 Add a library folder under **Settings**. The index, settings, thumbnails and logs live in `%APPDATA%\good-gallery`. Updates keep using it, so nothing is indexed twice. Uninstalling keeps that folder.
 
+### Linux
+
+**`good-gallery-<version>-linux-x86_64.tar.gz`** (x86-64, X11 or Wayland) uses your distribution's exiftool, ffmpeg and libmpv. Install them first, e.g. on Ubuntu or Debian `sudo apt install libimage-exiftool-perl ffmpeg libmpv2`. Extract the archive and run `./good-gallery`, or `./install.sh` to install it for your user with an app menu entry (`./install.sh --uninstall` removes it). The data folder is `~/.local/share/good-gallery`.
+
 ## Development
 
-Requirements: Rust (pinned in `rust-toolchain.toml`, installed through rustup) and, on Windows, the MSVC C++ build tools with the Windows SDK. Indexing needs exiftool, thumbnails of videos ffmpeg, playback libmpv: run `./packaging/fetch-helpers.ps1` once and point `GOOD_GALLERY_EXIFTOOL`, `GOOD_GALLERY_FFMPEG` and `GOOD_GALLERY_MPV` at the files in `target/helpers/`, or put the programs on `PATH`. Releases need git-cliff, the version CI uses: `cargo install --locked git-cliff@2.14.2` (or point `GIT_CLIFF` at it). Builds other than the packaged app (`cargo xtask dist`) keep their data in `%APPDATA%\good-gallery-rust`, so development never touches the real index.
+Requirements: Rust (pinned in `rust-toolchain.toml`, installed through rustup) and, on Windows, the MSVC C++ build tools with the Windows SDK. On Linux (Ubuntu): `sudo apt install build-essential pkg-config libimage-exiftool-perl ffmpeg libmpv2 mesa-vulkan-drivers` (the helpers come from the system there; `mesa-vulkan-drivers` gives the snapshot tests a software GPU, `xvfb` lets `--screenshot` run without a display). Indexing needs exiftool, thumbnails of videos ffmpeg, playback libmpv: run `./packaging/fetch-helpers.ps1` once and point `GOOD_GALLERY_EXIFTOOL`, `GOOD_GALLERY_FFMPEG` and `GOOD_GALLERY_MPV` at the files in `target/helpers/`, or put the programs on `PATH`. Releases need git-cliff, the version CI uses: `cargo install --locked git-cliff@2.14.2` (or point `GIT_CLIFF` at it). Builds other than the packaged app (`cargo xtask dist`) keep their data in `%APPDATA%\good-gallery-rust` (Linux: `~/.local/share/good-gallery-rust`), so development never touches the real index.
 
 | Command                             | Purpose                                                                                                        |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------- |
@@ -48,10 +52,10 @@ Requirements: Rust (pinned in `rust-toolchain.toml`, installed through rustup) a
 | `cargo fmt --all`                   | Format                                                                                                         |
 | `cargo xtask check-specs`           | Check that specs and tests reference each other                                                                |
 | `cargo xtask screenshots`           | Render the README screenshots into `docs/screenshots/` from a generated demo library (needs exiftool, ffmpeg)  |
-| `cargo xtask dist`                  | Build the installer and the portable zip into `target/dist/` (needs the helpers and NSIS)                       |
+| `cargo xtask dist`                  | Build the installer and the portable zip into `target/dist/` (needs the helpers and NSIS); on Linux the `.tar.gz` |
 | `cargo xtask release`               | Cut a release: bump the version, update `CHANGELOG.md`, tag and push (`--dry-run` previews; needs git-cliff)   |
 
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) checks formatting, clippy, the specs and all tests on pull requests and on pushes to `main`.
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) checks formatting, clippy, the specs and all tests on pull requests and on pushes to `main`, on Windows and Linux.
 
 ### Releases
 

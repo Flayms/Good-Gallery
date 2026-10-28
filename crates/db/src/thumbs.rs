@@ -87,6 +87,9 @@ mod tests {
     use super::*;
     use crate::libraries::{self, LibraryStatus};
 
+    /// A library root as the platform writes absolute paths.
+    const ROOT: &str = if cfg!(windows) { "D:\\Photos" } else { "/media/Photos" };
+
     fn insert(conn: &Connection, root: i64, rel_path: &str, taken_at: i64) -> i64 {
         conn.query_row(
             "INSERT INTO media (root_id, rel_path, file_name, kind, size, mtime, taken_at, duration)
@@ -107,7 +110,7 @@ mod tests {
     #[test]
     fn reads_the_source_of_a_media_item() {
         let conn = crate::open_in_memory().unwrap();
-        let root = libraries::insert(&conn, "D:\\Photos", "Photos", LibraryStatus::Online)
+        let root = libraries::insert(&conn, ROOT, "Photos", LibraryStatus::Online)
             .unwrap()
             .id;
         let id = insert(&conn, root, "trip/a.mp4", 1);
@@ -124,12 +127,15 @@ mod tests {
                     size: 7,
                     mtime: 1000
                 },
-                root_path: "D:\\Photos".into(),
+                root_path: ROOT.into(),
                 kind: MediaKind::Video,
                 duration: Some(2.5),
             }
         );
-        assert_eq!(source.file().unwrap(), std::path::Path::new("D:\\Photos\\trip\\a.mp4"));
+        assert_eq!(
+            source.file().unwrap(),
+            std::path::Path::new(ROOT).join("trip").join("a.mp4")
+        );
         assert_eq!(thumb_source(&conn, id + 1).unwrap(), None);
     }
 

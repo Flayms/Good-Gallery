@@ -102,7 +102,7 @@ fn req_007_04_req_007_05_suggests_tags_and_adds_them_as_included_or_excluded() {
     let beach = harness.get_by_role_and_label(Role::ListItem, "Beach").rect();
     let berlin = harness.get_by_role_and_label(Role::ListItem, "Berlin").rect();
     assert!(beach.top() < berlin.top());
-    harness.snapshot("search_suggestions");
+    harness.snapshot(common::snapshot_name("search_suggestions"));
     harness.key_press(egui::Key::Enter);
     settle(&mut harness);
     assert_eq!(search(&harness).tags, ["Beach"]);
@@ -170,7 +170,7 @@ fn req_007_07_req_007_09_req_013_08_filters_by_kind_and_rating_and_counts_active
     settle(&mut harness);
     assert_eq!(search(&harness).kind, Some(MediaKind::Video));
     assert_eq!(count(&harness), Some(1));
-    harness.snapshot("filters_menu");
+    harness.snapshot(common::snapshot_name("filters_menu"));
 
     harness.get_by_role_and_label(Role::Button, "All").click();
     // The sidebar has rating rows of the same names; the menu's come last.
@@ -259,7 +259,7 @@ fn req_008_01_req_008_02_req_007_10_limits_the_gallery_to_a_library_and_its_fold
 fn req_008_03_req_008_06_filters_by_clicking_people_places_and_tags() {
     let fixture = Fixture::new();
     let mut harness = app(&fixture);
-    harness.snapshot("sidebar");
+    harness.snapshot(common::snapshot_name("sidebar"));
 
     harness.get_by_role_and_label(Role::Button, "Anna").click();
     settle(&mut harness);

@@ -112,6 +112,9 @@ impl MpvPlayer {
         let mut options = vec![
             ("vo", "libmpv"),
             ("hwdec", "auto-copy"),
+            // The UI turns the frame itself (`video-dec-params/rotate`). mpv 0.41's software renderer (Ubuntu 26.04)
+            // aborts the process on a rotated video otherwise (`mp_image_crop` assertion).
+            ("video-rotate", "no"),
             ("keep-open", "yes"),
             ("idle", "yes"),
             ("terminal", "no"),
@@ -191,7 +194,7 @@ impl MpvPlayer {
             position: mpv.double("time-pos").unwrap_or(0.0),
             duration: mpv.double("duration").unwrap_or(0.0),
             video_size: size,
-            quarters: domain::video::quarter_turns(mpv.int("video-params/rotate").unwrap_or(0)),
+            quarters: domain::video::quarter_turns(mpv.int("video-dec-params/rotate").unwrap_or(0)),
             ended: mpv.flag("eof-reached").unwrap_or(false),
             volume: self.state.volume,
             muted: self.state.muted,

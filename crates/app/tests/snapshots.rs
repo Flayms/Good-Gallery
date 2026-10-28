@@ -14,7 +14,7 @@ fn req_006_10_first_run_shows_the_no_libraries_empty_state() {
     settle(&mut harness);
 
     harness.get_by_label("No libraries yet");
-    harness.snapshot("first_run");
+    harness.snapshot(common::snapshot_name("first_run"));
     harness.get_by_label("Add a library").click();
     settle(&mut harness);
     assert_eq!(harness.state().page, Page::Settings);

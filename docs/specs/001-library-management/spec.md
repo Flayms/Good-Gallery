@@ -32,6 +32,7 @@ The user decides which folders make up the gallery: folders on local disks or ne
 - **Given** a library `D:\Photos`
 - **When** the user adds the same path in any letter case (e.g. `d:\photos`)
 - **Then** nothing is added and the error "Library already added" is shown
+- **And** on Linux, whose paths are case-sensitive, only the same path counts: `/media/photos` is another folder than `/media/Photos`
 
 ### REQ-001-05 · Remove a library
 
@@ -87,7 +88,7 @@ The user decides which folders make up the gallery: folders on local disks or ne
 | REQ-001-01 | `crates/indexer/src/libraries.rs` › adds_a_reachable_folder…, normalizes_the_path; `crates/app/tests/libraries.rs` › adds_a_typed_path_and_confirms | pass |
 | REQ-001-02 | `crates/app/tests/libraries.rs` › adds_the_picked_folder_and_nothing_when_cancelled (fake dialog) | pass |
 | REQ-001-03 | `crates/indexer/src/libraries.rs` › rejects_relative_and_missing_paths; `reachability.rs` › gives_up_after_the_timeout; `crates/app/tests/libraries.rs` › explains_invalid_paths | pass |
-| REQ-001-04 | `crates/indexer/src/libraries.rs` › rejects_duplicates_case_insensitively; `crates/app/tests/libraries.rs` › rejects_a_duplicate_in_another_letter_case | pass |
+| REQ-001-04 | `crates/indexer/src/libraries.rs` › rejects_duplicates_case_insensitively (Windows), rejects_the_same_path_but_tells_letter_cases_apart (Linux); `crates/db/src/libraries.rs` › finds_only_the_same_path_outside_windows; `crates/app/tests/libraries.rs` › rejects_a_duplicate_in_another_letter_case | pass |
 | REQ-001-05 | `crates/indexer/src/libraries.rs` › removes_a_library…; `crates/indexer/src/indexer.rs` › removing_a_library_drops_its_queued_scan_and_cancels_the_running_one, watches_after_a_completed_scan_and_scans_reported_changes (watcher stopped); `crates/indexer/src/scan.rs` › writes_nothing_when_cancelled; `crates/app/tests/libraries.rs` › removes_a_library_after_confirmation… | pass |
 | REQ-001-06 | `crates/indexer/src/libraries.rs` › rescan_queues_a_full_scan; `crates/app/tests/libraries.rs` › rescan_queues_a_full_scan_and_confirms | pass |
 | REQ-001-07 | `crates/app/tests/libraries.rs` › lists_libraries_with_status_path_and_last_indexed_time, says_when_there_are_no_libraries | pass |

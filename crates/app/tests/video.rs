@@ -18,6 +18,14 @@ fn helper(name: &str, found: Option<PathBuf>) -> Option<PathBuf> {
     }
 }
 
+/// libmpv, if it loads: on Linux `find_mpv` names the system's library without knowing whether it is installed.
+#[allow(unsafe_code)]
+fn mpv() -> Option<PathBuf> {
+    // SAFETY: libmpv's initializers have no preconditions; the library is dropped again at once.
+    let found = media::helpers::find_mpv().filter(|path| unsafe { libloading::Library::new(path) }.is_ok());
+    helper("libmpv", found)
+}
+
 /// A 2 s clip with a test pattern and a tone.
 fn make(ffmpeg: &Path, out: &Path, codecs: &[&str]) {
     let mut args = vec![
@@ -118,7 +126,7 @@ fn wait_for(player: &mut MpvPlayer, what: &str, done: impl Fn(&PlaybackState, bo
 
 #[test]
 fn req_009_06_plays_all_four_containers_and_seeks() {
-    let Some(mpv) = helper("libmpv", media::helpers::find_mpv()) else {
+    let Some(mpv) = mpv() else {
         return;
     };
     let Some(ffmpeg) = helper("ffmpeg", media::ffmpeg::find_ffmpeg()) else {
@@ -152,7 +160,7 @@ fn req_009_06_plays_all_four_containers_and_seeks() {
 
 #[test]
 fn req_009_06_says_why_a_file_cant_play() {
-    let Some(mpv) = helper("libmpv", media::helpers::find_mpv()) else {
+    let Some(mpv) = mpv() else {
         return;
     };
     let dir = tempfile::tempdir().unwrap();

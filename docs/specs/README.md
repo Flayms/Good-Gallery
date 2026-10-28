@@ -21,6 +21,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [015-filmstrip](015-filmstrip/spec.md)                   | Row of thumbnails in the viewer to jump through the gallery      | Implemented |
 | [016-date-groups](016-date-groups/spec.md)               | Group the gallery by day, with date and count headers            | Implemented |
 | [017-tag-indicators](017-tag-indicators/spec.md)         | Rating, Places, People and Tags icons over tiles                 | Implemented |
+| [018-linux](018-linux/spec.md)                           | Linux: data folder, system helpers, title bar, package           | Implemented |
 
 ## Conventions
 

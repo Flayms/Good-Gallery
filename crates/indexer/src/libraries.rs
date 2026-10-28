@@ -108,11 +108,15 @@ pub fn rescan(conn: &Connection, id: i64, scans: &dyn ScanRequests) -> Result<()
 }
 
 fn is_separator(c: char) -> bool {
-    c == '\\' || c == '/'
+    c == '/' || (cfg!(windows) && c == '\\')
 }
 
 /// Windows rules, as Node's `path.win32.isAbsolute`: rooted (`\x`, `\\server\share`) or a drive with a root (`D:\`).
+/// Elsewhere a path from the root, `/…`.
 fn is_absolute(path: &str) -> bool {
+    if !cfg!(windows) {
+        return path.starts_with('/');
+    }
     let mut chars = path.chars();
     match (chars.next(), chars.next(), chars.next()) {
         (Some(first), _, _) if is_separator(first) => true,
@@ -121,8 +125,23 @@ fn is_absolute(path: &str) -> bool {
     }
 }
 
-/// Resolves `.` and `..`, unifies separators and drops a trailing separator, except at a drive or share root.
+/// Resolves `.` and `..`, unifies separators and drops a trailing separator, except at a drive or share root (`/`
+/// outside Windows).
 fn normalize(path: &str) -> Option<String> {
+    if !cfg!(windows) {
+        // Lexically, as on Windows: `std::path::absolute` keeps `..` on other systems.
+        let mut parts = Vec::new();
+        for part in path.split('/') {
+            match part {
+                "" | "." => {}
+                ".." => {
+                    parts.pop();
+                }
+                part => parts.push(part),
+            }
+        }
+        return Some(format!("/{}", parts.join("/")));
+    }
     let full = std::path::absolute(path).ok()?;
     let full = full.to_str()?.replace('/', "\\");
     let trimmed = full.trim_end_matches('\\');
@@ -143,9 +162,9 @@ fn is_root(path: &str) -> bool {
         .is_some_and(|rest| rest.split('\\').filter(|part| !part.is_empty()).count() <= 2)
 }
 
-/// The folder's name, or the whole path for a drive root.
+/// The folder's name, or the whole path for a drive root (`/`).
 fn label_for(path: &str) -> String {
-    let without_drive = if path.as_bytes().get(1) == Some(&b':') {
+    let without_drive = if cfg!(windows) && path.as_bytes().get(1) == Some(&b':') {
         &path[2..]
     } else {
         path
@@ -205,7 +224,7 @@ mod tests {
 
         let library = add(&conn, &messy, &NoScans).unwrap();
 
-        assert_eq!(library.path, format!("{}\\sub", path_of(&dir)));
+        assert_eq!(library.path, dir.path().join("sub").to_str().unwrap());
         assert_eq!(library.label, "sub");
     }
 
@@ -213,7 +232,7 @@ mod tests {
     fn req_001_03_rejects_relative_and_missing_paths() {
         let conn = db::open_in_memory().unwrap();
         let dir = tempfile::tempdir().unwrap();
-        let missing = format!("{}\\missing", path_of(&dir));
+        let missing = dir.path().join("missing").to_str().unwrap().to_owned();
 
         for relative in ["photos", "C:photos", ""] {
             let error = add(&conn, relative, &NoScans).unwrap_err();
@@ -245,6 +264,7 @@ mod tests {
         ));
     }
 
+    #[cfg(windows)]
     #[test]
     fn req_001_04_rejects_duplicates_case_insensitively() {
         let conn = db::open_in_memory().unwrap();
@@ -294,6 +314,36 @@ mod tests {
         assert!(matches!(rescan(&conn, 999, &scans), Err(LibraryError::NotFound)));
     }
 
+    /// REQ-001-04: outside Windows, paths are case-sensitive: only the same path is a duplicate.
+    #[cfg(not(windows))]
+    #[test]
+    fn req_001_04_rejects_the_same_path_but_tells_letter_cases_apart() {
+        let conn = db::open_in_memory().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let (lower, upper) = (dir.path().join("photos"), dir.path().join("Photos"));
+        std::fs::create_dir(&lower).unwrap();
+        std::fs::create_dir(&upper).unwrap();
+        add(&conn, lower.to_str().unwrap(), &NoScans).unwrap();
+
+        let again = format!("{}/", lower.to_str().unwrap());
+        assert!(matches!(add(&conn, &again, &NoScans), Err(LibraryError::AlreadyAdded)));
+        add(&conn, upper.to_str().unwrap(), &NoScans).unwrap();
+        assert_eq!(list(&conn).unwrap().len(), 2);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn posix_paths_are_absolute_from_the_root_and_named_after_their_folder() {
+        assert!(is_absolute("/media/Photos") && !is_absolute("media/Photos") && !is_absolute("D:\\Photos"));
+        assert_eq!(normalize("/media//Photos/./2024/../").as_deref(), Some("/media/Photos"));
+        assert_eq!(normalize("/..").as_deref(), Some("/"));
+        assert_eq!(normalize("/a\\b").as_deref(), Some("/a\\b"));
+        assert_eq!(label_for("/media/Photos"), "Photos");
+        assert_eq!(label_for("/a\\b"), "a\\b");
+        assert_eq!(label_for("/"), "/");
+    }
+
+    #[cfg(windows)]
     #[test]
     fn labels_are_folder_names_or_the_whole_drive() {
         assert_eq!(label_for("D:\\Photos\\2024"), "2024");
@@ -302,6 +352,7 @@ mod tests {
         assert_eq!(label_for("\\\\nas\\photos\\"), "photos");
     }
 
+    #[cfg(windows)]
     #[test]
     fn roots_keep_their_separator() {
         assert_eq!(normalize("D:\\").as_deref(), Some("D:\\"));

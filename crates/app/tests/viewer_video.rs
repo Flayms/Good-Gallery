@@ -313,7 +313,7 @@ fn req_009_06_shows_frames_fitted_and_turned_upright() {
     // Turned clockwise: the frame's left (red) half is on top.
     harness.hover_at(pos2(450.0, 20.0));
     harness.run_steps(1);
-    harness.snapshot("viewer_video");
+    harness.snapshot(common::snapshot_name("viewer_video"));
 }
 
 /// REQ-009-06: without a player, or for a file it can't play, the preview stays and a message says so.
