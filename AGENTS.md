@@ -10,7 +10,6 @@ A desktop gallery for large photo and video libraries (50k–500k files). Media 
 | `docs/architecture.md`   | Architecture overview and the decisions behind it                                                                 |
 | `docs/design.md`         | Visual design: principles, tokens, surfaces, type, motion, writing. Read before any UI work                       |
 | `docs/glossary.md`       | Definitions of domain terms                                                                                       |
-| `docs/roadmap.md`        | Upcoming features, open issues and bug reports                                                                    |
 | `docs/known-pitfalls.md` | if you encounter problems or pitfalls add them here, either to avoid them in the future or for us to fix later on |
 | `docs/specs/README.md`   | Index of feature specs with their status, conventions and template                                                |
 
@@ -46,6 +45,14 @@ A desktop gallery for large photo and video libraries (50k–500k files). Media 
 - `spec.md`: Status, Goal, Requirements (Given/When/Then), Out of scope, Assumptions, Verification (REQ | test | result). No implementation details.
 - `plan.md`: Approach, Tasks (linked to REQs). Lasting decisions also go into `docs/architecture.md`.
 - Tests reference REQs at the start of their name (`fn req_007_01_filters_by_tag()`) or in a doc comment directly above them (`/// REQ-007-01, REQ-007-02: …`). `cargo xtask check-specs` enforces it.
+
+## Issues
+
+Features, bugs and tasks live in [GitHub issues](https://github.com/Flayms/Good-Gallery/issues) on the project board, written with the issue templates (Given/When/Then). Status: Inbox → Needs refinement → Ready → In progress → In review → Done.
+
+- Pick up only issues in **Ready**. Move them to **In progress** when you start, and close them from the PR (`Closes #N`).
+- An issue's acceptance criteria become the spec's REQs; from then on the spec is the source of truth.
+- Found something out of scope (a bug, a gap, a follow-up)? Open an issue instead of fixing it on the side. Unchecked tasks in a spec's `plan.md` stay there.
 
 ## Definition of Done
 

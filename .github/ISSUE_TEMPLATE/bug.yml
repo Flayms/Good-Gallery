@@ -1,0 +1,56 @@
+name: Bug
+description: The app does something a requirement says it shouldn't.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A bug is code that violates a REQ (`docs/specs/`). If no REQ covers the behavior, it is a spec gap: use the *Feature* template instead.
+  - type: input
+    id: req
+    attributes:
+      label: Requirement
+      description: The REQ the app violates.
+      placeholder: REQ-015-04
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What should happen. This becomes the regression test.
+      value: |
+        - **Given** …
+        - **When** …
+        - **Then** …
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual
+      description: What happens instead. Logs, screenshots, measurements.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a library with …
+        2. …
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: App version or commit.
+      placeholder: v0.1.2
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - Windows
+        - Linux
+        - macOS

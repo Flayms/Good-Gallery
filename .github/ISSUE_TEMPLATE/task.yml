@@ -1,0 +1,26 @@
+name: Task
+description: Work that doesn't change what the app does — tests, tooling, measurements, manual checks, docs, repository settings.
+labels: [task]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What needs doing and why.
+    validations:
+      required: true
+  - type: textarea
+    id: done-when
+    attributes:
+      label: Done when
+      value: |
+        - **Given** …
+        - **When** …
+        - **Then** …
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Context, links, dependencies (`depends on #N`).
