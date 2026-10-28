@@ -1,0 +1,57 @@
+name: Feature
+description: Something new the app should do, or a change to what it does.
+labels: [feature]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Write it like a spec (`docs/specs/README.md`): what and why, no implementation details. Use domain terms from `docs/glossary.md`. Unclear parts go under *Open questions*; the issue stays in *Needs refinement* until they are answered.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: Who benefits and why, in one paragraph.
+    validations:
+      required: true
+  - type: textarea
+    id: criteria
+    attributes:
+      label: Acceptance criteria
+      description: One block per behavior. They become REQs in the spec.
+      value: |
+        - **Given** …
+        - **When** …
+        - **Then** …
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+  - type: textarea
+    id: open-questions
+    attributes:
+      label: Open questions
+      description: Decisions to make before work can start.
+  - type: input
+    id: spec
+    attributes:
+      label: Spec
+      description: The spec this extends, or "new", and REQs it touches.
+      placeholder: extends 009-media-viewer (REQ-009-02)
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Tier
+      description: See AGENTS.md. Tier 3 needs an approved plan.md before implementing.
+      options:
+        - Not sure
+        - 2 · small feature or spec gap (spec.md first)
+        - 3 · large or architectural (spec.md + plan.md, wait for approval)
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Context, links, dependencies (`depends on #N`), screenshots.

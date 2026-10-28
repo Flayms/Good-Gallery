@@ -1,6 +1,6 @@
 # Specs
 
-One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and `plan.md` (how: approach, deviations, tasks; open tasks are unchecked). Workflow and tiers: see [AGENTS.md](../../AGENTS.md). Terms: see [glossary](../glossary.md). Open issues across specs are collected in [docs/roadmap.md](../roadmap.md).
+One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and `plan.md` (how: approach, deviations, tasks; open tasks are unchecked). Workflow and tiers: see [AGENTS.md](../../AGENTS.md). Terms: see [glossary](../glossary.md). Open work across specs is tracked in [GitHub issues](https://github.com/Flayms/Good-Gallery/issues).
 
 | Spec                                                     | Area                                                             | Status      |
 | -------------------------------------------------------- | ---------------------------------------------------------------- | ----------- |

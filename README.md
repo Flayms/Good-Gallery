@@ -64,7 +64,7 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 - [docs/architecture.md](docs/architecture.md): architecture and decisions
 - [docs/glossary.md](docs/glossary.md): domain terms
 - [docs/specs/](docs/specs/): feature specs and their plans
-- [docs/roadmap.md](docs/roadmap.md): upcoming features and open issues
+- [Issues](https://github.com/Flayms/Good-Gallery/issues): upcoming features, bugs and tasks
 - [AGENTS.md](AGENTS.md): working guidelines for coding agents
 
 ## License
