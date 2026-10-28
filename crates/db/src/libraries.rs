@@ -63,14 +63,16 @@ pub fn get(conn: &Connection, id: i64) -> Result<Option<Library>> {
     Ok(conn.query_row(&sql, [id], from_row).optional()?)
 }
 
-/// The library with this path in any letter case (Windows paths are case-insensitive, beyond ASCII too, so this
-/// compares in Rust instead of with SQLite's ASCII-only `lower()`). There are few libraries.
+/// The library with this path, on Windows in any letter case (Windows paths are case-insensitive, beyond ASCII too, so
+/// this compares in Rust instead of with SQLite's ASCII-only `lower()`). Other systems' paths are case-sensitive
+/// (REQ-001-04). There are few libraries.
 pub fn find_by_path(conn: &Connection, path: &str) -> Result<Option<i64>> {
-    let wanted = path.to_lowercase();
+    let fold = |path: String| if cfg!(windows) { path.to_lowercase() } else { path };
+    let wanted = fold(path.to_owned());
     let mut stmt = conn.prepare_cached("SELECT id, path FROM library_roots")?;
     let mut rows = stmt.query([])?;
     while let Some(row) = rows.next()? {
-        if row.get::<_, String>(1)?.to_lowercase() == wanted {
+        if fold(row.get(1)?) == wanted {
             return Ok(Some(row.get(0)?));
         }
     }
@@ -116,6 +118,7 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
     #[test]
     fn finds_paths_in_any_letter_case() {
         let conn = crate::open_in_memory().unwrap();
@@ -125,12 +128,24 @@ mod tests {
         assert_eq!(find_by_path(&conn, "d:\\other").unwrap(), None);
     }
 
+    #[cfg(windows)]
     #[test]
     fn req_001_04_finds_paths_in_any_letter_case_beyond_ascii() {
         let conn = crate::open_in_memory().unwrap();
         let library = insert(&conn, "D:\\Fotos\\Ärger", "Ärger", LibraryStatus::Online).unwrap();
 
         assert_eq!(find_by_path(&conn, "d:\\fotos\\ärger").unwrap(), Some(library.id));
+    }
+
+    /// REQ-001-04: outside Windows, `/media/Photos` and `/media/photos` are different folders.
+    #[cfg(not(windows))]
+    #[test]
+    fn req_001_04_finds_only_the_same_path_outside_windows() {
+        let conn = crate::open_in_memory().unwrap();
+        let library = insert(&conn, "/media/Photos", "Photos", LibraryStatus::Online).unwrap();
+
+        assert_eq!(find_by_path(&conn, "/media/Photos").unwrap(), Some(library.id));
+        assert_eq!(find_by_path(&conn, "/media/photos").unwrap(), None);
     }
 
     #[test]

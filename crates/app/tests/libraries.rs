@@ -89,7 +89,12 @@ fn req_001_04_rejects_a_duplicate_in_another_letter_case() {
     harness.state_mut().add_library(path.clone());
     settle(&mut harness);
 
-    harness.state_mut().settings_page.path_input = path.to_lowercase();
+    // Windows paths are case-insensitive; on Linux the same path, written differently, is the duplicate.
+    harness.state_mut().settings_page.path_input = if cfg!(windows) {
+        path.to_lowercase()
+    } else {
+        format!("{path}/")
+    };
     harness.run_steps(1);
     harness.get_by_label("Add").click();
     settle(&mut harness);
@@ -168,7 +173,7 @@ fn req_001_07_lists_libraries_with_status_path_and_last_indexed_time() {
         app::format::medium_date_time(1751433120000)
     ));
     harness.get_by_label("\\\\nas\\archive");
-    harness.snapshot("settings_libraries");
+    harness.snapshot(common::snapshot_name("settings_libraries"));
 }
 
 #[test]

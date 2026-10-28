@@ -1382,8 +1382,8 @@ const BAR_BUTTONS: [(BarButton, Icon, &str, &str); 4] = [
     (
         BarButton::ShowInExplorer,
         Icon::FolderOpen,
-        "Show in Explorer",
-        "Show in Explorer",
+        crate::state::SHOW_IN_FOLDER,
+        crate::state::SHOW_IN_FOLDER,
     ),
     (BarButton::Info, Icon::Info, "Info", "Info (i)"),
     (

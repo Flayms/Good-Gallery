@@ -3,20 +3,32 @@
 use eframe::egui;
 use std::path::{Path, PathBuf};
 
-/// The data folder's name in `%APPDATA%` for the packaged app (the `packaged` feature, set by `cargo xtask dist`): the
+/// The data folder's name in `%APPDATA%` (Linux: the XDG data home) for the packaged app (the `packaged` feature, set by `cargo xtask dist`): the
 /// folder every earlier version used, so an update opens the existing index and thumbnail cache as they are
 /// (REQ-001-08, REQ-001-09).
 pub const PACKAGED_DATA_FOLDER: &str = "good-gallery";
 /// Other builds (`cargo run`, also `--release`) keep their own, so development never touches the user's real index.
 pub const DEVELOPMENT_DATA_FOLDER: &str = "good-gallery-rust";
 
-/// The data folder below `appdata` (`%APPDATA%`) for the packaged app or a development build.
-pub fn default_data_dir(appdata: &Path, packaged: bool) -> PathBuf {
-    appdata.join(if packaged {
+/// The data folder below `base` ([`data_home`]) for the packaged app or a development build.
+pub fn default_data_dir(base: &Path, packaged: bool) -> PathBuf {
+    base.join(if packaged {
         PACKAGED_DATA_FOLDER
     } else {
         DEVELOPMENT_DATA_FOLDER
     })
+}
+
+/// The folder the data folder lies in, from the environment variable `get` returns: `%APPDATA%` on Windows; on Linux
+/// `$XDG_DATA_HOME` if it is absolute, else `$HOME/.local/share`, as the XDG Base Directory spec says (REQ-018-02).
+pub fn data_home(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> Option<PathBuf> {
+    if cfg!(windows) {
+        return get("APPDATA").map(PathBuf::from);
+    }
+    get("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| get("HOME").map(|home| Path::new(&home).join(".local/share")))
 }
 
 /// The log file's folder in the data folder.
@@ -60,6 +72,32 @@ mod tests {
         let appdata = Path::new(r"C:\Users\someone\AppData\Roaming");
         assert_eq!(default_data_dir(appdata, true), appdata.join("good-gallery"));
         assert_eq!(default_data_dir(appdata, false), appdata.join("good-gallery-rust"));
+    }
+
+    /// REQ-018-02: Linux keeps the data folder in the XDG data home.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn req_018_02_the_data_folder_lies_in_the_xdg_data_home() {
+        let env = |vars: &'static [(&'static str, &'static str)]| {
+            move |name: &str| vars.iter().find(|(key, _)| *key == name).map(|(_, value)| value.into())
+        };
+        let home = env(&[("HOME", "/home/someone")]);
+        assert_eq!(data_home(home), Some(PathBuf::from("/home/someone/.local/share")));
+        let xdg = env(&[("HOME", "/home/someone"), ("XDG_DATA_HOME", "/data")]);
+        assert_eq!(data_home(xdg), Some(PathBuf::from("/data")));
+        // The spec says relative paths are invalid and to be ignored.
+        let relative = env(&[("HOME", "/home/someone"), ("XDG_DATA_HOME", "data")]);
+        assert_eq!(data_home(relative), Some(PathBuf::from("/home/someone/.local/share")));
+        assert_eq!(data_home(env(&[])), None);
+        let base = data_home(home).unwrap();
+        assert_eq!(
+            default_data_dir(&base, true),
+            Path::new("/home/someone/.local/share/good-gallery")
+        );
+        assert_eq!(
+            default_data_dir(&base, false),
+            Path::new("/home/someone/.local/share/good-gallery-rust")
+        );
     }
 
     #[test]

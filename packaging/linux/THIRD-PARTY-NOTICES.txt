@@ -1,0 +1,15 @@
+Good Gallery is free software under the GNU General Public License version 3 (LICENSE.txt).
+Source code: https://github.com/Flayms/Good-Gallery
+
+It runs these programs from your system as separate helper programs (they don't come with it):
+
+exiftool: reads the metadata of photos and videos. https://exiftool.org
+FFmpeg: renders video thumbnails and AVIF images. https://ffmpeg.org
+libmpv: plays videos. https://mpv.io
+
+Built into good-gallery:
+
+Atkinson Hyperlegible Next, the typeface. Copyright the Braille Institute of America.
+  License: SIL Open Font License 1.1.
+Lucide icons. License: ISC.
+Rust crates as listed in the source's Cargo.lock, under their licenses (mostly MIT and Apache-2.0).

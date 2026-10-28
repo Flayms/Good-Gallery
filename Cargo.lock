@@ -2380,6 +2380,7 @@ dependencies = [
  "fast_image_resize",
  "image",
  "jpeg-decoder",
+ "libc",
  "regex",
  "serde_json",
  "tempfile",

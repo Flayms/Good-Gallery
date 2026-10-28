@@ -303,23 +303,50 @@ fn create_library(dir: &Path, exiftool: &Path, ffmpeg: &Path, scratch: &Path) ->
     Ok(())
 }
 
-/// A drive letter that isn't in use, mapped to `dir` until dropped.
-struct Subst(String);
+/// A short path for the demo library, so the screenshots show `P:\\Photos` (Windows: a drive letter that isn't in use,
+/// mapped with `subst`) or `/tmp/Photos` (elsewhere: a symlink), until dropped.
+struct ShortPath(PathBuf);
 
-impl Subst {
+impl ShortPath {
+    #[cfg(windows)]
     fn new(dir: &Path) -> anyhow::Result<Self> {
         let letter = ('P'..='Z')
             .map(|letter| format!("{letter}:"))
             .find(|drive| !Path::new(&format!("{drive}\\")).exists())
             .context("no free drive letter for subst")?;
         crate::process::run_command(Command::new("subst").arg(&letter).arg(dir))?;
-        Ok(Self(letter))
+        std::fs::create_dir_all(dir.join("Photos"))?;
+        Ok(Self(PathBuf::from(format!("{letter}\\Photos"))))
+    }
+
+    #[cfg(not(windows))]
+    fn new(dir: &Path) -> anyhow::Result<Self> {
+        let link = std::env::temp_dir().join("Photos");
+        if link.symlink_metadata().is_ok() {
+            bail!("{} exists; remove it to take screenshots", link.display());
+        }
+        let photos = dir.join("Photos");
+        std::fs::create_dir_all(&photos)?;
+        std::os::unix::fs::symlink(&photos, &link)?;
+        Ok(Self(link))
     }
 }
 
-impl Drop for Subst {
+impl Drop for ShortPath {
     fn drop(&mut self) {
-        let _ = Command::new("subst").arg(&self.0).arg("/D").status();
+        if cfg!(windows) {
+            let drive = self
+                .0
+                .parent()
+                .unwrap_or(&self.0)
+                .as_os_str()
+                .to_string_lossy()
+                .trim_end_matches('\\')
+                .to_owned();
+            let _ = Command::new("subst").arg(drive).arg("/D").status();
+        } else {
+            let _ = std::fs::remove_file(&self.0);
+        }
     }
 }
 
@@ -357,11 +384,12 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         }
         std::fs::create_dir_all(dir)?;
     }
-    let drive = Subst::new(&drive_dir)?;
-    let library = format!("{}\\Photos", drive.0);
-    create_library(Path::new(&library), &exiftool, &ffmpeg, &scratch)?;
+    // Kept until the end: dropping it removes the short path.
+    let short_path = ShortPath::new(&drive_dir)?;
+    let library = short_path.0.clone();
+    create_library(&library, &exiftool, &ffmpeg, &scratch)?;
     let index = data.join("gallery.db");
-    crate::process::index_library(exiftool, Path::new(&library), &index, "Photos")?;
+    crate::process::index_library(exiftool, &library, &index, "Photos")?;
 
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     if !Command::new(cargo)
@@ -372,8 +400,10 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     {
         bail!("building the app failed");
     }
-    let app = root.join(r"target\debug\app.exe");
-    let out = root.join(r"docs\screenshots");
+    let app = root
+        .join("target/debug")
+        .join(if cfg!(windows) { "app.exe" } else { "app" });
+    let out = root.join("docs/screenshots");
     std::fs::create_dir_all(&out)?;
     // A first run renders the thumbnails, so the screenshots don't catch placeholders.
     screenshot(&app, &data, &scratch.join("warm-up.png"), &[])?;

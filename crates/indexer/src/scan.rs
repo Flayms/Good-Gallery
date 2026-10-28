@@ -703,7 +703,8 @@ mod tests {
     fn set_mtime(path: &Path, ms: i64) {
         let time = std::time::UNIX_EPOCH + Duration::from_millis(ms as u64);
         let mut options = fs::File::options();
-        options.write(true);
+        // Other systems can't open folders for writing, and setting the times of a file one owns needs no write access.
+        options.read(true).write(cfg!(windows));
         #[cfg(windows)]
         {
             use std::os::windows::fs::OpenOptionsExt;
