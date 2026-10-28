@@ -47,7 +47,7 @@ One part: about ten tasks, most of them tooling outside the app.
 - [x] 6. `xtask dist`: staging layout (test against the helper lookup), portable zip, NSIS installer (REQ-014-08)
 - [x] 7. Build the packages locally; silent install, run with a copy of the real index, uninstall keeps the data folder
 - [x] 8. `xtask screenshots`; README rewritten with install, features and screenshots
-- [ ] 9. Release dry run on this repository
+- [x] 9. Release dry run on this repository
 - [x] 10. Docs: spec statuses, verification tables, architecture, pitfalls, progress
 
 ## Exit criteria
