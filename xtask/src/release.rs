@@ -207,8 +207,9 @@ pub struct Tools {
 impl Tools {
     /// git-cliff with this repository's `cliff.toml`, and the cargo that runs xtask.
     pub fn find() -> Result<Self, ReleaseError> {
-        let git_cliff = find_git_cliff()
-            .ok_or_else(|| error("git-cliff wasn't found. Install it (cargo install git-cliff) or set GIT_CLIFF."))?;
+        let git_cliff = find_git_cliff().ok_or_else(|| {
+            error("git-cliff wasn't found. Install it (cargo install --locked git-cliff@2.14.2) or set GIT_CLIFF.")
+        })?;
         Ok(Self {
             git_cliff,
             config: Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("cliff.toml"),
