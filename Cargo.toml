@@ -56,6 +56,12 @@ unsafe_code = "deny"
 [workspace.lints.clippy]
 dbg_macro = "warn"
 
+# Full debug info makes target/ huge; line tables keep file:line in backtraces.
+[profile.dev]
+debug = "line-tables-only"
+
 # Decoding and layout are slow without optimizations; keep dependencies optimized in dev builds.
+# Nobody steps through dependencies in a debugger, so they get no debug info.
 [profile.dev.package."*"]
 opt-level = 3
+debug = false
