@@ -13,6 +13,7 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 - **Given** a commit pushed to `main`, or a pull request
 - **When** CI runs
 - **Then** it checks the formatting, runs the linter (clippy), the spec check and all tests including the UI tests, and the run fails if any of them fails
+- **And** a release commit (`chore(release): vX.Y.Z`) pushed to `main` isn't checked twice: its version tag's release run (REQ-014-08) checks it
 
 ### REQ-014-02 · Checks gate merges
 
@@ -82,7 +83,7 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 
 | REQ        | Test                                                                                       | Result  |
 | ---------- | ------------------------------------------------------------------------------------------ | ------- |
-| REQ-014-01 | `xtask/tests/workflows.rs` › ci_runs_every_check_on_main_and_pull_requests (the workflow itself runs on GitHub) | pass |
+| REQ-014-01 | `xtask/tests/workflows.rs` › ci_runs_every_check_on_main_and_pull_requests, ci_leaves_release_commits_to_the_release_run (the workflow itself runs on GitHub) | pass |
 | REQ-014-02 | — (branch protection rule in the repository settings; set up by the user) | no test |
 | REQ-014-03 | `xtask/src/release.rs` › req_014_03_derives_the_next_version_from_the_commits | pass |
 | REQ-014-04 | `xtask/src/release.rs` › req_014_04_parses_overrides, req_014_04_overrides_the_bump_or_the_version | pass |
