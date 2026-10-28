@@ -48,8 +48,7 @@ pub struct Fixture {
 
 impl Fixture {
     pub fn new() -> Self {
-        // Dates as in the specs' examples, whatever the machine's locale.
-        app::format::set_locale("en-GB");
+        pin_dates();
         Self {
             scans: Arc::default(),
             picker: Arc::default(),
@@ -75,13 +74,19 @@ impl Fixture {
     }
 }
 
+/// Dates as in the specs' examples, whatever the machine's locale and time zone.
+fn pin_dates() {
+    app::format::set_locale("en-GB");
+    domain::time_zone::set_fixed(chrono::FixedOffset::east_opt(0));
+}
+
 pub fn harness(state: AppState) -> Harness<'static, AppState> {
     harness_with_step(state, 0.25)
 }
 
 /// A harness whose steps advance time by `step_dt` seconds (kittest's default is 0.25 s, too slow for double-clicks).
 pub fn harness_with_step(state: AppState, step_dt: f32) -> Harness<'static, AppState> {
-    app::format::set_locale("en-GB");
+    pin_dates();
     Harness::builder()
         .with_size([900.0, 600.0])
         .with_step_dt(step_dt)

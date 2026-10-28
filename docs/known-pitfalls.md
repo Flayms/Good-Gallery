@@ -31,6 +31,7 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 ## Visual checks
 
 * **Screenshot of the real app:** `cargo run -p app -- --screenshot <file.png>` renders 3 frames, saves the window and exits. Save into the scratchpad, then look at the PNG. Snapshot tests: `cargo test -p app`; `UPDATE_SNAPSHOTS=1` rewrites `crates/app/tests/snapshots/*.png` (check the new PNG before committing it; `*.new.png` / `*.diff.png` are ignored).
+* **Snapshots must not depend on the machine.** `tests/common` pins the locale (`format::set_locale`) and the time zone (`domain::time_zone::set_fixed`, UTC) for every harness. Go through `domain::time_zone` instead of `chrono::Local` for anything shown, grouped or searched by day, or snapshots taken in Europe fail on the UTC CI runner.
 
 ## libmpv
 

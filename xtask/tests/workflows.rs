@@ -30,7 +30,7 @@ fn ci_runs_every_check_on_pushes_and_pull_requests() {
         "cargo fmt --all --check",
         "cargo clippy --workspace --all-targets -- -D warnings",
         "cargo xtask check-specs",
-        "cargo test --workspace",
+        "cargo test --workspace --no-fail-fast",
     ] {
         assert!(commands.contains(&check), "ci.yml doesn't run {check}");
     }

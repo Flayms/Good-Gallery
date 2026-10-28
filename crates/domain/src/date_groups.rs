@@ -1,6 +1,7 @@
 //! Date groups (spec 016): runs of consecutive gallery items whose sort date falls on the same local calendar day.
 
-use chrono::{DateTime, Local, NaiveDate, TimeZone};
+use crate::time_zone;
+use chrono::NaiveDate;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DateGroup {
@@ -14,15 +15,12 @@ pub struct DateGroup {
 
 /// The local day of `ms` (milliseconds since the Unix epoch) and where it starts and ends, in ms.
 fn local_day(ms: i64) -> (NaiveDate, i64, i64) {
-    let day = DateTime::from_timestamp_millis(ms)
-        .unwrap_or_default()
-        .with_timezone(&Local)
-        .date_naive();
+    let day = time_zone::wall_clock(ms).unwrap_or_default().date();
     // The earliest local time of the day: midnight, or later if a daylight saving gap swallows it.
     let start_of = |day: NaiveDate| {
         (0..24)
-            .find_map(|hour| Local.from_local_datetime(&day.and_hms_opt(hour, 0, 0)?).earliest())
-            .map_or(i64::MIN, |time| time.timestamp_millis())
+            .find_map(|hour| time_zone::earliest(&day.and_hms_opt(hour, 0, 0)?))
+            .unwrap_or(i64::MIN)
     };
     let next = day.succ_opt().unwrap_or(day);
     (day, start_of(day), start_of(next))
@@ -59,6 +57,7 @@ pub fn date_groups(dates: &[i64], is_video: impl Fn(usize) -> bool) -> Vec<DateG
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{Local, TimeZone};
 
     fn local(y: i32, m: u32, d: u32, h: u32, min: u32) -> i64 {
         Local

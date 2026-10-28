@@ -47,7 +47,8 @@ jobs:
       - name: Fetch exiftool, ffmpeg and libmpv
         shell: pwsh
         run: ./packaging/fetch-helpers.ps1
-      - run: cargo test --workspace
+      # Every test binary runs, so the uploaded diffs show all failing snapshots, not just the first binary's.
+      - run: cargo test --workspace --no-fail-fast
         env:
           GOOD_GALLERY_EXIFTOOL: ${{ github.workspace }}\target\helpers\exiftool\exiftool.exe
           GOOD_GALLERY_FFMPEG: ${{ github.workspace }}\target\helpers\ffmpeg\ffmpeg.exe

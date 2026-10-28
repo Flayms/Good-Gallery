@@ -2,7 +2,8 @@
 
 use crate::media::MediaKind;
 use crate::tags::normalize_tag;
-use chrono::{Local, NaiveDate, TimeZone};
+use crate::time_zone;
+use chrono::NaiveDate;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SortBy {
@@ -84,11 +85,8 @@ impl Default for GallerySearch {
 /// UTC midnight if the time zone has none at all).
 fn start_of(day: NaiveDate) -> i64 {
     (0..24)
-        .find_map(|hour| Local.from_local_datetime(&day.and_hms_opt(hour, 0, 0)?).earliest())
-        .map_or_else(
-            || day.and_time(chrono::NaiveTime::MIN).and_utc().timestamp_millis(),
-            |time| time.timestamp_millis(),
-        )
+        .find_map(|hour| time_zone::earliest(&day.and_hms_opt(hour, 0, 0)?))
+        .unwrap_or_else(|| day.and_time(chrono::NaiveTime::MIN).and_utc().timestamp_millis())
 }
 
 impl GallerySearch {
@@ -170,6 +168,7 @@ impl GallerySearch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{Local, TimeZone};
 
     #[test]
     fn req_007_05_req_008_06_adds_moves_and_removes_tags_case_insensitively() {

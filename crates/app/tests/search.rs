@@ -205,7 +205,7 @@ fn req_007_08_sets_a_date_range_from_the_filters() {
     harness.get_by_label("Set from day").click();
     settle(&mut harness);
     let from = search(&harness).from.expect("a start day");
-    assert_eq!(from, chrono::Local::now().date_naive());
+    assert_eq!(from, domain::time_zone::today());
     harness.get_by_label(&format!("From {}", from.format("%-d %b %Y")));
     harness.get_by_role_and_label(Role::Button, "Clear date range").click();
     settle(&mut harness);
