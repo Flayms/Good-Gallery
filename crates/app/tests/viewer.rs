@@ -595,7 +595,10 @@ fn panel_chip<'a>(harness: &'a App, name: &'a str) -> egui_kittest::Node<'a> {
 fn mask_location(harness: &mut App) {
     let location = harness.get_by_label_contains("photos\\").rect();
     let right = harness.ctx.content_rect().right();
-    harness.mask(egui::Rect::from_min_max(location.min, egui::pos2(right, location.max.y)));
+    harness.mask(egui::Rect::from_min_max(
+        location.min,
+        egui::pos2(right, location.max.y),
+    ));
 }
 
 fn search(harness: &App) -> domain::search::GallerySearch {
