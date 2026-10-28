@@ -108,13 +108,13 @@ pub fn caption_buttons(ctx: &egui::Context) {
 }
 
 /// Width of the resize handles along the window's edges, and the length of the corner handles along each edge.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 const EDGE: f32 = 4.0;
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 const CORNER: f32 = 12.0;
 
 /// Where the window can be resized from: the corners, then the edges between them (REQ-018-04).
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 pub fn resize_handles_in(screen: Rect) -> [(egui::ResizeDirection, Rect); 8] {
     use egui::ResizeDirection as D;
     let (l, r, t, b) = (screen.left(), screen.right(), screen.top(), screen.bottom());
@@ -132,7 +132,7 @@ pub fn resize_handles_in(screen: Rect) -> [(egui::ResizeDirection, Rect); 8] {
 }
 
 /// A widget covering `rect` above the window's content at `order`, so presses on it don't reach the controls below.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 fn on_top(ctx: &egui::Context, id: egui::Id, rect: Rect, order: egui::Order, sense: egui::Sense) -> egui::Response {
     let response = egui::Area::new(id)
         .order(order)
@@ -146,7 +146,7 @@ fn on_top(ctx: &egui::Context, id: egui::Id, rect: Rect, order: egui::Order, sen
 }
 
 /// Handles along the window's edges that start a resize by the compositor; none while the window is maximized.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 fn resize_handles(ctx: &egui::Context) {
     use egui::{CursorIcon as C, ResizeDirection as D};
     let (maximized, fullscreen) = ctx.input(|input| {
@@ -187,7 +187,7 @@ fn resize_handles(ctx: &egui::Context) {
 
 /// GNOME-style caption buttons: minimize, maximize or restore, close, each a faint circle that brightens on hover and
 /// press (REQ-018-04).
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 fn round_buttons(ctx: &egui::Context) {
     let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
     for (i, rect) in button_rects(ctx.content_rect()).into_iter().enumerate() {
@@ -532,6 +532,7 @@ mod tests {
 
     /// A press and release at `at` over a window whose content is one big button, with the Linux window chrome on
     /// top; the commands sent and whether the content got the click.
+    #[cfg(target_os = "linux")]
     fn click_linux_chrome(at: Pos2, maximized: bool) -> (Vec<egui::ViewportCommand>, bool) {
         let ctx = egui::Context::default();
         let mut content_clicked = false;
@@ -600,6 +601,7 @@ mod tests {
 
     /// REQ-018-04: the round caption buttons minimize, maximize or restore and close the window, and the content below
     /// doesn't get the click.
+    #[cfg(target_os = "linux")]
     #[test]
     fn req_018_04_round_caption_buttons_control_the_window() {
         use egui::ViewportCommand as C;
@@ -620,6 +622,7 @@ mod tests {
 
     /// REQ-018-04: pressing the window's edges and corners hands the resize to the compositor, except while the window
     /// is maximized; inside the window the content gets the press.
+    #[cfg(target_os = "linux")]
     #[test]
     fn req_018_04_edges_and_corners_resize_the_window() {
         use egui::ResizeDirection as D;
@@ -645,6 +648,7 @@ mod tests {
     }
 
     /// REQ-018-04: a menu reaching the window's edge keeps its clicks; the resize handles lie below it.
+    #[cfg(target_os = "linux")]
     #[test]
     fn req_018_04_menus_at_the_edge_cover_the_resize_handles() {
         let ctx = egui::Context::default();
