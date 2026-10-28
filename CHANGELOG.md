@@ -1,6 +1,17 @@
 # Changelog
 
 All notable changes to Good Gallery. Versions follow [Semantic Versioning](https://semver.org), entries are generated from [Conventional Commits](https://www.conventionalcommits.org).
+## [0.1.2](https://github.com/Flayms/Good-Gallery/releases/tag/v0.1.2) · 2026-10-28
+
+### 🐛 Bug fixes
+
+- **ci:** Install NSIS before building the installer (#7) ([`3ac5b06`](https://github.com/Flayms/Good-Gallery/commit/3ac5b06938abd2185501bfe260853aa35b307194))
+
+### 🔧 Maintenance
+
+- Run checks on pushes to main and pull requests only (#6) ([`afe1ff5`](https://github.com/Flayms/Good-Gallery/commit/afe1ff5125bea40a607006fd5eafd9bba8393907))
+
+**Full changelog:** [v0.1.1...v0.1.2](https://github.com/Flayms/Good-Gallery/compare/v0.1.1...v0.1.2)
 ## [0.1.1](https://github.com/Flayms/Good-Gallery/releases/tag/v0.1.1) · 2026-10-28
 
 ### 🐛 Bug fixes
