@@ -735,7 +735,7 @@ mod tests {
         // Exactly the size of one rendered pair: full after the first, but not over the cap.
         let fixture = Fixture::new(10);
         let requested = fixture.insert("requested.jpg", 1);
-        fixture.insert("first.jpg", 3);
+        let first = fixture.insert("first.jpg", 3);
         fixture.insert("second.jpg", 2);
         fixture
             .conn
@@ -747,6 +747,17 @@ mod tests {
         assert_eq!(fixture.cached_files(), 2, "only the first background item is stored");
         let states = fixture.states();
         assert_eq!([&states[0], &states[2]], [&ready("first.jpg"), &ready("second.jpg")]);
+        // Viewed an hour ago: mtimes are too coarse on some file systems to order writes milliseconds apart.
+        let cache = fixture.service.cache();
+        let paths = |media| {
+            let source = thumbs::thumb_source(&fixture.conn, media).unwrap().unwrap();
+            [400, 800].map(|width| cache.path(&source.key, width))
+        };
+        let an_hour_ago = std::time::SystemTime::now() - Duration::from_secs(60 * 60);
+        for path in paths(first) {
+            let file = std::fs::File::options().write(true).open(path).unwrap();
+            file.set_modified(an_hour_ago).unwrap();
+        }
 
         fixture.service.request(requested);
         assert_eq!(
@@ -756,10 +767,12 @@ mod tests {
                 stored: true
             }
         );
-        // Now over the cap, so eviction removes the least recently written files; the requested item's last written
-        // file is the newest of all.
-        let source = thumbs::thumb_source(&fixture.conn, requested).unwrap().unwrap();
-        assert!(fixture.service.cache().path(&source.key, 800).exists());
+        // Now over the cap, so eviction removes the least recently viewed files down to 90 %, room for one file. It
+        // waits for the eviction the write started, if any.
+        cache.evict();
+        assert!(paths(first).iter().all(|path| !path.exists()));
+        assert_eq!(fixture.cached_files(), 1);
+        assert!(paths(requested).iter().any(|path| path.exists()));
     }
 
     /// REQ-005-08: background passes go on until nothing is pending, beyond one batch.
