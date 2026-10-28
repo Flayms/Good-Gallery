@@ -1,9 +1,9 @@
-# Checks every commit and pull request (docs/specs/014-ci-release). The release workflow reuses this one.
+# Checks pushes to main and pull requests (docs/specs/014-ci-release). The release workflow reuses this one.
 name: CI
 
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
   workflow_call:
 
