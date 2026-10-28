@@ -257,16 +257,23 @@ fn rename_replacing(from: &Path, to: &Path) -> io::Result<()> {
     }
 }
 
+/// `<path>.<process id>-<n>.tmp`: unique among concurrent writes, and tells this process's writes from leftovers.
 fn temp_path(path: &Path) -> PathBuf {
     static NEXT: AtomicU64 = AtomicU64::new(0);
-    let unique = format!("{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed));
+    let unique = format!("{}{}", own_temp_prefix(), NEXT.fetch_add(1, Ordering::Relaxed));
     let mut name = path.as_os_str().to_owned();
-    name.push(format!(".{unique}{TMP_SUFFIX}"));
+    name.push(format!("{unique}{TMP_SUFFIX}"));
     PathBuf::from(name)
 }
 
-/// All cached thumbnails. At startup, temp files can only be leftovers of a crash and are removed.
+fn own_temp_prefix() -> String {
+    format!(".{}-", std::process::id())
+}
+
+/// All cached thumbnails. At startup, temp files of other processes can only be leftovers of a crash and are
+/// removed; this process's own are writes in progress (REQ-005-13).
 fn list(dir: &Path, remove_temp: bool) -> Vec<CachedFile> {
+    let own_temp = own_temp_prefix();
     let mut files = Vec::new();
     let mut folders = vec![dir.to_path_buf()];
     while let Some(folder) = folders.pop() {
@@ -279,8 +286,9 @@ fn list(dir: &Path, remove_temp: bool) -> Vec<CachedFile> {
             if file_type.is_dir() {
                 folders.push(path);
             } else if file_type.is_file() {
-                if path.as_os_str().to_string_lossy().ends_with(TMP_SUFFIX) {
-                    if remove_temp {
+                let name = path.as_os_str().to_string_lossy();
+                if name.ends_with(TMP_SUFFIX) {
+                    if remove_temp && !name.contains(&own_temp) {
                         let _ = std::fs::remove_file(&path);
                     }
                     continue;
@@ -416,6 +424,21 @@ mod tests {
         assert!(roomy.has_room());
     }
 
+    /// REQ-005-13: the startup walk removes leftovers of a crash, not the temp file of a write in progress.
+    #[test]
+    fn req_005_13_keeps_temp_files_of_writes_in_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = thumb_path(dir.path(), &key(), 400);
+        let in_progress = temp_path(&path);
+        std::fs::create_dir_all(in_progress.parent().unwrap()).unwrap();
+        std::fs::write(&in_progress, b"webp").unwrap();
+
+        let cache = ThumbCache::open(dir.path().into(), 100);
+        cache.wait_ready();
+
+        assert!(in_progress.exists());
+    }
+
     /// A thumbnail held open for a moment (as Defender does with new files) is still replaced.
     #[cfg(windows)]
     #[test]
@@ -454,8 +477,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cache = ThumbCache::open(dir.path().into(), 1000);
         let path = cache.path(&key(), 400);
-        cache.write(&path, &[0; 40]).unwrap();
+        // A walk still running could find the first write and count it twice (on purpose, see `store_walked`).
         cache.wait_ready();
+        cache.write(&path, &[0; 40]).unwrap();
         cache.write(&path, &[0; 50]).unwrap();
         cache.write(&path, &[0; 30]).unwrap();
         assert_eq!(cache.usage(), 30);
