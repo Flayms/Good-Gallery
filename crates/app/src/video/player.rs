@@ -1,8 +1,8 @@
 //! [`MpvPlayer`]: libmpv decodes (hardware decoding with copy-back), plays the audio and keeps A/V in sync. A render
 //! thread renders each frame with mpv's software renderer at the size the video takes on screen and, like thumbnails
 //! and originals, creates and fills the `wgpu::Texture` itself; the UI thread only draws it. Frames are timed to the
-//! display (`video-sync=display-resample`): the UI wakes the render thread once per presented frame (M0b). Without a
-//! wgpu render state (tests) frames go through egui's textures and are timed to mpv's clock.
+//! display (`video-sync=display-resample`): the UI wakes the render thread once per presented frame. Without a wgpu
+//! render state (tests) frames go through egui's textures and are timed to mpv's clock.
 
 use super::mpv::{Event, FrameBuffer, Mpv, SwRender};
 use super::{Playback, PlaybackState, VideoFrame};

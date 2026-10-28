@@ -1,7 +1,6 @@
-//! Thumbnail textures for the tiles (M0 spike, `docs/architecture.md`): worker threads read thumbnails from the
-//! cache, decode them with libwebp, build the mip chain and create the `wgpu::Texture` themselves; the UI thread only
-//! registers finished textures, within a time budget per frame. An LRU with a byte budget keeps GPU memory bounded
-//! (REQ-006-13).
+//! Thumbnail textures for the tiles (`docs/architecture.md`): worker threads read thumbnails from the cache, decode
+//! them with libwebp, build the mip chain and create the `wgpu::Texture` themselves; the UI thread only registers
+//! finished textures, within a time budget per frame. An LRU with a byte budget keeps GPU memory bounded (REQ-006-13).
 
 use eframe::egui::{self, TextureId};
 use eframe::egui_wgpu::{self, wgpu};
@@ -12,7 +11,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-/// Decode threads: more starve the UI thread and an integrated GPU (M0).
+/// Decode threads: more starve the UI thread and an integrated GPU.
 const WORKERS: usize = 4;
 /// UI-thread time per frame for registering finished textures.
 const REGISTER_BUDGET: Duration = Duration::from_millis(3);
@@ -357,7 +356,7 @@ fn work(
     }
 }
 
-/// libwebp decode to RGBA (3× faster than the `image` crate's decoder, M0).
+/// libwebp decode to RGBA (3× faster than the `image` crate's decoder).
 pub fn decode(data: &[u8]) -> Option<([u32; 2], Vec<u8>)> {
     let image = webp::Decoder::new(data).decode()?;
     let size = [image.width(), image.height()];

@@ -8,9 +8,9 @@ use std::time::Duration;
 const RETRIES: u32 = 3;
 const BASE_DELAY: Duration = Duration::from_millis(250);
 
-/// Errors retrying won't fix: missing files, access denied, wrong type, invalid names (the reference's `ENOENT`,
-/// `ENOTDIR`, `EISDIR`, `EACCES`, `EPERM`, `EINVAL`, `ENAMETOOLONG`). Anything else (busy, timeouts, connection resets,
-/// unknown network errors) is treated as a transient hiccup.
+/// Errors retrying won't fix: missing files, access denied, wrong type, invalid names (`ENOENT`, `ENOTDIR`, `EISDIR`,
+/// `EACCES`, `EPERM`, `EINVAL`, `ENAMETOOLONG`). Anything else (busy, timeouts, connection resets, unknown network
+/// errors) is treated as a transient hiccup.
 pub fn is_transient(error: &io::Error) -> bool {
     !matches!(
         error.kind(),
@@ -45,7 +45,7 @@ fn with_retry_delay<T>(cancel: &AtomicBool, base: Duration, f: &mut impl FnMut()
     }
 }
 
-/// Milliseconds since the epoch, truncated (as the reference's `Math.trunc(stats.mtimeMs)`).
+/// Milliseconds since the epoch, truncated (the unit the index stores).
 pub fn mtime_ms(metadata: &std::fs::Metadata) -> i64 {
     match metadata.modified() {
         Ok(time) => match time.duration_since(std::time::UNIX_EPOCH) {

@@ -1,5 +1,5 @@
-//! The gallery's view choices (spec 006, 016, 017) and what they show, stored as the Electron version stores them in
-//! `localStorage`: `gallery.view`, `gallery.groupByDay`, `gallery.tagIndicators`.
+//! The gallery's view choices (spec 006, 016, 017) and what they show, stored in the settings under `gallery.view`,
+//! `gallery.groupByDay` and `gallery.tagIndicators`.
 
 use crate::layout::TileView;
 use serde_json::{Value, json};

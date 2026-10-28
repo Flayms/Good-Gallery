@@ -1,4 +1,4 @@
-//! The search the gallery shows (spec 007): filters and sort order, as the Electron version keeps them in its URL.
+//! The search the gallery shows (spec 007): filters and sort order.
 
 use crate::media::MediaKind;
 use crate::tags::normalize_tag;

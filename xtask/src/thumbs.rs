@@ -1,6 +1,6 @@
-//! `cargo xtask thumbs --db <index> --cache <folder>`: how many of the index's rendered thumbnails this app finds in
-//! a thumbnail cache, e.g. the Electron version's (REQ-005-15). Opens the index read-only, so give it a copy of the
-//! real one anyway (the real data must never be opened in place).
+//! `cargo xtask thumbs --db <index> --cache <folder>`: how many of the index's rendered thumbnails this app finds in a
+//! thumbnail cache, e.g. one written by an earlier version (REQ-005-15). Opens the index read-only, so give it a copy
+//! of the real one anyway (the real data must never be opened in place).
 
 use anyhow::{Context, bail};
 use domain::thumbs::THUMB_WIDTHS;

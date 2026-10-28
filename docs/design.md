@@ -28,7 +28,7 @@ A personal archive of photos and videos, often on a NAS, browsed by one person w
 | Scrim           | `SCRIM`         | `rgb(0 0 0 / 0.5)`, blur 28px, saturate 120 %             | The whole window behind the viewer                           |
 | Raised          | `RAISED`        | `#2A2A2A`                                                 | Opaque fallback for both glass levels (Darkroom for the Scrim) |
 
-Glass is drawn by the app, not the OS: the tiles under a glass surface are rendered into an offscreen target at half resolution, blurred with a dual-Kawase chain and composited with saturation, tint and rounded corners in a wgpu paint callback (≈ 0.4 ms per surface, within 1–2 color levels of Chromium's `backdrop-filter`; see `docs/architecture.md`). What lies under glass is the frame's backdrop: the tiles the gallery drew and the solid surfaces (page, sidebar), without text, which the blur hides anyway. The viewer's chrome reuses the scrim's blur. `app::glass` holds the pass; menus and dialogs get it through `glass::panel` / `glass::behind_menu`.
+Glass is drawn by the app, not the OS: the tiles under a glass surface are rendered into an offscreen target at half resolution, blurred with a dual-Kawase chain and composited with saturation, tint and rounded corners in a wgpu paint callback (≈ 0.4 ms per surface; see `docs/architecture.md`). What lies under glass is the frame's backdrop: the tiles the gallery drew and the solid surfaces (page, sidebar), without text, which the blur hides anyway. The viewer's chrome reuses the scrim's blur. `app::glass` holds the pass; menus and dialogs get it through `glass::panel` / `glass::behind_menu`.
 
 Rules:
 
@@ -134,6 +134,6 @@ lucide, 16px, stroke 1.75 (in lucide's 24-unit grid, so it scales with the icon)
 | 2026-10-25 | Dark only                                                 | A light theme is out of scope for now. Tokens stay semantic so it can be added later.    |
 | 2026-10-25 | Glass over the scrolling gallery                         | Measured on 3 000 photos: no frame-time cost compared with an opaque toolbar (see `known-pitfalls.md`). |
 | 2026-10-25 | Glass bar at 0.72 and panel at 0.86 opacity               | Over a white photo: Paper on the bar 6.0:1, Mist on a Field on the bar 5.4:1 (on the bare bar only 3.3:1, hence the Field rule), Paper / Mist on the panel 8.9:1 / 4.8:1. |
-| 2026-10-26 | Same look, rebuilt in egui (Rust rewrite)                 | Tokens moved from `styles.css` to `crates/app/src/theme.rs`; glass is an own wgpu blur pass, approved from screenshots in M0. Mechanics changed, values didn't. |
+| 2026-10-26 | Same look, rebuilt in egui                                | Tokens live in `crates/app/src/theme.rs`; glass is an own wgpu blur pass, approved from screenshots. Mechanics changed, values didn't. |
 | 2026-10-28 | Glass blurs the recorded tiles, not the rendered frame     | A paint callback can't read egui's target mid-pass; tiles and solids are cheap to redraw at half resolution, and text vanishes under a 24–32 px blur anyway. |
 | 2026-10-28 | Dates in the user's locale through ICU4X                   | Medium dates differ per locale ("2 Jul 2025", "Jul 2, 2025", "02.07.2025"); Windows has no medium length. Counts keep English grouping for now. |

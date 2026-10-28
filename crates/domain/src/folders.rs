@@ -23,8 +23,8 @@ fn base_letters(text: &str) -> String {
         .to_lowercase()
 }
 
-/// Natural order: digit runs compare by value (`2` before `10`), everything else ignoring letter case and accents
-/// (the reference's `Intl.Collator` with `numeric` and base sensitivity); equal names fall back to code points.
+/// Natural order: digit runs compare by value (`2` before `10`), everything else ignoring letter case and accents;
+/// equal names fall back to code points.
 pub fn natural_cmp(a: &str, b: &str) -> Ordering {
     natural_base_cmp(&base_letters(a), &base_letters(b)).then_with(|| a.cmp(b))
 }

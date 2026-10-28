@@ -24,7 +24,6 @@ ManifestDPIAware true
 
 Name "${PRODUCT}"
 OutFile "${OUTFILE}"
-; Not the Electron version's folder (good-gallery), so both can be installed side by side.
 InstallDir "$LOCALAPPDATA\Programs\${PRODUCT}"
 InstallDirRegKey HKCU "${UNINSTALL_KEY}" "InstallLocation"
 RequestExecutionLevel user

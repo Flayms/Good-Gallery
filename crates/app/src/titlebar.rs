@@ -1,9 +1,9 @@
-//! Content in the title bar (REQ-013-02): the toolbar, the Settings header and the sidebar header take the place of
-//! the caption, and the native window controls stay. On Windows the native frame is kept (shadow, resizing, Aero
-//! snap) and a window subclass removes the caption (`WM_NCCALCSIZE`), answers the top resize edge and the caption
-//! buttons with their native hit-test codes (`WM_NCHITTEST`; `HTMAXBUTTON` makes Windows 11 show snap layouts) and
-//! runs them on release. The app draws the buttons itself (as Electron's `titleBarOverlay` does) and keeps their
-//! place free. Empty caption space takes drags in egui and hands them to Windows as a caption drag.
+//! Content in the title bar (REQ-013-02): the toolbar, the Settings header and the sidebar header take the place of the
+//! caption, and the native window controls stay. On Windows the native frame is kept (shadow, resizing, Aero snap) and
+//! a window subclass removes the caption (`WM_NCCALCSIZE`), answers the top resize edge and the caption buttons with
+//! their native hit-test codes (`WM_NCHITTEST`; `HTMAXBUTTON` makes Windows 11 show snap layouts) and runs them on
+//! release. The app draws the buttons itself and keeps their place free. Empty caption space takes drags in egui and
+//! hands them to Windows as a caption drag.
 //!
 //! All of the app's window `unsafe` is in this module. Other platforms keep their native caption.
 

@@ -1,5 +1,5 @@
-//! The thumbnail cache: WebP files in the layout of the Electron version (`src/indexer/thumb-cache.ts`), so its
-//! cache is read as is (REQ-005-15). Size-capped with LRU eviction by file mtime; reading a thumbnail bumps its mtime.
+//! The thumbnail cache: WebP files in the layout earlier versions wrote, so an existing cache is read as is
+//! (REQ-005-15). Size-capped with LRU eviction by file mtime; reading a thumbnail bumps its mtime.
 
 use domain::thumbs::ThumbKey;
 use sha1::{Digest, Sha1};
@@ -349,10 +349,10 @@ mod tests {
         assert!(name.ends_with(".webp") && name.len() == 40 + 5);
     }
 
-    /// REQ-005-15: the same path as the Electron version (hashes computed with Node's `crypto` over its
-    /// `JSON.stringify`), also for paths with quotes, backslashes, control characters and non-ASCII text.
+    /// REQ-005-15: the same path as in existing caches (hashes computed with Node's `crypto` over `JSON.stringify`),
+    /// also for paths with quotes, backslashes, control characters and non-ASCII text.
     #[test]
-    fn req_005_15_matches_the_electron_versions_cache_paths() {
+    fn req_005_15_matches_existing_cache_paths() {
         let dir = Path::new("cache");
         assert_eq!(
             thumb_path(dir, &key(), 400),

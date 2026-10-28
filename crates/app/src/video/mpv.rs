@@ -1,6 +1,6 @@
-//! A small binding of libmpv, loaded at runtime from `libmpv-2.dll` (M0b): the client API for commands and properties,
-//! and the software render API (`"sw"`), which the `libmpv2` crate doesn't wrap. All of the app's `unsafe` for video
-//! lives here.
+//! A small binding of libmpv, loaded at runtime from `libmpv-2.dll`: the client API for commands and properties, and
+//! the software render API (`"sw"`), which the `libmpv2` crate doesn't wrap. All of the app's `unsafe` for video lives
+//! here.
 
 #![allow(unsafe_code, reason = "FFI to libmpv")]
 

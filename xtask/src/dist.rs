@@ -80,7 +80,7 @@ fn zip(stage: &Path, out: &Path) -> anyhow::Result<()> {
     if out.exists() {
         std::fs::remove_file(out)?;
     }
-    crate::oracle::run_command(
+    crate::process::run_command(
         Command::new(tar)
             .arg("-a")
             .arg("-c")
@@ -160,7 +160,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
 
     if installer {
         let makensis = find_makensis().context("makensis wasn't found: install NSIS or set MAKENSIS")?;
-        crate::oracle::run_command(
+        crate::process::run_command(
             Command::new(makensis)
                 .arg("/V2")
                 .arg(format!("/DVERSION={version}"))

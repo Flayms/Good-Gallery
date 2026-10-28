@@ -126,7 +126,7 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 ## Assumptions
 
 - The OS settings for reduced transparency and reduced motion are Windows' _Transparency effects_ and _Animation effects_ (Settings › Accessibility › Visual effects); the app follows them while it runs.
-- Glass over the scrolling gallery keeps scrolling smooth on a typical laptop GPU: M0 measured ≈ 0.4 ms per glass surface on an integrated GPU.
+- Glass over the scrolling gallery keeps scrolling smooth on a typical laptop GPU: measured ≈ 0.4 ms per glass surface on an integrated GPU.
 - The placeholder of a media item represents its colors well enough to tint the viewer.
 
 ## Verification

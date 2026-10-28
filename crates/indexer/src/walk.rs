@@ -1,4 +1,4 @@
-//! Depth-first listing of a library, one folder at a time (the reference's `walk`).
+//! Depth-first listing of a library, one folder at a time.
 
 use crate::retry::{mtime_ms, with_retry};
 use domain::media::{MediaKind, is_ignored_dir, is_sidecar, media_kind};

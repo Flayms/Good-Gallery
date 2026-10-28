@@ -1,6 +1,5 @@
-//! Gallery layout (spec 006, 016): every tile and group header positioned up front, so the scroll length is exact
-//! and the tiles in view are found by binary search. A port of the Electron version's `gallery-layout.ts`,
-//! `justified.ts` and `masonry.ts`.
+//! Gallery layout (spec 006, 016): every tile and group header positioned up front, so the scroll length is exact and
+//! the tiles in view are found by binary search.
 
 /// Panoramas and tall strips are clamped, so a single tile can't dominate a column.
 const MIN_ASPECT: f64 = 0.3;

@@ -100,7 +100,7 @@ pub fn show(
         let mut value = position;
         let response = crate::widgets::slider(ui, seek_rect, &mut value, 0.0..=state.duration.max(0.0), 0.0, "Seek");
         if response.is_pointer_button_down_on() && response.changed() {
-            // Keyframe seeks while dragging, an exact one on release (M0b).
+            // Keyframe seeks while dragging, an exact one on release.
             if dragging.is_none_or(|at| (at - value).abs() > 0.05) {
                 control = Some(Control::Seek(value, false));
             }

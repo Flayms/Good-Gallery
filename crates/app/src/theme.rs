@@ -32,7 +32,7 @@ pub const SCROLLBAR_THUMB_HOVER: Color32 = Color32::from_rgba_premultiplied(102,
 pub struct Glass {
     pub color: Rgb,
     pub alpha: f32,
-    /// CSS `blur()` radius in points.
+    /// Blur radius in points.
     pub blur: f32,
     pub saturate: f32,
 }
@@ -415,7 +415,7 @@ mod tests {
     const WHITE: Opaque = Opaque([255.0; 3]);
     const BLACK: Opaque = Opaque([0.0; 3]);
 
-    /// Photo backgrounds from pure black to pure white, plus saturated colors (as the reference's token test).
+    /// Photo backgrounds from pure black to pure white, plus saturated colors.
     fn backdrops() -> Vec<Opaque> {
         let greys = (0..52).map(|step| Opaque([f64::from(step) * 5.0; 3]));
         let colors = [

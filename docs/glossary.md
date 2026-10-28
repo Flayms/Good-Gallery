@@ -7,7 +7,7 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | Term                     | Definition                                                                                                                                                                        |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 
-| **Library**              | A folder on a local disk or a network share (`\\server\share`) that the user added. Indexed recursively. (code: _library root_, `library_roots`, `rootId`)                          |
+| **Library**              | A folder on a local disk or a network share (`\\server\share`) that the user added. Indexed recursively. (code: _library root_, `library_roots`, `root_id`)                          |
 | **Library status**       | `online` (reachable), `offline` (unreachable at the last check) or `unknown`. The index of an offline library stays browsable.                                                      |
 | **Media item**           | One indexed image or video file in a library. (code: `media`)                                                                                                                     |
 | **Media kind**           | `image` (JPEG, PNG, WebP, GIF, AVIF) or `video` (MP4, M4V, MOV, WebM, MKV). Shown as _Photos_ / _Videos_ in the UI.                                                                 |
@@ -21,7 +21,7 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | Term                  | Definition                                                                                                                                                       |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Metadata**          | The dimensions, date taken, duration, rating and tags of a media item, read from embedded EXIF / IPTC / XMP and its sidecar.                                     |
-| **Date taken**        | The capture date from the metadata. If it is missing, sorting and the date filter use the _date modified_ instead. (code: `takenAt`, fallback `sortDate`)            |
+| **Date taken**        | The capture date from the metadata. If it is missing, sorting and the date filter use the _date modified_ instead. (code: `taken_at`, fallback `sort_date`)            |
 | **Date modified**     | The file's last modification time. (code: `mtime`)                                                                                                               |
 | **Rating**            | 1–5 stars from the metadata. Media without a rating, or with a _rejected_ (-1) or 0 rating, are **unrated**. Filters use `0` for unrated.                        |
 | **Tag**               | A keyword from the metadata. Tags are compared case-insensitively after Unicode (NFKC) and whitespace normalization. The first spelling seen is displayed.       |
@@ -42,7 +42,7 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | **Changes scan**     | Checks only the paths that the watcher reported.                                                                                                                             |
 | **Watcher**          | Watches a library for file changes between scans. Starts after a completed scan.                                                                                             |
 | **Quick check interval** | How often all libraries get a quick scan. `0` means at startup only. (Setting: _Check for missed changes_)                                                                |
-| **Parallel file reads** | How many files the indexer reads at once (scanning, metadata, thumbnails). (code: `ioConcurrency`)                                                                         |
+| **Parallel file reads** | How many files the indexer reads at once (scanning, metadata, thumbnails). (code: `io_concurrency`)                                                                         |
 
 ## Thumbnails
 

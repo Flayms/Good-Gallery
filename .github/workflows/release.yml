@@ -75,7 +75,7 @@ jobs:
           | **good-gallery-$VERSION-setup.exe** | Installer: pick the folder, installs for your user |
           | **good-gallery-$VERSION-portable.zip** | Portable: extract anywhere and run \`good-gallery.exe\` |
 
-          Both use the same data folder as Good Gallery's Electron version (\`%APPDATA%\\good-gallery\`), so an existing index and thumbnail cache are picked up as they are.
+          Both keep the index, settings and thumbnail cache in \`%APPDATA%\\good-gallery\`, so an update picks them up as they are.
 
           The downloads aren't code-signed yet, so Windows SmartScreen may warn about them. For the installer choose _More info_ → _Run anyway_. For the zip, right-click it → _Properties_ → _Unblock_ before extracting.
           NOTES

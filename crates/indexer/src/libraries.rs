@@ -40,7 +40,7 @@ pub fn add_with_timeout(conn: &Connection, path: &str, scans: &dyn ScanRequests,
     insert_checked(conn, &path, scans)
 }
 
-/// The longest path accepted, as in the reference.
+/// The longest path accepted.
 const MAX_PATH_LENGTH: usize = 1024;
 
 /// The first half of [`add`], without the index: the normalized path of a reachable folder. Waits up to `timeout`

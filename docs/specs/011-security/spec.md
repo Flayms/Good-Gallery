@@ -10,61 +10,31 @@ Media files may come from anywhere and contain hostile names and metadata. Good 
 
 ### ~~REQ-011-01 · Isolated window~~
 
-Deprecated 2026-10-26: the Rust app has no web page, renderer process or Node.js / Electron APIs to isolate.
-
-- **Given** the app window
-- **When** its page runs
-- **Then** it has no access to Node.js or Electron APIs, runs sandboxed with context isolation, and sees only the app's API transport
+Deprecated 2026-10-26: the app has no web page or renderer process to isolate.
 
 ### ~~REQ-011-02 · No foreign pages~~
 
 Deprecated 2026-10-26: a native window can't be navigated to other pages or open webviews.
 
-- **Given** the app window
-- **When** anything tries to navigate it to another page, redirect it, attach a webview or open a new window
-- **Then** that is blocked. Only `https:` links open, in the default browser
-
 ### ~~REQ-011-03 · Only the app's own page calls the API~~
 
-Deprecated 2026-10-26: there is no IPC API between a page and a main process; the UI calls the database and indexer in-process.
-
-- **Given** an API message
-- **When** it comes from anything but the main frame of the app's own page, or is malformed
-- **Then** it is ignored
-- **And** API inputs are validated, and invalid ones are rejected with a `BAD_REQUEST` error
+Deprecated 2026-10-26: there is no message API between a page and a main process; the UI calls the database and indexer in-process.
 
 ### ~~REQ-011-04 · Files only by media id~~
 
-Deprecated 2026-10-26: there are no custom protocols (`gg-thumb://`, `gg-media://`) in the Rust app. The rule behind it, files are resolved from the index by id, is REQ-011-08.
-
-- **Given** a request for a thumbnail or an original
-- **When** it reaches the app
-- **Then** it is served only for the exact forms `gg-thumb://media/<id>/<400|800>` and `gg-media://media/<id>`, where `<id>` is an indexed media item. Every other form, unknown id or vanished file gets a 404
-- **And** the window never sends file paths. _Show in Explorer_ and originals resolve the path from the index by id
+Deprecated 2026-10-26: there are no custom URL protocols for media. The rule behind it, files are resolved from the index by id, is REQ-011-08.
 
 ### ~~REQ-011-05 · Permissions~~
 
-Deprecated 2026-10-26: no web permissions (camera, microphone, notifications) exist in a native window.
-
-- **Given** a permission request (camera, microphone, notifications, …)
-- **When** the app's page or anything else asks
-- **Then** only fullscreen is granted, and only to the app's own page
+Deprecated 2026-10-26: a native window has no web permissions (camera, microphone, notifications).
 
 ### ~~REQ-011-06 · Content policy~~
 
 Deprecated 2026-10-26: there is no HTML content to restrict.
 
-- **Given** the app's page
-- **When** it loads content
-- **Then** scripts come only from the app itself. Images and media come only from the app, `data:` / `blob:` URLs and the two media protocols. Plugins, frames, form submissions and `<base>` changes are blocked
-
 ### ~~REQ-011-07 · API over IPC~~
 
-Deprecated 2026-10-26: there is no IPC transport. Cancelling indexer work when a library is removed is REQ-001-05.
-
-- **Given** the app's page calling the API
-- **When** it runs queries, mutations or subscriptions
-- **Then** results keep their types (e.g. dates), errors keep their codes, and stopping a subscription, closing or reloading the window aborts its pending work in the main process
+Deprecated 2026-10-26: there is no message transport. Cancelling indexer work when a library is removed is REQ-001-05.
 
 ### REQ-011-08 · Files only from the index
 
@@ -94,7 +64,7 @@ Deprecated 2026-10-26: there is no IPC transport. Cancelling indexer work when a
 
 ## Out of scope
 
-- Code signing and auto-updates.
+- Code signing and auto-updates (see `docs/roadmap.md`).
 - Protection against a malicious user with access to the user profile or the libraries.
 - Sandboxing the indexer (it needs file system access to read libraries).
 - Isolating crashes inside native decoders (C code) in a separate process; see the indexer decision in `docs/architecture.md`.

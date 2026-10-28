@@ -39,8 +39,8 @@ pub struct MediaMetadata {
     pub tags: Vec<Vec<String>>,
 }
 
-/// Bump when metadata extraction changes, so the indexer re-reads files already marked unchanged. Shared with the
-/// Electron version (`src/shared/metadata.ts`): both must agree, or each re-reads what the other wrote.
+/// Bump when metadata extraction changes, so the indexer re-reads files already marked unchanged. Existing indexes were
+/// written at version 1.
 pub const METADATA_VERSION: i64 = 1;
 
 fn extension(file_name: &str) -> Option<String> {

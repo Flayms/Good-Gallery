@@ -1,5 +1,5 @@
-//! A pool of long-running exiftool processes (`-stay_open`), read with the arguments of exiftool-vendored (the
-//! reference's library), so both apps see the same tags.
+//! A pool of long-running exiftool processes (`-stay_open`), read with the arguments of exiftool-vendored (the library
+//! earlier versions read with), so rows indexed by them stay valid.
 
 use crate::thumbnail::PreviewSource;
 use base64::Engine as _;
@@ -391,7 +391,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn uses_the_reference_arguments() {
+    fn uses_exiftool_vendoreds_arguments() {
         let mut args = read_args(Path::new("D:\\a.jpg"));
         assert_eq!(args.remove(5), UTF8_FILTER);
 
@@ -466,7 +466,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn uses_the_reference_arguments_for_binary_tags() {
+    fn uses_exiftool_vendoreds_arguments_for_binary_tags() {
         assert_eq!(
             binary_args("PreviewImage", Path::new("D:\\a.jpg")).join(" "),
             "-charset filename=utf8 -json -b -PreviewImage D:\\a.jpg"

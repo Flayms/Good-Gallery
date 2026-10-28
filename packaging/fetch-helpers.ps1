@@ -5,8 +5,8 @@
 #   ./packaging/fetch-helpers.ps1 [-Out target/helpers]
 #
 # Then `cargo xtask dist` packages them, and tests or `cargo run` can use them through GOOD_GALLERY_EXIFTOOL,
-# GOOD_GALLERY_FFMPEG and GOOD_GALLERY_MPV. Versions: exiftool and ffmpeg as the Electron version bundles them
-# (exiftool-vendored.exe 13.59, ffmpeg-static b6.1.1), libmpv the build chosen in M0b.
+# GOOD_GALLERY_FFMPEG and GOOD_GALLERY_MPV. Pinned versions: exiftool 13.59 (the exiftool-vendored.exe build),
+# ffmpeg-static b6.1.1, libmpv 20261021 (shinchiro).
 param(
     [string]$Out = (Join-Path $PSScriptRoot '..\target\helpers')
 )

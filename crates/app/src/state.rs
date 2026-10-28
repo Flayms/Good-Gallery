@@ -88,7 +88,7 @@ pub const USAGE_REFRESH: Duration = Duration::from_secs(10);
 /// After a change of the limit, the size is read this often for a while, so the eviction shows (REQ-010-05).
 const USAGE_REFRESH_AFTER_CHANGE: Duration = Duration::from_secs(1);
 
-/// Bytes of a cache limit in GB (GiB, as the Electron version counts them).
+/// Bytes of a cache limit in GB (GiB).
 pub fn gib_to_bytes(gib: f64) -> u64 {
     (gib * 1024f64.powi(3)).round() as u64
 }

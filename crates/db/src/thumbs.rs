@@ -1,5 +1,4 @@
-//! Thumbnail state of media items (`thumbhash`, `thumb_status`), as the Electron version's `IndexWriter` reads and
-//! writes it for its thumbnail service.
+//! Thumbnail state of media items (`thumbhash`, `thumb_status`), as the thumbnail service reads and writes it.
 
 use crate::Result;
 use domain::media::MediaKind;

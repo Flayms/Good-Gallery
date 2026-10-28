@@ -18,7 +18,7 @@ const ROW: f32 = 32.0;
 const INDENT: f32 = 16.0;
 /// Top-level tags of a category shown before _Show all_ (REQ-008-03).
 const PREVIEW: usize = 10;
-/// Collapsible groups, stored as the Electron version's `localStorage` keys (`sidebar.group.<id>`).
+/// Collapsible groups, stored under the settings keys `sidebar.group.<id>`.
 const COLLAPSIBLE: [&str; 3] = ["people", "places", "ratings"];
 
 /// What the sidebar remembers between frames.

@@ -5076,7 +5076,6 @@ name = "xtask"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "base64",
  "chrono",
  "db",
  "domain",
@@ -5086,7 +5085,6 @@ dependencies = [
  "regex",
  "serde_json",
  "tempfile",
- "thumbhash",
 ]
 
 [[package]]

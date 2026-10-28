@@ -1,5 +1,5 @@
-//! What the indexer is doing: "Indexing Photos · 1,204 files · 310 updated · 1 queued" (REQ-002-08). Lives in the
-//! sidebar footer once the sidebar exists (M7); until then in the bottom-left corner of the window.
+//! What the indexer is doing: "Indexing Photos · 1,204 files · 310 updated · 1 queued" (REQ-002-08). Drawn over
+//! the bottom-left corner of the window, where the sidebar's foot is.
 
 use crate::icons::Icon;
 use crate::state::AppState;

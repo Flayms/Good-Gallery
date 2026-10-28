@@ -3,9 +3,9 @@
 use eframe::egui;
 use std::path::{Path, PathBuf};
 
-/// The data folder's name in `%APPDATA%` for the packaged app (the `packaged` feature, set by `cargo xtask dist`):
-/// the Electron version's, so the installed app opens its index and thumbnail cache as they are (REQ-001-08,
-/// REQ-001-09).
+/// The data folder's name in `%APPDATA%` for the packaged app (the `packaged` feature, set by `cargo xtask dist`): the
+/// folder every earlier version used, so an update opens the existing index and thumbnail cache as they are
+/// (REQ-001-08, REQ-001-09).
 pub const PACKAGED_DATA_FOLDER: &str = "good-gallery";
 /// Other builds (`cargo run`, also `--release`) keep their own, so development never touches the user's real index.
 pub const DEVELOPMENT_DATA_FOLDER: &str = "good-gallery-rust";
@@ -54,9 +54,9 @@ pub fn window_icon() -> egui::IconData {
 mod tests {
     use super::*;
 
-    /// REQ-001-09: the packaged app shares the Electron version's data folder; development builds don't.
+    /// REQ-001-09: the packaged app uses `good-gallery`; development builds don't.
     #[test]
-    fn release_builds_share_the_electron_data_folder() {
+    fn packaged_builds_use_good_gallery_and_development_builds_dont() {
         let appdata = Path::new(r"C:\Users\someone\AppData\Roaming");
         assert_eq!(default_data_dir(appdata, true), appdata.join("good-gallery"));
         assert_eq!(default_data_dir(appdata, false), appdata.join("good-gallery-rust"));

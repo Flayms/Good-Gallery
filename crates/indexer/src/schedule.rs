@@ -1,6 +1,6 @@
-//! Scheduled scans (the reference's `scheduleRescans`): every library gets a quick scan at startup and whenever the
-//! quick check interval elapses (a full scan while rows are behind `METADATA_VERSION`); offline libraries are checked
-//! again every minute, so a reconnect is picked up quickly.
+//! Scheduled scans: every library gets a quick scan at startup and whenever the quick check interval elapses (a full
+//! scan while rows are behind `METADATA_VERSION`); offline libraries are checked again every minute, so a reconnect is
+//! picked up quickly.
 
 use crate::scan::ScanScope;
 use db::rusqlite::Connection;

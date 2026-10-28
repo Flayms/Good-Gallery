@@ -56,16 +56,15 @@ The user decides which folders make up the gallery: folders on local disks or ne
 
 ### REQ-001-08 · Existing index
 
-- **Given** an index written by Good Gallery's Electron version
+- **Given** an index written by an earlier version of Good Gallery
 - **When** the app starts with it
 - **Then** it opens without re-indexing, with all libraries, media items, tags and settings
-- **And** the Electron version can still open the index afterwards (same schema and migration bookkeeping)
 
-### REQ-001-09 · Shared data folder
+### REQ-001-09 · Data folder
 
 - **Given** the installed or portable app of a release
 - **When** it starts without a data folder given on the command line
-- **Then** it uses the Electron version's data folder (`%APPDATA%\good-gallery`), so its index, settings and thumbnail cache are picked up as they are
+- **Then** it uses `%APPDATA%\good-gallery`, the folder every earlier version used, so an update picks up the index, settings and thumbnail cache as they are
 - **And** builds made for development use a folder of their own (`%APPDATA%\good-gallery-rust`), so they never touch it
 
 ## Out of scope
@@ -92,5 +91,5 @@ The user decides which folders make up the gallery: folders on local disks or ne
 | REQ-001-05 | `crates/indexer/src/libraries.rs` › removes_a_library…; `crates/indexer/src/indexer.rs` › removing_a_library_drops_its_queued_scan_and_cancels_the_running_one, watches_after_a_completed_scan_and_scans_reported_changes (watcher stopped); `crates/indexer/src/scan.rs` › writes_nothing_when_cancelled; `crates/app/tests/libraries.rs` › removes_a_library_after_confirmation… | pass |
 | REQ-001-06 | `crates/indexer/src/libraries.rs` › rescan_queues_a_full_scan; `crates/app/tests/libraries.rs` › rescan_queues_a_full_scan_and_confirms | pass |
 | REQ-001-07 | `crates/app/tests/libraries.rs` › lists_libraries_with_status_path_and_last_indexed_time, says_when_there_are_no_libraries | pass |
-| REQ-001-08 | `crates/db/src/lib.rs` › opens_an_index_written_by_the_reference, leaves_the_reference_bookkeeping_alone, creates_the_reference_schema_and_bookkeeping | pass |
-| REQ-001-09 | `crates/app/src/startup.rs` › release_builds_share_the_electron_data_folder; installed app run on a copy of the real index (M11) | pass |
+| REQ-001-08 | `crates/db/src/lib.rs` › req_001_08_opens_an_index_written_by_an_earlier_version, req_001_08_keeps_the_earlier_bookkeeping, req_001_08_migrates_an_earlier_index_to_the_current_schema | pass |
+| REQ-001-09 | `crates/app/src/startup.rs` › packaged_builds_use_good_gallery_and_development_builds_dont; `packaging/smoke-test.ps1` (installed app run on a copy of the real index) | pass |

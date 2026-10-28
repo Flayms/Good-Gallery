@@ -2,7 +2,7 @@
 
 A desktop gallery for large photo and video libraries (50k–500k files). Media appear in a virtualized masonry, justified, grid or list view. Libraries on network shares are supported, and thumbnails are cached locally. Search uses the tags that are already embedded in your files.
 
-This is the Rust rewrite (eframe / egui on wgpu) of Good Gallery's Electron version. It opens the Electron version's index and thumbnail cache as they are.
+Built in Rust with eframe / egui on wgpu.
 
 ![Masonry view with the sidebar showing libraries, people, places, ratings and tags](docs/screenshots/masonry.png)
 
@@ -34,7 +34,7 @@ Download from the [releases](https://github.com/Flayms/Good-Gallery/releases) (W
 
 exiftool, ffmpeg and libmpv come with both. The downloads aren't code-signed yet, so Windows SmartScreen may warn: choose _More info_ → _Run anyway_, or unblock the zip (_Properties_ → _Unblock_) before extracting.
 
-Add a library folder under **Settings**. The index, settings, thumbnails and logs live in `%APPDATA%\good-gallery`, the same folder as the Electron version's, so an existing index is picked up without re-indexing. Uninstalling keeps that folder.
+Add a library folder under **Settings**. The index, settings, thumbnails and logs live in `%APPDATA%\good-gallery`. Updates keep using it, so nothing is indexed twice. Uninstalling keeps that folder.
 
 ## Development
 
@@ -47,7 +47,6 @@ Requirements: Rust (pinned in `rust-toolchain.toml`, installed through rustup) a
 | `cargo clippy --workspace --all-targets -- -D warnings` | Lint                                                                                       |
 | `cargo fmt --all`                   | Format                                                                                                         |
 | `cargo xtask check-specs`           | Check that specs and tests reference each other                                                                |
-| `cargo xtask oracle`                | Compare indexing with the Electron version (needs Node, ffmpeg and `../good-gallery` with `node_modules`)       |
 | `cargo xtask screenshots`           | Render the README screenshots into `docs/screenshots/` from a generated demo library (needs exiftool, ffmpeg)  |
 | `cargo xtask dist`                  | Build the installer and the portable zip into `target/dist/` (needs the helpers and NSIS)                       |
 | `cargo xtask release`               | Cut a release: bump the version, update `CHANGELOG.md`, tag and push (`--dry-run` previews; needs git-cliff)   |
@@ -58,10 +57,10 @@ CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) checks formatting, cli
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) (`feat: …`, `fix(viewer): …`, `feat!: …` for breaking changes). On an up-to-date, clean `main`, run `cargo xtask release`. It derives the next version from the commits since the last tag (breaking → major, or minor before 1.0; `feat` → minor; else patch), shows the release notes and asks before it sets the version in `Cargo.toml`, commits it with `CHANGELOG.md`, tags `vX.Y.Z` and pushes. Pass `major`, `minor`, `patch` or a version like `1.2.3` to override, `--yes` to skip the question. The pushed tag starts the [release workflow](.github/workflows/release.yml): it runs the checks, builds the installer and the portable zip, smoke-tests the installed app and publishes the GitHub release.
 
-- [docs/progress.md](docs/progress.md): the rewrite's milestones and log
 - [docs/architecture.md](docs/architecture.md): architecture and decisions
 - [docs/glossary.md](docs/glossary.md): domain terms
-- [docs/specs/](docs/specs/): feature specs
+- [docs/specs/](docs/specs/): feature specs and their plans
+- [docs/roadmap.md](docs/roadmap.md): upcoming features and open issues
 - [AGENTS.md](AGENTS.md): working guidelines for coding agents
 
 ## License

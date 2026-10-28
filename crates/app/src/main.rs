@@ -1,13 +1,12 @@
 //! Good Gallery.
 //!
-//! Options: `--data-dir <folder>` (index, settings, thumbnails and logs; default `%APPDATA%\good-gallery` in the packaged
-//! app, the Electron version's, and `%APPDATA%\good-gallery-rust` otherwise), `--screenshot
-//! <file.png>` (saves a screenshot of the window after a few frames and exits), `--screenshot-after <seconds>` (waits
-//! that long before the screenshot, e.g. for scans or thumbnails), `--bench-scroll <seconds>` (vsync off; scrolls the
-//! gallery once to warm the files, then again while measuring frame times, prints them and exits; REQ-006-12), `--view
-//! <position>` (opens the viewer at that gallery position once the gallery has loaded, e.g. for a screenshot; with
-//! `--info` its info panel too), `--scroll
-//! <points>` (scrolls the gallery that far once it has loaded, e.g. to show the glass toolbar over tiles).
+//! Options: `--data-dir <folder>` (index, settings, thumbnails and logs; default `%APPDATA%\good-gallery` in the
+//! packaged app, `%APPDATA%\good-gallery-rust` otherwise), `--screenshot <file.png>` (saves a screenshot of the window
+//! after a few frames and exits), `--screenshot-after <seconds>` (waits that long before the screenshot, e.g. for scans
+//! or thumbnails), `--bench-scroll <seconds>` (vsync off; scrolls the gallery once to warm the files, then again while
+//! measuring frame times, prints them and exits; REQ-006-12), `--view <position>` (opens the viewer at that gallery
+//! position once the gallery has loaded, e.g. for a screenshot; with `--info` its info panel too), `--scroll <points>`
+//! (scrolls the gallery that far once it has loaded, e.g. to show the glass toolbar over tiles).
 
 // The packaged app (`cargo xtask dist` builds it with the `packaged` feature) opens no console window; the log goes to
 // `logs\app.log` in the data folder.
@@ -33,7 +32,7 @@ struct Options {
     scroll: Option<f32>,
 }
 
-/// Scrolling speed of `--bench-scroll`, points per second (as in the M0 spike).
+/// Scrolling speed of `--bench-scroll`, points per second.
 const BENCH_SPEED: f32 = 1440.0;
 
 enum BenchPhase {
@@ -351,7 +350,7 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
         on_ready,
         &mut state,
     ));
-    // Media items indexed before (by this app or the Electron version) may still wait for thumbnails.
+    // Media items indexed before (also by an earlier version) may still wait for thumbnails.
     thumbnails.kick();
     let settings_db = state.db().expect("opened above");
     let mut gallery = app::gallery::Gallery::new(

@@ -1,6 +1,5 @@
-//! The indexer: a scan queue (the reference's `IndexerController`) and a thread that runs one scan at a time with
-//! the write connection (the reference's indexer process). Commands are method calls from any thread; results come
-//! back as [`IndexerEvent`]s.
+//! The indexer: a scan queue and a thread that runs one scan at a time with the write connection. Commands are method
+//! calls from any thread; results come back as [`IndexerEvent`]s.
 
 use crate::scan::{MAX_CHANGED_PATHS, ScanDeps, ScanOptions, ScanOutcome, ScanProgress, ScanScope, scan_root};
 use crate::watcher::{LibraryWatcher, WatchEvent};

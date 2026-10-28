@@ -1,6 +1,6 @@
-//! Syncs one library with the index (the reference's `scanRoot`): new or changed files (size, mtime, sidecar mtime,
-//! metadata version) are read again, vanished files and folders removed. Files in folders that couldn't be listed are
-//! kept. Read files are written in batches while the scan runs; removals happen once it completes.
+//! Syncs one library with the index: new or changed files (size, mtime, sidecar mtime, metadata version) are read
+//! again, vanished files and folders removed. Files in folders that couldn't be listed are kept. Read files are written
+//! in batches while the scan runs; removals happen once it completes.
 //!
 //! Threads: the calling thread walks the library and owns all index access; `concurrency` workers stat files and read
 //! their metadata.
