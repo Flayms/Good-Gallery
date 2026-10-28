@@ -84,7 +84,7 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 | REQ        | Test                                                                                       | Result  |
 | ---------- | ------------------------------------------------------------------------------------------ | ------- |
 | REQ-014-01 | `xtask/tests/workflows.rs` › ci_runs_every_check_on_main_and_pull_requests, ci_leaves_release_commits_to_the_release_run (the workflow itself runs on GitHub) | pass |
-| REQ-014-02 | — (repository ruleset "main: CI must pass": requires Lint and Test from GitHub Actions; admins bypass it so the release script can push) | no test |
+| REQ-014-02 | `xtask/tests/workflows.rs` › req_018_01_req_018_09_ci_and_the_release_cover_linux (the `Lint` and `Test` checks exist and sum up every platform); the ruleset itself is the repository setting "main: CI must pass" (requires Lint and Test from GitHub Actions; admins bypass it so the release script can push) | partial |
 | REQ-014-03 | `xtask/src/release.rs` › req_014_03_derives_the_next_version_from_the_commits | pass |
 | REQ-014-04 | `xtask/src/release.rs` › req_014_04_parses_overrides, req_014_04_overrides_the_bump_or_the_version | pass |
 | REQ-014-05 | `xtask/src/release.rs` › req_014_05_lists_failed_preconditions, req_014_05_stops_when_a_precondition_fails, req_014_05_undoes_a_release_whose_push_fails | pass |
