@@ -57,4 +57,4 @@ A desktop gallery for large photo and video libraries (50k–500k files). Media 
 
 ## Git
 
-Create a new worktree for a new feature. Use conventional commits. When you are done create a PR to main.
+Create a new worktree for a new feature. Use conventional commits. When you are done create a PR to main. Once it is merged, remove the worktree (`git worktree remove <path>`).
