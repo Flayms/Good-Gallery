@@ -76,7 +76,7 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) (`feat: …`, `fix(scope): …`, `feat!: …` / `BREAKING CHANGE:` for breaking changes).
 - Merge protection is a GitHub branch protection rule (or ruleset) on `main` that requires the CI checks; it lives in the repository settings, not in the repository.
-- git-cliff (2.14.2 in CI) is installed where the release script runs, and NSIS where the installer is built (GitHub's Windows images have it).
+- git-cliff (2.14.2 in CI) is installed where the release script runs, and NSIS where the installer is built (the release workflow installs it; GitHub's windows-2025 images don't have it).
 
 ## Verification
 

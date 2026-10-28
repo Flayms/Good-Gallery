@@ -55,6 +55,10 @@ jobs:
         shell: pwsh
         run: ./packaging/fetch-helpers.ps1
 
+      # windows-2025 images don't come with NSIS; Chocolatey installs it where `cargo xtask dist` finds it.
+      - name: Install NSIS
+        run: choco install nsis --no-progress -y
+
       - name: Build the installer and the portable zip
         run: cargo xtask dist
 
