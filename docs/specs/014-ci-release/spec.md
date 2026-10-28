@@ -76,7 +76,7 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 ## Assumptions
 
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) (`feat: …`, `fix(scope): …`, `feat!: …` / `BREAKING CHANGE:` for breaking changes).
-- Merge protection is a GitHub ruleset on `main` that requires the CI checks `Lint` and `Test`; it lives in the repository settings, not in the repository. Repository admins bypass it, since `cargo xtask release` pushes the release commit straight to `main`.
+- Merge protection is a GitHub ruleset on `main` that requires the CI checks `Lint` and `Test` (jobs in `ci.yml` that report the result of every platform's lint and test jobs); it lives in the repository settings, not in the repository. Repository admins bypass it, since `cargo xtask release` pushes the release commit straight to `main`.
 - git-cliff (2.14.2 in CI) is installed where the release script runs, and NSIS where the installer is built (the release workflow installs it; GitHub's windows-2025 images don't have it).
 
 ## Verification

@@ -104,3 +104,22 @@ jobs:
           name: snapshot-diffs-linux
           path: crates/*/tests/snapshots/*.diff.png
           if-no-files-found: ignore
+
+  # The ruleset on main requires the checks "Lint" and "Test" (REQ-014-02). The jobs above run per platform under
+  # their own names, so these two report the overall result under the required names; a new platform only adds
+  # itself to `needs`.
+  lint-result:
+    name: Lint
+    needs: [lint]
+    if: always() && (github.ref != 'refs/heads/main' || !startsWith(github.event.head_commit.message, 'chore(release)'))
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.lint.result }}" = success
+
+  test-result:
+    name: Test
+    needs: [test, test-linux]
+    if: always() && (github.ref != 'refs/heads/main' || !startsWith(github.event.head_commit.message, 'chore(release)'))
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.test.result }}" = success && test "${{ needs.test-linux.result }}" = success

@@ -103,6 +103,14 @@ fn req_018_01_req_018_09_ci_and_the_release_cover_linux() {
     assert!(tests.contains("libimage-exiftool-perl ffmpeg libmpv2 mesa-vulkan-drivers"));
     assert!(commands(tests).contains(&"cargo test --workspace --no-fail-fast"));
     assert!(tests.contains("GG_REQUIRE_HELPERS: '1'"));
+    // The ruleset on main requires "Lint" and "Test" (REQ-014-02): jobs of those names report every platform's result.
+    for (name, needs) in [("Lint", "needs: [lint]"), ("Test", "needs: [test, test-linux]")] {
+        let job = &ci[ci
+            .find(&format!("    name: {name}\n"))
+            .unwrap_or_else(|| panic!("no job named {name}"))..];
+        let job = &job[..job.find("\n\n").unwrap_or(job.len())];
+        assert!(job.contains(needs) && job.contains("if: always() &&"), "{job}");
+    }
     let release = workflow("release.yml");
     let linux = &release[release.find("  linux:").expect("no linux job")..release.find("  release:").unwrap()];
     assert!(linux.contains("runs-on: ubuntu-latest") && linux.contains("needs: checks"));
