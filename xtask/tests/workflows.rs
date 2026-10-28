@@ -18,13 +18,18 @@ fn commands(workflow: &str) -> Vec<&str> {
         .collect()
 }
 
-/// REQ-014-01: every push and pull request checks formatting, clippy, the specs and all tests.
+/// REQ-014-01: pushes to `main` and pull requests check formatting, clippy, the specs and all tests.
 #[test]
-fn ci_runs_every_check_on_pushes_and_pull_requests() {
+fn ci_runs_every_check_on_main_and_pull_requests() {
     let ci = workflow("ci.yml");
-    for trigger in ["push:", "branches: ['**']", "pull_request:", "workflow_call:"] {
+    for trigger in ["push:", "branches: [main]", "pull_request:", "workflow_call:"] {
         assert!(ci.contains(trigger), "ci.yml lacks {trigger}");
     }
+    // A push to a pull request's branch would otherwise run the checks twice, once per trigger.
+    assert!(
+        !ci.contains("branches: ['**']"),
+        "ci.yml runs on pushes to every branch"
+    );
     let commands = commands(&ci);
     for check in [
         "cargo fmt --all --check",
@@ -37,6 +42,24 @@ fn ci_runs_every_check_on_pushes_and_pull_requests() {
     assert!(!ci.contains("continue-on-error"), "a failing check must fail the run");
 }
 
+/// REQ-014-01: a release commit pushed to `main` skips CI, since its tag's release run checks the same commit.
+#[test]
+fn ci_leaves_release_commits_to_the_release_run() {
+    let ci = workflow("ci.yml");
+    let skip = "if: github.ref != 'refs/heads/main' || !startsWith(github.event.head_commit.message, 'chore(release)')";
+    for job in ["lint:", "test:", "test-linux:"] {
+        let start = ci
+            .find(&format!("\n  {job}"))
+            .unwrap_or_else(|| panic!("ci.yml has no {job} job"));
+        // The job's settings before its steps.
+        let header = &ci[start..start + ci[start..].find("steps:").expect("a job without steps")];
+        assert!(
+            header.contains(skip),
+            "ci.yml's {job} job also runs for release commits"
+        );
+    }
+}
+
 /// REQ-014-08: a version tag runs the checks, builds both downloads and publishes them with the changelog's notes.
 #[test]
 fn release_publishes_both_downloads_after_the_checks() {
@@ -44,8 +67,17 @@ fn release_publishes_both_downloads_after_the_checks() {
     assert!(release.contains("tags: ['v[0-9]+.[0-9]+.[0-9]+']"));
     assert!(release.contains("uses: ./.github/workflows/ci.yml"));
     assert!(release.contains("needs: checks"));
-    let commands = commands(&release);
-    assert!(commands.contains(&"cargo xtask dist"));
+    // The Windows job; the Linux archive's job runs `cargo xtask dist` too, without NSIS.
+    let windows = &release[release.find("\n  release:").expect("no release job")..];
+    let commands = commands(windows);
+    let dist = commands.iter().position(|line| *line == "cargo xtask dist");
+    // windows-2025 images don't come with NSIS, and the installer can't be built without it.
+    let nsis = commands.iter().position(|line| line.starts_with("choco install nsis"));
+    assert!(dist.is_some(), "release.yml doesn't run cargo xtask dist");
+    assert!(
+        nsis.is_some_and(|nsis| nsis < dist.unwrap()),
+        "release.yml doesn't install NSIS before cargo xtask dist"
+    );
     assert!(commands.iter().any(|line| line.starts_with("git-cliff --current")));
     let publish = &release[release.find("gh release create").expect("no gh release create")..];
     for part in [

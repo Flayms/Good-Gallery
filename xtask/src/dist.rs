@@ -126,7 +126,7 @@ fn zip(stage: &Path, out: &Path) -> anyhow::Result<()> {
     )
 }
 
-/// makensis: `MAKENSIS`, on `PATH`, or where the NSIS installer (and GitHub's Windows images) put it.
+/// makensis: `MAKENSIS`, on `PATH`, or where the NSIS installer (and Chocolatey) put it.
 fn find_makensis() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("MAKENSIS") {
         return Some(path.into());

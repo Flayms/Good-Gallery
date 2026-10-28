@@ -1,9 +1,9 @@
-# Checks every commit and pull request (docs/specs/014-ci-release). The release workflow reuses this one.
+# Checks pushes to main and pull requests (docs/specs/014-ci-release). The release workflow reuses this one.
 name: CI
 
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
   workflow_call:
 
@@ -20,6 +20,9 @@ env:
 jobs:
   lint:
     name: Lint (${{ matrix.os }})
+    # A release commit pushed to main skips these: its tag's release run checks the same commit (REQ-014-01).
+    # The condition checks the ref, since the release run (a tag push) sees the same head_commit.
+    if: github.ref != 'refs/heads/main' || !startsWith(github.event.head_commit.message, 'chore(release)')
     strategy:
       fail-fast: false
       matrix:
@@ -37,6 +40,8 @@ jobs:
 
   test:
     name: Test (Windows)
+    # Release commits: see lint.
+    if: github.ref != 'refs/heads/main' || !startsWith(github.event.head_commit.message, 'chore(release)')
     # The snapshot tests render with wgpu on WARP.
     runs-on: windows-latest
     steps:
@@ -66,6 +71,8 @@ jobs:
 
   test-linux:
     name: Test (Linux)
+    # Release commits: see lint.
+    if: github.ref != 'refs/heads/main' || !startsWith(github.event.head_commit.message, 'chore(release)')
     runs-on: ubuntu-latest
     # The Linux snapshots (`*_linux.png`) were rendered with Ubuntu 26.04's lavapipe and the video tests need its mpv
     # (0.41), so the tests run in that release, not whatever ubuntu-latest is (docs/specs/018-linux).
