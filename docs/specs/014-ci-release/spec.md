@@ -76,7 +76,7 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 ## Assumptions
 
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) (`feat: …`, `fix(scope): …`, `feat!: …` / `BREAKING CHANGE:` for breaking changes).
-- Merge protection is a GitHub branch protection rule (or ruleset) on `main` that requires the CI checks; it lives in the repository settings, not in the repository.
+- Merge protection is a GitHub ruleset on `main` that requires the CI checks `Lint` and `Test`; it lives in the repository settings, not in the repository. Repository admins bypass it, since `cargo xtask release` pushes the release commit straight to `main`.
 - git-cliff (2.14.2 in CI) is installed where the release script runs, and NSIS where the installer is built (the release workflow installs it; GitHub's windows-2025 images don't have it).
 
 ## Verification
@@ -84,7 +84,7 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 | REQ        | Test                                                                                       | Result  |
 | ---------- | ------------------------------------------------------------------------------------------ | ------- |
 | REQ-014-01 | `xtask/tests/workflows.rs` › ci_runs_every_check_on_main_and_pull_requests, ci_leaves_release_commits_to_the_release_run (the workflow itself runs on GitHub) | pass |
-| REQ-014-02 | — (branch protection rule in the repository settings; set up by the user) | no test |
+| REQ-014-02 | — (repository ruleset "main: CI must pass": requires Lint and Test from GitHub Actions; admins bypass it so the release script can push) | no test |
 | REQ-014-03 | `xtask/src/release.rs` › req_014_03_derives_the_next_version_from_the_commits | pass |
 | REQ-014-04 | `xtask/src/release.rs` › req_014_04_parses_overrides, req_014_04_overrides_the_bump_or_the_version | pass |
 | REQ-014-05 | `xtask/src/release.rs` › req_014_05_lists_failed_preconditions, req_014_05_stops_when_a_precondition_fails, req_014_05_undoes_a_release_whose_push_fails | pass |
