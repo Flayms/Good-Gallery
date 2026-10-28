@@ -7,10 +7,6 @@ Thumbs.db
 .env.*
 !.env.example
 
-# Spike outputs
-spikes/*/results/
-spikes/*/vendor/
-
 # Snapshot test output
 **/tests/snapshots/*.new.png
 **/tests/snapshots/*.diff.png

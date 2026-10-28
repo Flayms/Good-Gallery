@@ -1,5 +1,5 @@
-//! Tag suggestions and the sidebar's lists (specs 007, 008), as the Electron version's `tags`, `media.ratingCounts`
-//! and `libraries.folders` queries.
+//! Tag suggestions and the sidebar's lists (specs 007, 008): suggestions, People and Places, popular tags, rating
+//! counts and library folders.
 
 use crate::Result;
 use domain::folders::CategoryTag;

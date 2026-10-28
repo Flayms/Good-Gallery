@@ -1,5 +1,5 @@
-//! Metadata of a media file from exiftool's tags (spec 004): a port of the reference's `extractMetadata` and of the
-//! parts of exiftool-vendored it relies on (date parsing, time-zone inference).
+//! Metadata of a media file from exiftool's tags (spec 004), with the parts of exiftool-vendored's date parsing and
+//! time-zone inference that earlier versions relied on.
 
 use crate::exiftool::{ExifTool, ExifToolError};
 use chrono::{FixedOffset, Local, NaiveDate, NaiveDateTime, TimeZone};
@@ -20,7 +20,7 @@ pub trait MetadataSource: Send + Sync {
 
 impl MetadataSource for ExifTool {
     fn read(&self, file: &Path, sidecar: Option<&Path>) -> Result<MediaMetadata, ExifToolError> {
-        // File and sidecar in parallel (on two pool processes), as the reference does.
+        // File and sidecar in parallel (on two pool processes).
         let (tags, sidecar_tags) = std::thread::scope(|scope| {
             let sidecar = sidecar.map(|sidecar| scope.spawn(move || ExifTool::read(self, sidecar)));
             let tags = ExifTool::read(self, file);
@@ -126,8 +126,8 @@ pub fn extract_tags(sources: &[&Tags]) -> Vec<Vec<String>> {
 }
 
 /// Names of `Face` regions in the MWG struct (`RegionInfo.RegionList[]`) and of all regions in the Microsoft Photo
-/// struct (`RegionInfoMP.Regions[]`, which only holds people). The reference reads only the flattened fields, which
-/// exiftool doesn't return with its own arguments, so it never finds these (spec REQ-004-09 wins; see the M4 plan).
+/// struct (`RegionInfoMP.Regions[]`, which only holds people). Earlier versions read only the flattened fields, which
+/// exiftool doesn't return with its own arguments, so they never found these (REQ-004-09).
 fn face_regions(tags: &Tags) -> Vec<String> {
     let list = |value: Option<&Value>| match value {
         Some(Value::Array(items)) => items.clone(),
@@ -454,7 +454,7 @@ mod tests {
         assert_eq!(extract_tags(&[&t]), strings(&[&["People", "Anton"]]));
     }
 
-    /// REQ-004-09: the region structs exiftool returns with `-api struct=1` (the reference misses these).
+    /// REQ-004-09: the region structs exiftool returns with `-api struct=1`.
     #[test]
     fn req_004_09_reads_face_regions_from_the_mwg_and_microsoft_structs() {
         let t = tags(json!({

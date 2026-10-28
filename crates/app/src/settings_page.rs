@@ -499,7 +499,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn req_010_03_names_the_intervals_as_the_reference_does() {
+    fn req_010_03_names_the_intervals_in_words() {
         let labels: Vec<String> = [0, 1, 15, 60, 90, 180, 1440].map(interval_label).into();
         assert_eq!(
             labels,

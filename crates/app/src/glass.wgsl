@@ -1,6 +1,5 @@
 // Glass (docs/design.md): the backdrop under a surface is drawn into an offscreen target at half resolution, blurred
-// with a dual-Kawase chain and composited with saturation, tint, rounded corners and an opacity. Ported from the M0
-// spike (`spikes/grid/src/glass_*.wgsl`).
+// with a dual-Kawase chain and composited with saturation, tint, rounded corners and an opacity.
 
 struct VOut {
     @builtin(position) pos: vec4f,

@@ -1,4 +1,4 @@
-//! User settings, stored as JSON values in the `settings` table under the reference's keys.
+//! User settings, stored as JSON values in the `settings` table.
 
 use crate::{Error, Result};
 use rusqlite::{Connection, OptionalExtension};
@@ -33,7 +33,7 @@ fn thumb_cache(value: &Value) -> Option<f64> {
     value.as_f64().filter(|gib| (0.5..=1024.0).contains(gib))
 }
 
-/// An integer in `range`; `2.0` counts as an integer, `2.5` doesn't (as in the reference's zod schema).
+/// An integer in `range`; `2.0` counts as an integer, `2.5` doesn't.
 fn integer(value: &Value, range: std::ops::RangeInclusive<u32>) -> Option<u32> {
     let n = value.as_f64().filter(|n| n.fract() == 0.0)?;
     (n >= f64::from(*range.start()) && n <= f64::from(*range.end())).then_some(n as u32)
@@ -97,8 +97,8 @@ pub fn save(conn: &Connection, settings: &Settings) -> Result<()> {
     Ok(())
 }
 
-/// A stored value outside the settings above, e.g. a view choice of the gallery (`gallery.columns`). The Electron
-/// version ignores keys it doesn't know and keeps them. `None` if missing or unreadable.
+/// A stored value outside the settings above, e.g. a view choice of the gallery (`gallery.columns`), kept as is. `None`
+/// if missing or unreadable.
 pub fn value(conn: &Connection, key: &str) -> Result<Option<Value>> {
     let text: Option<String> = conn
         .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| row.get(0))
@@ -190,7 +190,7 @@ mod tests {
     }
 
     #[test]
-    fn stores_json_values_like_the_reference() {
+    fn stores_json_values_under_camel_case_keys() {
         let conn = crate::open_in_memory().unwrap();
         save(&conn, &Settings::default()).unwrap();
 

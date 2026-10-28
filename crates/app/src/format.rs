@@ -88,8 +88,7 @@ pub fn medium_date_time_in(name: &str, ms: i64) -> String {
     formatter(&locale).map_or_else(String::new, |formatter| format_with(&formatter, ms))
 }
 
-/// A count with thousands separators: "12,345". Follows the reference's English output; locale-dependent grouping
-/// comes with REQ-013-13.
+/// A count with thousands separators: "12,345". English grouping; locale-dependent grouping isn't part of REQ-013-13.
 pub fn count(n: u64) -> String {
     let digits = n.to_string();
     let mut out = String::new();

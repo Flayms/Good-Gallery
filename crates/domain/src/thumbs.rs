@@ -1,6 +1,6 @@
 //! Thumbnail widths (glossary: _Thumbnail_).
 
-/// Widths thumbnails are rendered at, in pixels; shared with the Electron version's cache.
+/// Widths thumbnails are rendered at, in pixels; part of the thumbnail cache's layout.
 pub const THUMB_WIDTHS: [u32; 2] = [400, 800];
 pub const MAX_THUMB_WIDTH: u32 = 800;
 /// Thumbnails are at most this many times as tall as wide (the tiles crop taller strips anyway).

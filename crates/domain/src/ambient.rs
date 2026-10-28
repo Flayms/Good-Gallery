@@ -1,5 +1,5 @@
 //! The viewer's photo-tinted chrome (REQ-013-11): a dark, muted version of the item's average color mixed into the
-//! glass, as the Electron version's `lib/ambient.ts`.
+//! glass.
 
 /// Upper bounds of the tint in OKLCH, so text on the tinted glass keeps its contrast (REQ-013-04).
 pub const MAX_LIGHTNESS: f32 = 0.28;

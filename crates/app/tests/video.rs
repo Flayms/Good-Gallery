@@ -1,5 +1,5 @@
-//! The real player (libmpv) on generated fixtures in the four containers the app supports (M9 exit criterion). Skipped
-//! without libmpv or ffmpeg unless `GG_REQUIRE_HELPERS` is set.
+//! The real player (libmpv) on generated fixtures in the four containers the app supports. Skipped without libmpv or
+//! ffmpeg unless `GG_REQUIRE_HELPERS` is set.
 
 use app::video::{MpvPlayer, Playback, PlaybackState};
 use eframe::egui;

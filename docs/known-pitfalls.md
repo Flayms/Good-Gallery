@@ -40,7 +40,7 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **The software renderer ignores rotation.** `video-params/rotate` is set, but frames and `dwidth` / `dheight` stay unrotated: rotate the quad.
 * **Default timing judders against our vsync.** With frames timed to the audio clock, a 30 fps video on 60 Hz shows frames for 1 or 3 vblanks in up to 44 % of frames, varying run to run. Use `video-sync=display-resample` + `override-display-fps`, render once per UI frame with `report_swap`, and skip frames whose next-frame info has `REPEAT`.
 * **`libmpv-2.dll` hard-imports `vulkan-1.dll`** (shinchiro builds): without the Vulkan loader it doesn't load. Load at runtime and degrade.
-* **Tests and `cargo run` find libmpv only through `GOOD_GALLERY_MPV`** (or `target\debug\mpv\libmpv-2.dll`, or `PATH`). Point it at the spike's `spikes/video/vendor/mpv/libmpv-2.dll`; without it `crates/app/tests/video.rs` skips and videos show their preview.
+* **Tests and `cargo run` find libmpv only through `GOOD_GALLERY_MPV`** (or `target\debug\mpv\libmpv-2.dll`, or `PATH`). Point it at `target/helpers/mpv/libmpv-2.dll` (`packaging/fetch-helpers.ps1`); without it `crates/app/tests/video.rs` skips and videos show their preview.
 * **A late `FILE_LOADED` belongs to the previous `loadfile`** when the user steps quickly between videos. Count `START_FILE` events against the `loadfile`s sent and accept frames only when they match; a `loadfile` mpv refuses sends no `START_FILE`.
 * **mpv's properties (`dwidth`, `duration`, `eof-reached` …) are the previous file's until the new one's `FILE_LOADED`**; `loadfile` only queues the switch. Read them only after it.
 * **With `keep-open=yes` mpv pauses on the last frame at the end** (`eof-reached`); unpausing does nothing. Seek to 0, then unpause.
@@ -60,9 +60,8 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **robocopy exit code 1 means "files copied"**, not failure (≥ 8 is an error).
 * **PowerShell passes `$null` to a P/Invoke `string` parameter as `""`**: use `[NullString]::Value` (e.g. `FindWindowW`). `Process.MainWindowHandle` may return a hidden 16 × 16 helper window right after start; find the window by title.
 * **Windows Python doesn't see Git Bash's `/tmp`**; use the scratchpad or relative paths.
-* **`python` may not run at all** (a mise shim points to a missing install). Use `node` for small scripts (`spikes/video/summarize.js`).
-* **Running a spike that loads a downloaded binary** (e.g. `libmpv-2.dll`) is blocked by auto mode until the user approves it. Ask before the first run.
-* **Spike crates are standalone**: run `cargo` inside `spikes/<name>/`; their `results/` and `vendor/` folders are git-ignored.
+* **`python` may not run at all** (a mise shim points to a missing install). Use `node` for small scripts.
+* **Running something that loads a downloaded binary** (e.g. `libmpv-2.dll`) can be blocked by auto mode until the user approves it. Ask before the first run.
 * **"The paging file is too small" (os error 1455) while compiling** shows up as "can't find crate" / "invalid metadata" errors: too many parallel rustc processes for the free memory (C: was nearly full). Build with `cargo … -j 4`.
 * **`cargo` may not be on the agent shell's `PATH`**: prepend `$env:USERPROFILE\.cargo\bin`.
 * **Restoring a file from a backup with `Copy-Item` or `cp` keeps the older mtime**, so cargo doesn't rebuild and keeps testing the mutated code. `touch` the file after restoring (mutation checks for red tests).
@@ -70,18 +69,17 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **Git Bash heredocs here turn `\\` into `\`**, even with a quoted `'EOF'`, which corrupts escapes in scripts (`\0` became a NUL byte in a `.mjs`). Use the Edit tool, or `chr(92)` in Python.
 * **Node's output through `| tail` was lost** when the process was killed by `timeout`; redirect to a file to see what a hanging Node script printed.
 * **exiftool on Windows mangles non-ASCII command-line arguments**; pass tag values through an argument file (`-@ file`, UTF-8). In exiftool's struct syntax, a comma inside a value is escaped with `|`.
-* **Node bundles of the reference**: `require()` of an ESM-only package (p-queue) works in Node 24, but the bundle's CommonJS interop then misses its default export. Bundle such packages and their dependencies (pnpm doesn't hoist them for `NODE_PATH`), and end the script with `process.exit`, since exiftool-vendored's timers keep Node alive.
 
 ## Indexer
 
-* **exiftool-vendored's real read arguments come from its default options**, not only `ReadTask`: `-fast`, `struct=1`, `keepUTCTime`, `-ignoreMinorErrors` and a UTF-8 repair filter. Check `DefaultExifToolOptions.js` before changing `media::exiftool::read_args`.
+* **Changing `media::exiftool::read_args` changes what existing index rows mean**: they were read with exiftool-vendored v38's default options (`-fast`, `struct=1`, `keepUTCTime`, `-ignoreMinorErrors`, a UTF-8 repair filter). Bump `METADATA_VERSION` if the extracted values change.
 * **Killing the Windows `exiftool.exe` leaves its `perl.exe` child running** with the pipes open; `Process::drop` ends the tree with `taskkill /T /F`. That isn't enough when the app exits: each drop takes ≈ 1.1 s (the indexer gets 2 s), and the PAR-packed exiftool 12.83 survived even a finished taskkill. The app's job object (`media::helpers`) is what ends them. Leftover exiftool processes also keep the stdout pipe of whoever started them open, so `cargo run … | Select-Object` seems to hang after the app has exited.
 * **`db::open_reader` can't create or migrate the index**: open it only after `db::open`. App checks on a data folder made by `cargo xtask libraries` don't catch this; also start once on an empty one.
 * **A watcher that can't start must not queue a scan**: it would follow every completed scan, so scans would run forever. Leave the retry to the schedule.
 * **Watcher tests that wait for a quick scan race the folder mtime**: a file written within the folder's stored mtime tick isn't seen by the quick scan. Keep the indexer busy with a gated scan of another library instead of relying on the new file.
 * **Folder mtimes need `FILE_FLAG_BACKUP_SEMANTICS`** to open a folder for `set_modified` on Windows (see the scan tests' `set_mtime`).
 
-* **A stat on a hung SMB share blocks its thread for the OS timeout** (often 30–60 s), past our 5 s reachability timeout. `reachability::with_timeout` leaves that thread behind; fine for single checks, but periodic checks of many offline libraries (M4) must not start a new check while the previous one for the same library still runs. (M4c: scans run one at a time and queued scans merge per library, so the minute-by-minute re-checks leave at most one stuck thread behind per hung library.)
+* **A stat on a hung SMB share blocks its thread for the OS timeout** (often 30–60 s), past our 5 s reachability timeout. `reachability::with_timeout` leaves that thread behind; fine for single checks, but periodic checks of many offline libraries must not start a new check while the previous one for the same library still runs. (M4c: scans run one at a time and queued scans merge per library, so the minute-by-minute re-checks leave at most one stuck thread behind per hung library.)
 
 ## Thumbnails
 
@@ -120,18 +118,15 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **Labels repeat across the window** (a library in the sidebar and on the Settings page, "5 stars" in the sidebar and in Filters): query tests by role and label, or take the last match for a menu that opens on top.
 
 * **A sort-index walk with SQLite's default page cache is a read call per row.** On a 200 MB index, listing 500k items took 5 s; memory-mapped reads plus a 64 MB cache bring it to 0.7 s (`db::open_reader`). Benchmarks must also run in release: the debug build doubled the times.
-* **One full `cargo xtask oracle` run stalled after the reference's search script had finished** (xtask waiting, no Node process left); it didn't happen again in the next run or in `cargo xtask oracle-search`. If it recurs, look for a process holding the inherited stdout pipe.
 
-## Carried over from the reference
-
-These still apply to the Rust implementation. The reference's own `docs/known-pitfalls.md` has the Electron-specific rest.
+## Index and metadata
 
 * **Folder mtimes** (quick scans) only change when direct children are added, removed or renamed, not on in-place edits or changes deeper down. Don't use them to skip whole subtrees or file stats outside `quick` scans.
 * **Watching on Windows reports last-access changes** too, so the indexer's own reads cause events; `changes` scans must keep stating only reported files. Expect the same from `notify` (ReadDirectoryChangesW).
-* **SQLite query plans:** the tag filters in the reference `src/main/db/tag-search.ts` rely on unary `+` (`+media.id`, `+tag_id`) to pin plans; removing them looks harmless but makes common-tag searches 10–100× slower. Keep the SQL as is.
+* **SQLite query plans:** the tag filters in `db::gallery` rely on unary `+` (`+media.id`, `+tag_id`) to pin plans; removing them looks harmless but makes common-tag searches 10–100× slower. Keep the SQL as is.
 * **`media.meta_version`** (vs `METADATA_VERSION`) is how the indexer tells "unchanged file" apart from "unchanged file, old extractor". Bump the constant whenever metadata extraction changes; a root with rows behind is upgraded to a full scan.
-* **Migrations:** the schema source of truth is the reference's `drizzle/*.sql` (statements separated by `--> statement-breakpoint`, each chunk prepared as one statement) plus its `__drizzle_migrations` bookkeeping. Keep both compatible so databases move between the two apps. Expression indexes were avoided in favor of generated columns.
-* **EXIF orientation:** the reference pins its mapping with a test against `sharp.autoOrient()` (`src/indexer/thumbnail.test.ts`). Port the expected results, not the sharp call order.
+* **Migrations:** `crates/db/migrations/*.sql` (statements separated by `--> statement-breakpoint`, each chunk prepared as one statement) plus the `__drizzle_migrations` bookkeeping that existing indexes carry. Never edit an applied migration (its hash is recorded); add a new file and journal entry. Expression indexes were avoided in favor of generated columns.
+* **EXIF orientation:** `req_005_03_turns_every_orientation_upright` pins the expected pixels for all 8 orientations. Change the mapping only against that test.
 * **The user's real data** (`%APPDATA%\good-gallery\gallery.db`, `thumbs\`) must never be opened in place: an open with WAL writes `-shm` / `-wal` files and migrations would change the schema. Copy first.
 
 ## Packaging and releases
@@ -139,9 +134,9 @@ These still apply to the Rust implementation. The reference's own `docs/known-pi
 * **Git Bash's `tar` is GNU tar**, which can't write zip or read 7z. Call Windows' own `%SystemRoot%\System32\tar.exe` (bsdtar) by its full path; it writes zip with `-a` and reads 7z, but has no `-s` (rename while extracting): use `--strip-components` and copy afterwards.
 * **Freshly unpacked executables can't be moved or renamed right away** ("access denied"): Defender holds them open while it scans. Copy them instead, and retry the delete of the original.
 * **`git add` right after appending to a file through a still-open handle stages nothing** on Windows (the release tests): close the file before calling git.
-* **The release tests need git-cliff**: set `GIT_CLIFF` (the reference has one in `node_modules\git-cliff-windows-x64\bin\git-cliff.exe`) or install it; without it they skip, with `CI` or `GG_REQUIRE_HELPERS` set they fail.
+* **The release tests need git-cliff**: set `GIT_CLIFF` or install it (2.14.2, as CI does); without it they skip, with `CI` or `GG_REQUIRE_HELPERS` set they fail.
 * **NSIS's uninstaller copies itself to a temp folder and returns at once.** Run it with `/S _?=<install folder>` to make it wait (the smoke test does); it then can't delete itself, so remove the folder afterwards.
 * **NSIS: `/D=<folder>` must be the last argument and unquoted**, even with spaces.
-* **makensis locally:** electron-builder keeps an NSIS copy in `%LOCALAPPDATA%\electron-builder\Cache\nsis\nsis-3.0.4.1-nsis-3.0.4.1\Bin\makensis.exe`; point `MAKENSIS` at it.
+* **makensis locally:** install NSIS (`Program Files (x86)\NSIS` is found) or point `MAKENSIS` at a `makensis.exe`.
 * **The packaged app (`--features packaged`, as `cargo xtask dist` builds it) has no console**: its output only shows when the caller redirects stdout / stderr, so look at `logs\app.log` in the data folder instead. Never start it without `--data-dir` during development: it opens the real `%APPDATA%\good-gallery`.
 * **A zip in `target/dist` can stay locked for minutes** after it was written (Defender or an open Explorer window), so `cargo xtask dist` fails with "used by another process": pass another `--out`.

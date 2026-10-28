@@ -1,5 +1,5 @@
-//! Watches a library for changes between scans (the reference's `RootWatcher`): `notify` (ReadDirectoryChangesW on
-//! Windows, which SMB shares support), housekeeping paths filtered out, changes reported once they settle.
+//! Watches a library for changes between scans: `notify` (ReadDirectoryChangesW on Windows, which SMB shares support),
+//! housekeeping paths filtered out, changes reported once they settle.
 
 use domain::media::is_ignored_dir;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};

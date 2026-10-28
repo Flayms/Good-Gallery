@@ -1,8 +1,6 @@
 {
   "permissions": {
-    "additionalDirectories": ["../good-gallery"],
     "allow": [
-      "Read(//c/Repositories/Personal/good-gallery/**)",
       "Bash(cargo build:*)",
       "Bash(cargo check:*)",
       "Bash(cargo test:*)",
@@ -13,10 +11,6 @@
       "Bash(cargo xtask:*)",
       "Bash(cargo tree:*)",
       "Bash(cargo metadata:*)"
-    ],
-    "deny": [
-      "Edit(//c/Repositories/Personal/good-gallery/**)",
-      "Edit(//c/Users/anton.lange/AppData/Roaming/good-gallery/**)"
     ]
   }
 }

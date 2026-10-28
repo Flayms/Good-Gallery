@@ -88,6 +88,6 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 | REQ-014-04 | `xtask/src/release.rs` › req_014_04_parses_overrides, req_014_04_overrides_the_bump_or_the_version | pass |
 | REQ-014-05 | `xtask/src/release.rs` › req_014_05_lists_failed_preconditions, req_014_05_stops_when_a_precondition_fails, req_014_05_undoes_a_release_whose_push_fails | pass |
 | REQ-014-06 | `xtask/src/release.rs` › req_014_06_writes_the_changelog | pass |
-| REQ-014-07 | `xtask/src/release.rs` › req_014_07_sets_the_workspace_version, req_014_07_commits_tags_and_pushes_the_release; `cargo xtask release --dry-run` on this repository (M11) | pass |
-| REQ-014-08 | `xtask/tests/workflows.rs` › release_publishes_both_downloads_after_the_checks; `xtask/src/dist.rs` › stages_the_helpers_where_the_app_finds_them, names_the_downloads_after_the_version; `cargo xtask dist` built both locally (M11) | partial (publishing runs with the first release) |
-| REQ-014-09 | `xtask/src/dist.rs` › stages_the_helpers_where_the_app_finds_them; `packaging/smoke-test.ps1` (release workflow; run locally in M11: silent install, app run, uninstall keeps the data folder) | pass |
+| REQ-014-07 | `xtask/src/release.rs` › req_014_07_sets_the_workspace_version, req_014_07_commits_tags_and_pushes_the_release; `cargo xtask release --dry-run` on this repository | pass |
+| REQ-014-08 | `xtask/tests/workflows.rs` › release_publishes_both_downloads_after_the_checks; `xtask/src/dist.rs` › stages_the_helpers_where_the_app_finds_them, names_the_downloads_after_the_version; `cargo xtask dist` built both locally | partial (publishing runs with the first release) |
+| REQ-014-09 | `xtask/src/dist.rs` › stages_the_helpers_where_the_app_finds_them; `packaging/smoke-test.ps1` (release workflow; run locally: silent install, app run, uninstall keeps the data folder) | pass |

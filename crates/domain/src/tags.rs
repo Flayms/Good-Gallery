@@ -12,8 +12,8 @@ pub fn clean_tag(tag: &str) -> String {
         .join(" ")
 }
 
-/// JavaScript's whitespace (`\s`, `trim()`), which the reference normalizes with. It differs from Rust's
-/// `char::is_whitespace`: it includes U+FEFF (byte order mark) and excludes U+0085 (next line).
+/// JavaScript's whitespace (`\s`, `trim()`), which tag names in existing indexes were normalized with. It differs from
+/// Rust's `char::is_whitespace`: it includes U+FEFF (byte order mark) and excludes U+0085 (next line).
 fn is_js_space(c: char) -> bool {
     matches!(
         c,
@@ -68,7 +68,7 @@ mod tests {
     }
 
     #[test]
-    fn req_004_11_uses_javascripts_whitespace_like_the_reference() {
+    fn req_004_11_uses_javascripts_whitespace() {
         assert_eq!(normalize_tag("\u{feff}Holiday"), "holiday");
         assert_eq!(clean_tag("a\u{85}b"), "a\u{85}b");
     }

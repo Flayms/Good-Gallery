@@ -1,6 +1,6 @@
 //! Glass surfaces (REQ-013-03, `docs/design.md`): what lies under a surface is drawn into an offscreen target at half
 //! resolution, blurred with a dual-Kawase chain and composited with saturation, tint, rounded corners and an opacity in
-//! an `egui_wgpu` paint callback (the M0 spike's pass, ≈ 0.4 ms per surface).
+//! an `egui_wgpu` paint callback (≈ 0.4 ms per surface).
 //!
 //! What lies under glass is the frame's **backdrop**: the gallery records every tile it draws (its rect, its texture or
 //! placeholder color) and the solid surfaces (page, sidebar); text isn't part of it, which a 24–32 px blur hides
@@ -18,7 +18,7 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
-/// Down and up passes after the half-resolution source: 4 match CSS's 24–32 px blur (M0).
+/// Down and up passes after the half-resolution source: 4 give the design's 24–32 px blur.
 const PASSES: u32 = 4;
 /// Floats per backdrop instance: NDC rect, UV rect, color.
 const INSTANCE_FLOATS: usize = 12;

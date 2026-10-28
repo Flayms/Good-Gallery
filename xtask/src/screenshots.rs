@@ -1,7 +1,7 @@
 //! `cargo xtask screenshots [--keep <dir>]`: renders the README screenshots (`docs/screenshots/`) from a generated demo
-//! library, as the reference's `e2e/screenshots.ts` does: 56 landscapes in four trips with keywords, People, Places,
-//! ratings and capture dates, plus two videos. The library lies on a spare drive letter (`subst`), so no user folder
-//! shows in the viewer's info panel. Needs exiftool and ffmpeg.
+//! library: 56 landscapes in four trips with keywords, People, Places, ratings and capture dates, plus two videos. The
+//! library lies on a spare drive letter (`subst`), so no user folder shows in the viewer's info panel. Needs exiftool
+//! and ffmpeg.
 
 use anyhow::{Context as _, bail};
 use image::{Rgb, RgbImage};
@@ -128,7 +128,7 @@ struct Demo {
     rating: u8,
 }
 
-/// The reference's demo library: 14 photos per trip, a few per day, so the gallery shows date groups.
+/// The demo library: 14 photos per trip, a few per day, so the gallery shows date groups.
 fn demo_library() -> Vec<Demo> {
     let mut demos = Vec::new();
     let mut n = 0usize;
@@ -183,7 +183,7 @@ fn pixel(color: [f64; 3]) -> Rgb<u8> {
     Rgb(color.map(|c| c.round().clamp(0.0, 255.0) as u8))
 }
 
-/// The reference's SVG landscape: sky gradient, sun with a glow, three hill layers, water in some palettes.
+/// A drawn landscape: sky gradient, sun with a glow, three hill layers, water in some palettes.
 fn landscape(palette: Palette, width: u32, height: u32, seed: u64) -> RgbImage {
     let mut random = Random(seed);
     let (w, h) = (f64::from(width), f64::from(height));
@@ -275,7 +275,7 @@ fn create_library(dir: &Path, exiftool: &Path, ffmpeg: &Path, scratch: &Path) ->
     // One exiftool run for all photos; an argument file keeps the values intact.
     let arg_file = scratch.join("tags.args");
     std::fs::write(&arg_file, args.join("\n"))?;
-    crate::oracle::run_command(
+    crate::process::run_command(
         Command::new(exiftool)
             .args(["-q", "-charset", "utf8", "-@"])
             .arg(&arg_file),
@@ -290,7 +290,7 @@ fn create_library(dir: &Path, exiftool: &Path, ffmpeg: &Path, scratch: &Path) ->
     for (index, (file, look, date)) in videos.into_iter().enumerate() {
         let still = scratch.join(format!("still-{index}.png"));
         landscape(look.palette(), 1920, 1080, 90 + index as u64).save(&still)?;
-        crate::oracle::run_command(
+        crate::process::run_command(
             Command::new(ffmpeg)
                 .args(["-v", "error", "-y", "-loop", "1", "-i"])
                 .arg(&still)
@@ -312,7 +312,7 @@ impl Subst {
             .map(|letter| format!("{letter}:"))
             .find(|drive| !Path::new(&format!("{drive}\\")).exists())
             .context("no free drive letter for subst")?;
-        crate::oracle::run_command(Command::new("subst").arg(&letter).arg(dir))?;
+        crate::process::run_command(Command::new("subst").arg(&letter).arg(dir))?;
         Ok(Self(letter))
     }
 }
@@ -325,7 +325,7 @@ impl Drop for Subst {
 
 /// Runs the app on `data` until it has saved `out`.
 fn screenshot(app: &Path, data: &Path, out: &Path, extra: &[&str]) -> anyhow::Result<()> {
-    crate::oracle::run_command(
+    crate::process::run_command(
         Command::new(app)
             .arg("--data-dir")
             .arg(data)
@@ -361,7 +361,7 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     let library = format!("{}\\Photos", drive.0);
     create_library(Path::new(&library), &exiftool, &ffmpeg, &scratch)?;
     let index = data.join("gallery.db");
-    crate::oracle::index_with_ours(exiftool, Path::new(&library), &index, "Photos")?;
+    crate::process::index_library(exiftool, Path::new(&library), &index, "Photos")?;
 
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     if !Command::new(cargo)
@@ -393,7 +393,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_demo_library_matches_the_reference() {
+    fn the_demo_library_has_four_trips_of_photos() {
         let demos = demo_library();
         assert_eq!(demos.len(), 56);
         assert_eq!(demos[0].file, "Trips/2024 Lofoten/IMG_4100.jpg");

@@ -116,7 +116,7 @@ pub fn controls_hidden(idle: bool, hovering: bool, info_open: bool, video_paused
 /// Size of the filmstrip's square thumbnails, points.
 pub const FILMSTRIP_THUMB: f32 = 56.0;
 
-/// Settings key of the filmstrip choice (REQ-015-02), as the Electron version's `localStorage` key.
+/// Settings key of the filmstrip choice (REQ-015-02).
 pub const FILMSTRIP_KEY: &str = "viewer.filmstrip";
 
 /// Whether the stored choice shows the filmstrip; it is hidden until the user shows it.

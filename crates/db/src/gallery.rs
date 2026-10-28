@@ -1,5 +1,5 @@
-//! What the gallery shows: the whole ordered result up front (ids and aspects, so the layout is exact before any
-//! item is loaded) and tile data for the visible range, as the Electron version's `media.layout` and `media.byIds`.
+//! What the gallery shows: the whole ordered result up front (ids and aspects, so the layout is exact before any item
+//! is loaded) and tile data for the visible range.
 
 use crate::Result;
 use domain::date_groups::{DateGroup, date_groups};
@@ -38,10 +38,10 @@ fn order_by(search: &GallerySearch) -> String {
     terms.join(", ")
 }
 
-/// Query shapes by (estimated) matches of an included tag, from the Electron version's `tag-search.ts`, measured
-/// there on 500k synthetic media items: up to `DRIVING_MAX`, the rarest tag drives (its media are looked up by id and
-/// sorted); otherwise the sort index is walked and rows are checked against each tag's materialized media ids; beyond
-/// `MATERIALIZE_MAX`, a primary key probe per row is cheaper than building the list.
+/// Query shapes by (estimated) matches of an included tag, measured on 500k synthetic media items: up to `DRIVING_MAX`,
+/// the rarest tag drives (its media are looked up by id and sorted); otherwise the sort index is walked and rows are
+/// checked against each tag's materialized media ids; beyond `MATERIALIZE_MAX`, a primary key probe per row is cheaper
+/// than building the list.
 const DRIVING_MAX: u64 = 5_000;
 const MATERIALIZE_MAX: u64 = 100_000;
 
@@ -485,7 +485,7 @@ mod tests {
         assert_eq!((loaded[0].width, loaded[0].height), (Some(1), Some(1)));
     }
 
-    /// Search tests ported from the Electron version's `router.test.ts` (`media.layout`).
+    /// Search tests (`layout` with every filter).
     mod search {
         use super::*;
         use chrono::{Local, NaiveDate, TimeZone};

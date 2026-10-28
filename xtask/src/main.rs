@@ -4,9 +4,7 @@ mod check_specs;
 mod dist;
 mod gallery_bench;
 mod libraries;
-mod oracle;
-mod oracle_search;
-mod oracle_thumbs;
+mod process;
 mod release;
 mod screenshots;
 mod search_bench;
@@ -35,36 +33,7 @@ fn main() -> ExitCode {
             ExitCode::from(code as u8)
         }
         Some("libraries") => report(libraries::run(&args[1..])),
-        Some("oracle") => match oracle::run(&args[1..]) {
-            Ok(true) => ExitCode::SUCCESS,
-            Ok(false) => ExitCode::FAILURE,
-            Err(error) => {
-                eprintln!("error: {error:#}");
-                ExitCode::FAILURE
-            }
-        },
         Some("gallery-bench") => report(gallery_bench::run(&args[1..])),
-        Some("oracle-search") => match args.get(1..=2) {
-            Some([flag, index]) if flag == "--index" => {
-                let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-                let reference = root.join("..").join("good-gallery");
-                match std::path::absolute(&reference)
-                    .map_err(anyhow::Error::from)
-                    .and_then(|reference| oracle_search::run_on_copy(&reference, Path::new(index)))
-                {
-                    Ok(true) => ExitCode::SUCCESS,
-                    Ok(false) => ExitCode::FAILURE,
-                    Err(error) => {
-                        eprintln!("error: {error:#}");
-                        ExitCode::FAILURE
-                    }
-                }
-            }
-            _ => {
-                eprintln!("usage: cargo xtask oracle-search --index <reference index of the fixture library>");
-                ExitCode::FAILURE
-            }
-        },
         Some("dist") => report(dist::run(&args[1..])),
         Some("screenshots") => report(screenshots::run(&args[1..])),
         Some("release") => ExitCode::from(release::run(&args[1..])),
@@ -79,7 +48,7 @@ fn main() -> ExitCode {
         Some("thumbs") => report(thumbs::run(&args[1..])),
         _ => {
             eprintln!(
-                "usage: cargo xtask check-specs [--summary] | libraries … | oracle … | thumbs … | oracle-search … | gallery-bench … | search-bench … | release … | dist … | screenshots …"
+                "usage: cargo xtask check-specs [--summary] | libraries … | thumbs … | gallery-bench … | search-bench … | release … | dist … | screenshots …"
             );
             ExitCode::FAILURE
         }

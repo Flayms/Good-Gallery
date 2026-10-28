@@ -1,7 +1,6 @@
-//! Thumbnail rendering in the background and on request (the Electron version's `src/indexer/thumbnails.ts`):
-//! worker threads take jobs from one priority queue. Requests from visible tiles come first, the most recent first,
-//! since earlier ones have likely scrolled away (REQ-005-07); media items without thumbnails are rendered in the
-//! background, newest first (REQ-005-08).
+//! Thumbnail rendering in the background and on request: worker threads take jobs from one priority queue. Requests
+//! from visible tiles come first, the most recent first, since earlier ones have likely scrolled away (REQ-005-07);
+//! media items without thumbnails are rendered in the background, newest first (REQ-005-08).
 
 use crate::thumb_cache::ThumbCache;
 use db::libraries::{self, LibraryStatus};

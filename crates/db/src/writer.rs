@@ -1,4 +1,4 @@
-//! All index writes of the indexer (the reference's `IndexWriter`). Owns the write connection; one per index.
+//! All index writes of the indexer. Owns the write connection; one per index.
 
 use crate::Result;
 use crate::libraries::{self, Library, LibraryStatus};

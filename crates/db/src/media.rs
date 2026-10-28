@@ -1,5 +1,4 @@
-//! One media item's details for the viewer's info panel and the info sheet (REQ-009-08), as the Electron version's
-//! `media.byId`.
+//! One media item's details for the viewer's info panel and the info sheet (REQ-009-08).
 
 use crate::Result;
 use domain::media::MediaKind;

@@ -48,8 +48,8 @@ pub fn end_helpers_with_app() -> std::io::Result<()> {
     Ok(())
 }
 
-/// Runs the calling thread below normal priority, so background work (thumbnail decoding) doesn't take time from the
-/// UI thread. Measured in M0: more or higher-priority decode threads cost frame time on an integrated GPU.
+/// Runs the calling thread below normal priority, so background work (thumbnail decoding) doesn't take time from the UI
+/// thread. Measured: more or higher-priority decode threads cost frame time on an integrated GPU.
 #[cfg(windows)]
 #[allow(unsafe_code)]
 pub fn lower_thread_priority() {
@@ -97,7 +97,7 @@ pub const EXIFTOOL_BUNDLED: Bundled = ("exiftool", "exiftool.exe");
 pub const FFMPEG_BUNDLED: Bundled = ("ffmpeg", if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" });
 pub const MPV_BUNDLED: Bundled = ("mpv", if cfg!(windows) { "libmpv-2.dll" } else { "libmpv.so.2" });
 
-/// libmpv for video playback (M9): `GOOD_GALLERY_MPV`, `mpv/libmpv-2.dll` next to the app, or on `PATH`.
+/// libmpv for video playback: `GOOD_GALLERY_MPV`, `mpv/libmpv-2.dll` next to the app, or on `PATH`.
 pub fn find_mpv() -> Option<std::path::PathBuf> {
     let (folder, name) = MPV_BUNDLED;
     find_helper("GOOD_GALLERY_MPV", folder, name)
@@ -120,7 +120,7 @@ pub fn find_helper(env: &str, folder: &str, name: &str) -> Option<std::path::Pat
     })
 }
 
-/// The refresh rate of the primary display in Hz, if Windows reports one: video frames are timed to it (M0b).
+/// The refresh rate of the primary display in Hz, if Windows reports one: video frames are timed to it.
 #[cfg(windows)]
 #[allow(unsafe_code)]
 pub fn display_refresh_rate() -> Option<f64> {

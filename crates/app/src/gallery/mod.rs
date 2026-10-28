@@ -46,7 +46,7 @@ pub const TOOLBAR_HEIGHT: f32 = 48.0;
 /// Placeholder textures made per frame; more wait for the next frame, so fast flings don't stall it.
 const PLACEHOLDERS_PER_FRAME: usize = 48;
 const MAX_PLACEHOLDERS: usize = 4_000;
-/// Settings keys of the view choices, as the Electron version's `localStorage` keys.
+/// Settings keys of the view choices.
 const COLUMNS_KEY: &str = "gallery.columns";
 const VIEW_KEY: &str = "gallery.view";
 const GROUP_BY_DAY_KEY: &str = "gallery.groupByDay";

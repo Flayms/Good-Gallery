@@ -1,6 +1,5 @@
-//! Thumbnail rendering, as the Electron version's `src/indexer/thumbnail.ts` does with sharp: one decode per file
-//! (shrunk while decoding where the format allows), upright, then every thumbnail width as WebP and a ThumbHash
-//! placeholder from it.
+//! Thumbnail rendering: one decode per file (shrunk while decoding where the format allows), upright, then every
+//! thumbnail width as WebP and a ThumbHash placeholder from it.
 
 use crate::ffmpeg::{self, FfmpegError};
 use base64::Engine as _;
@@ -20,8 +19,8 @@ const THUMBHASH_SIZE: u32 = 100;
 /// Video thumbnails show the frame at this share of the duration (REQ-005-05).
 const VIDEO_POSITION: f64 = 0.1;
 const PREVIEW_ASPECT_TOLERANCE: f64 = 0.02;
-/// What a decode may allocate: sharp's default input limit (268 402 689 pixels) as RGBA. The `image` crate's own
-/// default (512 MiB) would fail on large panoramas the Electron version renders.
+/// What a decode may allocate: 268 402 689 pixels (16 383²) as RGBA. The `image` crate's own default (512 MiB) would
+/// fail on large panoramas.
 const MAX_DECODE_BYTES: u64 = 268_402_689 * 4;
 
 pub(crate) fn limits() -> image::Limits {
@@ -33,7 +32,7 @@ pub(crate) fn limits() -> image::Limits {
 /// Every thumbnail width of a media item and its placeholder.
 #[derive(Debug, Clone)]
 pub struct Thumbnails {
-    /// Base64-encoded ThumbHash (with padding, as the Electron version stores it).
+    /// Base64-encoded ThumbHash (with padding, as the index stores it).
     pub thumbhash: String,
     /// `(width, WebP file)` for each of [`THUMB_WIDTHS`].
     pub images: Vec<(u32, Vec<u8>)>,
@@ -257,7 +256,7 @@ pub(crate) fn resize(image: &DynamicImage, width: u32, height: u32) -> Result<Dy
         return Ok(image.clone());
     }
     let mut resized = DynamicImage::new(width, height, image.color());
-    // Lanczos3, sharp's default kernel; alpha is premultiplied while resampling.
+    // Lanczos3; alpha is premultiplied while resampling.
     fast_image_resize::Resizer::new()
         .resize(image, &mut resized, &fast_image_resize::ResizeOptions::new())
         .map_err(decode_error)?;
@@ -393,10 +392,9 @@ pub(crate) mod tests {
         color[0] < 50 && color[1] < 50 && color[2] > 200
     }
 
-    /// REQ-005-03: sharp's auto-orientation of a 2 × 3 image with one distinct pixel per position (pinned from the
-    /// Electron version's test, which compares against sharp).
+    /// REQ-005-03: auto-orientation of a 2 × 3 image with one distinct pixel per position (expected pixels pinned).
     #[test]
-    fn req_005_03_matches_sharps_auto_orientation_for_every_orientation() {
+    fn req_005_03_turns_every_orientation_upright() {
         let expected: [(u8, (u32, u32), [u8; 6]); 8] = [
             (1, (2, 3), [0, 1, 2, 3, 4, 5]),
             (2, (2, 3), [1, 0, 3, 2, 5, 4]),

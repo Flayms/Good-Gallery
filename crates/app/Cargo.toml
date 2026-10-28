@@ -8,7 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-# The installed or portable app (`cargo xtask dist`): the Electron version's data folder, no console window.
+# The installed or portable app (`cargo xtask dist`): the data folder `%APPDATA%\good-gallery`, no console window.
 packaged = []
 
 [dependencies]
