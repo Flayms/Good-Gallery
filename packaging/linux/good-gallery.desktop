@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Good Gallery
+GenericName=Photo Gallery
+Comment=Browse large photo and video libraries
+Exec=good-gallery
+Icon=good-gallery
+Terminal=false
+Categories=Graphics;Photography;Viewer;
+StartupWMClass=good-gallery

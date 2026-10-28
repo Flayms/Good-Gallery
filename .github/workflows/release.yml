@@ -1,5 +1,5 @@
-# Publishes a GitHub release with the Windows installer and the portable zip for every version tag pushed by
-# `cargo xtask release` (xtask/src/release.rs, docs/specs/014-ci-release).
+# Publishes a GitHub release with the Windows installer, the portable zip and the Linux archive for every version tag
+# pushed by `cargo xtask release` (xtask/src/release.rs, docs/specs/014-ci-release, docs/specs/018-linux).
 name: Release
 
 on:
@@ -20,9 +20,25 @@ jobs:
     name: Checks
     uses: ./.github/workflows/ci.yml
 
+  linux:
+    name: Build the Linux archive
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the Linux archive
+        run: cargo xtask dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: target/dist/*.tar.gz
+          if-no-files-found: error
+
   release:
     name: Build and publish
-    needs: checks
+    needs: [checks, linux]
     runs-on: windows-latest
     permissions:
       contents: write
@@ -62,6 +78,11 @@ jobs:
         shell: pwsh
         run: ./packaging/smoke-test.ps1 -Installer "target/dist/good-gallery-$env:VERSION-setup.exe"
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux
+          path: target/dist
+
       - name: Write the release notes
         run: |
           # The release title already names the version, so drop the section heading.
@@ -74,8 +95,9 @@ jobs:
           | --- | --- |
           | **good-gallery-$VERSION-setup.exe** | Installer: pick the folder, installs for your user |
           | **good-gallery-$VERSION-portable.zip** | Portable: extract anywhere and run \`good-gallery.exe\` |
+          | **good-gallery-$VERSION-linux-x86_64.tar.gz** | Linux: extract, install exiftool, ffmpeg and libmpv from your distribution (see \`README.txt\`), run \`./install.sh\` or \`./good-gallery\` |
 
-          Both keep the index, settings and thumbnail cache in \`%APPDATA%\\good-gallery\`, so an update picks them up as they are.
+          The Windows downloads keep the index, settings and thumbnail cache in \`%APPDATA%\\good-gallery\`, the Linux one in \`~/.local/share/good-gallery\`, so an update picks them up as they are.
 
           The downloads aren't code-signed yet, so Windows SmartScreen may warn about them. For the installer choose _More info_ → _Run anyway_. For the zip, right-click it → _Properties_ → _Unblock_ before extracting.
           NOTES
@@ -88,6 +110,7 @@ jobs:
           gh release create "$TAG" \
             "target/dist/good-gallery-$VERSION-setup.exe" \
             "target/dist/good-gallery-$VERSION-portable.zip" \
+            "target/dist/good-gallery-$VERSION-linux-x86_64.tar.gz" \
             --title "Good Gallery $VERSION" \
             --notes-file release-notes.md \
             --verify-tag

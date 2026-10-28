@@ -1,7 +1,8 @@
 //! Good Gallery.
 //!
 //! Options: `--data-dir <folder>` (index, settings, thumbnails and logs; default `%APPDATA%\good-gallery` in the
-//! packaged app, `%APPDATA%\good-gallery-rust` otherwise), `--screenshot <file.png>` (saves a screenshot of the window
+//! packaged app, `%APPDATA%\good-gallery-rust` otherwise; on Linux the same names in `~/.local/share`),
+//! `--screenshot <file.png>` (saves a screenshot of the window
 //! after a few frames and exits), `--screenshot-after <seconds>` (waits that long before the screenshot, e.g. for scans
 //! or thumbnails), `--bench-scroll <seconds>` (vsync off; scrolls the gallery once to warm the files, then again while
 //! measuring frame times, prints them and exits; REQ-006-12), `--view <position>` (opens the viewer at that gallery
@@ -212,11 +213,9 @@ fn save_png(path: &Path, image: &egui::ColorImage) -> anyhow::Result<()> {
 }
 
 fn default_data_dir() -> anyhow::Result<PathBuf> {
-    let base = std::env::var_os("APPDATA").context("APPDATA isn't set; pass --data-dir")?;
-    Ok(app::startup::default_data_dir(
-        Path::new(&base),
-        cfg!(feature = "packaged"),
-    ))
+    let base =
+        app::startup::data_home(|name| std::env::var_os(name)).context("APPDATA or HOME isn't set; pass --data-dir")?;
+    Ok(app::startup::default_data_dir(&base, cfg!(feature = "packaged")))
 }
 
 fn parse_args() -> anyhow::Result<Options> {
@@ -428,7 +427,7 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
 fn videos(ctx: &egui::Context, render_state: Option<egui_wgpu::RenderState>) -> app::video::Videos {
     let Some(dll) = media::helpers::find_mpv() else {
         tracing::error!("libmpv not found: videos can't play");
-        return app::video::Videos::unavailable("libmpv-2.dll not found");
+        return app::video::Videos::unavailable(format!("{} not found", media::helpers::MPV_BUNDLED.1));
     };
     tracing::info!("libmpv: {}", dll.display());
     let ctx = ctx.clone();
@@ -550,7 +549,12 @@ fn run(options: Options) -> anyhow::Result<()> {
             .with_title("Good Gallery")
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([800.0, 600.0])
-            .with_icon(app::startup::window_icon()),
+            .with_icon(app::startup::window_icon())
+            // Linux: the app draws its own caption buttons in the toolbar (REQ-018-04); Windows keeps its native frame
+            // and removes only the caption (`app::titlebar`).
+            .with_decorations(!cfg!(target_os = "linux"))
+            // The `.desktop` file's name, so docks show the app's icon and group its windows.
+            .with_app_id("good-gallery"),
         ..Default::default()
     };
     if options.bench_scroll.is_some() {

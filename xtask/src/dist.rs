@@ -2,6 +2,10 @@
 //! release (REQ-014-08). Builds the app in release, stages it with the helper programs (from
 //! `packaging/fetch-helpers.ps1`, default `target/helpers`) in the layout the app looks for, then writes
 //! `good-gallery-<version>-portable.zip` and, with NSIS, `good-gallery-<version>-setup.exe` into `target/dist`.
+//!
+//! On Linux it writes `good-gallery-<version>-linux-x86_64.tar.gz` instead (REQ-018-09): the app, its menu entry, icon,
+//! install script and license files, without helpers (the app uses the system's). `--helpers` and `--no-installer`
+//! don't apply there.
 
 use anyhow::{Context as _, bail};
 use media::helpers::{Bundled, EXIFTOOL_BUNDLED, FFMPEG_BUNDLED, MPV_BUNDLED};
@@ -23,6 +27,36 @@ pub fn artifact_names(version: &str) -> (String, String) {
         format!("good-gallery-{version}-setup.exe"),
         format!("good-gallery-{version}-portable.zip"),
     )
+}
+
+/// The Linux download's name.
+pub fn linux_artifact_name(version: &str) -> String {
+    format!("good-gallery-{version}-linux-x86_64.tar.gz")
+}
+
+/// The files of the Linux package besides the executable: `(source below the workspace, name in the package)`.
+const LINUX_FILES: [(&str, &str); 6] = [
+    ("LICENSE", "LICENSE.txt"),
+    ("packaging/linux/THIRD-PARTY-NOTICES.txt", "THIRD-PARTY-NOTICES.txt"),
+    ("packaging/linux/README.txt", "README.txt"),
+    ("packaging/linux/install.sh", "install.sh"),
+    ("packaging/linux/good-gallery.desktop", "good-gallery.desktop"),
+    ("crates/app/assets/app-icon.png", "good-gallery.png"),
+];
+
+/// Stages the Linux package into `stage` (emptied first): the executable as `good-gallery` and [`LINUX_FILES`] from
+/// `root`. Copies keep the sources' permissions, so the app and `install.sh` stay executable.
+pub fn stage_linux(exe: &Path, root: &Path, stage: &Path) -> anyhow::Result<()> {
+    if stage.exists() {
+        std::fs::remove_dir_all(stage).with_context(|| format!("can't empty {}", stage.display()))?;
+    }
+    std::fs::create_dir_all(stage)?;
+    std::fs::copy(exe, stage.join("good-gallery")).with_context(|| format!("can't copy {}", exe.display()))?;
+    for (source, name) in LINUX_FILES {
+        let source = root.join(source);
+        std::fs::copy(&source, stage.join(name)).with_context(|| format!("can't copy {}", source.display()))?;
+    }
+    Ok(())
 }
 
 fn copy_dir(from: &Path, to: &Path) -> anyhow::Result<()> {
@@ -113,8 +147,8 @@ fn find_makensis() -> Option<PathBuf> {
 
 pub fn run(args: &[String]) -> anyhow::Result<()> {
     let root = std::path::absolute(Path::new(env!("CARGO_MANIFEST_DIR")).join(".."))?;
-    let mut helpers = root.join(r"target\helpers");
-    let mut out = root.join(r"target\dist");
+    let mut helpers = root.join("target").join("helpers");
+    let mut out = root.join("target").join("dist");
     let (mut build, mut installer) = (true, true);
     let mut args = args.iter();
     while let Some(arg) = args.next() {
@@ -137,6 +171,24 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         if !status.success() {
             bail!("the release build failed");
         }
+    }
+    if cfg!(target_os = "linux") {
+        let name = linux_artifact_name(version);
+        let folder = name.trim_end_matches(".tar.gz").to_owned();
+        let stage_dir = out.join(&folder);
+        stage_linux(&root.join("target/release/app"), &root, &stage_dir)?;
+        println!("staged {}", stage_dir.display());
+        // One top folder in the archive, as Linux archives have.
+        crate::process::run_command(
+            Command::new("tar")
+                .arg("-czf")
+                .arg(out.join(&name))
+                .arg("-C")
+                .arg(&out)
+                .arg(&folder),
+        )?;
+        println!("{}", out.join(&name).display());
+        return Ok(());
     }
     let exe = root.join(r"target\release\app.exe");
     let stage_dir = out.join(STAGE);
@@ -201,8 +253,8 @@ mod tests {
         for ((folder, file), _) in HELPERS {
             touch(&helpers.join(folder).join(file));
         }
-        touch(&helpers.join(r"exiftool\exiftool_files\perl.dll"));
-        touch(&helpers.join(r"mpv\include\mpv\client.h"));
+        touch(&helpers.join("exiftool/exiftool_files/perl.dll"));
+        touch(&helpers.join("mpv/include/mpv/client.h"));
         let out = dir.path().join("stage");
         touch(&out.join("left-over.txt"));
 
@@ -213,8 +265,8 @@ mod tests {
         for (folder, file) in [EXIFTOOL_BUNDLED, FFMPEG_BUNDLED, MPV_BUNDLED] {
             assert!(out.join(folder).join(file).is_file(), "{folder}/{file}");
         }
-        assert!(out.join(r"exiftool\exiftool_files\perl.dll").is_file());
-        assert!(!out.join(r"mpv\include").exists(), "only the DLL of the mpv package");
+        assert!(out.join("exiftool/exiftool_files/perl.dll").is_file());
+        assert!(!out.join("mpv/include").exists(), "only the DLL of the mpv package");
         assert!(!out.join("left-over.txt").exists());
     }
 
@@ -243,5 +295,48 @@ mod tests {
                 "good-gallery-1.2.3-portable.zip".to_owned()
             )
         );
+    }
+
+    /// REQ-018-09: the Linux package holds the app, its menu entry, icon, install script and licenses, and the app and
+    /// the script stay executable.
+    #[cfg(unix)]
+    #[test]
+    fn req_018_09_stages_the_linux_package() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::path::absolute(Path::new(env!("CARGO_MANIFEST_DIR")).join("..")).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("app");
+        touch(&exe);
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let out = dir.path().join("good-gallery-1.2.3-linux-x86_64");
+        touch(&out.join("left-over.txt"));
+
+        stage_linux(&exe, &root, &out).unwrap();
+
+        let mut names: Vec<_> = std::fs::read_dir(&out)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        let expected = [
+            "LICENSE.txt",
+            "README.txt",
+            "THIRD-PARTY-NOTICES.txt",
+            "good-gallery",
+            "good-gallery.desktop",
+            "good-gallery.png",
+            "install.sh",
+        ];
+        assert_eq!(names, expected);
+        for executable in ["good-gallery", "install.sh"] {
+            let mode = std::fs::metadata(out.join(executable)).unwrap().permissions().mode();
+            assert!(mode & 0o111 != 0, "{executable} isn't executable");
+        }
+        let entry = std::fs::read_to_string(out.join("good-gallery.desktop")).unwrap();
+        // The window's app id (`crates/app/src/main.rs`) and the icon's name, so docks match the window to the entry.
+        for line in ["Exec=good-gallery", "Icon=good-gallery", "StartupWMClass=good-gallery"] {
+            assert!(entry.lines().any(|l| l == line), "{line}");
+        }
+        assert_eq!(linux_artifact_name("1.2.3"), "good-gallery-1.2.3-linux-x86_64.tar.gz");
     }
 }

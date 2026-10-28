@@ -103,7 +103,7 @@ fn req_006_08_req_006_09_shows_a_tile_per_media_item_and_video_durations() {
     assert!(beach.left() < clip.left() && clip.left() < portrait.left());
     assert!((beach.height() / beach.width() - 0.75).abs() < 0.02);
     assert!((portrait.height() / portrait.width() - 4.0 / 3.0).abs() < 0.02);
-    harness.snapshot("gallery");
+    harness.snapshot(common::snapshot_name("gallery"));
 }
 
 #[test]
@@ -157,7 +157,7 @@ fn req_006_10_shows_skeleton_tiles_while_loading_and_the_error_when_loading_fail
     let mut harness = common::harness(state.with_gallery(Gallery::new(reader.clone(), settings.clone(), None)));
     harness.run_steps(3);
     assert!(gallery(&harness).count().is_none());
-    harness.snapshot("gallery_loading");
+    harness.snapshot(common::snapshot_name("gallery_loading"));
     drop(held);
 
     let broken = Arc::new(Mutex::new(Connection::open_in_memory().unwrap()));
@@ -240,7 +240,7 @@ fn req_006_01_picks_the_view_in_the_view_menu_and_remembers_it() {
     settle(&mut harness);
     assert_eq!(gallery(&harness).view(), GalleryView::Masonry);
     open_view_menu(&mut harness);
-    harness.snapshot("view_menu");
+    harness.snapshot(common::snapshot_name("view_menu"));
 
     harness
         .get_by_role_and_label(egui::accesskit::Role::Button, "Justified")
@@ -321,7 +321,7 @@ fn req_006_05_shows_a_row_per_media_item_in_the_list_view() {
     let beach = harness.get_by_label("beach.jpg").rect();
     let clip = harness.get_by_label("clip.mp4, video, 1:05").rect();
     assert!(beach.top() < clip.top() && (beach.height() - 52.0).abs() < 0.5);
-    harness.snapshot("gallery_list");
+    harness.snapshot(common::snapshot_name("gallery_list"));
 }
 
 #[test]

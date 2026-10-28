@@ -1,6 +1,6 @@
 # Architecture
 
-Good Gallery is one Rust binary (eframe / egui on wgpu) plus three bundled helper programs: exiftool (metadata), ffmpeg (video frames, AVIF) and libmpv (video playback). Keep this file describing the current state; how a feature was built is in its spec's `plan.md`.
+Good Gallery is one Rust binary (eframe / egui on wgpu) plus three helper programs: exiftool (metadata), ffmpeg (video frames, AVIF) and libmpv (video playback). Windows bundles them; Linux uses the system's. Keep this file describing the current state; how a feature was built is in its spec's `plan.md`.
 
 ```
 crates/
@@ -10,7 +10,7 @@ crates/
   indexer   scan queue, walk, scans, watcher, schedule, reachability, thumbnail cache and service, library operations
   app       eframe binary: UI, texture streaming, glass, viewer, video, settings
 xtask/      check-specs, libraries CLI, benchmarks, screenshots, dist, release
-packaging/  helper downloads, NSIS installer, smoke test
+packaging/  helper downloads, NSIS installer, smoke test (windows/); .desktop file, install script (linux/)
 ```
 
 ## Decisions
@@ -157,3 +157,15 @@ Architectural decisions, newest last. One entry each: what was decided, why (wit
 - *Package and releases:* `cargo xtask dist` (NSIS installer, portable zip), `cargo xtask release` (git-cliff with `cliff.toml`, version in `[workspace.package]`), `.github/workflows/release.yml`. Details in spec 014's plan.
 - *README screenshots:* `cargo xtask screenshots` generates a demo library (landscapes drawn with `image`, tags through exiftool, two ffmpeg videos) on a `subst` drive, indexes it and runs the app with `--screenshot` per view.
 **Rejected:** `cargo-packager` (another tool for one NSIS script, and its resource layout would differ from the folders the app looks in), WiX / MSI (per-machine by habit), a separate portable data folder (out of scope in spec 014), an HTTP client in xtask for the helpers.
+
+### 2026-10-28 · Linux
+
+**Decided:** Linux is a supported platform (spec 018), built and tested in CI beside Windows. Platform code stays behind `cfg(windows)` / `cfg(target_os = "linux")` (not `unix`: macOS will need its own answers); POSIX path rules (`indexer::libraries`, `db::libraries::find_by_path`) branch on `cfg!(windows)`.
+- *Data folder:* `$XDG_DATA_HOME/good-gallery` (else `~/.local/share`), `good-gallery-rust` for development builds (`app::startup::data_home`).
+- *Helpers* come from the distribution: exiftool and ffmpeg on `PATH`, libmpv by its soname `libmpv.so.2` through the dynamic loader. Every helper starts through `media::helpers::spawn_helper`: on Linux from one long-lived thread with `PR_SET_PDEATHSIG = SIGKILL`, the counterpart of the Windows job object.
+- *Title bar:* the window is undecorated; `app::titlebar` draws GNOME-style round caption buttons (`Area`s on the `Foreground` order, so the content below gets no presses) and 4 px resize handles (12 px corners, on top of the `Middle` order: above the viewer, below menus) that send `ViewportCommand::BeginResize`, which winit hands to the compositor on X11 and Wayland.
+- *Desktop services* run processes, not a D-Bus crate: _Show in folder_ is `org.freedesktop.FileManager1.ShowItems` through `gdbus` / `dbus-send`, else `xdg-open`; reduced motion reads `gsettings` / `kreadconfig` on a background thread every 2 s. Decode threads get nice 10.
+- *Package:* `cargo xtask dist` writes a `.tar.gz` (app, `.desktop` file, icon, `install.sh` into `~/.local`), built on `ubuntu-latest` for an older glibc. Snapshot tests keep a Linux set (`*_linux.png`, lavapipe renders like WARP otherwise), checked in CI in an `ubuntu:26.04` container.
+- *Video:* mpv gets `video-rotate=no` and the UI reads `video-dec-params/rotate`, since mpv 0.41's software renderer aborts on rotated videos.
+**Rejected:** winit's client-side decorations (a bar above the toolbar, so the search isn't in the title bar), zbus (its async runtime trips REQ-011-11's guard), bundling the helpers on Linux (distributions ship them; an AppImage can bundle them later).
+

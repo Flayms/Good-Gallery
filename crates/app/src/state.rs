@@ -39,6 +39,13 @@ pub trait FileManager: Send + Sync {
     fn show_in_folder(&self, file: &std::path::Path) -> std::io::Result<()>;
 }
 
+/// The command that shows a file in the system's file manager (REQ-009-10, REQ-018-05).
+pub const SHOW_IN_FOLDER: &str = if cfg!(windows) {
+    "Show in Explorer"
+} else {
+    "Show in folder"
+};
+
 pub struct Explorer;
 
 impl FileManager for Explorer {
@@ -280,8 +287,9 @@ impl AppState {
                 return Event::ExplorerFailed(Some(format!("{} no longer exists.", file.display())));
             }
             Event::ExplorerFailed(file_manager.show_in_folder(&file).err().map(|error| {
-                tracing::error!("can't open Explorer on {}: {error}", file.display());
-                format!("Couldn't open Explorer: {error}")
+                tracing::error!("can't show {} in the file manager: {error}", file.display());
+                let program = if cfg!(windows) { "Explorer" } else { "the file manager" };
+                format!("Couldn't open {program}: {error}")
             }))
         });
     }

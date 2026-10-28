@@ -59,7 +59,7 @@ fn frame_png(ffmpeg: &Path, file: &Path, position: f64, max_width: Option<u32>) 
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
-    let mut child = command.spawn().map_err(|source| FfmpegError::Start {
+    let mut child = crate::helpers::spawn_helper(command).map_err(|source| FfmpegError::Start {
         path: ffmpeg.to_path_buf(),
         source,
     })?;

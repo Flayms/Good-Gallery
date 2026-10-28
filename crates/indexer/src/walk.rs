@@ -15,8 +15,8 @@ pub struct DirListing {
     /// Folder mtime, taken before listing it.
     pub mtime: i64,
     pub files: Vec<(String, MediaKind)>,
-    /// Lower-cased sidecar file name → actual name.
-    pub sidecars: HashMap<String, String>,
+    /// Lower-cased sidecar file name → the actual names (several where letter case tells files apart).
+    pub sidecars: HashMap<String, Vec<String>>,
     /// Relative paths of the subfolders, housekeeping folders excluded.
     pub subdirs: Vec<String>,
 }
@@ -133,10 +133,14 @@ impl<'a> Walk<'a> {
                 if let Some(kind) = media_kind(&name) {
                     listing.files.push((name, kind));
                 } else if is_sidecar(&name) {
-                    listing.sidecars.insert(name.to_lowercase(), name);
+                    listing.sidecars.entry(name.to_lowercase()).or_default().push(name);
                 }
             }
         }
+        // In name order on every file system (NTFS lists entries sorted, ext4 in hash order), so scans read files and
+        // write their batches in the same order everywhere.
+        listing.files.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        listing.subdirs.sort_unstable();
         let next = match self.descend {
             Some(descend) => descend(&listing),
             None => listing.subdirs.clone(),
@@ -206,7 +210,7 @@ mod tests {
         assert_eq!(found[0].files, [("a.jpg".to_string(), MediaKind::Image)]);
         assert_eq!(found[0].subdirs, ["b"]);
         assert_eq!(found[1].files, [("c.MP4".to_string(), MediaKind::Video)]);
-        assert_eq!(found[1].sidecars["c.mp4.xmp"], "c.MP4.xmp");
+        assert_eq!(found[1].sidecars["c.mp4.xmp"], ["c.MP4.xmp"]);
     }
 
     #[test]

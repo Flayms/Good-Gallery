@@ -77,18 +77,28 @@ pub fn is_sidecar(file_name: &str) -> bool {
     extension(file_name).as_deref() == Some(".xmp")
 }
 
-/// The sidecar of `file_name` among a folder's sidecars (lower-cased name → actual name): `IMG_1.jpg.xmp`
-/// (darktable, digiKam) before `IMG_1.xmp` (Lightroom), in any letter case.
-pub fn find_sidecar<'a>(sidecars: &'a std::collections::HashMap<String, String>, file_name: &str) -> Option<&'a str> {
-    let lower = file_name.to_lowercase();
-    let stem = match lower.rfind('.') {
-        Some(dot) if dot > 0 => &lower[..dot],
-        _ => lower.as_str(),
+/// The sidecar of `file_name` among a folder's sidecars (lower-cased name → actual names): `IMG_1.jpg.xmp`
+/// (darktable, digiKam) before `IMG_1.xmp` (Lightroom), in any letter case. Where letter case tells files apart (Linux)
+/// and several sidecars differ only in it, the one whose name matches `file_name` exactly wins, else the first by name.
+pub fn find_sidecar<'a>(
+    sidecars: &'a std::collections::HashMap<String, Vec<String>>,
+    file_name: &str,
+) -> Option<&'a str> {
+    fn stem(name: &str) -> &str {
+        match name.rfind('.') {
+            Some(dot) if dot > 0 => &name[..dot],
+            _ => name,
+        }
+    }
+    let pick = |base: &str| {
+        let names = sidecars.get(&format!("{}.xmp", base.to_lowercase()))?;
+        names
+            .iter()
+            .find(|name| stem(name) == base)
+            .or_else(|| names.iter().min())
+            .map(String::as_str)
     };
-    sidecars
-        .get(&format!("{lower}.xmp"))
-        .or_else(|| sidecars.get(&format!("{stem}.xmp")))
-        .map(String::as_str)
+    pick(file_name).or_else(|| pick(stem(file_name)))
 }
 
 /// Whether a relative path from the index stays inside its library (REQ-011-08): `/`-separated components, none of
@@ -145,13 +155,26 @@ mod tests {
 
     #[test]
     fn req_004_10_prefers_the_full_name_sidecar_in_any_letter_case() {
-        let sidecars = |names: &[&str]| -> std::collections::HashMap<String, String> {
-            names.iter().map(|n| (n.to_lowercase(), n.to_string())).collect()
+        let sidecars = |names: &[&str]| -> std::collections::HashMap<String, Vec<String>> {
+            let mut map = std::collections::HashMap::<String, Vec<String>>::new();
+            for name in names {
+                map.entry(name.to_lowercase()).or_default().push(name.to_string());
+            }
+            map
         };
         let both = sidecars(&["IMG_1.JPG.xmp", "img_1.XMP"]);
         assert_eq!(find_sidecar(&both, "IMG_1.jpg"), Some("IMG_1.JPG.xmp"));
         assert_eq!(find_sidecar(&sidecars(&["img_1.XMP"]), "IMG_1.jpg"), Some("img_1.XMP"));
         assert_eq!(find_sidecar(&sidecars(&["IMG_2.xmp"]), "IMG_1.jpg"), None);
+        // Sidecars that differ only in letter case (possible on Linux) each belong to the file named the same way.
+        let twins = sidecars(&["img.xmp", "IMG.xmp"]);
+        assert_eq!(find_sidecar(&twins, "IMG.jpg"), Some("IMG.xmp"));
+        assert_eq!(find_sidecar(&twins, "img.jpg"), Some("img.xmp"));
+        assert_eq!(
+            find_sidecar(&twins, "Img.jpg"),
+            Some("IMG.xmp"),
+            "else the first by name"
+        );
     }
 
     #[test]

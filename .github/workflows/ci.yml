@@ -19,8 +19,13 @@ env:
 
 jobs:
   lint:
-    name: Lint
-    runs-on: windows-latest
+    name: Lint (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linux too (docs/specs/018-linux): clippy checks each platform's own code.
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       # Installs the toolchain and components pinned in rust-toolchain.toml.
@@ -31,8 +36,8 @@ jobs:
       - run: cargo xtask check-specs
 
   test:
-    name: Test
-    # The app, its native dependencies and the snapshot tests (wgpu on WARP) target Windows.
+    name: Test (Windows)
+    # The snapshot tests render with wgpu on WARP.
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -55,6 +60,40 @@ jobs:
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: snapshot-diffs
+          name: snapshot-diffs-windows
+          path: crates/*/tests/snapshots/*.diff.png
+          if-no-files-found: ignore
+
+  test-linux:
+    name: Test (Linux)
+    runs-on: ubuntu-latest
+    # The Linux snapshots (`*_linux.png`) were rendered with Ubuntu 26.04's lavapipe and the video tests need its mpv
+    # (0.41), so the tests run in that release, not whatever ubuntu-latest is (docs/specs/018-linux).
+    container: ubuntu:26.04
+    env:
+      CARGO_HOME: /usr/local/cargo
+      RUSTUP_HOME: /usr/local/rustup
+    steps:
+      # The distribution's helpers, as the app uses them there (REQ-018-03), lavapipe for wgpu, and the build tools.
+      - name: Install the build tools, exiftool, ffmpeg, libmpv and lavapipe
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl git \
+            build-essential pkg-config libimage-exiftool-perl ffmpeg libmpv2 mesa-vulkan-drivers libvulkan1
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff@2.14.2
+      - run: cargo test --workspace --no-fail-fast
+        env:
+          GG_REQUIRE_HELPERS: '1'
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-diffs-linux
           path: crates/*/tests/snapshots/*.diff.png
           if-no-files-found: ignore

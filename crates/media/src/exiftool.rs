@@ -122,7 +122,7 @@ impl Process {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             command.creation_flags(CREATE_NO_WINDOW);
         }
-        let mut child = command.spawn().map_err(|source| ExifToolError::Start {
+        let mut child = crate::helpers::spawn_helper(command).map_err(|source| ExifToolError::Start {
             path: path.to_path_buf(),
             source,
         })?;

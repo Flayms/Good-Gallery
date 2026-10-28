@@ -1098,7 +1098,7 @@ impl Gallery {
 pub fn context_menu(ui: &mut egui::Ui) -> Option<MediaAction> {
     crate::glass::behind_menu(ui, |ui| {
         let mut action = None;
-        if ui.button("Show in Explorer").clicked() {
+        if ui.button(crate::state::SHOW_IN_FOLDER).clicked() {
             action = Some(MediaAction::ShowInExplorer);
         }
         if ui.button("Information").clicked() {

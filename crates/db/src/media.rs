@@ -137,6 +137,10 @@ fn categories_of(conn: &Connection, media: i64) -> Result<HashMap<i64, TagCatego
 mod tests {
     use super::*;
     use crate::libraries::{self, LibraryStatus};
+    use std::path::Path;
+
+    /// A library root as the platform writes absolute paths.
+    const ROOT: &str = if cfg!(windows) { "D:\\Photos" } else { "/media/Photos" };
 
     fn tag(conn: &Connection, name: &str, parent: Option<i64>) -> i64 {
         conn.query_row(
@@ -150,7 +154,7 @@ mod tests {
     #[test]
     fn req_009_08_returns_the_details_with_tags_by_category() {
         let conn = crate::open_in_memory().unwrap();
-        let root = libraries::insert(&conn, "D:\\Photos", "Holiday photos", LibraryStatus::Online)
+        let root = libraries::insert(&conn, ROOT, "Holiday photos", LibraryStatus::Online)
             .unwrap()
             .id;
         let media: i64 = conn
@@ -178,7 +182,7 @@ mod tests {
         let detail = detail(&conn, media).unwrap().unwrap();
 
         assert_eq!(detail.library_label, "Holiday photos");
-        assert_eq!(detail.path, PathBuf::from("D:\\Photos\\2024\\rome\\a.jpg"));
+        assert_eq!(detail.path, Path::new(ROOT).join("2024").join("rome").join("a.jpg"));
         assert_eq!(
             (detail.width, detail.height, detail.rating, detail.taken_at),
             (Some(4000), Some(3000), Some(4), Some(7))
@@ -201,7 +205,7 @@ mod tests {
     #[test]
     fn req_011_08_treats_an_item_whose_path_leaves_its_library_as_missing() {
         let conn = crate::open_in_memory().unwrap();
-        let library = libraries::insert(&conn, "D:\\Photos", "Photos", LibraryStatus::Online).unwrap();
+        let library = libraries::insert(&conn, ROOT, "Photos", LibraryStatus::Online).unwrap();
         let media: i64 = conn
             .query_row(
                 "INSERT INTO media (root_id, rel_path, file_name, kind, size, mtime)
@@ -214,10 +218,16 @@ mod tests {
         assert_eq!(detail(&conn, media).unwrap(), None);
         let libraries = [library];
         assert_eq!(file_in(&libraries, libraries[0].id, "../../Windows/win.ini"), None);
-        assert_eq!(file_in(&libraries, libraries[0].id, "C:/Windows/win.ini"), None);
+        // An absolute path would replace the root when joined.
+        let absolute = if cfg!(windows) {
+            "C:/Windows/win.ini"
+        } else {
+            "/etc/passwd"
+        };
+        assert_eq!(file_in(&libraries, libraries[0].id, absolute), None);
         assert_eq!(
             file_in(&libraries, libraries[0].id, "2024/a.jpg"),
-            Some(PathBuf::from("D:\\Photos\\2024\\a.jpg"))
+            Some(Path::new(ROOT).join("2024").join("a.jpg"))
         );
         let source = crate::thumbs::thumb_source(&conn, media).unwrap().unwrap();
         assert_eq!(source.file(), None);

@@ -51,10 +51,29 @@ fn release_publishes_both_downloads_after_the_checks() {
     for part in [
         "good-gallery-$VERSION-setup.exe",
         "good-gallery-$VERSION-portable.zip",
+        "good-gallery-$VERSION-linux-x86_64.tar.gz",
         "--title \"Good Gallery $VERSION\"",
         "--notes-file release-notes.md",
     ] {
         assert!(publish.contains(part), "the release doesn't get {part}");
     }
     assert!(!release.contains("continue-on-error"));
+}
+
+/// REQ-018-01, REQ-018-09: CI checks Linux as well as Windows, and the release builds the Linux archive there.
+#[test]
+fn req_018_01_req_018_09_ci_and_the_release_cover_linux() {
+    let ci = workflow("ci.yml");
+    assert!(ci.contains("os: [windows-latest, ubuntu-latest]"), "lint runs on both");
+    let tests = &ci[ci.find("  test-linux:").expect("no Linux test job")..];
+    // The release the Linux snapshots were rendered on.
+    assert!(tests.contains("container: ubuntu:26.04"));
+    assert!(tests.contains("libimage-exiftool-perl ffmpeg libmpv2 mesa-vulkan-drivers"));
+    assert!(commands(tests).contains(&"cargo test --workspace --no-fail-fast"));
+    assert!(tests.contains("GG_REQUIRE_HELPERS: '1'"));
+    let release = workflow("release.yml");
+    let linux = &release[release.find("  linux:").expect("no linux job")..release.find("  release:").unwrap()];
+    assert!(linux.contains("runs-on: ubuntu-latest") && linux.contains("needs: checks"));
+    assert!(commands(linux).contains(&"cargo xtask dist"));
+    assert!(release.contains("needs: [checks, linux]"));
 }

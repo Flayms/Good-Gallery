@@ -19,7 +19,7 @@ Good Gallery gets its own look instead of a UI toolkit's defaults. The photos ar
 
 - **Given** the main window
 - **When** it is shown
-- **Then** the toolbar and sidebar header take the place of the title bar, and the native window controls (minimize, maximize, close) remain available
+- **Then** the toolbar and sidebar header take the place of the title bar, and the native window controls (minimize, maximize, close) remain available (on Linux the app's own, see REQ-018-04)
 - **And** dragging an empty area of the toolbar or sidebar header moves the window, and double-clicking it maximizes or restores the window as the OS does
 - **And** no control of the app lies under the window controls, at any window width
 
@@ -133,7 +133,7 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 
 | REQ        | Test | Result |
 | ---------- | ---- | ------ |
-| REQ-013-01 | `crates/app/src/theme.rs` › req_013_01_uses_its_own_colors_whatever_the_os_theme, install_uses_the_bundled_font_at_both_weights | pass (Windows only; macOS and Linux are out of scope) |
+| REQ-013-01 | `crates/app/src/theme.rs` › req_013_01_uses_its_own_colors_whatever_the_os_theme, install_uses_the_bundled_font_at_both_weights | pass (Windows and Linux; macOS is out of scope) |
 | REQ-013-02 | `crates/app/src/titlebar.rs` › req_013_02_empty_caption_space_moves_and_maximizes_the_window, req_013_02_keeps_the_window_controls_place_free; `crates/app/tests/search.rs` › req_013_02_req_013_08_the_toolbar_fits_the_minimum_window_beside_the_window_controls | pass (native hit tests and snap layouts checked in the running app) |
 | REQ-013-03 | `crates/app/src/glass.rs` › req_013_03_surfaces_blur_the_tiles_under_them_but_not_other_glass | pass (the blur pass itself checked in the running app; kittest has no glass pass) |
 | REQ-013-04 | `crates/app/src/theme.rs` › req_013_04_text_is_legible_on_the_solid_surfaces, req_013_04_text_is_legible_on_glass_over_any_photo, req_013_04_req_013_11_text_is_legible_on_tinted_glass | pass |

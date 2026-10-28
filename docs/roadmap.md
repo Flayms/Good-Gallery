@@ -15,6 +15,7 @@ Upcoming features, open issues and bug reports. Unchecked tasks in the specs' `p
 - **Metadata:** no time zone from the GPS position (REQ-004-03); ICC profiles aren't applied to thumbnails.
 - **Tests:** REQ-002-11 (folders that can't be listed) has no test; the thumbnail cache tests `req_005_13_writes_leave_no_temp_files` and `replaces_a_thumbnail_that_is_open_for_a_moment` fail now and then in the first full run after a rebuild (Defender holds new files open longer than the rename retries).
 - **Icon tooling:** the scripts that rendered `app-icon.ico` / `app-icon.png` and wrote the lucide SVGs depended on the old app's `node_modules` and were removed. Add an `xtask icons` command (render the SVG to a multi-size ICO with PNG entries, set lucide's `stroke` / `stroke-width`) before the next icon change.
+- **Linux by hand:** dragging, resizing and the caption buttons on GNOME and KDE (Wayland and X11), _Show in folder_ in Nautilus and Dolphin, video audio. Only Xvfb (X11, no window manager) was tried.
 - **Manual checks never done:** video audio by ear and the video controls by hand in the real app; snap layouts when hovering the maximize button.
 
 ## Features
@@ -56,9 +57,9 @@ Upcoming features, open issues and bug reports. Unchecked tasks in the specs' `p
 
 ### Platforms
 
-- macOS and Linux support.
-- Open photos with Good Gallery from the Windows context menu (and the macOS / Linux equivalents).
-- Development on Linux (Ubuntu): what needs to change (helper lookup, title bar, job object, packaging scripts)?
+- macOS support (Linux: spec 018).
+- Linux follow-ups: AppImage / Flatpak / `.deb`; the desktop's button layout (`org.gnome.desktop.wm.preferences button-layout`) for the caption buttons; the display's refresh rate for display-synced video (60 Hz assumed); window shadows on compositors that don't add them to undecorated windows; reduced transparency where a desktop has a setting.
+- Open photos with Good Gallery from the Windows context menu (and the macOS / Linux equivalents: a `MimeType=` line in the `.desktop` file and opening a file passed on the command line).
 
 ### Other
 
