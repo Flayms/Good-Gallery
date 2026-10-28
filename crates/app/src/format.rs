@@ -1,6 +1,6 @@
 //! Formatting of dates, sizes and counts for display.
 
-use chrono::{Datelike, Local, TimeZone, Timelike};
+use chrono::{Datelike, Timelike};
 use icu_datetime::DateTimeFormatter;
 use icu_datetime::fieldsets::{YMD, YMDT};
 use icu_datetime::input::{Date, DateTime, Time};
@@ -54,7 +54,7 @@ pub fn set_locale(name: &str) {
 }
 
 fn format_with(formatter: &DateTimeFormatter<YMDT>, ms: i64) -> String {
-    let Some(at) = Local.timestamp_millis_opt(ms).single() else {
+    let Some(at) = domain::time_zone::wall_clock(ms) else {
         return String::new();
     };
     let date = Date::try_new_iso(at.year(), at.month() as u8, at.day() as u8);
@@ -181,7 +181,7 @@ pub fn bytes(bytes: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveDate;
+    use chrono::{Local, NaiveDate, TimeZone};
 
     #[test]
     fn req_016_02_names_the_day_with_its_weekday() {

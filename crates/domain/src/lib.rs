@@ -8,6 +8,7 @@ pub mod media;
 pub mod search;
 pub mod tags;
 pub mod thumbs;
+pub mod time_zone;
 pub mod video;
 pub mod view;
 pub mod viewer;

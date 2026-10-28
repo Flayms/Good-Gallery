@@ -163,7 +163,7 @@ fn filters_menu(ui: &mut egui::Ui, gallery: &mut Gallery) {
         .num_columns(2)
         .spacing([8.0, 4.0])
         .show(ui, |ui| {
-            let today = chrono::Local::now().date_naive();
+            let today = domain::time_zone::today();
             ui.label(egui::RichText::new("From").color(theme::MIST));
             if let Some(day) = day_field(ui, "from", search.from, search.to.unwrap_or(today)) {
                 search.from = day;
