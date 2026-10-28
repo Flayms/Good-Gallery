@@ -53,17 +53,9 @@ A desktop gallery for large photo and video libraries (50k–500k files). Media 
 - Full test suite and lint run in this session and pass.
 - Verification table and spec status updated.
 - No unrelated changes.
-- The PR is open and up to date with `main`, and every check on it is green, including the required `Lint` and `Test` (see Git).
+- PR to main is green and mergeable.
 - Summary: tier, REQs touched, results, open issues.
 
 ## Git
 
-Create a new worktree for a new feature. Use conventional commits. When the work is done locally, create a PR to main. Once it is merged, remove the worktree (`git worktree remove <path>`).
-
-Opening the PR doesn't finish the work: stay with it until it can be merged.
-
-- Wait for CI (`gh pr checks <n> --watch`, or poll `gh pr checks <n>` in the background) instead of stopping at the PR link.
-- A red check: read its log (`gh run view <run> --log-failed`), fix the cause on the branch, push, and wait again. Don't hand back a red PR without saying what's red and why.
-- Conflicts with `main`: merge `main` into the branch (no force push on an open PR), resolve, rerun the affected checks locally, push.
-- A check stuck at "Expected — Waiting for status to be reported" never ran: a job was renamed or split and the ruleset on `main` still requires the old name. Required checks are `Lint` and `Test` (spec 014).
-- Done means every check is green and GitHub reports the PR as mergeable (`gh pr view <n> --json mergeStateStatus`). What then still blocks the merge, such as a review, is the user's to give.
+Create a new worktree for a new feature. Use conventional commits. When you are done create a PR to main, then wait for CI and fix whatever turns red until it is green and mergeable. Once it is merged, remove the worktree (`git worktree remove <path>`).
