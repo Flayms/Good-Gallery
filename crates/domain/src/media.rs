@@ -91,9 +91,57 @@ pub fn find_sidecar<'a>(sidecars: &'a std::collections::HashMap<String, String>,
         .map(String::as_str)
 }
 
+/// Whether a relative path from the index stays inside its library (REQ-011-08): `/`-separated components, none of
+/// them empty, `.`, `..` or with a NUL, and on Windows none with a `\` or `:` (which would make a drive, UNC or stream
+/// prefix there; elsewhere they are ordinary file name characters).
+pub fn is_safe_rel_path(rel_path: &str) -> bool {
+    let forbidden: &[char] = if cfg!(windows) { &['\\', ':', '\0'] } else { &['\0'] };
+    !rel_path.is_empty()
+        && rel_path
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != ".." && !part.contains(forbidden))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn req_011_08_refuses_relative_paths_that_leave_the_library() {
+        for safe in [
+            "a.jpg",
+            "2024/trip/IMG 0001.jpg",
+            "..hidden/x.jpg",
+            "a..b.png",
+            "Ünïcødé/ä.jpg",
+        ] {
+            assert!(is_safe_rel_path(safe), "{safe}");
+        }
+        for unsafe_path in [
+            "",
+            "/etc/passwd",
+            "//server/share/x.jpg",
+            "../x.jpg",
+            "a/../../x.jpg",
+            "a/./b.jpg",
+            "a//b.jpg",
+            "a/",
+            "a\0b",
+        ] {
+            assert!(!is_safe_rel_path(unsafe_path), "{unsafe_path:?}");
+        }
+        // Drive, UNC and stream prefixes on Windows, where `\` and `:` aren't file name characters.
+        #[cfg(windows)]
+        for unsafe_path in [
+            "C:/Windows/win.ini",
+            "C:Windows",
+            "\\\\server\\share\\x.jpg",
+            "..\\..\\x.jpg",
+            "x.jpg:stream",
+        ] {
+            assert!(!is_safe_rel_path(unsafe_path), "{unsafe_path:?}");
+        }
+    }
 
     #[test]
     fn req_004_10_prefers_the_full_name_sidecar_in_any_letter_case() {

@@ -44,21 +44,6 @@ const STRIP: Strip = Strip {
 const STRIP_HEIGHT: f32 = FILMSTRIP_THUMB + 12.0;
 /// Room the filmstrip takes below the media and the control bar (REQ-015-01).
 const STRIP_SPACE: f32 = STRIP_HEIGHT + INSET;
-/// The window behind the viewer, darkened. The design's 0.5 needs the blur of M10 (REQ-013-14).
-const SCRIM: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 204);
-/// `GLASS_BAR` and `GLASS_PANEL` without their blur (M10), before the item's tint.
-const GLASS_BAR: Rgb = Rgb {
-    r: 28.0,
-    g: 28.0,
-    b: 28.0,
-};
-const GLASS_BAR_ALPHA: f32 = 0.72;
-const GLASS_PANEL: Rgb = Rgb {
-    r: 36.0,
-    g: 36.0,
-    b: 36.0,
-};
-const GLASS_PANEL_ALPHA: f32 = 0.86;
 
 /// What the viewer asks the app for.
 #[derive(Debug, Clone, PartialEq)]
@@ -109,20 +94,24 @@ struct Playing {
 pub struct Chrome {
     pub bar: Color32,
     pub panel: Color32,
+    tint: Option<Rgb>,
 }
 
 impl Chrome {
     fn new(tint: Option<Rgb>) -> Self {
-        let glass = |base: Rgb, alpha: f32| {
-            let Rgb { r, g, b } = match tint {
-                Some(tint) => ambient::tint_glass(base, tint, ambient::AMOUNT),
-                None => base,
-            };
-            Color32::from_rgba_unmultiplied(r as u8, g as u8, b as u8, (alpha * 255.0).round() as u8)
-        };
         Self {
-            bar: glass(GLASS_BAR, GLASS_BAR_ALPHA),
-            panel: glass(GLASS_PANEL, GLASS_PANEL_ALPHA),
+            bar: theme::GLASS_BAR.fill(tint),
+            panel: theme::GLASS_PANEL.fill(tint),
+            tint,
+        }
+    }
+
+    /// The bar or panel level as glass over the scrim's blur (`over`), tinted.
+    fn backing(&self, glass: theme::Glass, over: Option<crate::glass::Painted>) -> crate::glass::Backing {
+        crate::glass::Backing {
+            glass,
+            tint: self.tint,
+            over,
         }
     }
 }
@@ -197,6 +186,8 @@ pub struct Viewer {
     chrome: Chrome,
     /// The media item the chrome was tinted for.
     chrome_for: Option<i64>,
+    /// The scrim painted this frame: the chrome shows its blur.
+    scrim: Option<crate::glass::Painted>,
     playing: Option<Playing>,
     /// The last click was on the video or its controls: ← / → seek instead of stepping (REQ-009-02).
     video_focus: bool,
@@ -226,6 +217,7 @@ impl Viewer {
             closing: None,
             photo: None,
             chrome: Chrome::new(None),
+            scrim: None,
             chrome_for: None,
             playing: None,
             video_focus: false,
@@ -533,7 +525,9 @@ impl Viewer {
                 if tile.is_none() {
                     ui.set_opacity(progress);
                 }
-                ui.painter().rect_filled(screen, 0.0, SCRIM.gamma_multiply(progress));
+                // The window behind, blurred and darkened; opaque without glass (REQ-013-14, REQ-013-06).
+                let scrim = crate::glass::Surface::new(screen, 0.0, theme::SCRIM).opacity(progress);
+                self.scrim = crate::glass::paint(ui.painter(), scrim);
                 let backdrop = ui.interact(screen, ui.make_persistent_id("backdrop"), egui::Sense::click_and_drag());
                 let label = item
                     .as_ref()
@@ -763,7 +757,7 @@ impl Viewer {
             .filter(|playing| playing.id == item.id)
             .map(|playing| (playing.state.video_size, playing.state.quarters, playing.frame));
         let video_size = playing.and_then(|(size, quarters, _)| Some(domain::video::shown_size(size?, quarters)));
-        let natural = match (item.width, item.height, loaded, thumbnail) {
+        let natural = match (item.width, item.height, loaded, &thumbnail) {
             // A video's own size once the player knows it (turned as it is shown), else its upright thumbnail's.
             _ if video_size.is_some() => {
                 let [width, height] = video_size.unwrap_or_default();
@@ -1008,10 +1002,11 @@ impl Viewer {
         let mut step = None;
         ui.scope(|ui| {
             ui.multiply_opacity(shown);
-            let chrome = self.chrome;
+            let bar_backing = self.chrome.backing(theme::GLASS_BAR, self.scrim);
             if let Some(rect) = video_bar
                 && let Some(playing) = &mut self.playing
-                && let Some(control) = video_controls::show(ui, rect, &playing.state, &mut playing.dragging, chrome.bar)
+                && let Some(control) =
+                    video_controls::show(ui, rect, &playing.state, &mut playing.dragging, bar_backing)
             {
                 playing.control = Some(control);
             }
@@ -1021,7 +1016,7 @@ impl Viewer {
             ] {
                 let Some(rect) = rect else { continue };
                 let tooltip = if by < 0 { "Previous (←)" } else { "Next (→)" };
-                if round_button(ui, rect, icon, label, tooltip, chrome.bar).clicked() {
+                if round_button(ui, rect, icon, label, tooltip, bar_backing).clicked() {
                     step = Some((self.index as i64 + by).max(0) as usize);
                 }
             }
@@ -1030,7 +1025,7 @@ impl Viewer {
             {
                 step = Some(index);
             }
-            match control_bar(ui, bar, text, chrome.bar, self.info_open, self.filmstrip) {
+            match control_bar(ui, bar, text, bar_backing, self.info_open, self.filmstrip) {
                 Some(BarButton::ShowInExplorer) => {
                     if let Some(item) = item {
                         action = Self::explorer_action(item, libraries);
@@ -1057,13 +1052,9 @@ impl Viewer {
 
     /// The info panel at the right (REQ-009-08); a click on a tag filters the gallery by it (REQ-009-09).
     fn info_panel(&mut self, ui: &mut egui::Ui, rect: Rect, gallery: &mut Gallery) -> Option<Action> {
-        ui.painter().rect(
-            rect,
-            theme::RADIUS_PANEL,
-            self.chrome.panel,
-            egui::Stroke::new(1.0, theme::RIM),
-            egui::StrokeKind::Inside,
-        );
+        self.chrome
+            .backing(theme::GLASS_PANEL, self.scrim)
+            .paint(ui.painter(), rect, f32::from(theme::RADIUS_PANEL));
         // Clicks and wheel turns on the panel stay in it.
         ui.interact(rect, ui.make_persistent_id("info panel"), egui::Sense::click());
         let mut clicked = None;
@@ -1104,13 +1095,9 @@ impl Viewer {
                 self.strip_offset = STRIP.clamp(self.strip_offset + sideways, count, view);
             }
         }
-        ui.painter().rect(
-            rect,
-            theme::RADIUS_PANEL,
-            self.chrome.bar,
-            egui::Stroke::new(1.0, theme::RIM),
-            egui::StrokeKind::Inside,
-        );
+        self.chrome
+            .backing(theme::GLASS_BAR, self.scrim)
+            .paint(ui.painter(), rect, f32::from(theme::RADIUS_PANEL));
         // A short row stays centered.
         let left = rect.left() + ((view - STRIP.width(count)) / 2.0).max(0.0) - self.strip_offset;
         let visible = STRIP.visible(count, self.strip_offset, view);
@@ -1197,7 +1184,11 @@ impl Layout {
     fn new(screen: Rect, info_open: bool, filmstrip: bool) -> Self {
         let info = info_open.then(|| {
             Rect::from_min_max(
-                pos2(screen.right() - INSET - info::WIDTH, screen.top() + INSET),
+                // Below the window controls (REQ-013-02).
+                pos2(
+                    screen.right() - INSET - info::WIDTH,
+                    screen.top() + crate::titlebar::HEIGHT + INSET,
+                ),
                 pos2(screen.right() - INSET, screen.bottom() - INSET),
             )
         });
@@ -1322,15 +1313,13 @@ fn round_button(
     icon: Icon,
     label: &str,
     tooltip: &str,
-    fill: Color32,
+    backing: crate::glass::Backing,
 ) -> egui::Response {
+    backing.paint(ui.painter(), rect, NAV_SIZE / 2.0);
     let response = ui
         .put(
             rect,
-            egui::Button::image(icon.image(20.0, theme::PAPER))
-                .fill(fill)
-                .stroke(egui::Stroke::new(1.0, theme::RIM))
-                .corner_radius(NAV_SIZE / 2.0),
+            egui::Button::image(icon.image(20.0, theme::PAPER)).corner_radius(NAV_SIZE / 2.0),
         )
         .on_hover_text(tooltip);
     let label = label.to_owned();
@@ -1427,18 +1416,11 @@ fn control_bar(
     ui: &mut egui::Ui,
     rect: Rect,
     text: BarText,
-    fill: Color32,
+    backing: crate::glass::Backing,
     info_open: bool,
     filmstrip: bool,
 ) -> Option<BarButton> {
-    let painter = ui.painter();
-    painter.rect(
-        rect,
-        rect.height() / 2.0,
-        fill,
-        egui::Stroke::new(1.0, theme::RIM),
-        egui::StrokeKind::Inside,
-    );
+    backing.paint(ui.painter(), rect, rect.height() / 2.0);
     // Clicks on the bar's background don't reach the scrim behind it.
     ui.interact(rect, ui.make_persistent_id("control bar"), egui::Sense::click());
     let y = rect.center().y;

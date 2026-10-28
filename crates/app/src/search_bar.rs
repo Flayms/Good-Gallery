@@ -204,24 +204,26 @@ pub fn show(ui: &mut egui::Ui, bar: &mut SearchBar, gallery: &mut Gallery) {
                 .corner_radius(theme::RADIUS_PANEL)
                 .inner_margin(4.0)
                 .show(ui, |ui| {
-                    ui.set_width(width - 8.0);
-                    if loaded && choices.is_empty() {
-                        ui.label(egui::RichText::new("No matching tags").color(theme::MIST));
-                    }
-                    for (index, choice) in choices.iter().enumerate() {
-                        let count = match choice {
-                            Choice::Tag(name) => tags.iter().find(|(n, _)| n == name).map(|(_, c)| *c),
-                            Choice::FileName(_) => None,
-                        };
-                        if suggestion_row(ui, choice, count, mode, index == bar.highlighted).clicked() {
-                            picked = Some(index);
+                    crate::glass::behind_frame(ui, egui::Margin::same(4), |ui| {
+                        ui.set_width(width - 8.0);
+                        if loaded && choices.is_empty() {
+                            ui.label(egui::RichText::new("No matching tags").color(theme::MIST));
                         }
-                    }
-                    ui.label(
-                        egui::RichText::new("Start with - to exclude a tag")
-                            .size(theme::SIZE_CAPTION)
-                            .color(theme::MIST),
-                    );
+                        for (index, choice) in choices.iter().enumerate() {
+                            let count = match choice {
+                                Choice::Tag(name) => tags.iter().find(|(n, _)| n == name).map(|(_, c)| *c),
+                                Choice::FileName(_) => None,
+                            };
+                            if suggestion_row(ui, choice, count, mode, index == bar.highlighted).clicked() {
+                                picked = Some(index);
+                            }
+                        }
+                        ui.label(
+                            egui::RichText::new("Start with - to exclude a tag")
+                                .size(theme::SIZE_CAPTION)
+                                .color(theme::MIST),
+                        );
+                    });
                 });
         });
     bar.popup = Some(area.response.rect);

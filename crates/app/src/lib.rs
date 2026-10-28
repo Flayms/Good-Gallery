@@ -3,6 +3,7 @@
 pub mod empty_state;
 pub mod format;
 pub mod gallery;
+pub mod glass;
 pub mod icons;
 pub mod indexer_progress;
 pub mod info;
@@ -13,12 +14,14 @@ pub mod sidebar;
 pub mod state;
 pub mod textures;
 pub mod theme;
+pub mod titlebar;
 pub mod toasts;
 pub mod toolbar;
 pub mod video;
 pub mod viewer;
+pub mod widgets;
 
-pub use state::{AppState, FolderPicker, NativeFolderPicker, Page};
+pub use state::{AppState, CacheUsage, FolderPicker, NativeFolderPicker, Page, SettingsTargets};
 
 use eframe::egui;
 
@@ -32,6 +35,7 @@ pub fn setup(ctx: &egui::Context) {
 pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     state.poll();
     let ctx = ui.ctx().clone();
+    glass::begin_frame(&ctx);
     // The viewer's keys go to it alone (REQ-009-02).
     if let Some(viewer) = &mut state.viewer {
         viewer.input(&ctx);
@@ -60,11 +64,13 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
         } else {
             state.gallery.as_mut()
         };
-        egui::Panel::left("sidebar")
+        let sidebar = egui::Panel::left("sidebar")
             .exact_size(sidebar::WIDTH)
             .resizable(false)
             .frame(egui::Frame::new().fill(theme::RECESS).inner_margin(8))
             .show(ui, |ui| sidebar::show(ui, &mut state.sidebar, gallery, input));
+        // Behind the viewer the sidebar shows through the scrim too (REQ-013-14).
+        glass::record_solid(&ctx, sidebar.response.rect, theme::RECESS, true);
         // Not under the viewer: it has its own info panel.
         if state.page == Page::Gallery && state.info_sheet.is_some() && state.viewer.is_none() {
             egui::Panel::right("info sheet")
@@ -81,6 +87,8 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     }
     indexer_progress::show(&ctx, state);
     state.toasts.show(&ctx);
+    titlebar::caption_buttons(&ctx);
+    theme::draw_focus_ring(&ctx);
 }
 
 /// The viewer over the window while it is open; closing it leaves the gallery where it was (REQ-009-03).
@@ -130,6 +138,10 @@ fn filter_by_tag(state: &mut AppState, tag: &str) {
 /// The info sheet beside the gallery (REQ-009-11): the same details as the viewer's info panel.
 fn info_sheet(ui: &mut egui::Ui, state: &mut AppState) {
     let Some(id) = state.info_sheet else { return };
+    // Below the window controls, which take the top right of the window (REQ-013-02).
+    if titlebar::reserved_width() > 0.0 {
+        ui.add_space(titlebar::HEIGHT - 16.0);
+    }
     let mut close = false;
     ui.horizontal(|ui| {
         ui.label(

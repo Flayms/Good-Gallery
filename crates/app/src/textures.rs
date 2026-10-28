@@ -59,6 +59,8 @@ struct Queue {
 struct Entry {
     id: TextureId,
     texture: wgpu::Texture,
+    /// For glass, which draws tiles under it itself.
+    view: wgpu::TextureView,
     width: u32,
     size: [u32; 2],
     bytes: usize,
@@ -67,9 +69,10 @@ struct Entry {
 }
 
 /// A loaded thumbnail.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Loaded {
     pub id: TextureId,
+    pub view: wgpu::TextureView,
     /// Pixels.
     pub size: [u32; 2],
     /// When it was registered, for the fade-in.
@@ -165,6 +168,7 @@ impl TextureStreamer {
             media,
             Entry {
                 id,
+                view: texture.create_view(&wgpu::TextureViewDescriptor::default()),
                 texture,
                 width,
                 size,
@@ -226,6 +230,7 @@ impl TextureStreamer {
             entry.last_used = frame;
             Loaded {
                 id: entry.id,
+                view: entry.view.clone(),
                 size: entry.size,
                 at: entry.loaded_at,
             }

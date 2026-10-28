@@ -22,6 +22,12 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **Labels default to the non-interactive `fg_stroke` color.** `theme` sets it to Paper; secondary text sets Mist itself.
 * **Icon-only buttons need an accessible name** for tests and screen readers: `icons::icon_button` sets one through `Response::widget_info`.
 
+* **egui's `ComboBox` has no accessible name** without a label drawn beside it; its value is `current_text_value`. Set the name with `widget_info` after `show_ui` (`settings_page::name_combo`) and query its value with `accesskit_node().value()`.
+* **`ctx.egui_wants_keyboard_input()` is true for any focused widget**, not only text inputs. Tell a focused text input by its state: `TextEditState::load(ctx, id).is_some()`.
+* **A paint callback ignores the painter's opacity** (`ui.multiply_opacity` / `set_opacity` reach only ordinary shapes): pass the opacity into the callback (`glass::place`).
+* **wgpu's `TextureView` is `Clone`** (cheap), so textures made on worker threads can hand their view to glass.
+* **ICU4X formatters aren't `Send`** (yoke'd `Rc` data): cache them in a `thread_local!`, not a `static Mutex`.
+
 ## Visual checks
 
 * **Screenshot of the real app:** `cargo run -p app -- --screenshot <file.png>` renders 3 frames, saves the window and exits. Save into the scratchpad, then look at the PNG. Snapshot tests: `cargo test -p app`; `UPDATE_SNAPSHOTS=1` rewrites `crates/app/tests/snapshots/*.png` (check the new PNG before committing it; `*.new.png` / `*.diff.png` are ignored).
@@ -57,6 +63,7 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **`python` may not run at all** (a mise shim points to a missing install). Use `node` for small scripts (`spikes/video/summarize.js`).
 * **Running a spike that loads a downloaded binary** (e.g. `libmpv-2.dll`) is blocked by auto mode until the user approves it. Ask before the first run.
 * **Spike crates are standalone**: run `cargo` inside `spikes/<name>/`; their `results/` and `vendor/` folders are git-ignored.
+* **"The paging file is too small" (os error 1455) while compiling** shows up as "can't find crate" / "invalid metadata" errors: too many parallel rustc processes for the free memory (C: was nearly full). Build with `cargo … -j 4`.
 * **`cargo` may not be on the agent shell's `PATH`**: prepend `$env:USERPROFILE\.cargo\bin`.
 * **Restoring a file from a backup with `Copy-Item` or `cp` keeps the older mtime**, so cargo doesn't rebuild and keeps testing the mutated code. `touch` the file after restoring (mutation checks for red tests).
 * **Long Git Bash heredocs can fail with "unexpected EOF while looking for matching `'`"** (the content is cut). Write scripts with the Write tool into the scratchpad and run them from there.

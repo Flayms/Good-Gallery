@@ -47,6 +47,52 @@ impl FileManager for Explorer {
     }
 }
 
+/// The running parts that take new settings at once (spec 010): the app's indexer, schedule and thumbnail cache, or a
+/// fake in tests.
+pub trait SettingsTargets: Send + Sync {
+    /// Scheduled quick scans follow this interval from now on, without scanning now (REQ-010-03).
+    fn set_quick_check_interval(&self, minutes: u32);
+    /// Parallel file reads for the next scans and for rendering thumbnails (REQ-010-04).
+    fn set_io_concurrency(&self, reads: usize);
+    /// The thumbnail cache's limit in bytes; a lower one evicts in the background (REQ-010-05).
+    fn set_cache_limit(&self, bytes: u64);
+    /// The cache's size in bytes, `None` while it is still being measured (REQ-010-06). Doesn't block.
+    fn cache_usage(&self) -> Option<u64>;
+    /// Deletes all cached thumbnails (but those being read) and returns the new size. Blocks; runs on a job thread.
+    fn clear_cache(&self) -> u64;
+}
+
+/// The thumbnail cache's size as the Settings page shows it (REQ-010-06).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CacheUsage {
+    /// Nothing to ask (no thumbnail cache).
+    #[default]
+    Unknown,
+    Measuring,
+    Bytes(u64),
+}
+
+impl CacheUsage {
+    /// "…" while unknown, "unknown" if it can't be determined, else the size.
+    pub fn label(self) -> String {
+        match self {
+            Self::Unknown => "unknown".into(),
+            Self::Measuring => "…".into(),
+            Self::Bytes(bytes) => crate::format::bytes(i64::try_from(bytes).unwrap_or(i64::MAX)),
+        }
+    }
+}
+
+/// The cache's size is read again this often while the Settings page shows (REQ-010-06).
+pub const USAGE_REFRESH: Duration = Duration::from_secs(10);
+/// After a change of the limit, the size is read this often for a while, so the eviction shows (REQ-010-05).
+const USAGE_REFRESH_AFTER_CHANGE: Duration = Duration::from_secs(1);
+
+/// Bytes of a cache limit in GB (GiB, as the Electron version counts them).
+pub fn gib_to_bytes(gib: f64) -> u64 {
+    (gib * 1024f64.powi(3)).round() as u64
+}
+
 /// Results of background jobs, applied on the UI thread.
 enum Event {
     LibraryAdded(Result<Library, String>),
@@ -54,6 +100,8 @@ enum Event {
     FolderPicked(Option<PathBuf>),
     /// Explorer couldn't show a file: why.
     ExplorerFailed(Option<String>),
+    /// The thumbnail cache was cleared; its new size.
+    CacheCleared(u64),
     /// The job panicked; its flags are reset and the user gets an error.
     Failed,
 }
@@ -66,6 +114,11 @@ pub struct SettingsPage {
     pub picking: bool,
     /// The library whose removal waits for confirmation.
     pub confirm_remove: Option<Library>,
+    /// _Clear_ waits for confirmation (REQ-010-06).
+    pub confirm_clear: bool,
+    pub clearing: bool,
+    /// The _Parallel file reads_ slider's value while it is dragged; saved on release (REQ-010-04).
+    pub concurrency_drag: Option<u32>,
 }
 
 pub struct AppState {
@@ -87,7 +140,7 @@ pub struct AppState {
     last_written_refresh: Option<Instant>,
     written_since_refresh: bool,
     /// Kept alive for the app's lifetime; dropping it stops the schedule.
-    scheduler: Option<indexer::schedule::Scheduler>,
+    scheduler: Option<Arc<indexer::schedule::Scheduler>>,
     /// Renders thumbnails in the background; the gallery's tiles request theirs from it.
     thumbnails: Option<Arc<indexer::thumbnails::ThumbnailService>>,
     /// `None` if the index couldn't be opened.
@@ -103,11 +156,22 @@ pub struct AppState {
     pub originals: Option<crate::originals::Originals>,
     /// Plays the viewer's videos (REQ-009-06); unavailable unless set with [`Self::with_videos`].
     pub videos: crate::video::Videos,
+    /// The stored settings (spec 010).
+    pub settings: db::settings::Settings,
+    settings_targets: Option<Arc<dyn SettingsTargets>>,
+    pub cache_usage: CacheUsage,
+    /// When the cache's size was last read, and until when it is read more often after a change.
+    usage_read_at: Option<Instant>,
+    usage_fast_until: Option<Instant>,
 }
 
 impl AppState {
     pub fn new(conn: Connection, scans: Arc<dyn ScanRequests>, picker: Arc<dyn FolderPicker>) -> Self {
         let mut state = Self::empty(scans, picker);
+        state.settings = db::settings::load(&conn).unwrap_or_else(|error| {
+            tracing::error!("can't read the settings: {error}");
+            Default::default()
+        });
         let db = Arc::new(Mutex::new(conn));
         state.db = Some(db.clone());
         state.refresh();
@@ -134,7 +198,7 @@ impl AppState {
     }
 
     /// Runs scheduled scans for as long as the app runs.
-    pub fn with_scheduler(mut self, scheduler: indexer::schedule::Scheduler) -> Self {
+    pub fn with_scheduler(mut self, scheduler: Arc<indexer::schedule::Scheduler>) -> Self {
         self.scheduler = Some(scheduler);
         self
     }
@@ -143,6 +207,62 @@ impl AppState {
     pub fn with_thumbnails(mut self, thumbnails: Arc<indexer::thumbnails::ThumbnailService>) -> Self {
         self.thumbnails = Some(thumbnails);
         self
+    }
+
+    /// Hands changed settings to `targets` (the running indexer, schedule and thumbnail cache).
+    pub fn with_settings_targets(mut self, targets: Arc<dyn SettingsTargets>) -> Self {
+        self.settings_targets = Some(targets);
+        self
+    }
+
+    /// Validates and stores `settings`, then applies what changed right away (REQ-010-02 … -05). An invalid value
+    /// is an error toast, and nothing changes.
+    pub fn update_settings(&mut self, settings: db::settings::Settings) {
+        let Some(db) = self.db.clone() else { return };
+        if let Err(error) = db::settings::save(&lock(&db), &settings) {
+            self.toasts.error(error.to_string());
+            return;
+        }
+        let old = std::mem::replace(&mut self.settings, settings);
+        let Some(targets) = &self.settings_targets else { return };
+        if old.quick_check_interval_minutes != settings.quick_check_interval_minutes {
+            targets.set_quick_check_interval(settings.quick_check_interval_minutes);
+        }
+        if old.io_concurrency != settings.io_concurrency {
+            targets.set_io_concurrency(settings.io_concurrency as usize);
+        }
+        if old.thumb_cache_gib != settings.thumb_cache_gib {
+            targets.set_cache_limit(gib_to_bytes(settings.thumb_cache_gib));
+            self.usage_read_at = None;
+            self.usage_fast_until = Some(Instant::now() + USAGE_REFRESH);
+        }
+    }
+
+    /// Reads the thumbnail cache's size when it is due (every 10 s, more often right after a change of the limit);
+    /// the Settings page calls it every frame. Returns when to read next.
+    pub fn refresh_cache_usage(&mut self) -> Duration {
+        let now = Instant::now();
+        let every = match self.usage_fast_until {
+            Some(until) if now < until => USAGE_REFRESH_AFTER_CHANGE,
+            _ => USAGE_REFRESH,
+        };
+        if self.usage_read_at.is_none_or(|at| now.duration_since(at) >= every) {
+            self.usage_read_at = Some(now);
+            self.cache_usage = match &self.settings_targets {
+                None => CacheUsage::Unknown,
+                Some(targets) => targets.cache_usage().map_or(CacheUsage::Measuring, CacheUsage::Bytes),
+            };
+        }
+        every
+    }
+
+    /// Deletes all cached thumbnails in the background, then shows the new size (REQ-010-06).
+    pub fn clear_thumbnail_cache(&mut self) {
+        let Some(targets) = self.settings_targets.clone() else {
+            return;
+        };
+        self.settings_page.clearing = true;
+        self.spawn(move || Event::CacheCleared(targets.clear_cache()));
     }
 
     /// Shows files in `file_manager` instead of Explorer.
@@ -218,6 +338,11 @@ impl AppState {
             file_manager: Arc::new(Explorer),
             originals: None,
             videos: crate::video::Videos::default(),
+            settings: Default::default(),
+            settings_targets: None,
+            cache_usage: CacheUsage::default(),
+            usage_read_at: None,
+            usage_fast_until: None,
         }
     }
 
@@ -412,9 +537,16 @@ impl AppState {
                     self.toasts.error(error);
                 }
             }
+            Event::CacheCleared(bytes) => {
+                self.settings_page.clearing = false;
+                self.cache_usage = CacheUsage::Bytes(bytes);
+                self.usage_read_at = Some(Instant::now());
+                self.toasts.success("Thumbnail cache cleared");
+            }
             Event::Failed => {
                 self.settings_page.adding = false;
                 self.settings_page.picking = false;
+                self.settings_page.clearing = false;
                 self.toasts.error("Something went wrong. Details are in the log.");
                 self.refresh();
             }

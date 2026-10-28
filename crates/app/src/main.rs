@@ -4,7 +4,8 @@
 //! <file.png>` (saves a screenshot of the window after a few frames and exits), `--screenshot-after <seconds>` (waits
 //! that long before the screenshot, e.g. for scans or thumbnails), `--bench-scroll <seconds>` (vsync off; scrolls the
 //! gallery once to warm the files, then again while measuring frame times, prints them and exits; REQ-006-12), `--view
-//! <position>` (opens the viewer at that gallery position once the gallery has loaded, e.g. for a screenshot).
+//! <position>` (opens the viewer at that gallery position once the gallery has loaded, e.g. for a screenshot), `--scroll
+//! <points>` (scrolls the gallery that far once it has loaded, e.g. to show the glass toolbar over tiles).
 
 use anyhow::Context as _;
 use app::{AppState, NativeFolderPicker};
@@ -26,6 +27,7 @@ struct Options {
     screenshot_after: std::time::Duration,
     bench_scroll: Option<f32>,
     view: Option<usize>,
+    scroll: Option<f32>,
 }
 
 /// Scrolling speed of `--bench-scroll`, points per second (as in the M0 spike).
@@ -130,10 +132,15 @@ struct GalleryApp {
     bench: Option<Bench>,
     /// `--view`: the gallery position to open in the viewer once it has loaded.
     view: Option<usize>,
+    /// `--scroll`: how far to scroll the gallery once it has loaded.
+    scroll: Option<f32>,
+    /// Windows' animation and transparency effects, followed while the app runs.
+    preferences: app::theme::OsPreferences,
 }
 
 impl eframe::App for GalleryApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.preferences.poll(ui.ctx());
         app::ui(ui, &mut self.state);
         self.frames += 1;
         if let Some(index) = self.view
@@ -142,6 +149,14 @@ impl eframe::App for GalleryApp {
         {
             self.view = None;
             self.state.viewer = Some(viewer);
+            ui.ctx().request_repaint();
+        }
+        if let Some(offset) = self.scroll
+            && let Some(gallery) = &mut self.state.gallery
+            && gallery.count().is_some()
+        {
+            self.scroll = None;
+            gallery.scroll_to(offset);
             ui.ctx().request_repaint();
         }
         if let Some(bench) = &mut self.bench {
@@ -198,13 +213,14 @@ fn default_data_dir() -> anyhow::Result<PathBuf> {
 
 fn parse_args() -> anyhow::Result<Options> {
     const USAGE: &str = "usage: app [--data-dir <folder>] [--screenshot <file.png> [--screenshot-after <seconds>]] \
-                         [--bench-scroll <seconds>] [--view <position>]";
+                         [--bench-scroll <seconds>] [--view <position>] [--scroll <points>]";
     let mut args = std::env::args().skip(1);
     let mut data_dir = None;
     let mut screenshot = None;
     let mut screenshot_after = std::time::Duration::ZERO;
     let mut bench_scroll = None;
     let mut view = None;
+    let mut scroll = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--data-dir" => data_dir = Some(args.next().context(USAGE)?.into()),
@@ -219,6 +235,7 @@ fn parse_args() -> anyhow::Result<Options> {
                 bench_scroll = Some(seconds);
             }
             "--view" => view = Some(args.next().context(USAGE)?.parse().context(USAGE)?),
+            "--scroll" => scroll = Some(args.next().context(USAGE)?.parse().context(USAGE)?),
             other => anyhow::bail!("unknown argument {other} ({USAGE})"),
         }
     }
@@ -232,7 +249,49 @@ fn parse_args() -> anyhow::Result<Options> {
         screenshot_after,
         bench_scroll,
         view,
+        scroll,
     })
+}
+
+/// The running parts that take changed settings (spec 010).
+struct RunningParts {
+    thumbnails: Arc<indexer::thumbnails::ThumbnailService>,
+    /// Without exiftool there is no indexer and no schedule.
+    indexer: Option<(Arc<indexer::Indexer>, Arc<media::exiftool::ExifTool>)>,
+    scheduler: Option<Arc<indexer::schedule::Scheduler>>,
+}
+
+impl app::SettingsTargets for RunningParts {
+    fn set_quick_check_interval(&self, minutes: u32) {
+        if let Some(scheduler) = &self.scheduler {
+            scheduler.set_interval(minutes);
+        }
+    }
+
+    fn set_io_concurrency(&self, reads: usize) {
+        if let Some((indexer, exiftool)) = &self.indexer {
+            // The next scan reads with the new number. exiftool's pool only grows now: shrinking it would throttle a
+            // running scan, which keeps its value (REQ-010-04); extra idle processes cost nothing.
+            indexer.set_concurrency(reads);
+            exiftool.grow_max_processes(reads);
+        }
+        self.thumbnails.set_workers(reads);
+    }
+
+    fn set_cache_limit(&self, bytes: u64) {
+        self.thumbnails.cache().set_max_bytes(bytes);
+    }
+
+    fn cache_usage(&self) -> Option<u64> {
+        let cache = self.thumbnails.cache();
+        cache.is_measured().then(|| cache.usage())
+    }
+
+    fn clear_cache(&self) -> u64 {
+        let cache = self.thumbnails.cache();
+        cache.clear();
+        cache.usage()
+    }
 }
 
 /// Opens the index in the data folder (one connection for the UI, one for the indexer) and starts the indexer, or
@@ -313,16 +372,21 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
         .with_videos(videos);
     let Some(exiftool) = exiftool else {
         tracing::error!("exiftool not found: libraries can't be indexed");
-        let mut state = state;
+        let mut state = state.with_settings_targets(Arc::new(RunningParts {
+            thumbnails,
+            indexer: None,
+            scheduler: None,
+        }));
         state
             .toasts
             .error("exiftool not found, so libraries can't be indexed. Put exiftool.exe next to the app.");
         return state;
     };
     let ctx = ctx.clone();
+    let rendering = thumbnails.clone();
     let (indexer, events) = indexer::Indexer::start(indexer::IndexerDeps {
         writer: db::writer::IndexWriter::new(writer),
-        metadata: exiftool,
+        metadata: exiftool.clone(),
         is_reachable,
         concurrency,
         notify: Box::new(move || ctx.request_repaint()),
@@ -330,13 +394,21 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
     });
     let indexer = Arc::new(indexer);
     // Quick scans at startup and every quick check interval; offline libraries every minute.
-    let scheduler = indexer::schedule::Scheduler::start(
+    let scheduler = Arc::new(indexer::schedule::Scheduler::start(
         schedule_conn,
         indexer.clone(),
         settings.quick_check_interval_minutes,
         indexer::schedule::OFFLINE_RETRY,
-    );
-    state.with_indexer(indexer, events).with_scheduler(scheduler)
+    ));
+    let parts = RunningParts {
+        thumbnails: rendering,
+        indexer: Some((indexer.clone(), exiftool)),
+        scheduler: Some(scheduler.clone()),
+    };
+    state
+        .with_indexer(indexer, events)
+        .with_scheduler(scheduler)
+        .with_settings_targets(Arc::new(parts))
 }
 
 /// The video player, made when the first video shows (libmpv is large); without libmpv, videos show their preview.
@@ -374,7 +446,7 @@ fn start_thumbnails(
         Some(exiftool) => exiftool,
         None => Arc::new(media::thumbnail::NoPreviews),
     };
-    let cache_bytes = (settings.thumb_cache_gib * 1024f64.powi(3)).round() as u64;
+    let cache_bytes = app::state::gib_to_bytes(settings.thumb_cache_gib);
     indexer::thumbnails::ThumbnailService::start(indexer::thumbnails::ThumbnailDeps {
         conn,
         cache: indexer::thumb_cache::ThumbCache::open(data_dir.join("thumbs"), cache_bytes),
@@ -412,6 +484,10 @@ fn main() -> anyhow::Result<()> {
         native,
         Box::new(move |cc| {
             app::setup(&cc.egui_ctx);
+            if let Some(render_state) = &cc.wgpu_render_state {
+                app::glass::install(&cc.egui_ctx, render_state);
+            }
+            app::titlebar::install(cc);
             Ok(Box::new(GalleryApp {
                 state: open_state(&options.data_dir, &cc.egui_ctx, cc.wgpu_render_state.clone()),
                 screenshot: options.screenshot,
@@ -421,6 +497,8 @@ fn main() -> anyhow::Result<()> {
                 frames: 0,
                 bench: options.bench_scroll.map(Bench::new),
                 view: options.view,
+                scroll: options.scroll,
+                preferences: Default::default(),
             }))
         }),
     )

@@ -311,3 +311,42 @@ fn req_008_04_req_008_07_toggles_ratings_and_remembers_collapsed_groups() {
     let stored = db::settings::value(&db.lock().unwrap(), "sidebar.group.people").unwrap();
     assert_eq!(stored, Some("closed".into()));
 }
+
+/// REQ-013-02, REQ-013-08: at the minimum window size every toolbar control is visible, none overlaps another, and
+/// none lies under the window controls.
+#[test]
+fn req_013_02_req_013_08_the_toolbar_fits_the_minimum_window_beside_the_window_controls() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture);
+    harness.set_size(egui::vec2(800.0, 600.0));
+    harness.state_mut().search_bar = Default::default();
+    // Filters show their count, the widest the button gets.
+    let mut filtered = search(&harness);
+    filtered.ratings = vec![5];
+    filtered.kind = Some(MediaKind::Image);
+    harness.state_mut().gallery.as_mut().unwrap().set_search(filtered);
+    settle(&mut harness);
+
+    let screen = harness.ctx.content_rect();
+    let controls = [
+        harness
+            .get_by_role_and_label(Role::TextInput, app::search_bar::LABEL)
+            .rect(),
+        harness.get_by_role_and_label(Role::Button, "Filters, 2 active").rect(),
+        harness.get_by_role_and_label(Role::Button, "View options").rect(),
+    ];
+    let window_controls = app::titlebar::button_rects(screen);
+    for (i, control) in controls.iter().enumerate() {
+        assert!(screen.contains_rect(*control), "{control:?} is cut off");
+        assert!(control.width() >= 28.0, "{control:?} is too small");
+        for other in &controls[i + 1..] {
+            assert!(!control.intersects(*other), "{control:?} overlaps {other:?}");
+        }
+        for button in window_controls {
+            assert!(
+                !control.intersects(button),
+                "{control:?} lies under the window control {button:?}"
+            );
+        }
+    }
+}

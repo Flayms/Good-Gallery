@@ -20,12 +20,26 @@ The current milestone is the first row that isn't `Done`. Statuses: `Not started
 | M8a       | Viewer core                            | Done        | [M08](rewrite/milestones/M08-viewer.md) |
 | M8b       | Viewer panels and filmstrip            | Done        | [M08](rewrite/milestones/M08-viewer.md) |
 | M9        | Video                                  | Done        | [M09](rewrite/milestones/M09-video.md) |
-| M10       | Settings, design polish, glass         | Not started | —                                       |
+| M10a      | Settings and rules                     | Done        | [M10](rewrite/milestones/M10-settings-design.md) |
+| M10b      | Glass and title bar                    | Done        | [M10](rewrite/milestones/M10-settings-design.md) |
 | M11       | Packaging and release                  | Not started | —                                       |
 
 ## Log
 
 Newest first. One entry per session: date, milestone, what was done, decisions (lasting ones also in `docs/architecture.md`), open issues, next step.
+
+### 2026-10-28 · M10a + M10b · Settings, design polish, glass
+
+- Plan `M10-settings-design.md` written and self-approved, split into M10a (settings and rules) and M10b (glass and title bar); both done in this session (several runs, interrupted by rate limits) and committed together.
+- M10a: Settings page _Indexing_ (check interval with a stored odd value kept as an option, parallel reads slider saved on release) and _Thumbnail cache_ (size, usage every 10 s, _Clear_ with confirmation and toast), applied at once through `SettingsTargets` (new `ThumbnailService::set_workers`); `domain::media::is_safe_rel_path` refuses index paths that leave their library (REQ-011-08); `xtask/tests/no_network.rs` (REQ-011-11); glass, focus and scrollbar tokens with the reference's contrast tests; one focus ring for the focused widget; Windows' animation and transparency effects re-read every 2 s; dates in the user's locale through ICU4X (tests pin `en-GB`).
+- M10b: `app::glass` (the M0 pass on the frame's recorded backdrop) on the toolbar, Settings header, menus, combo lists, context menus, suggestions and dialogs; the viewer's scrim blurs the window (tiles, sidebar, toolbar) and its chrome reuses that blur, tinted; opaque fallback for reduced transparency and without the pass (kittest); content in the title bar with the M0 window subclass (native hit tests for the caption buttons, egui-handled caption drags), 138 px kept free; scrollbars as the design's pill, starting below the toolbar.
+- Specs 010, 011, 013 `Implemented`. 13 snapshots updated (reserved caption space, opaque fallbacks); new tests `crates/app/tests/settings.rs`.
+- Checked in the running app on the dev data folder: caption buttons, toolbar glass picking up the red tiles scrolled under it (pixel values), blurred and darkened window behind the viewer with glass control bar, arrows and filmstrip; dates in the machine's en-US locale.
+- Code review fixes: the info sheet's and the viewer info panel's tops lay under the caption buttons (a click on the sheet's X closed the app), now below the caption; caption space is kept free only where a bar reaches the window's right edge (the toolbar beside an open info sheet squeezed its search field); a lower parallel reads value no longer shrinks exiftool's pool under a running scan (it only grows now); parked thumbnail threads wait on their own condvar; tiles record their placeholder for glass only until the thumbnail covers it; the OS preferences no longer wake an idle window every 2 s (read while frames are drawn); the date formatter checks a version counter instead of locking per call; `:` and `\` count as unsafe path characters only on Windows; "Every minute"; the parallel reads knob snaps to whole steps; the sidebar's drag area uses the caption height.
+- Not changed after review: glass rebuilds its per-tile bind groups and buffers every frame and keeps slot textures (e.g. the scrim's) until exit; worth measuring with `cargo xtask gallery-bench` before optimizing.
+- Session note: the build failed with "paging file too small" (C: had 15 GB free, 15 GB in `target`); building with `-j 4` works.
+- Open: (1) the user's approval of the side-by-side screenshots (exit criterion); (2) the viewer chrome blurs the scrim, not the photo under it (only visible when zoomed under the bar); (3) glass rebuilds tile bind groups every frame (≈ 300 for the scrim at 12 columns) — not measured against the frame budget yet; (4) the date pickers' popups stay Raised; (5) counts keep English grouping.
+- Next: M11 (Packaging and release).
 
 ### 2026-10-27 · M9 · Video
 

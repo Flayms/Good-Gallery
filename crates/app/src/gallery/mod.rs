@@ -952,6 +952,7 @@ impl Gallery {
         let mut scroll = egui::ScrollArea::vertical()
             .id_salt("gallery")
             .auto_shrink(false)
+            .scroll_bar_rect(scroll_bar_rect(area, list))
             // Ctrl + wheel zooms (handled above), it never scrolls.
             .scroll_source(egui::scroll_area::ScrollSource::ALL);
         // The anchor goes right below the toolbar, where it was.
@@ -1014,12 +1015,30 @@ impl Gallery {
             || self.failed.contains(&id)
             || self.thumbnails.as_ref().is_some_and(|t| t.streamer.is_broken(id));
         let loaded = self.thumbnails.as_mut().and_then(|t| t.streamer.get(id));
+        // Under glass the placeholder is its plain color (the blur hides the difference), and only while the
+        // thumbnail doesn't cover it yet (REQ-013-03).
+        if loaded
+            .as_ref()
+            .is_none_or(|loaded| (frame.now - loaded.at).as_secs_f32() < theme::DURATION_BASE)
+        {
+            crate::glass::record_solid(ui.ctx(), rect, theme::RAISED, false);
+        }
         if let Some(loaded) = loaded {
             let t = (frame.now - loaded.at).as_secs_f32() / theme::DURATION_BASE;
             frame.fading |= t < 1.0;
             let tint = Color32::WHITE.gamma_multiply(t.clamp(0.0, 1.0));
             let uv = cover_uv(loaded.size, rect.size());
             painter.add(egui::epaint::RectShape::filled(rect, radius, tint).with_texture(loaded.id, uv));
+            crate::glass::record(
+                ui.ctx(),
+                crate::glass::BackdropItem {
+                    rect,
+                    uv,
+                    view: Some(loaded.view),
+                    color: tint,
+                    chrome: false,
+                },
+            );
         } else if failed {
             let size = (rect.width().min(rect.height()) * 0.6).min(24.0);
             let icon = Rect::from_center_size(rect.center(), Vec2::splat(size));
@@ -1077,17 +1096,19 @@ impl Gallery {
 
 /// _Show in Explorer_ and _Information_ in a context menu (REQ-009-11); what was chosen.
 pub fn context_menu(ui: &mut egui::Ui) -> Option<MediaAction> {
-    let mut action = None;
-    if ui.button("Show in Explorer").clicked() {
-        action = Some(MediaAction::ShowInExplorer);
-    }
-    if ui.button("Information").clicked() {
-        action = Some(MediaAction::Information);
-    }
-    if action.is_some() {
-        ui.close();
-    }
-    action
+    crate::glass::behind_menu(ui, |ui| {
+        let mut action = None;
+        if ui.button("Show in Explorer").clicked() {
+            action = Some(MediaAction::ShowInExplorer);
+        }
+        if ui.button("Information").clicked() {
+            action = Some(MediaAction::Information);
+        }
+        if action.is_some() {
+            ui.close();
+        }
+        action
+    })
 }
 
 /// The ThumbHash placeholder of an item as a small texture (REQ-005-06).
@@ -1117,6 +1138,17 @@ fn key_of(item: &GalleryItem) -> ThumbKey {
         size: item.size,
         mtime: item.mtime,
     }
+}
+
+/// Where the gallery's scrollbar goes in `area`: below the toolbar (and the List view's column header), so it never
+/// lies under the window controls (REQ-013-15).
+pub fn scroll_bar_rect(area: Rect, list: bool) -> Rect {
+    let top = if list {
+        TOOLBAR_HEIGHT + list::COLUMN_HEADER_HEIGHT
+    } else {
+        TOOLBAR_HEIGHT
+    };
+    Rect::from_min_max(pos2(area.left(), area.top() + top), area.max)
 }
 
 fn full_uv() -> Rect {
@@ -1151,6 +1183,22 @@ fn one_line(ui: &egui::Ui, text: &str, font: egui::FontId, color: Color32, max_w
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn req_013_15_the_scrollbar_starts_below_the_toolbar() {
+        let area = Rect::from_min_max(pos2(256.0, 0.0), pos2(1280.0, 800.0));
+        let tiles = scroll_bar_rect(area, false);
+        assert_eq!(
+            (tiles.top(), tiles.bottom(), tiles.right()),
+            (TOOLBAR_HEIGHT, 800.0, 1280.0)
+        );
+        let rows = scroll_bar_rect(area, true);
+        assert_eq!(rows.top(), TOOLBAR_HEIGHT + list::COLUMN_HEADER_HEIGHT);
+        // Below the window controls, whatever the window's width.
+        for button in crate::titlebar::button_rects(area) {
+            assert!(button.bottom() <= tiles.top());
+        }
+    }
 
     #[test]
     fn crops_textures_to_cover_the_tile_centered() {

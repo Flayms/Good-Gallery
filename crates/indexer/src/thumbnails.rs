@@ -11,6 +11,7 @@ use media::thumbnail::{Renderer, Thumbnails};
 use std::collections::HashSet;
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -26,7 +27,8 @@ pub trait RenderThumbnails: Send + Sync {
 
 impl RenderThumbnails for Renderer {
     fn render(&self, source: &ThumbSource) -> Result<Thumbnails, String> {
-        Renderer::render(self, &source.file(), source.kind, source.duration).map_err(|error| error.to_string())
+        let file = source.file().ok_or("its indexed path leaves its library")?;
+        Renderer::render(self, &file, source.kind, source.duration).map_err(|error| error.to_string())
     }
 }
 
@@ -94,17 +96,20 @@ impl Queue {
 struct Shared {
     queue: Mutex<Queue>,
     changed: Condvar,
+    /// Render threads above the set number wait here, so the queue's notifications don't wake them.
+    parked: Condvar,
     conn: Mutex<Connection>,
     cache: ThumbCache,
     render: Arc<dyn RenderThumbnails>,
     is_reachable: Arc<dyn Fn(&Path) -> bool + Send + Sync>,
     on_ready: Box<dyn Fn(ThumbnailReady) + Send + Sync>,
-    workers: usize,
+    /// Render threads that may work; threads numbered above wait (REQ-010-04).
+    workers: AtomicUsize,
 }
 
 pub struct ThumbnailService {
     shared: Arc<Shared>,
-    workers: Vec<JoinHandle<()>>,
+    workers: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl ThumbnailService {
@@ -113,22 +118,19 @@ impl ThumbnailService {
         let shared = Arc::new(Shared {
             queue: Mutex::new(Queue::default()),
             changed: Condvar::new(),
+            parked: Condvar::new(),
             conn: Mutex::new(deps.conn),
             cache: deps.cache,
             render: deps.render,
             is_reachable: deps.is_reachable,
             on_ready: deps.on_ready,
-            workers: deps.workers.max(1),
+            workers: AtomicUsize::new(deps.workers.max(1)),
         });
-        let workers = (0..shared.workers)
-            .map(|i| {
-                let shared = shared.clone();
-                std::thread::Builder::new()
-                    .name(format!("thumbnails {i}"))
-                    .spawn(move || work(&shared))
-                    .expect("can't start a thumbnail thread")
-            })
-            .collect();
+        let service = Self {
+            shared: shared.clone(),
+            workers: Mutex::new(Vec::new()),
+        };
+        service.set_workers(deps.workers);
         // Background passes wait until the cache is measured (an empty-looking cache would be overfilled), but no
         // render thread waits for it: requests go on meanwhile.
         let weak = Arc::downgrade(&shared);
@@ -143,7 +145,28 @@ impl ThumbnailService {
                 }
             })
             .expect("can't start a thumbnail thread");
-        Self { shared, workers }
+        service
+    }
+
+    /// Renders with `workers` threads from now on (REQ-010-04): renders running on threads above the new number
+    /// finish, then those threads wait.
+    pub fn set_workers(&self, workers: usize) {
+        let workers = workers.max(1);
+        self.shared.workers.store(workers, Ordering::Relaxed);
+        let mut threads = self.workers.lock().unwrap_or_else(|p| p.into_inner());
+        while threads.len() < workers {
+            let (shared, index) = (self.shared.clone(), threads.len());
+            threads.push(
+                std::thread::Builder::new()
+                    .name(format!("thumbnails {index}"))
+                    .spawn(move || work(&shared, index))
+                    .expect("can't start a thumbnail thread"),
+            );
+        }
+        drop(threads);
+        drop(self.shared.lock());
+        self.shared.changed.notify_all();
+        self.shared.parked.notify_all();
     }
 
     pub fn cache(&self) -> &ThumbCache {
@@ -196,9 +219,11 @@ impl Drop for ThumbnailService {
     fn drop(&mut self) {
         self.shared.lock().shutdown = true;
         self.shared.changed.notify_all();
+        self.shared.parked.notify_all();
         // A render can wait on a hung share or a slow ffmpeg; don't hang the app's exit for it.
         let deadline = Instant::now() + Duration::from_secs(2);
-        for worker in self.workers.drain(..) {
+        let threads = std::mem::take(self.workers.get_mut().unwrap_or_else(|p| p.into_inner()));
+        for worker in threads {
             while !worker.is_finished() && Instant::now() < deadline {
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -230,14 +255,20 @@ impl Shared {
         self.conn.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    fn next(&self) -> Option<Work> {
+    /// The next work for render thread `index`; it waits while its number is above the set number of threads.
+    fn next(&self, index: usize) -> Option<Work> {
         let mut queue = self.lock();
         loop {
             if queue.shutdown {
                 return None;
             }
+            let workers = self.workers.load(Ordering::Relaxed);
+            if index >= workers {
+                queue = self.parked.wait(queue).unwrap_or_else(|p| p.into_inner());
+                continue;
+            }
             // Topped up while shorter than the number of workers, so requests never wait behind a long queue.
-            if queue.kicked && !queue.refilling && queue.jobs.len() < self.workers && self.cache.is_measured() {
+            if queue.kicked && !queue.refilling && queue.jobs.len() < workers && self.cache.is_measured() {
                 queue.refilling = true;
                 return Some(Work::Refill(queue.kicks));
             }
@@ -380,8 +411,8 @@ impl Shared {
     }
 }
 
-fn work(shared: &Shared) {
-    while let Some(work) = shared.next() {
+fn work(shared: &Shared, index: usize) {
+    while let Some(work) = shared.next(index) {
         match work {
             Work::Refill(kicks) => shared.refill(kicks),
             Work::Render(media) => {
@@ -406,6 +437,10 @@ mod tests {
         /// Each render first reports its name here, then waits for a message on `gate`.
         started: Mutex<Option<Sender<String>>>,
         gate: Mutex<Option<Receiver<()>>>,
+        /// Renders running now, the most at once, and how long each takes.
+        active: AtomicUsize,
+        peak: AtomicUsize,
+        delay: Mutex<Duration>,
     }
 
     impl RenderThumbnails for FakeRender {
@@ -415,6 +450,10 @@ mod tests {
                 started.send(name.clone()).unwrap();
                 self.gate.lock().unwrap().as_ref().unwrap().recv().unwrap();
             }
+            let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
+            self.peak.fetch_max(active, Ordering::SeqCst);
+            std::thread::sleep(*self.delay.lock().unwrap());
+            self.active.fetch_sub(1, Ordering::SeqCst);
             self.rendered.lock().unwrap().push(name);
             if *self.panic.lock().unwrap() {
                 panic!("decoder crashed");
@@ -518,6 +557,29 @@ mod tests {
 
     fn ready(rel_path: &str) -> (String, String, Option<String>) {
         (rel_path.into(), "ready".into(), Some("aGFzaA==".into()))
+    }
+
+    #[test]
+    fn req_010_04_renders_with_as_many_threads_as_set() {
+        let fixture = Fixture::new(1 << 20);
+        *fixture.render.delay.lock().unwrap() = Duration::from_millis(30);
+        fixture.service.set_workers(3);
+        for i in 0..12 {
+            fixture.insert(&format!("{i}.jpg"), i);
+        }
+        fixture.service.kick();
+        fixture.service.wait_idle();
+        assert_eq!(fixture.render.peak.load(Ordering::SeqCst), 3);
+
+        fixture.service.set_workers(1);
+        fixture.render.peak.store(0, Ordering::SeqCst);
+        for i in 12..18 {
+            fixture.insert(&format!("{i}.jpg"), i);
+        }
+        fixture.service.kick();
+        fixture.service.wait_idle();
+        assert_eq!(fixture.render.peak.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.rendered().len(), 18);
     }
 
     #[test]

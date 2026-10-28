@@ -161,7 +161,8 @@ fn req_001_07_lists_libraries_with_status_path_and_last_indexed_time() {
     let labels: Vec<_> = harness.state().libraries.iter().map(|l| l.label.clone()).collect();
     assert_eq!(labels, ["Zoo", "archive"]);
     harness.get_by_label("offline");
-    harness.get_by_label("unknown");
+    // The library's status, and the thumbnail cache's usage further down (no cache in this test).
+    assert_eq!(harness.query_all_by_label("unknown").count(), 2);
     harness.get_by_label(&format!(
         "D:\\Zoo · last indexed {}",
         app::format::medium_date_time(1751433120000)

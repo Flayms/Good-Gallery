@@ -39,20 +39,25 @@ pub struct DetailTag {
     pub category: Option<TagCategory>,
 }
 
-/// The library folder joined with a relative path stored with `/` separators.
-pub fn absolute_path(root: &str, rel_path: &str) -> PathBuf {
+/// The library folder joined with a relative path stored with `/` separators; `None` for a relative path that would
+/// leave the library (REQ-011-08), so the item is treated as missing.
+pub fn absolute_path(root: &str, rel_path: &str) -> Option<PathBuf> {
+    if !domain::media::is_safe_rel_path(rel_path) {
+        return None;
+    }
     let mut path = PathBuf::from(root);
     path.extend(rel_path.split('/'));
-    path
+    Some(path)
 }
 
-/// The file of a media item in `libraries`, or `None` if its library isn't among them.
+/// The file of a media item in `libraries`, or `None` if its library isn't among them or its path leaves the library.
 pub fn file_in(libraries: &[crate::libraries::Library], root_id: i64, rel_path: &str) -> Option<PathBuf> {
     let library = libraries.iter().find(|library| library.id == root_id)?;
-    Some(absolute_path(&library.path, rel_path))
+    absolute_path(&library.path, rel_path)
 }
 
-/// The details of media item `id`, or `None` if it isn't indexed (REQ-009-12).
+/// The details of media item `id`, or `None` if it isn't indexed (REQ-009-12) or its path leaves its library
+/// (REQ-011-08).
 pub fn detail(conn: &Connection, id: i64) -> Result<Option<MediaDetail>> {
     let row = conn
         .prepare_cached(
@@ -63,11 +68,14 @@ pub fn detail(conn: &Connection, id: i64) -> Result<Option<MediaDetail>> {
              WHERE media.id = ?1",
         )?
         .query_row([id], |row| {
-            Ok(MediaDetail {
+            let Some(path) = absolute_path(&row.get::<_, String>(3)?, &row.get::<_, String>(4)?) else {
+                return Ok(None);
+            };
+            Ok(Some(MediaDetail {
                 id: row.get(0)?,
                 root_id: row.get(1)?,
                 library_label: row.get(2)?,
-                path: absolute_path(&row.get::<_, String>(3)?, &row.get::<_, String>(4)?),
+                path,
                 file_name: row.get(5)?,
                 kind: MediaKind::parse(&row.get::<_, String>(6)?).unwrap_or(MediaKind::Image),
                 size: row.get(7)?,
@@ -79,9 +87,10 @@ pub fn detail(conn: &Connection, id: i64) -> Result<Option<MediaDetail>> {
                 thumbhash: row.get(13)?,
                 rating: row.get(14)?,
                 tags: Vec::new(),
-            })
+            }))
         })
-        .optional()?;
+        .optional()?
+        .flatten();
     let Some(mut detail) = row else { return Ok(None) };
     let mut stmt = conn.prepare_cached(
         "SELECT tags.id, tags.name FROM media_tags JOIN tags ON tags.id = media_tags.tag_id
@@ -188,6 +197,31 @@ mod tests {
                 ("Rome", Some(TagCategory::Places)),
             ]
         );
+    }
+
+    #[test]
+    fn req_011_08_treats_an_item_whose_path_leaves_its_library_as_missing() {
+        let conn = crate::open_in_memory().unwrap();
+        let library = libraries::insert(&conn, "D:\\Photos", "Photos", LibraryStatus::Online).unwrap();
+        let media: i64 = conn
+            .query_row(
+                "INSERT INTO media (root_id, rel_path, file_name, kind, size, mtime)
+                 VALUES (?1, '../../Windows/win.ini', 'win.ini', 'image', 1, 0) RETURNING id",
+                [library.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(detail(&conn, media).unwrap(), None);
+        let libraries = [library];
+        assert_eq!(file_in(&libraries, libraries[0].id, "../../Windows/win.ini"), None);
+        assert_eq!(file_in(&libraries, libraries[0].id, "C:/Windows/win.ini"), None);
+        assert_eq!(
+            file_in(&libraries, libraries[0].id, "2024/a.jpg"),
+            Some(PathBuf::from("D:\\Photos\\2024\\a.jpg"))
+        );
+        let source = crate::thumbs::thumb_source(&conn, media).unwrap().unwrap();
+        assert_eq!(source.file(), None);
     }
 
     #[test]

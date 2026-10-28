@@ -1,6 +1,6 @@
 # 013 · Visual design
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Goal
 
@@ -133,18 +133,18 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 
 | REQ        | Test | Result |
 | ---------- | ---- | ------ |
-| REQ-013-01 | — | no test |
-| REQ-013-02 | — | no test |
-| REQ-013-03 | — | no test |
-| REQ-013-04 | — | no test |
-| REQ-013-05 | — | no test |
-| REQ-013-06 | — | no test |
-| REQ-013-07 | — | no test |
-| REQ-013-08 | `crates/domain/src/search.rs` › req_013_08_counts_and_clears_only_the_filters_under_filters; `crates/app/tests/search.rs` › req_007_07_req_007_09_req_013_08_filters_by_kind_and_rating_and_counts_active_filters | partial: Filters with count and Clear filters, View with view, zoom and sort; the minimum window size is checked with the title bar in M10 |
+| REQ-013-01 | `crates/app/src/theme.rs` › req_013_01_uses_its_own_colors_whatever_the_os_theme, install_uses_the_bundled_font_at_both_weights | pass (Windows only; macOS and Linux are out of scope) |
+| REQ-013-02 | `crates/app/src/titlebar.rs` › req_013_02_empty_caption_space_moves_and_maximizes_the_window, req_013_02_keeps_the_window_controls_place_free; `crates/app/tests/search.rs` › req_013_02_req_013_08_the_toolbar_fits_the_minimum_window_beside_the_window_controls | pass (native hit tests and snap layouts checked in the running app) |
+| REQ-013-03 | `crates/app/src/glass.rs` › req_013_03_surfaces_blur_the_tiles_under_them_but_not_other_glass | pass (the blur pass itself checked in the running app; kittest has no glass pass) |
+| REQ-013-04 | `crates/app/src/theme.rs` › req_013_04_text_is_legible_on_the_solid_surfaces, req_013_04_text_is_legible_on_glass_over_any_photo, req_013_04_req_013_11_text_is_legible_on_tinted_glass | pass |
+| REQ-013-05 | `crates/app/src/theme.rs` › req_013_05_the_focus_ring_shows_over_any_background; `crates/app/tests/settings.rs` › req_013_05_rings_the_focused_control_but_not_a_focused_text_input | pass |
+| REQ-013-06 | `crates/app/src/glass.rs` › req_013_06_req_013_14_surfaces_are_opaque_without_glass; `crates/app/src/theme.rs` › req_013_07_req_013_06_follows_the_os_settings_for_motion_and_transparency | pass |
+| REQ-013-07 | `crates/app/src/theme.rs` › req_013_07_req_013_06_follows_the_os_settings_for_motion_and_transparency; `crates/app/tests/viewer.rs` › req_013_12_the_photo_grows_from_its_tile_and_back | pass (the OS setting is read again every 2 s) |
+| REQ-013-08 | `crates/domain/src/search.rs` › req_013_08_counts_and_clears_only_the_filters_under_filters; `crates/app/tests/search.rs` › req_007_07_req_007_09_req_013_08_filters_by_kind_and_rating_and_counts_active_filters, req_013_02_req_013_08_the_toolbar_fits_the_minimum_window_beside_the_window_controls | pass |
 | ~~REQ-013-09~~ | — | no test (deprecated) |
 | REQ-013-10 | `crates/domain/src/viewer.rs` › req_013_10_hides_the_controls_only_when_idle_and_nothing_keeps_them; `crates/app/tests/viewer.rs` › req_013_10_controls_step_aside_while_idle, req_015_06_the_filmstrip_steps_aside_with_the_controls; `crates/app/tests/viewer_video.rs` › req_013_10_a_paused_video_keeps_the_controls | pass |
 | REQ-013-11 | `crates/domain/src/ambient.rs` › req_013_11_darkens_and_desaturates_bright_colors, req_013_11_keeps_the_hue_of_the_photo, req_013_11_leaves_dark_muted_colors_as_they_are, req_013_11_mixes_the_tint_into_the_glass; `crates/app/tests/viewer.rs` › req_013_11_tints_the_chrome_with_the_items_colors | pass |
 | REQ-013-12 | `crates/app/tests/viewer.rs` › req_013_12_the_photo_grows_from_its_tile_and_back | pass (fades when the tile isn't on screen or in the List view; instant with Windows' animation effects off) |
-| REQ-013-13 | `crates/app/tests/viewer.rs` › req_009_08_req_013_13_toggles_the_info_panel_with_the_details | partial: medium date with hours and minutes ("2 Jul 2025, 07:12"); the user's locale comes with M10 |
-| REQ-013-14 | `crates/app/tests/viewer.rs` › req_009_01_req_009_04_opens_the_clicked_item_with_its_original (snapshot `viewer`) | partial: the window stays visible behind a darker scrim; the blur comes with the glass in M10 |
-| REQ-013-15 | — | no test |
+| REQ-013-13 | `crates/app/src/format.rs` › req_013_13_formats_medium_dates_in_the_locale_without_seconds; `crates/app/tests/viewer.rs` › req_009_08_req_013_13_toggles_the_info_panel_with_the_details | pass |
+| REQ-013-14 | `crates/app/tests/viewer.rs` › req_009_01_req_009_04_opens_the_clicked_item_with_its_original (snapshot `viewer`, opaque); `crates/app/src/glass.rs` › req_013_06_req_013_14_surfaces_are_opaque_without_glass | pass (blurred scrim checked in the running app) |
+| REQ-013-15 | `crates/app/src/gallery/mod.rs` › req_013_15_the_scrollbar_starts_below_the_toolbar | pass (Settings starts its bar below its header the same way) |

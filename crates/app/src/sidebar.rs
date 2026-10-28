@@ -88,6 +88,14 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
     }
     let on_settings = *input.page == Page::Settings;
     ui.spacing_mut().item_spacing.y = 2.0;
+    // The header is part of the title bar: it moves the window (REQ-013-02).
+    let header = egui::Rect::from_min_size(ui.ctx().content_rect().min, vec2(WIDTH, crate::titlebar::HEIGHT));
+    let drag = ui.interact(
+        header,
+        ui.make_persistent_id("sidebar header"),
+        egui::Sense::click_and_drag(),
+    );
+    crate::titlebar::drag_area(ui.ctx(), &drag);
     ui.horizontal(|ui| {
         ui.set_height(48.0);
         ui.add_space(8.0);

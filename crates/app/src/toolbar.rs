@@ -1,5 +1,5 @@
-//! The toolbar over the top of the gallery (REQ-013-08): the search bar, _Filters_ and _View_. Glass and the title
-//! bar come with M10; until then it is Raised.
+//! The toolbar over the top of the gallery (REQ-013-08): the search bar, _Filters_ and _View_, on glass the gallery
+//! scrolls under (REQ-013-03). It is also the window's title bar (REQ-013-02).
 
 use crate::gallery::{Gallery, TOOLBAR_HEIGHT};
 use crate::icons::{Icon, icon_button};
@@ -24,14 +24,20 @@ fn view_icon(view: GalleryView) -> Icon {
 /// Draws the toolbar over the top of `area`; without a gallery (no libraries yet) it stays empty.
 pub fn show(ui: &mut egui::Ui, area: Rect, gallery: Option<&mut Gallery>, bar_state: &mut SearchBar) {
     let bar = Rect::from_min_size(area.min, vec2(area.width(), TOOLBAR_HEIGHT));
-    // Tiles scrolled under the bar don't react to the pointer.
-    ui.interact(bar, ui.make_persistent_id("toolbar"), egui::Sense::click());
-    ui.painter().rect_filled(bar, 0, theme::RAISED);
+    // Tiles scrolled under the bar don't react to the pointer; its empty space moves the window.
+    let background = ui.interact(bar, ui.make_persistent_id("toolbar"), egui::Sense::click_and_drag());
+    crate::titlebar::drag_area(ui.ctx(), &background);
+    crate::glass::paint(ui.painter(), crate::glass::Surface::new(bar, 0.0, theme::GLASS_BAR));
+    crate::glass::record_solid(ui.ctx(), bar, theme::GLASS_BAR.fill(None), true);
     ui.painter()
         .hline(bar.x_range(), bar.bottom() - 0.5, egui::Stroke::new(1.0, theme::RIM));
+    // The window controls' place stays free (REQ-013-02).
     let controls = Rect::from_min_max(
         pos2(bar.left() + 12.0, bar.top() + 8.0),
-        pos2(bar.right() - 12.0, bar.bottom() - 8.0),
+        pos2(
+            bar.right() - 12.0 - crate::titlebar::reserved_in(ui.ctx(), bar.right()),
+            bar.bottom() - 8.0,
+        ),
     );
     let Some(gallery) = gallery else { return };
     // A stable id: the widgets before the toolbar vary (an empty gallery has none), and auto ids would move the
@@ -94,7 +100,9 @@ fn menu(button: &egui::Response, name: &str, width: f32, add: impl FnOnce(&mut e
         .align(egui::RectAlign::BOTTOM_END)
         .width(width);
     let id = popup.get_id();
-    let Some(shown) = popup.show(add) else { return };
+    let Some(shown) = popup.show(|ui| crate::glass::behind_menu(ui, add)) else {
+        return;
+    };
     let ctx = &button.ctx;
     let (click, escape) = ctx.input(|input| {
         let click = input

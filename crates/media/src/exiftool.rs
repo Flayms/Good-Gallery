@@ -236,6 +236,15 @@ impl ExifTool {
         }
     }
 
+    /// Raises the pool size to at least `max`; never lowers it.
+    pub fn grow_max_processes(&self, max: usize) {
+        let mut pool = self.pool.lock().unwrap_or_else(|p| p.into_inner());
+        if max > pool.max {
+            pool.max = max;
+            self.available.notify_all();
+        }
+    }
+
     /// Changes the pool size; extra idle processes end now, busy ones when they are returned.
     pub fn set_max_processes(&self, max: usize) {
         let mut pool = self.pool.lock().unwrap_or_else(|p| p.into_inner());

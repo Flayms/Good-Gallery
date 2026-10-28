@@ -1,6 +1,6 @@
 # 010 · Settings
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Goal
 
@@ -64,9 +64,9 @@ The user adapts indexing and the thumbnail cache to their hardware and network: 
 
 | REQ        | Test                                                                                                                                                         | Result                                                       |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
-| REQ-010-01 | `crates/db/src/settings.rs` › starts_with_defaults_and_persists_updates | partial: storage only, the Settings page controls come in M10 |
-| REQ-010-02 | `crates/db/src/settings.rs` › rejects_out_of_range_values, falls_back_to_defaults… | partial: storage only, errors in the UI come in M10 |
-| REQ-010-03 | — | no test |
-| REQ-010-04 | — | no test |
-| REQ-010-05 | `crates/indexer/src/thumb_cache.rs` › evicts_down_to_a_lowered_cap | partial: the cache evicts to a lowered limit; the setting has no UI until M10 |
-| REQ-010-06 | `crates/indexer/src/thumb_cache.rs` › req_010_06_clears_all_thumbnails | partial: the cache reports its usage and clears; the Settings section comes in M10 |
+| REQ-010-01 | `crates/db/src/settings.rs` › req_010_01_starts_with_defaults_and_persists_updates; `crates/app/tests/settings.rs` › req_010_01_shows_the_defaults_and_keeps_changes_across_restarts | pass |
+| REQ-010-02 | `crates/db/src/settings.rs` › req_010_02_rejects_out_of_range_values, req_010_02_falls_back_to_defaults_for_stored_values_that_no_longer_validate; `crates/app/tests/settings.rs` › req_010_02_rejects_invalid_values_with_an_error_and_changes_nothing | pass |
+| REQ-010-03 | `crates/app/tests/settings.rs` › req_010_03_follows_the_new_interval_and_offers_a_stored_odd_value | pass (the schedule restarts its timer in `Scheduler::set_interval`) |
+| REQ-010-04 | `crates/indexer/src/thumbnails.rs` › req_010_04_renders_with_as_many_threads_as_set; `crates/app/tests/settings.rs` › req_010_04_saves_parallel_reads_when_the_slider_is_released | pass (scans read the new value at their start, exiftool's pool resizes) |
+| REQ-010-05 | `crates/indexer/src/thumb_cache.rs` › evicts_down_to_a_lowered_cap; `crates/app/tests/settings.rs` › req_010_05_applies_a_new_cache_limit_and_shows_the_new_usage | pass |
+| REQ-010-06 | `crates/indexer/src/thumb_cache.rs` › req_010_06_clears_all_thumbnails; `crates/app/tests/settings.rs` › req_010_06_shows_usage_and_clears_after_confirmation, req_010_06_says_unknown_without_a_thumbnail_cache | pass |

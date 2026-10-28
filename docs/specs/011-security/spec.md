@@ -1,6 +1,6 @@
 # 011 · Security
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Goal
 
@@ -115,7 +115,7 @@ Deprecated 2026-10-26: there is no IPC transport. Cancelling indexer work when a
 | ~~REQ-011-05~~ | — | no test (deprecated) |
 | ~~REQ-011-06~~ | — | no test (deprecated) |
 | ~~REQ-011-07~~ | — | no test (deprecated) |
-| REQ-011-08 | — | no test |
+| REQ-011-08 | `crates/domain/src/media.rs` › req_011_08_refuses_relative_paths_that_leave_the_library; `crates/db/src/media.rs` › req_011_08_treats_an_item_whose_path_leaves_its_library_as_missing | pass |
 | REQ-011-09 | `crates/media/src/exiftool.rs` › reads_files_with_awkward_names (exiftool) | pass |
 | REQ-011-10 | `crates/media/src/metadata.rs` › survives_hostile_values; `crates/indexer/src/indexer.rs` › a_panic_while_reading_one_file_costs_only_that_file | pass |
-| REQ-011-11 | — | no test |
+| REQ-011-11 | `xtask/tests/no_network.rs` › req_011_11_the_app_depends_on_no_network_crate, req_011_11_the_app_has_no_network_code | pass |

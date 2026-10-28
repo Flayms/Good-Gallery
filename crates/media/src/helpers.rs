@@ -148,6 +148,37 @@ pub fn reduced_motion() -> bool {
     false
 }
 
+/// Whether Windows' _Transparency effects_ are off: glass becomes opaque (REQ-013-06).
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub fn reduced_transparency() -> bool {
+    use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
+    let wide = |text: &str| text.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let key = wide(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+    let name = wide("EnableTransparency");
+    let mut value: u32 = 1;
+    let mut size = size_of::<u32>() as u32;
+    // SAFETY: both strings are NUL-terminated and live for the call; `value` has room for the DWORD asked for.
+    let status = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            key.as_ptr(),
+            name.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&raw mut value).cast(),
+            &raw mut size,
+        )
+    };
+    // Missing means the default: transparency on.
+    status == 0 && value == 0
+}
+
+#[cfg(not(windows))]
+pub fn reduced_transparency() -> bool {
+    false
+}
+
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;

@@ -1,14 +1,91 @@
 //! Formatting of dates, sizes and counts for display.
 
-use chrono::{Local, TimeZone};
+use chrono::{Datelike, Local, TimeZone, Timelike};
+use icu_datetime::DateTimeFormatter;
+use icu_datetime::fieldsets::{YMD, YMDT};
+use icu_datetime::input::{Date, DateTime, Time};
+use icu_locale_core::Locale;
+use std::cell::RefCell;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Medium date with hours and minutes, without seconds, in local time: "2 Jul 2025, 07:12". `ms` since the Unix epoch.
-/// Follows the reference's English output; locale-dependent formats come with REQ-013-13.
-pub fn medium_date_time(ms: i64) -> String {
-    match Local.timestamp_millis_opt(ms).single() {
-        Some(at) => at.format("%-d %b %Y, %H:%M").to_string(),
-        None => String::new(),
+/// Used when the system's locale is unknown or can't be read: the design guide's examples are in it.
+const FALLBACK_LOCALE: &str = "en-GB";
+
+/// The locale set with [`set_locale`]; `None` formats in the user's locale.
+static LOCALE: Mutex<Option<String>> = Mutex::new(None);
+/// Counts [`set_locale`] calls, so formatting only looks at [`LOCALE`] after a change.
+static LOCALE_VERSION: AtomicU64 = AtomicU64::new(0);
+
+/// The [`LOCALE_VERSION`] a formatter was made for, and the formatter, if one could be made.
+type CachedFormatter = (u64, Option<DateTimeFormatter<YMDT>>);
+
+thread_local! {
+    /// The formatter for the locale in use, made once (dates show on every list row); it can't move between threads.
+    static DATES: RefCell<Option<CachedFormatter>> = const { RefCell::new(None) };
+}
+
+fn parse_locale(name: &str) -> Option<Locale> {
+    // POSIX names ("de_DE.UTF-8") as BCP 47.
+    let name = name.split(['.', '@']).next()?.replace('_', "-");
+    Locale::try_from_str(&name).ok()
+}
+
+/// The user's locale (REQ-013-13).
+fn system_locale() -> Locale {
+    sys_locale::get_locale()
+        .and_then(|name| parse_locale(&name))
+        .or_else(|| parse_locale(FALLBACK_LOCALE))
+        .unwrap_or(Locale::UNKNOWN)
+}
+
+fn formatter(locale: &Locale) -> Option<DateTimeFormatter<YMDT>> {
+    let fields: YMDT = YMD::medium().with_time_hm();
+    DateTimeFormatter::try_new(locale.into(), fields)
+        .ok()
+        .or_else(|| DateTimeFormatter::try_new(parse_locale(FALLBACK_LOCALE)?.into(), fields).ok())
+}
+
+/// Formats dates in `name` (a BCP 47 locale such as "en-GB") from now on instead of the user's locale; for tests and
+/// screenshots that must not depend on the machine.
+pub fn set_locale(name: &str) {
+    *LOCALE.lock().unwrap_or_else(|p| p.into_inner()) = Some(name.to_owned());
+    LOCALE_VERSION.fetch_add(1, Ordering::SeqCst);
+}
+
+fn format_with(formatter: &DateTimeFormatter<YMDT>, ms: i64) -> String {
+    let Some(at) = Local.timestamp_millis_opt(ms).single() else {
+        return String::new();
+    };
+    let date = Date::try_new_iso(at.year(), at.month() as u8, at.day() as u8);
+    let time = Time::try_new(at.hour() as u8, at.minute() as u8, 0, 0);
+    match (date, time) {
+        (Ok(date), Ok(time)) => formatter.format(&DateTime { date, time }).to_string(),
+        _ => String::new(),
     }
+}
+
+/// Medium date with hours and minutes, without seconds, in local time and the user's locale (REQ-013-13): "2 Jul
+/// 2025, 07:12" in British English, "Jul 2, 2025, 7:12 AM" in American English. `ms` since the Unix epoch.
+pub fn medium_date_time(ms: i64) -> String {
+    let version = LOCALE_VERSION.load(Ordering::SeqCst);
+    DATES.with_borrow_mut(|dates| {
+        if dates.as_ref().is_none_or(|(made_for, _)| *made_for != version) {
+            let wanted = LOCALE.lock().unwrap_or_else(|p| p.into_inner()).clone();
+            let locale = wanted.as_deref().and_then(parse_locale).unwrap_or_else(system_locale);
+            *dates = Some((version, formatter(&locale)));
+        }
+        match dates {
+            Some((_, Some(formatter))) => format_with(formatter, ms),
+            _ => String::new(),
+        }
+    })
+}
+
+/// [`medium_date_time`] in the locale `name`.
+pub fn medium_date_time_in(name: &str, ms: i64) -> String {
+    let locale = parse_locale(name).unwrap_or(Locale::UNKNOWN);
+    formatter(&locale).map_or_else(String::new, |formatter| format_with(&formatter, ms))
 }
 
 /// A count with thousands separators: "12,345". Follows the reference's English output; locale-dependent grouping
@@ -160,13 +237,18 @@ mod tests {
     }
 
     #[test]
-    fn formats_without_seconds() {
+    fn req_013_13_formats_medium_dates_in_the_locale_without_seconds() {
         let local = NaiveDate::from_ymd_opt(2025, 7, 2)
             .unwrap()
             .and_hms_opt(7, 12, 59)
             .unwrap();
         let ms = Local.from_local_datetime(&local).single().unwrap().timestamp_millis();
 
-        assert_eq!(medium_date_time(ms), "2 Jul 2025, 07:12");
+        assert_eq!(medium_date_time_in("en-GB", ms), "2 Jul 2025, 07:12");
+        assert_eq!(medium_date_time_in("en_GB.UTF-8", ms), "2 Jul 2025, 07:12");
+        assert_eq!(medium_date_time_in("de-DE", ms), "02.07.2025, 07:12");
+        let us = medium_date_time_in("en-US", ms);
+        assert!(us.starts_with("Jul 2, 2025"), "{us}");
+        assert!(us.contains("7:12") && us.contains("AM") && !us.contains(":59"), "{us}");
     }
 }

@@ -18,11 +18,10 @@ pub struct ThumbSource {
 }
 
 impl ThumbSource {
-    /// The media file: the library folder joined with the `/`-separated relative path.
-    pub fn file(&self) -> std::path::PathBuf {
-        let mut path = std::path::PathBuf::from(&self.root_path);
-        path.extend(self.key.rel_path.split('/'));
-        path
+    /// The media file: the library folder joined with the `/`-separated relative path; `None` if that would leave
+    /// the library (REQ-011-08).
+    pub fn file(&self) -> Option<std::path::PathBuf> {
+        crate::media::absolute_path(&self.root_path, &self.key.rel_path)
     }
 }
 
@@ -131,7 +130,7 @@ mod tests {
                 duration: Some(2.5),
             }
         );
-        assert_eq!(source.file(), std::path::Path::new("D:\\Photos\\trip\\a.mp4"));
+        assert_eq!(source.file().unwrap(), std::path::Path::new("D:\\Photos\\trip\\a.mp4"));
         assert_eq!(thumb_source(&conn, id + 1).unwrap(), None);
     }
 
