@@ -50,7 +50,14 @@ fn release_publishes_both_downloads_after_the_checks() {
     assert!(release.contains("uses: ./.github/workflows/ci.yml"));
     assert!(release.contains("needs: checks"));
     let commands = commands(&release);
-    assert!(commands.contains(&"cargo xtask dist"));
+    let dist = commands.iter().position(|line| *line == "cargo xtask dist");
+    // windows-2025 images don't come with NSIS, and the installer can't be built without it.
+    let nsis = commands.iter().position(|line| line.starts_with("choco install nsis"));
+    assert!(dist.is_some(), "release.yml doesn't run cargo xtask dist");
+    assert!(
+        nsis.is_some_and(|nsis| nsis < dist.unwrap()),
+        "release.yml doesn't install NSIS before cargo xtask dist"
+    );
     assert!(commands.iter().any(|line| line.starts_with("git-cliff --current")));
     let publish = &release[release.find("gh release create").expect("no gh release create")..];
     for part in [

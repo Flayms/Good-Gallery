@@ -139,5 +139,6 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **NSIS's uninstaller copies itself to a temp folder and returns at once.** Run it with `/S _?=<install folder>` to make it wait (the smoke test does); it then can't delete itself, so remove the folder afterwards.
 * **NSIS: `/D=<folder>` must be the last argument and unquoted**, even with spaces.
 * **makensis locally:** install NSIS (`Program Files (x86)\NSIS` is found) or point `MAKENSIS` at a `makensis.exe`.
+* **GitHub's windows-2025 images don't come with NSIS** (older ones did). The release workflow installs it with `choco install nsis`.
 * **The packaged app (`--features packaged`, as `cargo xtask dist` builds it) has no console**: its output only shows when the caller redirects stdout / stderr, so look at `logs\app.log` in the data folder instead. Never start it without `--data-dir` during development: it opens the real `%APPDATA%\good-gallery`.
 * **A zip in `target/dist` can stay locked for minutes** after it was written (Defender or an open Explorer window), so `cargo xtask dist` fails with "used by another process": pass another `--out`.
