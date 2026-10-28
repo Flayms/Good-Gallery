@@ -58,4 +58,4 @@ A desktop gallery for large photo and video libraries (50k–500k files). Media 
 
 ## Git
 
-Create a new worktree for a new feature. Use conventional commits. When you are done create a PR to main, then wait for CI and fix whatever turns red until it is green and mergeable. Once it is merged, remove the worktree (`git worktree remove <path>`).
+Create a new worktree for a new feature, branched from `origin/main`. Use conventional commits. When you are done, merge `origin/main` into the branch and create a PR to main. Then wait for CI and fix whatever turns red (on conflicts, merge `origin/main` again) until it is green and mergeable. Merged worktrees are removed at session start (`.claude/hooks/tidy-worktrees.sh`).
