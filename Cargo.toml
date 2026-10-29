@@ -14,6 +14,7 @@ domain = { path = "crates/domain" }
 db = { path = "crates/db" }
 media = { path = "crates/media" }
 indexer = { path = "crates/indexer" }
+meta = { path = "crates/meta" }
 
 # egui, eframe, egui_kittest and wgpu change APIs between minor versions: pin exact versions.
 eframe = { version = "=0.37.0", default-features = false, features = ["accesskit", "default_fonts", "wgpu", "wayland", "x11"] }
@@ -43,6 +44,7 @@ sha1 = "0.11.0"
 sys-locale = "0.3.2"
 sha2 = "0.11.1"
 notify = { version = "8.2.1", default-features = false }
+quick-xml = "0.41.0"
 regex = "1.12"
 tempfile = "3"
 thiserror = "2.0.21"
@@ -50,6 +52,12 @@ tracing = "0.1"
 unicode-normalization = "0.1.26"
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+# The web build (spec 019).
+js-sys = "0.3.106"
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "0.4.56"
+web-sys = "0.3.106"
+web-time = "1.1.0"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

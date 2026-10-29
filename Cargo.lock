@@ -201,15 +201,22 @@ dependencies = [
  "image",
  "indexer",
  "jiff",
+ "js-sys",
  "libloading",
  "media",
+ "meta",
  "rfd",
+ "rusqlite",
  "serde_json",
  "sys-locale",
  "tempfile",
  "thumbhash",
  "tracing",
  "tracing-subscriber",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "web-time",
  "webp",
  "windows-sys 0.61.2",
  "winresource",
@@ -630,7 +637,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -954,6 +963,7 @@ version = "0.1.2"
 dependencies = [
  "chrono",
  "serde_json",
+ "sha1",
  "unicode-normalization",
 ]
 
@@ -1989,8 +1999,6 @@ dependencies = [
  "image",
  "media",
  "notify",
- "serde_json",
- "sha1",
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
@@ -2375,13 +2383,12 @@ name = "media"
 version = "0.1.2"
 dependencies = [
  "base64",
- "chrono",
  "domain",
  "fast_image_resize",
  "image",
  "jpeg-decoder",
  "libc",
- "regex",
+ "meta",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
@@ -2413,6 +2420,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "meta"
+version = "0.1.2"
+dependencies = [
+ "chrono",
+ "domain",
+ "quick-xml",
+ "regex",
+ "serde_json",
 ]
 
 [[package]]
@@ -3879,7 +3897,10 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8eab9a99a024a169fe8a903cf9d4a3b3601109bcc13bd9e3c6fff259138626c4"
 dependencies = [
+ "js-sys",
  "libc",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
