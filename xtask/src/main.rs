@@ -9,6 +9,7 @@ mod release;
 mod screenshots;
 mod search_bench;
 mod thumbs;
+mod web;
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -46,9 +47,10 @@ fn main() -> ExitCode {
             }
         },
         Some("thumbs") => report(thumbs::run(&args[1..])),
+        Some("web") => report(web::run(&args[1..])),
         _ => {
             eprintln!(
-                "usage: cargo xtask check-specs [--summary] | libraries … | thumbs … | gallery-bench … | search-bench … | release … | dist … | screenshots …"
+                "usage: cargo xtask check-specs [--summary] | libraries … | thumbs … | gallery-bench … | search-bench … | release … | dist … | screenshots … | web [--debug]"
             );
             ExitCode::FAILURE
         }

@@ -1,0 +1,12 @@
+{
+  "name": "good-gallery-web-tests",
+  "private": true,
+  "description": "End-to-end tests of the browser version (spec 019); run with `cargo xtask web-test`.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1"
+  }
+}

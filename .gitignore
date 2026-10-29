@@ -11,3 +11,8 @@ Thumbs.db
 **/tests/snapshots/*.new.png
 **/tests/snapshots/*.diff.png
 **/tests/snapshots/*.old.png
+
+# Browser tests (web/tests)
+node_modules/
+/web/tests/test-results/
+/web/tests/playwright-report/

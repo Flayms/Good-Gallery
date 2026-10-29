@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Nothing but the page's own files is ever loaded or contacted (REQ-019-12). `cargo xtask web` moves Trunk's
+         start script into a file, so no inline script is needed. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; img-src 'self' blob: data:; media-src blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="referrer" content="no-referrer" />
+    <title>Good Gallery</title>
+    <link data-trunk rel="icon" href="../crates/app/assets/app-icon.svg" />
+    <link data-trunk rel="css" href="page.css" />
+    <link data-trunk rel="copy-file" href="check.js" />
+    <script src="check.js"></script>
+    <link data-trunk rel="rust" href="../crates/app/Cargo.toml" data-bin="app" data-wasm-opt="z" />
+  </head>
+  <body>
+    <canvas id="good-gallery"></canvas>
+    <div id="problem" role="alert"></div>
+    <noscript><div id="noscript">Good Gallery needs JavaScript and WebAssembly.</div></noscript>
+  </body>
+</html>

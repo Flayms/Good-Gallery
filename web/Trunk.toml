@@ -1,0 +1,8 @@
+# Built by `cargo xtask web` (spec 019), which also moves the start script into a file for the CSP.
+[build]
+target = "index.html"
+dist = "../target/web"
+release = true
+filehash = true
+# GitHub Pages serves the page under /<repository>/.
+public_url = "./"
