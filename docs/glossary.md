@@ -8,7 +8,7 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 
 | **Library**              | A folder on a local disk or a network share (`\\server\share`) that the user added. Indexed recursively. (code: _library root_, `library_roots`, `root_id`)                          |
-| **Library status**       | `online` (reachable), `offline` (unreachable at the last check) or `unknown`. The index of an offline library stays browsable.                                                      |
+| **Library status**       | `online` (reachable), `offline` (unreachable at the last check) or `unknown`. The index of an offline library stays browsable. In the browser an offline library _needs access_. |
 | **Media item**           | One indexed image or video file in a library. (code: `media`)                                                                                                                     |
 | **Media kind**           | `image` (JPEG, PNG, WebP, GIF, AVIF) or `video` (MP4, M4V, MOV, WebM, MKV). Shown as _Photos_ / _Videos_ in the UI.                                                                 |
 | **Sidecar**              | An `.xmp` file next to a media file (`IMG_1.jpg.xmp` or `IMG_1.xmp`) that holds additional metadata.                                                                               |

@@ -161,3 +161,15 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **A new egui `Area` is invisible for its first frame** (sizing pass): tests that click the Linux caption buttons or resize handles run one empty frame first.
 * **Snapshots on Linux** are their own files (`<name>_linux.png`, `common::snapshot_name`): the caption buttons and the narrower room kept for them change the toolbar. lavapipe renders everything else pixel-identical to WARP, so a difference elsewhere is a real change.
 * **The kittest harness insets the UI by 8 px but not the caption buttons** (they align to the window's edge), so in Linux snapshots the buttons sit 8 px above the toolbar row; in the app they line up.
+
+## Browser version (spec 019)
+
+* **`sqlite-wasm-rs` needs clang** to compile SQLite for wasm (`failed to find tool "clang"`), and its **`wasm-bindgen` feature**: without it the page fails to load with `Failed to resolve module specifier "env"` (SQLite's clock, randomness and local time are unresolved imports).
+* **rusqlite 0.41 has no `DatabaseName`:** use `rusqlite::MAIN_DB` with `serialize` / `deserialize_read_exact` (features `serialize`, `backup`).
+* **`cargo install` builds in `/tmp`**, which is a small RAM disk on some machines (`Disk quota exceeded`, os error 122). Set `CARGO_TARGET_DIR` to a folder on the disk for the install.
+* **Snapshot tests embed the temp folder's path** (the info panel's location): a longer `TMPDIR` wraps it to two lines and fails `info_sheet_linux`. Run the native tests with the default `/tmp`.
+* **Playwright's Chromium needs system libraries** on Linux (`libnspr4.so: cannot open shared object file`): `sudo npx playwright install-deps chromium` (CI: `npx playwright install --with-deps chromium`).
+* **egui misses clicks that arrive with the pointer** (Playwright's `mouse.click` moves, presses and releases at once): the browser test moves first, waits 100 ms, then presses (`click` in `web.spec.js`).
+* **A 1 % screenshot tolerance hides small changes** like a status badge: the browser test allows 50 pixels. Fix the page's clock (`page.clock.setFixedTime`), time zone and locale, since Settings show when a library was last indexed.
+* **The page can't be driven through Chromium's directory picker headless:** the test deletes `showDirectoryPicker`, so the page falls back to the folder upload input, which `setInputFiles` fills.
+* **`pkill -f <pattern>` in a shell command can kill the shell itself** when the pattern appears in its own command line. Stop the test server by port: `fuser -k 8765/tcp`.
