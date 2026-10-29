@@ -29,8 +29,8 @@ Supported formats: JPEG, PNG, WebP, GIF and AVIF images, plus videos (MP4, MOV, 
 
 Download from the [releases](https://github.com/Flayms/Good-Gallery/releases) (Windows 10 or 11, 64-bit):
 
-- **`good-gallery-<version>-setup.exe`:** installs for your user (no admin rights), into a folder you can change, with a Start menu shortcut. Uninstall it under _Settings → Apps_.
-- **`good-gallery-<version>-portable.zip`:** extract anywhere and run `good-gallery.exe`.
+- **`good-gallery-<version>-windows-x64-setup.exe`:** installs for your user (no admin rights), into a folder you can change, with a Start menu shortcut. Uninstall it under _Settings → Apps_.
+- **`good-gallery-<version>-windows-x64-portable.zip`:** extract anywhere and run `good-gallery.exe`.
 
 exiftool, ffmpeg and libmpv come with both. The downloads aren't code-signed yet, so Windows SmartScreen may warn: choose _More info_ → _Run anyway_, or unblock the zip (_Properties_ → _Unblock_) before extracting.
 
@@ -38,7 +38,7 @@ Add a library folder under **Settings**. The index, settings, thumbnails and log
 
 ### Linux
 
-**`good-gallery-<version>-linux-x86_64.tar.gz`** (x86-64, X11 or Wayland) uses your distribution's exiftool, ffmpeg and libmpv. Install them first, e.g. on Ubuntu or Debian `sudo apt install libimage-exiftool-perl ffmpeg libmpv2`. Extract the archive and run `./good-gallery`, or `./install.sh` to install it for your user with an app menu entry (`./install.sh --uninstall` removes it). The data folder is `~/.local/share/good-gallery`.
+**`good-gallery-<version>-linux-x64.tar.gz`** (x86-64, X11 or Wayland) uses your distribution's exiftool, ffmpeg and libmpv. Install them first, e.g. on Ubuntu or Debian `sudo apt install libimage-exiftool-perl ffmpeg libmpv2`. Extract the archive and run `./good-gallery`, or `./install.sh` to install it for your user with an app menu entry (`./install.sh --uninstall` removes it). The data folder is `~/.local/share/good-gallery`.
 
 ### In the browser
 

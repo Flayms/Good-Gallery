@@ -106,7 +106,7 @@ jobs:
 
       - name: Smoke test the installed app
         shell: pwsh
-        run: ./packaging/smoke-test.ps1 -Installer "target/dist/good-gallery-$env:VERSION-setup.exe"
+        run: ./packaging/smoke-test.ps1 -Installer "target/dist/good-gallery-$env:VERSION-windows-x64-setup.exe"
 
       - uses: actions/download-artifact@v4
         with:
@@ -123,9 +123,9 @@ jobs:
 
           | File | For |
           | --- | --- |
-          | **good-gallery-$VERSION-setup.exe** | Installer: pick the folder, installs for your user |
-          | **good-gallery-$VERSION-portable.zip** | Portable: extract anywhere and run \`good-gallery.exe\` |
-          | **good-gallery-$VERSION-linux-x86_64.tar.gz** | Linux: extract, install exiftool, ffmpeg and libmpv from your distribution (see \`README.txt\`), run \`./install.sh\` or \`./good-gallery\` |
+          | **good-gallery-$VERSION-windows-x64-setup.exe** | Installer: pick the folder, installs for your user |
+          | **good-gallery-$VERSION-windows-x64-portable.zip** | Portable: extract anywhere and run \`good-gallery.exe\` |
+          | **good-gallery-$VERSION-linux-x64.tar.gz** | Linux: extract, install exiftool, ffmpeg and libmpv from your distribution (see \`README.txt\`), run \`./install.sh\` or \`./good-gallery\` |
 
           The Windows downloads keep the index, settings and thumbnail cache in \`%APPDATA%\\good-gallery\`, the Linux one in \`~/.local/share/good-gallery\`, so an update picks them up as they are.
 
@@ -138,9 +138,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$TAG" \
-            "target/dist/good-gallery-$VERSION-setup.exe" \
-            "target/dist/good-gallery-$VERSION-portable.zip" \
-            "target/dist/good-gallery-$VERSION-linux-x86_64.tar.gz" \
+            "target/dist/good-gallery-$VERSION-windows-x64-setup.exe" \
+            "target/dist/good-gallery-$VERSION-windows-x64-portable.zip" \
+            "target/dist/good-gallery-$VERSION-linux-x64.tar.gz" \
             --title "Good Gallery $VERSION" \
             --notes-file release-notes.md \
             --verify-tag
