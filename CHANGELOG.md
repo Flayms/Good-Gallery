@@ -1,6 +1,46 @@
 # Changelog
 
 All notable changes to Good Gallery. Versions follow [Semantic Versioning](https://semver.org), entries are generated from [Conventional Commits](https://www.conventionalcommits.org).
+## [0.2.0](https://github.com/Flayms/Good-Gallery/releases/tag/v0.2.0) · 2026-10-29
+
+### ✨ Features
+
+- Linux support ([`812cc1a`](https://github.com/Flayms/Good-Gallery/commit/812cc1ad7f2c98e67573e22415c2824cdd060f67))
+- **meta:** Read EXIF, IPTC, XMP and MP4 metadata without exiftool ([`4d3e6b1`](https://github.com/Flayms/Good-Gallery/commit/4d3e6b115d7b0ef6eb36734cabe1e94e1d7fd861))
+- **web:** Build the app for the browser ([`5665ef4`](https://github.com/Flayms/Good-Gallery/commit/5665ef4761ced9c69b1d2643802070095cc484c5))
+
+### 🐛 Bug fixes
+
+- **web:** Link SQLite's host services and log scan and thumbnail progress ([`f735a09`](https://github.com/Flayms/Good-Gallery/commit/f735a09402cccb3ffdee7128343fb55cfc660f06))
+- **meta:** Reconcile IPTC and XMP keywords as exiftool's MWG mode does ([`974487e`](https://github.com/Flayms/Good-Gallery/commit/974487e0afd1146a4d42a3c4f4110acb4ba99007))
+- **web:** Show libraries without folder access as needing access ([`37affe2`](https://github.com/Flayms/Good-Gallery/commit/37affe292b19cc492c6334596fc9a4b096875e9f))
+
+### 📝 Documentation
+
+- **specs:** Record the ruleset behind REQ-014-02 ([`ba9f763`](https://github.com/Flayms/Good-Gallery/commit/ba9f76350ff3f558666267e5982b9f07b23d7c92))
+- **agents:** A PR is done when it is green, not when it is opened ([`f3d9ce5`](https://github.com/Flayms/Good-Gallery/commit/f3d9ce5db68421494832ef741e108173d53b72bd))
+- **agents:** Shorten ([`c3390cc`](https://github.com/Flayms/Good-Gallery/commit/c3390cc68a4aca4e734906db4903dd15f4fa8bd6))
+- **specs:** REQ-014-02 is partly tested by the workflow test ([`2ea18f0`](https://github.com/Flayms/Good-Gallery/commit/2ea18f090ff8e460405512b4ce80982241ff98f5))
+- Move the roadmap to GitHub issues, add issue templates ([`fef9833`](https://github.com/Flayms/Good-Gallery/commit/fef9833776a013523647ada6fa088c947e1dbd0e))
+- **AGENTS:** Update issue handling guidelines and definition of done ([`e5b0e54`](https://github.com/Flayms/Good-Gallery/commit/e5b0e542dedb39bfdf265da7a89019dd94dbe00e))
+- **specs:** 019 web spec and plan (draft) ([`a9628c9`](https://github.com/Flayms/Good-Gallery/commit/a9628c9f5e1234e610f380d10aed2ed5e634eea1))
+- **web:** Plan as built, verification, architecture, README and pitfalls ([`0f4ee45`](https://github.com/Flayms/Good-Gallery/commit/0f4ee45e417507ddf4f1f1a4877a2ef4a7b343ca))
+- **web:** #45 closes with the PR ([`b4083a5`](https://github.com/Flayms/Good-Gallery/commit/b4083a53127e118178ee448ac27f1d50adbcb603))
+
+### 🔧 Maintenance
+
+- Skip CI on release commits pushed to main ([`29f9a70`](https://github.com/Flayms/Good-Gallery/commit/29f9a70671efa23f77fc3a1483eed9d753c2bbf8))
+- Tidy merged worktrees at session start ([`f7c590f`](https://github.com/Flayms/Good-Gallery/commit/f7c590f3194e6ced7c0495026b19fb7262be0054))
+- **titlebar:** Run the Linux window chrome tests on Linux only ([`fcdddc7`](https://github.com/Flayms/Good-Gallery/commit/fcdddc7d224b557b3e2eb99ebd952b0969c457b6))
+- Report the required Lint and Test checks for all platforms ([`f8369aa`](https://github.com/Flayms/Good-Gallery/commit/f8369aa4aa92f70ac60f49015303062143e891c1))
+- **thumbnails:** Make the full-cache eviction check independent of mtime ties ([`7bcaa72`](https://github.com/Flayms/Good-Gallery/commit/7bcaa728d5b26505116f3bbdd593109c45729f6c))
+- **web:** Page shell and cargo xtask web ([`945f574`](https://github.com/Flayms/Good-Gallery/commit/945f5748584e6c4b380c9a84eb9bee306b4cb06c))
+- **web:** End-to-end browser tests and no-network checks ([`4b26c72`](https://github.com/Flayms/Good-Gallery/commit/4b26c72dca192da3e23a71275575f87b3f3c8d00))
+- **web:** Test the page on pull requests, publish it to GitHub Pages on release ([`51b5fd7`](https://github.com/Flayms/Good-Gallery/commit/51b5fd70eb3ba96e69a0af79153084e4d1606880))
+- **web:** Cover picking again, rescans and removing a library ([`31eb41e`](https://github.com/Flayms/Good-Gallery/commit/31eb41ed2781c0f3cdd4f889b8f20b51b4ac6193))
+- **web:** Wait out the access toast before the settings screenshot ([`18230f7`](https://github.com/Flayms/Good-Gallery/commit/18230f748d9dfba9d5bde0e79a04fb3b8521d75c))
+
+**Full changelog:** [v0.1.2...v0.2.0](https://github.com/Flayms/Good-Gallery/compare/v0.1.2...v0.2.0)
 ## [0.1.2](https://github.com/Flayms/Good-Gallery/releases/tag/v0.1.2) · 2026-10-28
 
 ### 🐛 Bug fixes
