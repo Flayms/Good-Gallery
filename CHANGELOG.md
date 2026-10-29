@@ -1,6 +1,17 @@
 # Changelog
 
 All notable changes to Good Gallery. Versions follow [Semantic Versioning](https://semver.org), entries are generated from [Conventional Commits](https://www.conventionalcommits.org).
+## [0.2.1](https://github.com/Flayms/Good-Gallery/releases/tag/v0.2.1) · 2026-10-29
+
+### 📝 Documentation
+
+- **AGENTS:** Add note to text created by agents ([`469b174`](https://github.com/Flayms/Good-Gallery/commit/469b1747fd99971b5c53b31c25a1ebe34f3f0005))
+
+### 🔧 Maintenance
+
+- **web:** Wait for tag suggestions before searching ([`7932792`](https://github.com/Flayms/Good-Gallery/commit/79327922554a3e363a8796f13d8956872d1d91b2))
+
+**Full changelog:** [v0.2.0...v0.2.1](https://github.com/Flayms/Good-Gallery/compare/v0.2.0...v0.2.1)
 ## [0.2.0](https://github.com/Flayms/Good-Gallery/releases/tag/v0.2.0) · 2026-10-29
 
 ### ✨ Features
