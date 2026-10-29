@@ -159,6 +159,104 @@ fn press(
     });
 }
 
+/// A precision touchpad as Windows and Linux report it: point deltas, no phase or source.
+fn touchpad(harness: &egui_kittest::Harness<'_, app::AppState>, dy: f32) {
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, dy),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+        modifiers: egui::Modifiers::NONE,
+    });
+}
+
+/// REQ-006-14: autoscroll stops at the end of the gallery instead of overshooting and springing back, which made the
+/// next touchpad scroll jump.
+#[test]
+fn req_006_14_stops_at_the_end_without_scrolling_past_it() {
+    use egui::PointerButton::Middle;
+    let fixture = Fixture::new();
+    let mut harness = common::harness_with_step(fixture.state(index(&photos(60))), 1.0 / 60.0);
+    settle(&mut harness);
+    let offset = |harness: &egui_kittest::Harness<'_, app::AppState>| gallery(harness).offset();
+    let start = egui::pos2(450.0, 300.0);
+    let far = start + egui::vec2(0.0, 250.0);
+
+    harness.hover_at(start);
+    press(&harness, Middle, start, true);
+    harness.hover_at(far);
+    let mut highest = 0.0f32;
+    for _ in 0..240 {
+        harness.step();
+        highest = highest.max(offset(&harness));
+    }
+    press(&harness, Middle, far, false);
+    harness.run_steps(60);
+    let end = offset(&harness);
+    assert!(end > 1000.0, "scrolled to the end: {end}");
+    assert!(
+        highest - end < 1.0,
+        "went past the end to {highest}, then back to {end}"
+    );
+
+    // The touchpad moves it from there without a jump.
+    let mut previous = end;
+    for _ in 0..10 {
+        touchpad(&harness, 10.0);
+        harness.step();
+        let now = offset(&harness);
+        assert!(
+            previous - now <= 10.5 && now <= previous,
+            "jumped from {previous} to {now}"
+        );
+        previous = now;
+    }
+}
+
+/// REQ-006-14: like in a browser, turning the wheel or touchpad, or pressing a key, stops autoscroll; the wheel then
+/// scrolls as usual.
+#[test]
+fn req_006_14_the_wheel_or_a_key_stops_it() {
+    use egui::PointerButton::Middle;
+    let fixture = Fixture::new();
+    let mut harness = common::harness_with_step(fixture.state(index(&photos(300))), 1.0 / 60.0);
+    settle(&mut harness);
+    let offset = |harness: &egui_kittest::Harness<'_, app::AppState>| gallery(harness).offset();
+    let start = egui::pos2(450.0, 300.0);
+    let below = start + egui::vec2(0.0, 100.0);
+    let latch = |harness: &mut egui_kittest::Harness<'_, app::AppState>| {
+        harness.hover_at(start);
+        press(harness, Middle, start, true);
+        press(harness, Middle, start, false);
+        harness.step();
+        harness.hover_at(below);
+        harness.run_steps(30);
+    };
+
+    latch(&mut harness);
+    let scrolling = offset(&harness);
+    assert!(scrolling > 100.0, "autoscroll runs: {scrolling}");
+    for _ in 0..20 {
+        touchpad(&harness, 20.0);
+        harness.step();
+    }
+    harness.run_steps(30);
+    let after_wheel = offset(&harness);
+    assert!(
+        after_wheel < scrolling,
+        "the touchpad scrolled up: {scrolling} -> {after_wheel}"
+    );
+    harness.run_steps(30);
+    assert_eq!(offset(&harness), after_wheel, "autoscroll stopped");
+
+    latch(&mut harness);
+    harness.key_press(egui::Key::A);
+    harness.step();
+    let after_key = offset(&harness);
+    harness.run_steps(30);
+    assert_eq!(offset(&harness), after_key, "a key stopped autoscroll");
+}
+
 /// REQ-006-14: holding the middle button scrolls toward the pointer until it is released; a middle click scrolls until
 /// the next click, which does nothing else.
 #[test]
