@@ -136,7 +136,10 @@ fn open_state(ctx: &egui::Context, render_state: Option<eframe::egui_wgpu::Rende
     // Folders of an earlier visit: readable ones are scanned again (REQ-019-10), then thumbnails catch up.
     let libraries = state.libraries.clone();
     super::spawn(async move {
-        folders::restore(&libraries, &db, indexer.as_ref()).await;
+        // The UI shows the libraries it loaded before; it reloads them when a scan reports one offline.
+        for library in folders::restore(&libraries, &db, indexer.as_ref()).await {
+            indexer.report_offline(library);
+        }
         thumbnails.kick();
     });
     if let Err(error) = index::keep_saved() {

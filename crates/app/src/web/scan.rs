@@ -150,6 +150,11 @@ thread_local! {
 
 impl WebIndexer {
     /// Keeps the page's indexer, so `&self` can hand its queue an owned handle.
+    /// Tells the UI a library can't be read, as a scan that found it offline would (REQ-019-09).
+    pub fn report_offline(&self, library: i64) {
+        self.send(IndexerEvent::Done(library, ScanResult::Offline));
+    }
+
     pub fn install(self: &Arc<Self>) {
         INDEXER.with_borrow_mut(|indexer| *indexer = Some(self.clone()));
     }

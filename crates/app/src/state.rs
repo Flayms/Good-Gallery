@@ -590,6 +590,9 @@ impl AppState {
                 if let Err(error) = result {
                     self.toasts.error(error);
                 }
+                // Its thumbnails are gone (or going): show the cache's new size soon, not in 10 s.
+                self.usage_read_at = None;
+                self.usage_fast_until = Some(Instant::now() + USAGE_REFRESH);
                 self.refresh();
             }
             #[cfg(target_arch = "wasm32")]
