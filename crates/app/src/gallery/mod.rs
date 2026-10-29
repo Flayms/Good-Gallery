@@ -7,6 +7,8 @@ mod tiles;
 
 use crate::icons::Icon;
 use crate::textures::{TextureRequest, TextureStreamer};
+#[cfg(target_arch = "wasm32")]
+use crate::web::thumbs::{ThumbCache, ThumbnailReady, ThumbnailService};
 use crate::{empty_state, theme};
 use base64::Engine as _;
 use db::gallery::{GalleryItem, GalleryLayout, GallerySearch, ThumbStatus};
@@ -20,12 +22,14 @@ use domain::thumbs::{ThumbKey, pick_thumb_width};
 use domain::view::{GalleryView, TagIndicatorChoice, group_by_day_value, groups_shown, is_grouped_by_day};
 use domain::zoom;
 use eframe::egui::{self, Color32, Rect, Vec2, pos2, vec2};
+#[cfg(not(target_arch = "wasm32"))]
 use indexer::thumb_cache::ThumbCache;
+#[cfg(not(target_arch = "wasm32"))]
 use indexer::thumbnails::{ThumbnailReady, ThumbnailService};
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use web_time::Instant;
 
 /// Tile data is loaded in chunks of consecutive gallery positions.
 const CHUNK: usize = 200;
@@ -136,15 +140,65 @@ fn load_sidebar(conn: &Connection, library: Option<i64>) -> db::Result<SidebarDa
     })
 }
 
-/// Runs the gallery's queries on its own thread, so a 500k-row layout never stalls a frame.
+/// Runs one of the gallery's queries.
+fn run(conn: &Connection, request: Request) -> Loaded {
+    match request {
+        Request::Layout { generation, search } => Loaded::Layout {
+            generation,
+            result: db::gallery::layout(conn, &search).map_err(|e| e.to_string()),
+        },
+        Request::Items { generation, chunk, ids } => Loaded::Items {
+            generation,
+            chunk,
+            result: db::gallery::items(conn, &ids).map_err(|e| e.to_string()),
+        },
+        Request::Sidebar { library } => Loaded::Sidebar(load_sidebar(conn, library).map_err(|e| e.to_string())),
+        Request::Suggest { prefix, limit } => Loaded::Suggest {
+            result: db::tags::autocomplete(conn, &prefix, limit).map_err(|e| e.to_string()),
+            prefix,
+        },
+        Request::Detail { id } => Loaded::Detail {
+            id,
+            result: db::media::detail(conn, id).map_err(|e| e.to_string()),
+        },
+    }
+}
+
+/// Runs the gallery's queries on its own thread, so a 500k-row layout never stalls a frame. The browser has no threads:
+/// there they run when they are sent, which the libraries in scope allow (spec 019, Assumptions).
 struct Loader {
+    #[cfg(not(target_arch = "wasm32"))]
     requests: Sender<Request>,
+    #[cfg(target_arch = "wasm32")]
+    conn: Arc<Mutex<Connection>>,
+    #[cfg(target_arch = "wasm32")]
+    outbox: Sender<Loaded>,
     results: Receiver<Loaded>,
     /// Requests sent and not yet applied.
     pending: usize,
 }
 
 impl Loader {
+    #[cfg(target_arch = "wasm32")]
+    fn start(conn: Arc<Mutex<Connection>>, _ctx: Option<egui::Context>) -> Self {
+        let (outbox, results) = channel();
+        Self {
+            conn,
+            outbox,
+            results,
+            pending: 0,
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn send(&mut self, request: Request) {
+        let loaded = run(&self.conn.lock().unwrap_or_else(|p| p.into_inner()), request);
+        if self.outbox.send(loaded).is_ok() {
+            self.pending += 1;
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn start(conn: Arc<Mutex<Connection>>, ctx: Option<egui::Context>) -> Self {
         let (requests, inbox) = channel::<Request>();
         let (outbox, results) = channel();
@@ -153,28 +207,7 @@ impl Loader {
             .spawn(move || {
                 while let Ok(request) = inbox.recv() {
                     let conn = conn.lock().unwrap_or_else(|p| p.into_inner());
-                    let loaded = match request {
-                        Request::Layout { generation, search } => Loaded::Layout {
-                            generation,
-                            result: db::gallery::layout(&conn, &search).map_err(|e| e.to_string()),
-                        },
-                        Request::Items { generation, chunk, ids } => Loaded::Items {
-                            generation,
-                            chunk,
-                            result: db::gallery::items(&conn, &ids).map_err(|e| e.to_string()),
-                        },
-                        Request::Sidebar { library } => {
-                            Loaded::Sidebar(load_sidebar(&conn, library).map_err(|e| e.to_string()))
-                        }
-                        Request::Suggest { prefix, limit } => Loaded::Suggest {
-                            result: db::tags::autocomplete(&conn, &prefix, limit).map_err(|e| e.to_string()),
-                            prefix,
-                        },
-                        Request::Detail { id } => Loaded::Detail {
-                            id,
-                            result: db::media::detail(&conn, id).map_err(|e| e.to_string()),
-                        },
-                    };
+                    let loaded = run(&conn, request);
                     drop(conn);
                     if outbox.send(loaded).is_err() {
                         return;
@@ -192,6 +225,7 @@ impl Loader {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn send(&mut self, request: Request) {
         if self.requests.send(request).is_ok() {
             self.pending += 1;
@@ -1098,7 +1132,8 @@ impl Gallery {
 pub fn context_menu(ui: &mut egui::Ui) -> Option<MediaAction> {
     crate::glass::behind_menu(ui, |ui| {
         let mut action = None;
-        if ui.button(crate::state::SHOW_IN_FOLDER).clicked() {
+        // The browser can't open a file manager (REQ-019-13).
+        if !crate::WEB && ui.button(crate::state::SHOW_IN_FOLDER).clicked() {
             action = Some(MediaAction::ShowInExplorer);
         }
         if ui.button("Information").clicked() {

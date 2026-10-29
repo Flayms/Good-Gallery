@@ -1,10 +1,13 @@
 //! Adding, removing and rescanning libraries (spec 001).
 
+#[cfg(not(target_arch = "wasm32"))]
 use crate::reachability::{self, is_reachable_directory};
 use crate::{ScanKind, ScanRequests};
 use db::libraries::{self as rows, Library, LibraryStatus};
 use db::rusqlite::Connection;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
 #[derive(Debug, thiserror::Error)]
@@ -31,20 +34,24 @@ pub fn list(conn: &Connection) -> Result<Vec<Library>> {
 }
 
 /// Adds the folder at `path` as an `online` library and queues a full scan. Waits up to 5 seconds for the folder.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn add(conn: &Connection, path: &str, scans: &dyn ScanRequests) -> Result<Library> {
     add_with_timeout(conn, path, scans, reachability::TIMEOUT)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn add_with_timeout(conn: &Connection, path: &str, scans: &dyn ScanRequests, timeout: Duration) -> Result<Library> {
     let path = check_folder(path, timeout)?;
     insert_checked(conn, &path, scans)
 }
 
 /// The longest path accepted.
+#[cfg(not(target_arch = "wasm32"))]
 const MAX_PATH_LENGTH: usize = 1024;
 
 /// The first half of [`add`], without the index: the normalized path of a reachable folder. Waits up to `timeout`
 /// for the folder, so callers holding the index connection should call it before locking.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn check_folder(path: &str, timeout: Duration) -> Result<String> {
     let path = path.trim();
     if path.chars().count() > MAX_PATH_LENGTH {
@@ -113,6 +120,7 @@ fn is_separator(c: char) -> bool {
 
 /// Windows rules, as Node's `path.win32.isAbsolute`: rooted (`\x`, `\\server\share`) or a drive with a root (`D:\`).
 /// Elsewhere a path from the root, `/…`.
+#[cfg(not(target_arch = "wasm32"))]
 fn is_absolute(path: &str) -> bool {
     if !cfg!(windows) {
         return path.starts_with('/');
@@ -127,6 +135,7 @@ fn is_absolute(path: &str) -> bool {
 
 /// Resolves `.` and `..`, unifies separators and drops a trailing separator, except at a drive or share root (`/`
 /// outside Windows).
+#[cfg(not(target_arch = "wasm32"))]
 fn normalize(path: &str) -> Option<String> {
     if !cfg!(windows) {
         // Lexically, as on Windows: `std::path::absolute` keeps `..` on other systems.
@@ -153,6 +162,7 @@ fn normalize(path: &str) -> Option<String> {
 }
 
 /// `D:` or `\\server\share` (without the trailing separator).
+#[cfg(not(target_arch = "wasm32"))]
 fn is_root(path: &str) -> bool {
     let bytes = path.as_bytes();
     if bytes.len() == 2 && bytes[1] == b':' {

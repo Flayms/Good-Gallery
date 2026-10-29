@@ -2,7 +2,6 @@
 //! (REQ-005-15). Size-capped with LRU eviction by file mtime; reading a thumbnail bumps its mtime.
 
 use domain::thumbs::ThumbKey;
-use sha1::{Digest, Sha1};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -15,15 +14,9 @@ const EVICT_TO: f64 = 0.9;
 /// Reading a thumbnail refreshes its LRU timestamp at most this often (REQ-005-11).
 const TOUCH_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
-/// `<dir>/ab/cd/<sha1>.webp`, fanned out so no folder grows huge. The hash is over the key as JavaScript's
-/// `JSON.stringify([rootId, relPath, size, mtime, width])` writes it, which `serde_json` matches for integers and
-/// strings.
+/// `<dir>/ab/cd/<sha1>.webp` ([`domain::thumbs::thumb_hash`]), fanned out so no folder grows huge.
 pub fn thumb_path(dir: &Path, key: &ThumbKey, width: u32) -> PathBuf {
-    let json = serde_json::json!([key.root_id, key.rel_path, key.size, key.mtime, width]).to_string();
-    let hash: String = Sha1::digest(json.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
+    let hash = domain::thumbs::thumb_hash(key, width);
     dir.join(&hash[0..2]).join(&hash[2..4]).join(format!("{hash}.webp"))
 }
 

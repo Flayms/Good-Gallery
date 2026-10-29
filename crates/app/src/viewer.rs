@@ -20,7 +20,8 @@ use domain::media::MediaKind;
 use domain::viewer::{self as zoom, FILMSTRIP_KEY, FILMSTRIP_THUMB, FIT, Size, Strip, ZoomView};
 use eframe::egui::{self, Color32, CursorIcon, Key, Modifiers, Pos2, Rect, Vec2, pos2, vec2};
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// The controls step aside after this long without pointer movement or key presses (REQ-013-10).
 const IDLE: Duration = Duration::from_millis(2500);
@@ -1395,6 +1396,11 @@ const BAR_BUTTONS: [(BarButton, Icon, &str, &str); 4] = [
     (BarButton::Close, Icon::X, "Close", "Close (Esc)"),
 ];
 
+/// The bar's buttons on this platform: the browser can't open a file manager (REQ-019-13).
+fn bar_buttons() -> &'static [(BarButton, Icon, &'static str, &'static str)] {
+    &BAR_BUTTONS[usize::from(crate::WEB)..]
+}
+
 fn control_bar_rect(layout: &Layout, text: &BarText) -> Rect {
     let mut width = 20.0 + text.name.size().x + BAR_GAP;
     if let Some(date) = &text.date {
@@ -1404,7 +1410,7 @@ fn control_bar_rect(layout: &Layout, text: &BarText) -> Rect {
         width += text.stars as f32 * (STAR_SIZE + 2.0) + BAR_GAP;
     }
     // Separator, the buttons and the right padding.
-    width += 1.0 + BAR_GAP + BAR_BUTTONS.len() as f32 * theme::CONTROL_HEIGHT + 6.0;
+    width += 1.0 + BAR_GAP + bar_buttons().len() as f32 * theme::CONTROL_HEIGHT + 6.0;
     let room = layout.right - layout.screen.left();
     let width = width.min(room - 32.0);
     Rect::from_center_size(
@@ -1429,7 +1435,7 @@ fn control_bar(
     // Clicks on the bar's background don't reach the scrim behind it.
     ui.interact(rect, ui.make_persistent_id("control bar"), egui::Sense::click());
     let y = rect.center().y;
-    let buttons_width = BAR_BUTTONS.len() as f32 * theme::CONTROL_HEIGHT + 6.0;
+    let buttons_width = bar_buttons().len() as f32 * theme::CONTROL_HEIGHT + 6.0;
     let text_clip = Rect::from_min_max(rect.min, pos2(rect.right() - buttons_width - BAR_GAP, rect.bottom()));
     let painter = ui.painter().with_clip_rect(text_clip);
     let mut x = rect.left() + 20.0;
@@ -1454,10 +1460,10 @@ fn control_bar(
     ui.painter()
         .vline(separator, (y - 10.0)..=(y + 10.0), egui::Stroke::new(1.0, theme::RIM));
     let mut clicked = None;
-    for (i, (button, icon, label, tooltip)) in BAR_BUTTONS.into_iter().enumerate() {
+    for (i, &(button, icon, label, tooltip)) in bar_buttons().iter().enumerate() {
         let at = Rect::from_min_size(
             pos2(
-                rect.right() - 6.0 - (BAR_BUTTONS.len() - i) as f32 * theme::CONTROL_HEIGHT,
+                rect.right() - 6.0 - (bar_buttons().len() - i) as f32 * theme::CONTROL_HEIGHT,
                 y - theme::CONTROL_HEIGHT / 2.0,
             ),
             Vec2::splat(theme::CONTROL_HEIGHT),

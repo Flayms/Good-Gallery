@@ -1,19 +1,36 @@
 //! Keeps the index in sync with the libraries: scan queue, walk, watcher, writer, rescan scheduling. Library
 //! operations (add, remove, rescan) live here too, since they check reachability and queue scans.
 
+//!
+//! The web build (spec 019) has no threads, files or helper programs: it uses only the library operations and the
+//! status types, and scans with its own code.
+
+#[cfg(not(target_arch = "wasm32"))]
 mod indexer;
 pub mod libraries;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod reachability;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod retry;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod scan;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod schedule;
+mod status;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod thumb_cache;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod thumbnails;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod walk;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod watcher;
 
-pub use indexer::{CurrentScan, Indexer, IndexerDeps, IndexerEvent, IndexerStatus, ScanResult, merge_scopes};
+#[cfg(not(target_arch = "wasm32"))]
+pub use indexer::{Indexer, IndexerDeps, merge_scopes};
+#[cfg(not(target_arch = "wasm32"))]
 pub use scan::ScanScope;
+pub use status::{CurrentScan, IndexerEvent, IndexerStatus, ScanResult};
 
 /// How thoroughly a scan looks at a library (glossary: full scan, quick scan, changes scan). Ordered from least to
 /// most thorough.

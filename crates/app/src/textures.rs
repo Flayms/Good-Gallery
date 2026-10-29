@@ -2,14 +2,18 @@
 //! them with libwebp, build the mip chain and create the `wgpu::Texture` themselves; the UI thread only registers
 //! finished textures, within a time budget per frame. An LRU with a byte budget keeps GPU memory bounded (REQ-006-13).
 
+#[cfg(target_arch = "wasm32")]
+use crate::web::thumbs::ThumbCache;
 use eframe::egui::{self, TextureId};
 use eframe::egui_wgpu::{self, wgpu};
+#[cfg(not(target_arch = "wasm32"))]
 use indexer::thumb_cache::ThumbCache;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// Decode threads: more starve the UI thread and an integrated GPU.
 const WORKERS: usize = 4;
@@ -18,6 +22,8 @@ const REGISTER_BUDGET: Duration = Duration::from_millis(3);
 /// GPU memory for thumbnails (REQ-006-13). At 12 columns the visible tiles and the prefetch band alone take ≈ 330 MB
 /// (400 px thumbnails with mips).
 pub const DEFAULT_BUDGET: usize = 512 << 20;
+/// In the browser: wasm32 has 4 GB of address space, and browsers limit a page's GPU memory (spec 019).
+pub const WEB_BUDGET: usize = 256 << 20;
 
 /// A thumbnail a tile wants: the cached file of the width it needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,10 +97,101 @@ pub struct TextureStreamer {
     bytes: usize,
     budget: usize,
     frame: u64,
+    #[cfg(not(target_arch = "wasm32"))]
     workers: Vec<std::thread::JoinHandle<()>>,
+    /// The browser has no threads: loads are tasks on the page's event loop, started by [`Self::pump`].
+    #[cfg(target_arch = "wasm32")]
+    loads: Loads,
+}
+
+#[cfg(target_arch = "wasm32")]
+struct Loads {
+    cache: ThumbCache,
+    done: Sender<Done>,
+    ctx: egui::Context,
 }
 
 impl TextureStreamer {
+    #[cfg(target_arch = "wasm32")]
+    pub fn new(render_state: egui_wgpu::RenderState, cache: ThumbCache, budget: usize, ctx: egui::Context) -> Self {
+        let (done, results) = channel();
+        Self {
+            queue: Arc::new((Mutex::new(Queue::default()), Condvar::new())),
+            results,
+            render_state,
+            entries: HashMap::new(),
+            missing: HashSet::new(),
+            newly_missing: Vec::new(),
+            broken: HashSet::new(),
+            bytes: 0,
+            budget,
+            frame: 0,
+            loads: Loads { cache, done, ctx },
+        }
+    }
+
+    /// Starts loads of the wanted thumbnails, up to as many at once as the desktop has workers.
+    #[cfg(target_arch = "wasm32")]
+    fn pump(&self) {
+        loop {
+            let request = {
+                let mut queue = self.queue.0.lock().unwrap_or_else(|p| p.into_inner());
+                if queue.in_flight.len() >= WORKERS {
+                    return;
+                }
+                match take_request(&mut queue) {
+                    Some(request) => request,
+                    None => return,
+                }
+            };
+            let (queue, done, cache, ctx) = (
+                self.queue.clone(),
+                self.loads.done.clone(),
+                self.loads.cache.clone(),
+                self.loads.ctx.clone(),
+            );
+            let (device, gpu) = (self.render_state.device.clone(), self.render_state.queue.clone());
+            crate::web::spawn(async move {
+                let path = request.path.to_string_lossy().into_owned();
+                let outcome = match crate::web::js::wait(crate::web::js::stored_rgba(&path)).await {
+                    Ok(stored) if stored.is_null() => Outcome::Missing,
+                    Ok(stored) => {
+                        cache.touch(&path);
+                        let side = |i| crate::web::at(&stored, i).as_f64().unwrap_or(0.0) as u32;
+                        let size = [side(0), side(1)];
+                        match crate::web::js::bytes(&crate::web::at(&stored, 2)) {
+                            Some(rgba)
+                                if size[0] > 0 && size[1] > 0 && rgba.len() == (size[0] * size[1] * 4) as usize =>
+                            {
+                                let levels = mip_chain(size, rgba);
+                                let bytes = levels.iter().map(Vec::len).sum();
+                                Outcome::Loaded {
+                                    texture: upload(&device, &gpu, size, &levels),
+                                    size,
+                                    bytes,
+                                }
+                            }
+                            _ => Outcome::Broken,
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!("can't read thumbnail {path}: {error}");
+                        Outcome::Broken
+                    }
+                };
+                let key = (request.media, request.width);
+                let _ = done.send(Done {
+                    media: request.media,
+                    width: request.width,
+                    outcome,
+                });
+                queue.0.lock().unwrap_or_else(|p| p.into_inner()).in_flight.remove(&key);
+                ctx.request_repaint();
+            });
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(render_state: egui_wgpu::RenderState, cache: ThumbCache, budget: usize, ctx: egui::Context) -> Self {
         let queue = Arc::new((Mutex::new(Queue::default()), Condvar::new()));
         let (tx, results) = channel();
@@ -127,6 +224,8 @@ impl TextureStreamer {
     /// per frame before drawing.
     pub fn begin_frame(&mut self) {
         self.frame += 1;
+        #[cfg(target_arch = "wasm32")]
+        self.pump();
         let start = Instant::now();
         while start.elapsed() < REGISTER_BUDGET {
             let Ok(done) = self.results.try_recv() else { break };
@@ -220,6 +319,9 @@ impl TextureStreamer {
         queue.wanted = list;
         queue.next = 0;
         wake.notify_all();
+        drop(queue);
+        #[cfg(target_arch = "wasm32")]
+        self.pump();
     }
 
     /// The loaded thumbnail of a media item; marks it as used this frame.
@@ -269,6 +371,7 @@ impl Drop for TextureStreamer {
         let (lock, wake) = &*self.queue;
         lock.lock().unwrap_or_else(|p| p.into_inner()).stop = true;
         wake.notify_all();
+        #[cfg(not(target_arch = "wasm32"))]
         for worker in self.workers.drain(..) {
             let _ = worker.join();
         }
@@ -298,6 +401,19 @@ fn eviction(entries: impl Iterator<Item = (i64, u64, usize)>, frame: u64, mut by
     evicted
 }
 
+/// The next wanted thumbnail not loading yet, marked as loading.
+fn take_request(queue: &mut Queue) -> Option<TextureRequest> {
+    while queue.next < queue.wanted.len() {
+        let request = queue.wanted[queue.next].clone();
+        queue.next += 1;
+        if queue.in_flight.insert((request.media, request.width)) {
+            return Some(request);
+        }
+    }
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn next_request(queue: &(Mutex<Queue>, Condvar)) -> Option<TextureRequest> {
     let (lock, wake) = queue;
     let mut queue = lock.lock().unwrap_or_else(|p| p.into_inner());
@@ -305,17 +421,14 @@ fn next_request(queue: &(Mutex<Queue>, Condvar)) -> Option<TextureRequest> {
         if queue.stop {
             return None;
         }
-        while queue.next < queue.wanted.len() {
-            let request = queue.wanted[queue.next].clone();
-            queue.next += 1;
-            if queue.in_flight.insert((request.media, request.width)) {
-                return Some(request);
-            }
+        if let Some(request) = take_request(&mut queue) {
+            return Some(request);
         }
         queue = wake.wait(queue).unwrap_or_else(|p| p.into_inner());
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn work(
     queue: &(Mutex<Queue>, Condvar),
     results: &Sender<Done>,
@@ -357,6 +470,7 @@ fn work(
 }
 
 /// libwebp decode to RGBA (3× faster than the `image` crate's decoder).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn decode(data: &[u8]) -> Option<([u32; 2], Vec<u8>)> {
     let image = webp::Decoder::new(data).decode()?;
     let size = [image.width(), image.height()];

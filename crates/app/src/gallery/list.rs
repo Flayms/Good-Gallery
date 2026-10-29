@@ -11,7 +11,7 @@ use db::gallery::GalleryItem;
 use domain::layout::{ListEntry, ListRows, list_entry_at};
 use domain::media::MediaKind;
 use eframe::egui::{self, Align2, Rect, Vec2, pos2, vec2};
-use std::time::Instant;
+use web_time::Instant;
 
 pub(super) const ROWS: ListRows = ListRows {
     row: 52.0,

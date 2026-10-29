@@ -61,8 +61,11 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
                     ui.set_width(width);
                     libraries(ui, state);
                     ui.add_space(theme::SPACE * 10.0);
-                    indexing(ui, state);
-                    ui.add_space(theme::SPACE * 10.0);
+                    // The browser has no watchers, scheduled checks or parallel reads to tune (REQ-019-13).
+                    if !crate::WEB {
+                        indexing(ui, state);
+                        ui.add_space(theme::SPACE * 10.0);
+                    }
                     thumbnail_cache(ui, state);
                     ui.add_space(24.0);
                 });
@@ -306,7 +309,12 @@ fn confirm_clear(ctx: &egui::Context, state: &mut AppState) {
 
 fn libraries(ui: &mut egui::Ui, state: &mut AppState) {
     ui.label(RichText::new("Libraries").font(FontId::new(theme::SIZE_SECTION, theme::semibold())));
-    ui.label(RichText::new("Folders on local disks or network shares, indexed recursively.").color(theme::MIST));
+    let description = if crate::WEB {
+        "Folders on this computer, indexed recursively in this browser."
+    } else {
+        "Folders on local disks or network shares, indexed recursively."
+    };
+    ui.label(RichText::new(description).color(theme::MIST));
     ui.add_space(theme::SPACE * 2.0);
 
     let page = &mut state.settings_page;
@@ -314,6 +322,18 @@ fn libraries(ui: &mut egui::Ui, state: &mut AppState) {
     let mut add = false;
     let mut browse = false;
     ui.horizontal(|ui| {
+        // The browser has no paths to type: folders come from its picker (REQ-019-13).
+        if crate::WEB {
+            let button = egui::Button::image_and_text(
+                Icon::FolderPlus.image(theme::ICON_SIZE, theme::DARKROOM),
+                RichText::new("Add folder…")
+                    .color(theme::DARKROOM)
+                    .font(FontId::new(theme::SIZE_BODY, theme::semibold())),
+            )
+            .fill(theme::PAPER);
+            browse = ui.add_enabled(!busy, button).clicked();
+            return;
+        }
         let buttons_width = 190.0;
         let input = ui.add(
             egui::TextEdit::singleline(&mut page.path_input)

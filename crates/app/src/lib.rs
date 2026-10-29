@@ -20,9 +20,16 @@ pub mod toasts;
 pub mod toolbar;
 pub mod video;
 pub mod viewer;
+#[cfg(target_arch = "wasm32")]
+pub mod web;
 pub mod widgets;
 
-pub use state::{AppState, CacheUsage, FolderPicker, NativeFolderPicker, Page, SettingsTargets};
+#[cfg(not(target_arch = "wasm32"))]
+pub use state::NativeFolderPicker;
+pub use state::{AppState, CacheUsage, FolderPicker, Page, SettingsTargets};
+
+/// The browser version (spec 019): no files by path, no file manager, no helper programs, no scheduled checks.
+pub const WEB: bool = cfg!(target_arch = "wasm32");
 
 use eframe::egui;
 
@@ -174,7 +181,12 @@ fn info_sheet(ui: &mut egui::Ui, state: &mut AppState) {
 fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
     if state.libraries.is_empty() {
         if empty_state::no_libraries(ui).clicked() {
-            state.page = Page::Settings;
+            // The browser's folder picker needs the click (REQ-019-01, REQ-019-02).
+            if WEB {
+                state.browse_for_library();
+            } else {
+                state.page = Page::Settings;
+            }
         }
     } else if let Some(gallery) = &mut state.gallery {
         gallery.show(ui);

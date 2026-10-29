@@ -11,8 +11,11 @@
 //!
 //! All of the app's window `unsafe` is in this module. Other platforms keep their native caption.
 
+#[cfg(any(windows, target_os = "linux"))]
 use crate::theme;
-use eframe::egui::{self, Pos2, Rect, Stroke, Vec2};
+#[cfg(any(windows, target_os = "linux"))]
+use eframe::egui::Stroke;
+use eframe::egui::{self, Pos2, Rect, Vec2};
 
 /// Width of one caption button: Windows' 46 px buttons, or on Linux a slot for a GNOME header bar's 24 px circle with
 /// 6 px between circles.
