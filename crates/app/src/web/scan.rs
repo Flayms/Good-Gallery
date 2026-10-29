@@ -91,7 +91,10 @@ impl WebIndexer {
                 library
             };
             let result = match scan(&self, library).await {
-                Ok(result) => result,
+                Ok(result) => {
+                    tracing::info!("scan of library {library} ended: {result:?}");
+                    result
+                }
                 Err(error) => {
                     tracing::error!("scan of library {library} failed: {error}");
                     ScanResult::Failed(error)

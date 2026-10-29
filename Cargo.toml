@@ -54,6 +54,7 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graph
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # The web build (spec 019).
 js-sys = "0.3.106"
+sqlite-wasm-rs = "0.6.2"
 wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "0.4.56"
 web-sys = "0.3.106"

@@ -48,6 +48,8 @@ js-sys.workspace = true
 meta.workspace = true
 # The index's snapshot in the page's storage (`web::index`).
 rusqlite = { workspace = true, features = ["backup", "serialize"] }
+# SQLite's clock, randomness and local time come from the browser.
+sqlite-wasm-rs = { workspace = true, features = ["wasm-bindgen"] }
 sys-locale = { workspace = true, features = ["js"] }
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true

@@ -311,6 +311,7 @@ impl ThumbnailService {
             match db::thumbs::pending_thumbs(conn, BATCH, &running) {
                 Ok(ids) if !ids.is_empty() => queue.background = ids.into_iter().rev().collect(),
                 Ok(_) => {
+                    tracing::info!("thumbnails are up to date");
                     queue.idle = true;
                     return None;
                 }
