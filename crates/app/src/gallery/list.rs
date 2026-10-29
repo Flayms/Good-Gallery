@@ -121,7 +121,7 @@ impl Gallery {
     }
 
     fn draw_row(&mut self, ui: &mut egui::Ui, rect: Rect, index: usize, id: i64, frame: &mut FrameState) {
-        let response = ui.interact(rect, ui.make_persistent_id(("row", id)), egui::Sense::click());
+        let response = ui.interact(rect, ui.make_persistent_id(("row", id)), self.tile_sense());
         // A click, or Enter on the focused row, opens the viewer (REQ-009-01).
         if response.clicked() {
             self.opened = Some(index);

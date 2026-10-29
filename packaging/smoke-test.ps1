@@ -2,7 +2,7 @@
 # runs the installed app once with a screenshot, checks that it found its bundled helpers, then uninstalls and checks
 # that the data folder stays.
 #
-#   ./packaging/smoke-test.ps1 -Installer target/dist/good-gallery-<version>-setup.exe [-DataDir <copy of an index>]
+#   ./packaging/smoke-test.ps1 -Installer target/dist/good-gallery-<version>-windows-x64-setup.exe [-DataDir <copy of an index>]
 #
 # Without -DataDir the app starts on an empty data folder. Never pass the real %APPDATA%\good-gallery: the app
 # migrates and writes the index it opens.

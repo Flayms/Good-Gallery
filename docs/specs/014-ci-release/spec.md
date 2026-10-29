@@ -65,6 +65,12 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 - **And** the installer adds a Start menu shortcut and an entry under Windows' installed apps
 - **And** uninstalling removes the program, its shortcut and its entry, but keeps the data folder (index, settings, thumbnails)
 
+### REQ-014-10 · Download names
+
+- **Given** a release's downloads
+- **When** a user looks at their file names
+- **Then** each name says the app, the version, the operating system and the processor architecture it is for, and for Windows whether it is the installer or the portable zip: `good-gallery-<version>-windows-x64-setup.exe`, `good-gallery-<version>-windows-x64-portable.zip`, `good-gallery-<version>-linux-x64.tar.gz`
+
 ## Out of scope
 
 - Code signing (Windows SmartScreen warns about unsigned downloads). Free option for later: SignPath Foundation.
@@ -90,5 +96,6 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 | REQ-014-05 | `xtask/src/release.rs` › req_014_05_lists_failed_preconditions, req_014_05_stops_when_a_precondition_fails, req_014_05_undoes_a_release_whose_push_fails | pass |
 | REQ-014-06 | `xtask/src/release.rs` › req_014_06_writes_the_changelog | pass |
 | REQ-014-07 | `xtask/src/release.rs` › req_014_07_sets_the_workspace_version, req_014_07_commits_tags_and_pushes_the_release; `cargo xtask release --dry-run` on this repository | pass |
-| REQ-014-08 | `xtask/tests/workflows.rs` › release_publishes_both_downloads_after_the_checks; `xtask/src/dist.rs` › stages_the_helpers_where_the_app_finds_them, names_the_downloads_after_the_version; `cargo xtask dist` built both locally | partial (publishing runs with the first release) |
+| REQ-014-08 | `xtask/tests/workflows.rs` › release_publishes_both_downloads_after_the_checks; `xtask/src/dist.rs` › stages_the_helpers_where_the_app_finds_them, req_014_10_names_say_the_system_and_the_architecture; `cargo xtask dist` built both locally | partial (publishing runs with the first release) |
 | REQ-014-09 | `xtask/src/dist.rs` › stages_the_helpers_where_the_app_finds_them; `packaging/smoke-test.ps1` (release workflow; run locally: silent install, app run, uninstall keeps the data folder) | pass |
+| REQ-014-10 | `xtask/src/dist.rs` › req_014_10_names_say_the_system_and_the_architecture; `xtask/tests/workflows.rs` › release_publishes_both_downloads_after_the_checks | pass |

@@ -8,11 +8,11 @@ Built in Rust with eframe / egui on wgpu.
 
 ## Features
 
-- **Views:** Masonry (columns), Justified (rows of equal height), Grid (square tiles) and List (details). All are virtualized, so they stay fast at any library size. Media are grouped by day, with the date and the number of photos and videos above each day. Switch views, zoom, sort and grouping under _View_, or zoom with Ctrl + mouse wheel.
+- **Views:** Masonry (columns), Justified (rows of equal height), Grid (square tiles) and List (details). All are virtualized, so they stay fast at any library size. Media are grouped by day, with the date and the number of photos and videos above each day. Switch views, zoom, sort and grouping under _View_, or zoom with Ctrl + mouse wheel. Hold the middle mouse button and move the pointer to autoscroll, as in a browser.
 - **Network shares:** libraries can live on `\\server\share`. Thumbnails (WebP and ThumbHash placeholders) are cached locally, and the cached index stays browsable while a share is offline.
 - **Change detection:** a file watcher picks up changes, plus periodic quick scans. Manual rescans are also possible.
 - **Search:** combine tags (include or exclude, hierarchical), file name text and folder; media type, date range and rating are under _Filters_. Sort by date taken, date modified, name, path or size.
-- **Sidebar:** libraries with a folder tree, People and Places (from keyword hierarchies and face regions), ratings and popular tags.
+- **Sidebar:** libraries with a folder tree, People and Places (from keyword hierarchies and face regions), ratings and popular tags. Hide it with the button in its header or Ctrl + B.
 - **Viewer:** the photo floats over the blurred window, with controls that step aside while you look. Keyboard navigation, an optional filmstrip to jump through the gallery, zoom and pan, video playback, a metadata panel and "Show in Explorer".
 - **Look:** dark, neutral chrome so only your photos bring color; the toolbar and menus are frosted glass over the gallery.
 - **Read-only:** tags and ratings come from EXIF / IPTC / XMP and `.xmp` sidecars. Files are never modified.
@@ -29,8 +29,8 @@ Supported formats: JPEG, PNG, WebP, GIF and AVIF images, plus videos (MP4, MOV, 
 
 Download from the [releases](https://github.com/Flayms/Good-Gallery/releases) (Windows 10 or 11, 64-bit):
 
-- **`good-gallery-<version>-setup.exe`:** installs for your user (no admin rights), into a folder you can change, with a Start menu shortcut. Uninstall it under _Settings → Apps_.
-- **`good-gallery-<version>-portable.zip`:** extract anywhere and run `good-gallery.exe`.
+- **`good-gallery-<version>-windows-x64-setup.exe`:** installs for your user (no admin rights), into a folder you can change, with a Start menu shortcut. Uninstall it under _Settings → Apps_.
+- **`good-gallery-<version>-windows-x64-portable.zip`:** extract anywhere and run `good-gallery.exe`.
 
 exiftool, ffmpeg and libmpv come with both. The downloads aren't code-signed yet, so Windows SmartScreen may warn: choose _More info_ → _Run anyway_, or unblock the zip (_Properties_ → _Unblock_) before extracting.
 
@@ -38,7 +38,7 @@ Add a library folder under **Settings**. The index, settings, thumbnails and log
 
 ### Linux
 
-**`good-gallery-<version>-linux-x86_64.tar.gz`** (x86-64, X11 or Wayland) uses your distribution's exiftool, ffmpeg and libmpv. Install them first, e.g. on Ubuntu or Debian `sudo apt install libimage-exiftool-perl ffmpeg libmpv2`. Extract the archive and run `./good-gallery`, or `./install.sh` to install it for your user with an app menu entry (`./install.sh --uninstall` removes it). The data folder is `~/.local/share/good-gallery`.
+**`good-gallery-<version>-linux-x64.tar.gz`** (x86-64, X11 or Wayland) uses your distribution's exiftool, ffmpeg and libmpv. Install them first, e.g. on Ubuntu or Debian `sudo apt install libimage-exiftool-perl ffmpeg libmpv2`. Extract the archive and run `./good-gallery`, or `./install.sh` to install it for your user with an app menu entry (`./install.sh --uninstall` removes it). The data folder is `~/.local/share/good-gallery`.
 
 ### In the browser
 
@@ -46,7 +46,34 @@ Try it without installing at **[flayms.github.io/Good-Gallery](https://flayms.gi
 
 ## Development
 
-Requirements: Rust (pinned in `rust-toolchain.toml`, installed through rustup) and, on Windows, the MSVC C++ build tools with the Windows SDK. On Linux (Ubuntu): `sudo apt install build-essential pkg-config libimage-exiftool-perl ffmpeg libmpv2 mesa-vulkan-drivers` (the helpers come from the system there; `mesa-vulkan-drivers` gives the snapshot tests a software GPU, `xvfb` lets `--screenshot` run without a display). Indexing needs exiftool, thumbnails of videos ffmpeg, playback libmpv: run `./packaging/fetch-helpers.ps1` once and point `GOOD_GALLERY_EXIFTOOL`, `GOOD_GALLERY_FFMPEG` and `GOOD_GALLERY_MPV` at the files in `target/helpers/`, or put the programs on `PATH`. The browser version needs the `wasm32-unknown-unknown` target (installed through `rust-toolchain.toml`), clang (compiles SQLite for wasm), [Trunk](https://trunkrs.dev) (`cargo install --locked trunk`) and, for its tests, Node.js (`npm`; on Linux Playwright's Chromium needs `sudo npx playwright install-deps chromium` once). Releases need git-cliff, the version CI uses: `cargo install --locked git-cliff@2.14.2` (or point `GIT_CLIFF` at it). Builds other than the packaged app (`cargo xtask dist`) keep their data in `%APPDATA%\good-gallery-rust` (Linux: `~/.local/share/good-gallery-rust`), so development never touches the real index.
+### Requirements
+
+**Everywhere:** Rust through [rustup](https://rustup.rs). `rust-toolchain.toml` pins the version, and the first `cargo` command installs it.
+
+**Windows:**
+
+- The MSVC C++ build tools with the Windows SDK:
+  `winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`
+- The helpers (exiftool for indexing, ffmpeg for video thumbnails, libmpv for playback): run `./packaging/fetch-helpers.ps1` once. It puts them in `target/helpers/`. For `cargo run` and the tests, point `GOOD_GALLERY_EXIFTOOL`, `GOOD_GALLERY_FFMPEG` and `GOOD_GALLERY_MPV` at the files there, or put the programs on `PATH`. Without them, the tests that need them skip.
+- For the installer (`cargo xtask dist`): [NSIS](https://nsis.sourceforge.io), `winget install NSIS.NSIS`, or set `MAKENSIS` to a `makensis.exe`. `cargo xtask dist --no-installer` builds only the portable zip.
+
+**Linux (Ubuntu):**
+
+- `sudo apt install build-essential pkg-config libimage-exiftool-perl ffmpeg libmpv2 mesa-vulkan-drivers`. The helpers come from the system here. `mesa-vulkan-drivers` gives the snapshot tests a software GPU.
+- Optional: `xvfb`, so that `--screenshot` runs without a display.
+
+**Browser version:**
+
+- The `wasm32-unknown-unknown` target (`rust-toolchain.toml` installs it)
+- clang (compiles SQLite for wasm)
+- [Trunk](https://trunkrs.dev): `cargo install --locked trunk`
+- For its tests, Node.js with `npm`. On Linux, Playwright's Chromium needs `sudo npx playwright install-deps chromium` once.
+
+**Releases:** git-cliff, the version CI uses: `cargo install --locked git-cliff@2.14.2` (or point `GIT_CLIFF` at it).
+
+Builds other than the packaged app (`cargo xtask dist`) keep their data in `%APPDATA%\good-gallery-rust` (Linux: `~/.local/share/good-gallery-rust`), so development never touches the real index.
+
+### Commands
 
 | Command                             | Purpose                                                                                                        |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------- |
