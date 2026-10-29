@@ -48,18 +48,15 @@ A desktop gallery for large photo and video libraries (50k–500k files). Media 
 
 ## Issues
 
-Features, bugs and tasks live in [GitHub issues](https://github.com/Flayms/Good-Gallery/issues) on the project board, written with the issue templates (Given/When/Then). Status: Inbox → Needs refinement → Ready → In progress → In review → Done.
-
-- Pick up only issues in **Ready**. Move them to **In progress** when you start, and close them from the PR (`Closes #N`).
-- An issue's acceptance criteria become the spec's REQs; from then on the spec is the source of truth.
-- Found something out of scope (a bug, a gap, a follow-up)? Open an issue instead of fixing it on the side. Unchecked tasks in a spec's `plan.md` stay there.
+- If the user references an issue, look it up at [GitHub issues](https://github.com/Flayms/Good-Gallery/issues).  
+- Name branches related to issues `{issue-id}-{issue-name}`
+- in your PR use a Github closing keyword for auto closing after merge
 
 ## Definition of Done
 
 - Every REQ in scope has a test that you saw fail, then pass.
 - Full test suite and lint run in this session and pass.
 - Verification table and spec status updated.
-- No unrelated changes.
 - PR to main is green and mergeable.
 - Summary: tier, REQs touched, results, open issues.
 
