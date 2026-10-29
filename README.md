@@ -8,7 +8,7 @@ Built in Rust with eframe / egui on wgpu.
 
 ## Features
 
-- **Views:** Masonry (columns), Justified (rows of equal height), Grid (square tiles) and List (details). All are virtualized, so they stay fast at any library size. Media are grouped by day, with the date and the number of photos and videos above each day. Switch views, zoom, sort and grouping under _View_, or zoom with Ctrl + mouse wheel.
+- **Views:** Masonry (columns), Justified (rows of equal height), Grid (square tiles) and List (details). All are virtualized, so they stay fast at any library size. Media are grouped by day, with the date and the number of photos and videos above each day. Switch views, zoom, sort and grouping under _View_, or zoom with Ctrl + mouse wheel. Hold the middle mouse button and move the pointer to autoscroll, as in a browser.
 - **Network shares:** libraries can live on `\\server\share`. Thumbnails (WebP and ThumbHash placeholders) are cached locally, and the cached index stays browsable while a share is offline.
 - **Change detection:** a file watcher picks up changes, plus periodic quick scans. Manual rescans are also possible.
 - **Search:** combine tags (include or exclude, hierarchical), file name text and folder; media type, date range and rating are under _Filters_. Sort by date taken, date modified, name, path or size.

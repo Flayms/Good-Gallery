@@ -93,12 +93,20 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 - **Then** the memory they take on the GPU stays within a fixed budget, dropping the least recently shown first
 - **And** thumbnails of visible tiles and of tiles about to scroll into view are kept
 
+### REQ-006-14 · Autoscroll with the middle mouse button
+
+- **Given** the gallery in any view
+- **When** the user presses the middle mouse button over it and moves the pointer up or down
+- **Then** a marker shows where the button was pressed, and the gallery scrolls in the pointer's direction, faster the farther the pointer is from the marker, and not at all within a few points of it
+- **And** releasing the button stops it if the pointer had left that small area; otherwise autoscroll stays on until the next click of any button or Escape, and that click does nothing else (it doesn't open a media item or a context menu)
+
 ## Out of scope
 
 - Selecting multiple media items, and drag and drop to other apps.
 - Grouping by folder (section headers). Grouping by day is in 016.
 - Custom column sets or sorting by clicking list headers (sorting is in 007).
 - A setting for the gap size or tile corner radius.
+- Autoscroll sideways, and a setting for its speed.
 
 ## Assumptions
 
@@ -122,3 +130,4 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 | REQ-006-11 | `crates/indexer/src/scan.rs` › writes_read_files_while_the_scan_still_runs; `crates/app/tests/indexing.rs` › refreshes_after_the_first_written_files_and_when_the_scan_ends; `crates/app/tests/gallery.rs` › req_006_11_shows_media_items_written_while_indexing | pass (the sidebar reloads with the gallery; suggestions are asked for per input) |
 | REQ-006-12 | `cargo xtask gallery-bench` (100,000 items, 12 columns, vsync off, AMD iGPU, mains power, 2026-10-27) | no test (measured: p95 4.4 ms, p99 5.3 ms, max 11.9 ms) |
 | REQ-006-13 | `crates/app/src/textures.rs` › req_006_13_frees_least_recently_shown_textures_down_to_90_percent_of_the_budget, req_006_13_keeps_textures_shown_or_requested_in_this_or_the_last_frame; `cargo xtask gallery-bench` (at most 511 MB of a 512 MB budget) | pass |
+| REQ-006-14 | `crates/domain/src/autoscroll.rs` › req_006_14_scrolls_toward_the_pointer_faster_the_farther_it_is, req_006_14_releasing_after_moving_stops_it, req_006_14_a_click_keeps_it_on_until_the_next_click; `crates/app/tests/gallery.rs` › req_006_14_scrolls_while_the_middle_button_is_held_and_after_a_middle_click | pass |

@@ -15,6 +15,7 @@ use db::gallery::{GalleryItem, GalleryLayout, GallerySearch, ThumbStatus};
 use db::media::MediaDetail;
 use db::rusqlite::Connection;
 use db::tags::TagCount;
+use domain::autoscroll::Autoscroll;
 use domain::folders::{FolderNode, TagNode, build_folder_tree, build_tag_tree};
 use domain::layout::{LayoutOptions, ListEntry, TileLayout, list_entry_at, list_index_of_item, tile_layout};
 use domain::tags::TagCategory;
@@ -325,6 +326,11 @@ pub struct Gallery {
     menu_action: Option<(usize, MediaAction)>,
     /// Where the tiles were drawn in the last frame: the content's origin and the visible area (REQ-013-12).
     tiles_frame: Option<(egui::Pos2, Rect)>,
+    /// Autoscroll with the middle mouse button, and where it started on screen (REQ-006-14).
+    autoscroll: Autoscroll,
+    autoscroll_at: egui::Pos2,
+    /// The click that stopped autoscroll: tiles and rows ignore it until every button is up again.
+    swallow_click: bool,
 }
 
 impl Gallery {
@@ -379,6 +385,9 @@ impl Gallery {
             strip: 0..0,
             detail: None,
             menu_action: None,
+            autoscroll: Autoscroll::Off,
+            autoscroll_at: egui::Pos2::ZERO,
+            swallow_click: false,
             tiles_frame: None,
         }
     }
@@ -983,12 +992,21 @@ impl Gallery {
         } else {
             arranged.tiles.total_height as f32
         };
+        let autoscroll = self.handle_autoscroll(ui, Rect::from_min_max(pos2(area.left(), self.content_top), area.max));
+        let mut source = egui::scroll_area::ScrollSource::ALL;
+        // Dragging with the middle button would scroll the other way.
+        if self.autoscroll.is_on() {
+            source.drag = egui::scroll_area::DragScroll::Never;
+        }
         let mut scroll = egui::ScrollArea::vertical()
             .id_salt("gallery")
             .auto_shrink(false)
             .scroll_bar_rect(scroll_bar_rect(area, list))
             // Ctrl + wheel zooms (handled above), it never scrolls.
-            .scroll_source(egui::scroll_area::ScrollSource::ALL);
+            .scroll_source(source);
+        if autoscroll != 0.0 {
+            scroll = scroll.vertical_scroll_offset((self.offset + autoscroll).max(0.0));
+        }
         // The anchor goes right below the toolbar, where it was.
         if changed && anchor > 0 {
             scroll = scroll.vertical_scroll_offset(self.start_of(&arranged, anchor.min(count - 1)) as f32);
@@ -1015,6 +1033,68 @@ impl Gallery {
         self.arranged = Some(arranged);
         if list {
             list::column_header(ui, area, self.list_width);
+        }
+    }
+
+    /// Starts, stops and draws autoscroll with the middle mouse button over `area` (REQ-006-14); how far to scroll this
+    /// frame.
+    fn handle_autoscroll(&mut self, ui: &egui::Ui, area: Rect) -> f32 {
+        let ctx = ui.ctx();
+        let (events, pointer, dt, all_up) = ui.input(|input| {
+            (
+                input.events.clone(),
+                input.pointer.latest_pos(),
+                input.stable_dt,
+                !input.pointer.any_down() && !input.pointer.any_released(),
+            )
+        });
+        if self.swallow_click && all_up {
+            self.swallow_click = false;
+        }
+        for event in events {
+            let egui::Event::PointerButton {
+                pos, button, pressed, ..
+            } = event
+            else {
+                continue;
+            };
+            match (button, pressed) {
+                (egui::PointerButton::Middle, true) if self.autoscroll.is_on() => self.autoscroll.stop(),
+                // Only over the gallery itself: not the toolbar, a menu or the viewer.
+                (egui::PointerButton::Middle, true)
+                    if area.contains(pos) && ctx.layer_id_at(pos) == Some(ui.layer_id()) =>
+                {
+                    self.autoscroll.press_middle(pos.y);
+                    self.autoscroll_at = pos;
+                }
+                (egui::PointerButton::Middle, false) => self.autoscroll.release_middle(),
+                (_, true) if self.autoscroll.is_on() => {
+                    self.autoscroll.stop();
+                    self.swallow_click = true;
+                }
+                _ => {}
+            }
+        }
+        if self.autoscroll.is_on() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.autoscroll.stop();
+        }
+        let Some(pointer) = pointer.filter(|_| self.autoscroll.is_on()) else {
+            return 0.0;
+        };
+        self.autoscroll.pointer_at(pointer.y);
+        ctx.set_cursor_icon(egui::CursorIcon::AllScroll);
+        ctx.request_repaint();
+        paint_autoscroll_marker(ctx, self.autoscroll_at);
+        self.autoscroll.velocity(pointer.y) * dt
+    }
+
+    /// Whether tiles and rows react to the pointer: not while autoscroll is on or the click that stopped it lasts.
+    fn tile_sense(&self) -> egui::Sense {
+        if self.autoscroll.is_on() || self.swallow_click {
+            egui::Sense::hover()
+        } else {
+            egui::Sense::click()
         }
     }
 
@@ -1125,6 +1205,22 @@ impl Gallery {
                 service.request(media);
             }
         }
+    }
+}
+
+/// Where autoscroll started: a round marker with arrows up and down (REQ-006-14).
+fn paint_autoscroll_marker(ctx: &egui::Context, at: egui::Pos2) {
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Foreground,
+        egui::Id::unique("autoscroll"),
+    ));
+    painter.circle(at, 14.0, theme::RAISED, egui::Stroke::new(1.0, theme::MIST));
+    let stroke = egui::Stroke::new(1.5, theme::PAPER);
+    // Chevrons pointing up and down, 8 points wide, 2.5 points apart from the center.
+    for direction in [-1.0, 1.0] {
+        let tip = at + vec2(0.0, direction * 7.0);
+        let base = at.y + direction * 2.5;
+        painter.line(vec![pos2(at.x - 4.0, base), tip, pos2(at.x + 4.0, base)], stroke);
     }
 }
 

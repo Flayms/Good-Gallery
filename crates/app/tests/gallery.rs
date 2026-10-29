@@ -145,6 +145,72 @@ fn req_006_07_keeps_the_first_visible_item_in_view_when_zooming() {
     assert!((tile.top() - gallery(&harness).content_top()).abs() < 2.0, "{tile:?}");
 }
 
+fn press(
+    harness: &egui_kittest::Harness<'_, app::AppState>,
+    button: egui::PointerButton,
+    pos: egui::Pos2,
+    pressed: bool,
+) {
+    harness.event(egui::Event::PointerButton {
+        pos,
+        button,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    });
+}
+
+/// REQ-006-14: holding the middle button scrolls toward the pointer until it is released; a middle click scrolls until
+/// the next click, which does nothing else.
+#[test]
+fn req_006_14_scrolls_while_the_middle_button_is_held_and_after_a_middle_click() {
+    use egui::PointerButton::{Middle, Primary};
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness(index(&photos(300)));
+    settle(&mut harness);
+    let offset = |harness: &egui_kittest::Harness<'_, app::AppState>| gallery(harness).offset();
+    let start = egui::pos2(450.0, 300.0);
+    let below = start + egui::vec2(0.0, 150.0);
+    let above = start - egui::vec2(0.0, 150.0);
+
+    harness.hover_at(start);
+    press(&harness, Middle, start, true);
+    harness.run_steps(2);
+    assert_eq!(offset(&harness), 0.0, "not before the pointer leaves the dead zone");
+    harness.hover_at(below);
+    harness.run_steps(4);
+    let scrolled = offset(&harness);
+    assert!(scrolled > 500.0, "scrolled down to {scrolled}");
+    press(&harness, Middle, below, false);
+    harness.run_steps(2);
+    let stopped = offset(&harness);
+    harness.run_steps(4);
+    assert_eq!(offset(&harness), stopped, "releasing the button after moving stops it");
+
+    harness.hover_at(start);
+    press(&harness, Middle, start, true);
+    press(&harness, Middle, start, false);
+    harness.run_steps(1);
+    harness.hover_at(above);
+    harness.run_steps(4);
+    let latched = offset(&harness);
+    assert!(
+        latched < stopped - 500.0,
+        "a middle click scrolls up toward the pointer: {latched}"
+    );
+
+    // The click that stops it opens nothing.
+    press(&harness, Primary, above, true);
+    press(&harness, Primary, above, false);
+    harness.run_steps(2);
+    let after_click = offset(&harness);
+    harness.run_steps(4);
+    assert_eq!(offset(&harness), after_click);
+    assert!(
+        harness.state().viewer.is_none(),
+        "the stopping click opened a media item"
+    );
+}
+
 /// REQ-006-10: gray tiles while the layout loads, and the error when it can't be loaded.
 #[test]
 fn req_006_10_shows_skeleton_tiles_while_loading_and_the_error_when_loading_fails() {

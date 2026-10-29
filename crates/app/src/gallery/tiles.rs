@@ -64,7 +64,7 @@ impl Gallery {
                 continue;
             }
             let id = data.ids[index];
-            let response = ui.interact(rect, ui.make_persistent_id(("tile", id)), egui::Sense::click());
+            let response = ui.interact(rect, ui.make_persistent_id(("tile", id)), self.tile_sense());
             // A click, or Enter on the focused tile, opens the viewer (REQ-009-01).
             if response.clicked() {
                 self.opened = Some(index);
