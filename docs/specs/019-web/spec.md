@@ -1,6 +1,6 @@
 # 019 · Web
 
-**Status:** Draft
+**Status:** Approved
 
 ## Goal
 
@@ -122,17 +122,17 @@ People who want to try Good Gallery, or who are on a computer where they can't i
 
 | REQ        | Test | Result  |
 | ---------- | ---- | ------- |
-| REQ-019-01 |      | no test |
-| REQ-019-02 |      | no test |
-| REQ-019-03 |      | no test |
-| REQ-019-04 |      | no test |
-| REQ-019-05 |      | no test |
-| REQ-019-06 |      | no test |
-| REQ-019-07 |      | no test |
-| REQ-019-08 |      | no test |
-| REQ-019-09 |      | no test |
-| REQ-019-10 |      | no test |
-| REQ-019-11 |      | no test |
-| REQ-019-12 |      | no test |
-| REQ-019-13 |      | no test |
-| REQ-019-14 |      | no test |
+| REQ-019-01 | `web/tests/web.spec.js` › pick, scan, browse, …; a browser without what the page needs… | pass |
+| REQ-019-02 | `web/tests/web.spec.js` › pick, scan, browse, … | partial: the folder upload input (Firefox, Safari); the directory picker (Chrome, Edge) by hand |
+| REQ-019-03 | `web/tests/web.spec.js` › pick, scan, browse, … | partial: formats and skipped folders of the fixture; responsiveness during a scan by hand |
+| REQ-019-04 | `crates/media/src/metadata.rs` › req_019_04_meta_reads_the_same_metadata_as_exiftool; `crates/meta/src` › req_019_04_… | pass |
+| REQ-019-05 | `web/tests/web.spec.js` › pick, scan, browse, … | pass |
+| REQ-019-06 | `web/tests/web.spec.js` › pick, scan, browse, … | partial: the sidebar and a tag search; views, zoom and filters are the desktop's code and tests |
+| REQ-019-07 | `web/tests/web.spec.js` › pick, scan, browse, … | partial: a photo in original quality; video playback by hand |
+| REQ-019-08 | `web/tests/web.spec.js` › pick, scan, browse, … | partial: the reload; the persistent storage request by hand |
+| REQ-019-09 | `web/tests/web.spec.js` › pick, scan, browse, … | partial: picking the folder again (upload input); the browser's permission prompt by hand |
+| REQ-019-10 | `web/tests/web.spec.js` › pick, scan, browse, … | pass |
+| REQ-019-11 | `web/tests/web.spec.js` › pick, scan, browse, … | pass |
+| REQ-019-12 | `web/tests/web.spec.js` › pick, scan, browse, …; `xtask/tests/no_network.rs` › req_019_12_…; `xtask/src/web.rs` › req_019_12_… | pass |
+| REQ-019-13 | `web/tests/web.spec.js` › pick, scan, browse, … | partial: the settings page; the gallery's and viewer's menus by inspection |
+| REQ-019-14 | `xtask/tests/workflows.rs` › req_019_14_ci_tests_the_page_and_the_release_publishes_it | pass |

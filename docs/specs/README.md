@@ -22,7 +22,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [016-date-groups](016-date-groups/spec.md)               | Group the gallery by day, with date and count headers            | Implemented |
 | [017-tag-indicators](017-tag-indicators/spec.md)         | Rating, Places, People and Tags icons over tiles                 | Implemented |
 | [018-linux](018-linux/spec.md)                           | Linux: data folder, system helpers, title bar, package           | Implemented |
-| [019-web](019-web/spec.md)                               | Browser version: a static page, index kept in the browser        | Draft       |
+| [019-web](019-web/spec.md)                               | Browser version: a static page, index kept in the browser        | Approved    |
 
 ## Conventions
 

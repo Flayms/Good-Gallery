@@ -1,15 +1,17 @@
 # Architecture
 
-Good Gallery is one Rust binary (eframe / egui on wgpu) plus three helper programs: exiftool (metadata), ffmpeg (video frames, AVIF) and libmpv (video playback). Windows bundles them; Linux uses the system's. Keep this file describing the current state; how a feature was built is in its spec's `plan.md`.
+Good Gallery is one Rust binary (eframe / egui on wgpu) plus three helper programs: exiftool (metadata), ffmpeg (video frames, AVIF) and libmpv (video playback). Windows bundles them; Linux uses the system's. The same UI also runs in the browser as a static page without helpers (spec 019). Keep this file describing the current state; how a feature was built is in its spec's `plan.md`.
 
 ```
 crates/
   domain    pure types and logic: media, tags, search model, gallery layout, date groups, zoom and viewer math. No IO.
   db        rusqlite: migrations, connections, index writer, gallery and tag queries, settings
-  media     exiftool process pool, metadata extraction, thumbnail rendering, originals, ffmpeg, helper lookup
+  meta      metadata rules (exiftool-named tags → MediaMetadata) and pure-Rust EXIF / XMP / IPTC / container readers. No IO.
+  media     exiftool process pool, metadata extraction, thumbnail rendering, originals, ffmpeg, helper lookup (desktop)
   indexer   scan queue, walk, scans, watcher, schedule, reachability, thumbnail cache and service, library operations
-  app       eframe binary: UI, texture streaming, glass, viewer, video, settings
-xtask/      check-specs, libraries CLI, benchmarks, screenshots, dist, release
+  app       eframe binary: UI, texture streaming, glass, viewer, video, settings; `app::web` for the browser
+xtask/      check-specs, libraries CLI, benchmarks, screenshots, dist, release, web, web-test
+web/        the browser page: index.html (content security policy), browser check, Trunk config; Playwright tests
 packaging/  helper downloads, NSIS installer, smoke test (windows/); .desktop file, install script (linux/)
 ```
 
@@ -85,6 +87,7 @@ Architectural decisions, newest last. One entry each: what was decided, why (wit
 
 **Decided:** `media::exiftool` keeps a pool of `exiftool -stay_open True -@ -` processes (size = parallel file reads) and reads each file with the argument set of exiftool-vendored v38's defaults (`-charset filename=utf8 -json -fast`, its UTF-8 repair filter, `-api struct=1 -use MWG -api keepUTCTime`, numeric durations, GPS and orientation, `-all <file> -ignoreMinorErrors`), which existing indexes were read with, so their rows stay valid. Arguments go over stdin, one per line, no shell; paths are always absolute. A read over 60 s replaces its process. `METADATA_VERSION` is 1; bump it when the extraction rules change.
 **Deviation:** no time zone from the GPS position (it would need a time-zone shape database); such photos get the computer's local zone. See spec 004's plan.
+**Since 2026-10-29** the rules that turn exiftool's tags into `MediaMetadata` live in the crate `meta`, beside the browser's readers (spec 019); `media::metadata` re-exports them.
 **Tests that need exiftool** (or ffmpeg, libmpv, git-cliff) skip themselves when it isn't found, unless `GG_REQUIRE_HELPERS=1` (CI).
 
 ### 2026-10-26 · Pure media and tag rules in `domain`
@@ -169,3 +172,13 @@ Architectural decisions, newest last. One entry each: what was decided, why (wit
 - *Video:* mpv gets `video-rotate=no` and the UI reads `video-dec-params/rotate`, since mpv 0.41's software renderer aborts on rotated videos.
 **Rejected:** winit's client-side decorations (a bar above the toolbar, so the search isn't in the title bar), zbus (its async runtime trips REQ-011-11's guard), bundling the helpers on Linux (distributions ship them; an AppImage can bundle them later).
 
+### 2026-10-29 · Browser version
+
+**Decided:** the app also builds for `wasm32-unknown-unknown` and runs as a static page on GitHub Pages (spec 019; details in its plan).
+- *One wasm instance on the main thread.* No wasm threads (nightly and COOP / COEP headers, which Pages can't send). Slow work is the browser's (decoding, encoding, file reads); our own is sliced by `app::web::Slice`, which yields after 8 ms.
+- *Seams:* desktop-only code sits behind `cfg(not(target_arch = "wasm32"))` in `app`, `indexer` and the crate graph (`media` is desktop only); `app::web` implements the same seams the desktop fills (`ScanRequests`, `IndexerEvent`s, `ThumbnailReady`s, `video::Playback`). `app::WEB` hides desktop-only actions. The desktop entry point is `crates/app/src/desktop.rs`.
+- *Index:* `db` on `sqlite-wasm-rs`'s in-memory file system, with a snapshot in the Origin Private File System, saved after changes and when the page is hidden. *Thumbnails:* OPFS files under `thumbs/<library>/`, the desktop cache's names, size limit and LRU.
+- *Metadata without exiftool:* `meta`'s readers produce exiftool-shaped tags, including `-use MWG`'s keyword reconciliation; a test compares them with exiftool on the same files.
+- *Privacy:* a content security policy without inline scripts (`cargo xtask web` moves Trunk's start script into a file); `no_network.rs` checks the `web-sys` features and the page's scripts.
+- *Tests:* Playwright (`web/tests`, `cargo xtask web-test`) in Chromium with SwiftShader, clicking by position in a fixed viewport and comparing screenshots; npm only there.
+**Rejected:** an index worker with SQLite on OPFS (`sahpool`), a separate web UI, sql.js / IndexedDB, `image` + libwebp in wasm, a DOM `<video>` over the canvas, Chromium only.
