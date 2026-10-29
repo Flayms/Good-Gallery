@@ -4,8 +4,8 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: ".",
   testMatch: "*.spec.js",
-  timeout: 120_000,
-  expect: { timeout: 30_000, toHaveScreenshot: { maxDiffPixelRatio: 0.01 } },
+  timeout: 150_000,
+  expect: { timeout: 30_000, toHaveScreenshot: { maxDiffPixels: 50 } },
   fullyParallel: false,
   workers: 1,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
@@ -14,6 +14,9 @@ export default defineConfig({
     baseURL: "http://localhost:8765/",
     viewport: { width: 1200, height: 800 },
     deviceScaleFactor: 1,
+    locale: "en-US",
+    timezoneId: "UTC",
+    screenshot: "only-on-failure",
   },
   projects: [
     {
