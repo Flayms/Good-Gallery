@@ -60,7 +60,8 @@ fn ci_leaves_release_commits_to_the_release_run() {
     }
 }
 
-/// REQ-014-08: a version tag runs the checks, builds both downloads and publishes them with the changelog's notes.
+/// REQ-014-08, REQ-014-10: a version tag runs the checks, builds both downloads and publishes them, named after the
+/// system and the architecture, with the changelog's notes.
 #[test]
 fn release_publishes_both_downloads_after_the_checks() {
     let release = workflow("release.yml");
@@ -81,9 +82,9 @@ fn release_publishes_both_downloads_after_the_checks() {
     assert!(commands.iter().any(|line| line.starts_with("git-cliff --current")));
     let publish = &release[release.find("gh release create").expect("no gh release create")..];
     for part in [
-        "good-gallery-$VERSION-setup.exe",
-        "good-gallery-$VERSION-portable.zip",
-        "good-gallery-$VERSION-linux-x86_64.tar.gz",
+        "good-gallery-$VERSION-windows-x64-setup.exe",
+        "good-gallery-$VERSION-windows-x64-portable.zip",
+        "good-gallery-$VERSION-linux-x64.tar.gz",
         "--title \"Good Gallery $VERSION\"",
         "--notes-file release-notes.md",
     ] {

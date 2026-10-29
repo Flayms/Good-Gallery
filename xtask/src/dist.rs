@@ -1,9 +1,9 @@
 //! `cargo xtask dist [--helpers <dir>] [--out <dir>] [--no-build] [--no-installer]`: the Windows downloads of a
 //! release (REQ-014-08). Builds the app in release, stages it with the helper programs (from
 //! `packaging/fetch-helpers.ps1`, default `target/helpers`) in the layout the app looks for, then writes
-//! `good-gallery-<version>-portable.zip` and, with NSIS, `good-gallery-<version>-setup.exe` into `target/dist`.
+//! `good-gallery-<version>-windows-x64-portable.zip` and, with NSIS, `good-gallery-<version>-windows-x64-setup.exe` into `target/dist`.
 //!
-//! On Linux it writes `good-gallery-<version>-linux-x86_64.tar.gz` instead (REQ-018-09): the app, its menu entry, icon,
+//! On Linux it writes `good-gallery-<version>-linux-x64.tar.gz` instead (REQ-018-09): the app, its menu entry, icon,
 //! install script and license files, without helpers (the app uses the system's). `--helpers` and `--no-installer`
 //! don't apply there.
 
@@ -24,14 +24,14 @@ const HELPERS: [(Bundled, bool); 3] = [(EXIFTOOL_BUNDLED, true), (FFMPEG_BUNDLED
 /// The installer's and the portable zip's file names.
 pub fn artifact_names(version: &str) -> (String, String) {
     (
-        format!("good-gallery-{version}-setup.exe"),
-        format!("good-gallery-{version}-portable.zip"),
+        format!("good-gallery-{version}-windows-x64-setup.exe"),
+        format!("good-gallery-{version}-windows-x64-portable.zip"),
     )
 }
 
 /// The Linux download's name.
 pub fn linux_artifact_name(version: &str) -> String {
-    format!("good-gallery-{version}-linux-x86_64.tar.gz")
+    format!("good-gallery-{version}-linux-x64.tar.gz")
 }
 
 /// The files of the Linux package besides the executable: `(source below the workspace, name in the package)`.
@@ -285,16 +285,18 @@ mod tests {
         assert!(error.contains("fetch-helpers.ps1"), "{error}");
     }
 
-    /// REQ-014-08: the release attaches setup.exe and the portable zip named after the version.
+    /// REQ-014-08, REQ-014-10: the release attaches setup.exe and the portable zip named after the version, the system
+    /// and the architecture.
     #[test]
-    fn names_the_downloads_after_the_version() {
+    fn req_014_10_names_say_the_system_and_the_architecture() {
         assert_eq!(
             artifact_names("1.2.3"),
             (
-                "good-gallery-1.2.3-setup.exe".to_owned(),
-                "good-gallery-1.2.3-portable.zip".to_owned()
+                "good-gallery-1.2.3-windows-x64-setup.exe".to_owned(),
+                "good-gallery-1.2.3-windows-x64-portable.zip".to_owned()
             )
         );
+        assert_eq!(linux_artifact_name("1.2.3"), "good-gallery-1.2.3-linux-x64.tar.gz");
     }
 
     /// REQ-018-09: the Linux package holds the app, its menu entry, icon, install script and licenses, and the app and
@@ -308,7 +310,7 @@ mod tests {
         let exe = dir.path().join("app");
         touch(&exe);
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let out = dir.path().join("good-gallery-1.2.3-linux-x86_64");
+        let out = dir.path().join("good-gallery-1.2.3-linux-x64");
         touch(&out.join("left-over.txt"));
 
         stage_linux(&exe, &root, &out).unwrap();
@@ -337,6 +339,5 @@ mod tests {
         for line in ["Exec=good-gallery", "Icon=good-gallery", "StartupWMClass=good-gallery"] {
             assert!(entry.lines().any(|l| l == line), "{line}");
         }
-        assert_eq!(linux_artifact_name("1.2.3"), "good-gallery-1.2.3-linux-x86_64.tar.gz");
     }
 }
