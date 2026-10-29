@@ -312,6 +312,60 @@ fn req_008_04_req_008_07_toggles_ratings_and_remembers_collapsed_groups() {
     assert_eq!(stored, Some("closed".into()));
 }
 
+#[test]
+fn req_008_08_req_008_09_hides_and_shows_the_sidebar_and_remembers_it() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture);
+    let gallery_left = |harness: &App| {
+        harness
+            .get_by_role_and_label(Role::TextInput, app::search_bar::LABEL)
+            .rect()
+            .left()
+    };
+    let shown_left = gallery_left(&harness);
+    assert!(harness.query_by_role_and_label(Role::Button, "Show sidebar").is_none());
+
+    harness.get_by_role_and_label(Role::Button, "Hide sidebar").click();
+    settle(&mut harness);
+    assert!(
+        harness.query_by_role_and_label(Role::Button, "Beach").is_none(),
+        "the sidebar still shows"
+    );
+    assert!(
+        gallery_left(&harness) < shown_left - 100.0,
+        "the gallery doesn't take the sidebar's width"
+    );
+    let db = harness.state().db().unwrap();
+    let stored = db::settings::value(&db.lock().unwrap(), "sidebar.hidden").unwrap();
+    assert_eq!(stored, Some(true.into()));
+
+    // The Settings page has the button too.
+    harness.state_mut().page = app::Page::Settings;
+    settle(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "Show sidebar").click();
+    settle(&mut harness);
+    assert!(harness.query_by_role_and_label(Role::Button, "Beach").is_some());
+    harness.state_mut().page = app::Page::Gallery;
+    settle(&mut harness);
+
+    // Ctrl + B hides and shows it again.
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::B);
+    settle(&mut harness);
+    assert!(harness.query_by_role_and_label(Role::Button, "Beach").is_none());
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::B);
+    settle(&mut harness);
+    assert!(harness.query_by_role_and_label(Role::Button, "Beach").is_some());
+    assert_eq!(gallery_left(&harness), shown_left);
+
+    // The next start keeps it hidden.
+    let conn = index();
+    db::settings::set_value(&conn, "sidebar.hidden", &true.into()).unwrap();
+    let mut harness = fixture.harness(conn);
+    settle(&mut harness);
+    assert!(harness.query_by_role_and_label(Role::Button, "Beach").is_none());
+    assert!(harness.query_by_role_and_label(Role::Button, "Show sidebar").is_some());
+}
+
 /// REQ-013-02, REQ-013-08: at the minimum window size every toolbar control is visible, none overlaps another, and
 /// none lies under the window controls.
 #[test]

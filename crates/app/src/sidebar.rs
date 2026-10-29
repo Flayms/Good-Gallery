@@ -30,11 +30,14 @@ pub struct SidebarState {
     collapsed: HashSet<String>,
     /// The library whose folder tree was expanded for the active folder.
     expanded_for: Option<(i64, Option<String>)>,
+    /// Hidden with _Hide sidebar_ or Ctrl + B, stored under `sidebar.hidden` (REQ-008-08, REQ-008-09).
+    hidden: bool,
     loaded: bool,
 }
 
 impl SidebarState {
-    fn load(&mut self, db: &Arc<Mutex<Connection>>) {
+    /// Reads the collapsed groups and whether the sidebar is hidden, once.
+    pub fn load(&mut self, db: &Arc<Mutex<Connection>>) {
         if self.loaded {
             return;
         }
@@ -48,6 +51,22 @@ impl SidebarState {
             if stored.as_ref().and_then(|value| value.as_str()) == Some("closed") {
                 self.collapsed.insert(id.to_string());
             }
+        }
+        self.hidden = db::settings::value(&conn, "sidebar.hidden").ok().flatten() == Some(true.into());
+    }
+
+    pub fn is_hidden(&self) -> bool {
+        self.hidden
+    }
+
+    /// Hides or shows the sidebar and remembers it (REQ-008-08, REQ-008-09).
+    pub fn set_hidden(&mut self, hidden: bool, db: Option<&Arc<Mutex<Connection>>>) {
+        self.hidden = hidden;
+        // As for groups: if a background job holds the connection, the choice isn't stored this time.
+        if let Some(Ok(conn)) = db.map(|db| db.try_lock())
+            && let Err(error) = db::settings::set_value(&conn, "sidebar.hidden", &hidden.into())
+        {
+            tracing::warn!("can't store whether the sidebar is hidden: {error}");
         }
     }
 
@@ -101,6 +120,12 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
         ui.add_space(8.0);
         ui.add(Icon::Images.image(20.0, theme::PAPER));
         ui.label(egui::RichText::new("Good Gallery").family(theme::semibold()));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let hide = crate::icons::icon_button(ui, Icon::PanelLeft, "Hide sidebar", "Hide sidebar (Ctrl + B)");
+            if hide.clicked() {
+                state.set_hidden(true, input.db.as_ref());
+            }
+        });
     });
     let Some(gallery) = gallery else {
         settings_row(ui, input.page);
@@ -140,6 +165,12 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
         *input.page = Page::Gallery;
         gallery.set_search(search);
     }
+}
+
+/// The _Show sidebar_ button at the left of the toolbar and the Settings header while the sidebar is hidden
+/// (REQ-008-08); whether it was clicked.
+pub fn show_button(ui: &mut egui::Ui) -> bool {
+    crate::icons::icon_button(ui, Icon::PanelLeft, "Show sidebar", "Show sidebar (Ctrl + B)").clicked()
 }
 
 fn group_label(ui: &mut egui::Ui, label: &str) {

@@ -59,12 +59,26 @@ The user browses by structure rather than by typing: libraries and their folders
 - **When** the user collapses or expands one
 - **Then** that state is kept across sessions
 
+### REQ-008-08 · Hide and show the sidebar
+
+- **Given** the sidebar is shown
+- **When** the user clicks _Hide sidebar_ in its header, or presses Ctrl + B while the viewer is closed
+- **Then** the sidebar hides and the gallery or the Settings page takes its width, and a _Show sidebar_ button appears at the left of the toolbar and of the Settings header
+- **And** clicking _Show sidebar_, or pressing Ctrl + B again, shows the sidebar where it was (same groups, scroll position and filters)
+
+### REQ-008-09 · Remember the hidden sidebar
+
+- **Given** the user hid or showed the sidebar
+- **When** the app starts the next time
+- **Then** the sidebar is hidden or shown as it was
+
 ## Out of scope
 
 - Configuring which tag names count as People or Places roots, or adding categories.
 - Library-specific counts in the People, Places, Ratings and Tags groups (they count across all libraries).
 - Showing counts that reflect the current filters.
 - Drag and drop or context menus in the sidebar.
+- Resizing the sidebar, or hiding it automatically in narrow windows.
 
 ## Assumptions
 
@@ -82,3 +96,5 @@ The user browses by structure rather than by typing: libraries and their folders
 | REQ-008-05 | `crates/db/src/tags.rs` › req_008_05_excludes_category_tags_and_their_roots; `crates/app/tests/search.rs` › req_008_03_req_008_06_filters_by_clicking_people_places_and_tags | pass |
 | REQ-008-06 | `crates/domain/src/search.rs` › req_007_05_req_008_06_adds_moves_and_removes_tags_case_insensitively; `crates/app/tests/search.rs` › req_008_03_req_008_06_filters_by_clicking_people_places_and_tags | pass |
 | REQ-008-07 | `crates/app/tests/search.rs` › req_008_04_req_008_07_toggles_ratings_and_remembers_collapsed_groups | pass |
+| REQ-008-08 | `crates/app/tests/search.rs` › req_008_08_req_008_09_hides_and_shows_the_sidebar_and_remembers_it | pass |
+| REQ-008-09 | `crates/app/tests/search.rs` › req_008_08_req_008_09_hides_and_shows_the_sidebar_and_remembers_it | pass |
