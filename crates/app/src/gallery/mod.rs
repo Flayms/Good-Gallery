@@ -1005,7 +1005,9 @@ impl Gallery {
             // Ctrl + wheel zooms (handled above), it never scrolls.
             .scroll_source(source);
         if autoscroll != 0.0 {
-            scroll = scroll.vertical_scroll_offset((self.offset + autoscroll).max(0.0));
+            // Within the content: past its end the scroll area would spring back once autoscroll stops.
+            let end = (total + PADDING - self.view_height).max(0.0);
+            scroll = scroll.vertical_scroll_offset((self.offset + autoscroll).clamp(0.0, end));
         }
         // The anchor goes right below the toolbar, where it was.
         if changed && anchor > 0 {
@@ -1040,6 +1042,11 @@ impl Gallery {
     /// frame.
     fn handle_autoscroll(&mut self, ui: &egui::Ui, area: Rect) -> f32 {
         let ctx = ui.ctx();
+        // Escape stops it and does nothing else.
+        if self.autoscroll.is_on() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.autoscroll.stop();
+        }
         let (events, pointer, dt, all_up) = ui.input(|input| {
             (
                 input.events.clone(),
@@ -1052,11 +1059,16 @@ impl Gallery {
             self.swallow_click = false;
         }
         for event in events {
-            let egui::Event::PointerButton {
-                pos, button, pressed, ..
-            } = event
-            else {
-                continue;
+            let (pos, button, pressed) = match event {
+                egui::Event::PointerButton {
+                    pos, button, pressed, ..
+                } => (pos, button, pressed),
+                // As in a browser, the wheel, the touchpad or a key stops it; the wheel then scrolls as usual.
+                egui::Event::MouseWheel { .. } | egui::Event::Key { pressed: true, .. } => {
+                    self.autoscroll.stop();
+                    continue;
+                }
+                _ => continue,
             };
             match (button, pressed) {
                 (egui::PointerButton::Middle, true) if self.autoscroll.is_on() => self.autoscroll.stop(),
@@ -1075,10 +1087,6 @@ impl Gallery {
                 _ => {}
             }
         }
-        if self.autoscroll.is_on() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
-        {
-            self.autoscroll.stop();
-        }
         let Some(pointer) = pointer.filter(|_| self.autoscroll.is_on()) else {
             return 0.0;
         };
@@ -1086,7 +1094,7 @@ impl Gallery {
         ctx.set_cursor_icon(egui::CursorIcon::AllScroll);
         ctx.request_repaint();
         paint_autoscroll_marker(ctx, self.autoscroll_at);
-        self.autoscroll.velocity(pointer.y) * dt
+        self.autoscroll.velocity(pointer.y) * dt.min(domain::autoscroll::MAX_FRAME)
     }
 
     /// Whether tiles and rows react to the pointer: not while autoscroll is on or the click that stopped it lasts.

@@ -1,13 +1,16 @@
 //! Autoscroll with the middle mouse button (REQ-006-14), as in a browser: holding the button and moving the pointer
 //! scrolls until the button is released; a click without moving keeps scrolling until the next click.
+//!
+//! The speed follows Firefox (`toolkit/actors/AutoScrollChild.sys.mjs`): `(d / 12)^1.5 - 1` pixels every 20 ms at a
+//! distance `d` from where the button was pressed, so it starts slowly and grows faster than the distance.
 
-/// Distance from where the button was pressed within which the gallery doesn't scroll, in points. Leaving it while the
-/// button is held makes releasing the button stop autoscroll.
+/// Distance from where the button was pressed within which the gallery doesn't scroll, in points (Firefox's 12 px).
+/// Leaving it while the button is held makes releasing the button stop autoscroll.
 pub const DEAD_ZONE: f32 = 12.0;
-/// Scroll speed per point beyond the dead zone, in points per second.
-pub const SPEED: f32 = 8.0;
-/// The fastest autoscroll, in points per second.
-pub const MAX_SPEED: f32 = 8000.0;
+/// Firefox's speeds are per 20 ms, the frame time it was tuned at.
+const FIREFOX_FRAME: f32 = 0.02;
+/// The longest frame to scroll for, in seconds (Firefox's 100 ms): a stalled frame doesn't make it leap.
+pub const MAX_FRAME: f32 = 0.1;
 
 /// Whether and how autoscroll is on. `origin` is the pointer's height where the middle button was pressed.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -73,9 +76,11 @@ impl Autoscroll {
     /// How fast to scroll with the pointer at height `y`, in points per second (positive scrolls down).
     pub fn velocity(self, y: f32) -> f32 {
         let Some(origin) = self.origin() else { return 0.0 };
-        let distance = y - origin;
-        let beyond = (distance.abs() - DEAD_ZONE).max(0.0);
-        (beyond * SPEED).min(MAX_SPEED).copysign(distance)
+        let distance = (y - origin) / DEAD_ZONE;
+        if distance.abs() <= 1.0 {
+            return 0.0;
+        }
+        ((distance.abs().powf(1.5) - 1.0) / FIREFOX_FRAME).copysign(distance)
     }
 }
 
@@ -90,15 +95,21 @@ mod tests {
         autoscroll.press_middle(100.0);
         assert_eq!(autoscroll.velocity(100.0 + DEAD_ZONE), 0.0, "within the dead zone");
         assert_eq!(autoscroll.velocity(100.0 - DEAD_ZONE), 0.0);
-        let near = autoscroll.velocity(150.0);
-        let far = autoscroll.velocity(300.0);
-        assert!(near > 0.0 && far > near, "{near} {far}");
         assert_eq!(
             autoscroll.velocity(-200.0),
             -autoscroll.velocity(400.0),
             "up as fast as down"
         );
-        assert_eq!(autoscroll.velocity(1_000_000.0), MAX_SPEED);
+        // Firefox's curve: (d / 12)^1.5 - 1 points every 20 ms.
+        let per_second = |d: f32| autoscroll.velocity(100.0 + d);
+        assert!((per_second(24.0) - 50.0 * (2f32.powf(1.5) - 1.0)).abs() < 0.01);
+        assert!((per_second(120.0) - 50.0 * (10f32.powf(1.5) - 1.0)).abs() < 0.1);
+        // Faster than the distance: twice as far is more than twice as fast.
+        assert!(per_second(200.0) > 2.5 * per_second(100.0));
+        assert!(
+            per_second(13.0) > 0.0 && per_second(13.0) < 10.0,
+            "starts slowly past the dead zone"
+        );
     }
 
     #[test]
