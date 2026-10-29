@@ -450,7 +450,11 @@ fn status_badge(ui: &mut egui::Ui, status: LibraryStatus) {
         .corner_radius(CornerRadius::same(u8::MAX))
         .inner_margin(Margin::symmetric(8, 1))
         .show(ui, |ui| {
-            ui.label(RichText::new(status.as_str()).size(theme::SIZE_CAPTION).color(text));
+            ui.label(
+                RichText::new(crate::status_label(status))
+                    .size(theme::SIZE_CAPTION)
+                    .color(text),
+            );
         });
 }
 

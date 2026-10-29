@@ -31,6 +31,15 @@ pub use state::{AppState, CacheUsage, FolderPicker, Page, SettingsTargets};
 /// The browser version (spec 019): no files by path, no file manager, no helper programs, no scheduled checks.
 pub const WEB: bool = cfg!(target_arch = "wasm32");
 
+/// A library's status as the sidebar and the settings show it: in the browser, an unreadable folder needs the user
+/// to give access again rather than a drive to come back (REQ-019-09).
+pub fn status_label(status: db::libraries::LibraryStatus) -> &'static str {
+    match status {
+        db::libraries::LibraryStatus::Offline if WEB => "needs access",
+        status => status.as_str(),
+    }
+}
+
 use eframe::egui;
 
 /// Once per context: theme, fonts and image loaders (icons are SVG).

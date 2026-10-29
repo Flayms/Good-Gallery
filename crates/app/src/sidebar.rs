@@ -287,7 +287,8 @@ fn libraries(
         let offline = library.status == LibraryStatus::Offline;
         let selected = search.library == Some(library.id);
         // A spinner while scanned (drawn below), else the offline badge.
-        let trailing = (input.scanning != Some(library.id) && offline).then(|| "offline".to_string());
+        let trailing =
+            (input.scanning != Some(library.id) && offline).then(|| crate::status_label(library.status).to_string());
         let (response, _) = row(
             ui,
             Row {

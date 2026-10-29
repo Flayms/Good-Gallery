@@ -135,8 +135,10 @@ fn readable(library: i64, path: &str, source: Source) {
 }
 
 /// At the start of a visit: libraries whose folder the browser still lets the page read become readable and get a
-/// full scan (REQ-019-10); the others are marked offline until the user gives access again (REQ-019-09).
-pub async fn restore(libraries: &[Library], db: &Mutex<Connection>, scans: &dyn ScanRequests) {
+/// full scan (REQ-019-10); the others are marked offline until the user gives access again (REQ-019-09). Returns
+/// those offline ones.
+pub async fn restore(libraries: &[Library], db: &Mutex<Connection>, scans: &dyn ScanRequests) -> Vec<i64> {
+    let mut offline = Vec::new();
     for library in libraries {
         FOLDERS.with_borrow_mut(|folders| folders.paths.insert(library.id, library.path.clone()));
         let dir = match js::wait(js::load_folder(&library.path)).await {
@@ -172,10 +174,12 @@ pub async fn restore(libraries: &[Library], db: &Mutex<Connection>, scans: &dyn 
             }
             (Some(dir), false) => {
                 FOLDERS.with_borrow_mut(|folders| folders.asleep.insert(library.id, dir));
+                offline.push(library.id);
             }
-            (None, _) => {}
+            (None, _) => offline.push(library.id),
         }
     }
+    offline
 }
 
 /// What the page can read of `library` now, if anything.
