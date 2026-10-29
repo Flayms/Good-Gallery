@@ -11,7 +11,7 @@ use domain::layout::TileLayout;
 use domain::media::MediaKind;
 use domain::view::{TagIndicator, TagIndicatorKind, indicators_of};
 use eframe::egui::{self, Color32, Rect, Vec2, pos2, vec2};
-use std::time::Instant;
+use web_time::Instant;
 
 /// Solid badges on tiles (`docs/design.md`: never glass on tiles).
 const BADGE: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 153);

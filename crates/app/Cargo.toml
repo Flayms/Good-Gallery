@@ -17,15 +17,12 @@ chrono.workspace = true
 db.workspace = true
 egui_extras.workspace = true
 indexer.workspace = true
-media.workspace = true
-rfd.workspace = true
 eframe.workspace = true
 image.workspace = true
-libloading.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
-webp.workspace = true
 jiff.workspace = true
+tracing-subscriber.workspace = true
+web-time.workspace = true
 serde_json.workspace = true
 domain.workspace = true
 thumbhash.workspace = true
@@ -36,6 +33,36 @@ sys-locale.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
+
+# Helper programs, files by path, libmpv and threads: the desktop app only.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+libloading.workspace = true
+media.workspace = true
+rfd.workspace = true
+webp.workspace = true
+
+# The browser version (spec 019).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+chrono = { workspace = true, features = ["wasmbind"] }
+js-sys.workspace = true
+meta.workspace = true
+# The index's snapshot in the page's storage (`web::index`).
+rusqlite = { workspace = true, features = ["backup", "serialize"] }
+sys-locale = { workspace = true, features = ["js"] }
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-sys = { workspace = true, features = [
+    "Blob",
+    "console",
+    "Document",
+    "Element",
+    "File",
+    "HtmlCanvasElement",
+    "HtmlVideoElement",
+    "ImageBitmap",
+    "Performance",
+    "Window",
+] }
 
 [build-dependencies]
 winresource = { version = "0.1.34", default-features = false }

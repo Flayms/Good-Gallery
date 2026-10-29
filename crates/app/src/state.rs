@@ -8,7 +8,8 @@ use indexer::{IndexerEvent, IndexerStatus, ScanRequests};
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// While a scan writes, the gallery and counts refresh at most this often (REQ-006-11).
 const REFRESH_WHILE_SCANNING: Duration = Duration::from_secs(5);
@@ -25,8 +26,10 @@ pub trait FolderPicker: Send + Sync {
     fn pick_folder(&self) -> Option<PathBuf>;
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct NativeFolderPicker;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl FolderPicker for NativeFolderPicker {
     fn pick_folder(&self) -> Option<PathBuf> {
         rfd::FileDialog::new().set_title("Add a library").pick_folder()
@@ -49,8 +52,24 @@ pub const SHOW_IN_FOLDER: &str = if cfg!(windows) {
 pub struct Explorer;
 
 impl FileManager for Explorer {
+    #[cfg(not(target_arch = "wasm32"))]
     fn show_in_folder(&self, file: &std::path::Path) -> std::io::Result<()> {
         media::helpers::show_in_explorer(file)
+    }
+
+    /// The browser has no file manager to open (REQ-019-13).
+    #[cfg(target_arch = "wasm32")]
+    fn show_in_folder(&self, _file: &std::path::Path) -> std::io::Result<()> {
+        Err(std::io::ErrorKind::Unsupported.into())
+    }
+}
+
+/// No folder dialog: the browser's picker is asynchronous (`web::pick_folder`), and a failed index has none.
+pub struct NoFolderPicker;
+
+impl FolderPicker for NoFolderPicker {
+    fn pick_folder(&self) -> Option<PathBuf> {
+        None
     }
 }
 
@@ -100,9 +119,15 @@ pub fn gib_to_bytes(gib: f64) -> u64 {
     (gib * 1024f64.powi(3)).round() as u64
 }
 
-/// Results of background jobs, applied on the UI thread.
+/// Results of background jobs, applied on the UI thread. The browser has no background threads or folder dialog, so
+/// some never happen there.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 enum Event {
     LibraryAdded(Result<Library, String>),
+    /// The browser's folder picker closed: the library it added or made readable again, or `None` when cancelled
+    /// (REQ-019-02, REQ-019-09).
+    #[cfg(target_arch = "wasm32")]
+    FolderAdded(Result<Option<crate::web::folders::Picked>, String>),
     LibraryRemoved(Result<(), String>),
     FolderPicked(Option<PathBuf>),
     /// Explorer couldn't show a file: why.
@@ -136,6 +161,7 @@ pub struct AppState {
     pub libraries: Vec<Library>,
     pub media_count: i64,
     scans: Arc<dyn ScanRequests>,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     picker: Arc<dyn FolderPicker>,
     events: (Sender<Event>, Receiver<Event>),
     pending_jobs: usize,
@@ -147,8 +173,10 @@ pub struct AppState {
     last_written_refresh: Option<Instant>,
     written_since_refresh: bool,
     /// Kept alive for the app's lifetime; dropping it stops the schedule.
+    #[cfg(not(target_arch = "wasm32"))]
     scheduler: Option<Arc<indexer::schedule::Scheduler>>,
     /// Renders thumbnails in the background; the gallery's tiles request theirs from it.
+    #[cfg(not(target_arch = "wasm32"))]
     thumbnails: Option<Arc<indexer::thumbnails::ThumbnailService>>,
     /// `None` if the index couldn't be opened.
     pub gallery: Option<Gallery>,
@@ -205,12 +233,14 @@ impl AppState {
     }
 
     /// Runs scheduled scans for as long as the app runs.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_scheduler(mut self, scheduler: Arc<indexer::schedule::Scheduler>) -> Self {
         self.scheduler = Some(scheduler);
         self
     }
 
     /// Renders thumbnails for as long as the app runs.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_thumbnails(mut self, thumbnails: Arc<indexer::thumbnails::ThumbnailService>) -> Self {
         self.thumbnails = Some(thumbnails);
         self
@@ -314,7 +344,7 @@ impl AppState {
 
     /// The index couldn't be opened: the app shows `error` instead of the gallery.
     pub fn failed(error: String) -> Self {
-        let mut state = Self::empty(Arc::new(indexer::NoScans), Arc::new(NativeFolderPicker));
+        let mut state = Self::empty(Arc::new(indexer::NoScans), Arc::new(NoFolderPicker));
         state.error = Some(error);
         state
     }
@@ -336,7 +366,9 @@ impl AppState {
             indexer_status: IndexerStatus::default(),
             last_written_refresh: None,
             written_since_refresh: false,
+            #[cfg(not(target_arch = "wasm32"))]
             scheduler: None,
+            #[cfg(not(target_arch = "wasm32"))]
             thumbnails: None,
             gallery: None,
             search_bar: Default::default(),
@@ -403,6 +435,7 @@ impl AppState {
     }
 
     /// Runs `job` on its own thread. Every job sends exactly one event, also when it panics.
+    #[cfg(not(target_arch = "wasm32"))]
     fn spawn(&mut self, job: impl FnOnce() -> Event + Send + 'static) {
         let tx = self.events.0.clone();
         self.pending_jobs += 1;
@@ -412,11 +445,19 @@ impl AppState {
         });
     }
 
+    /// The browser has no threads: runs `job` now; its event applies with the next [`Self::poll`].
+    #[cfg(target_arch = "wasm32")]
+    fn spawn(&mut self, job: impl FnOnce() -> Event + Send + 'static) {
+        self.pending_jobs += 1;
+        let _ = self.events.0.send(job());
+    }
+
     pub fn is_busy(&self) -> bool {
         self.pending_jobs > 0
     }
 
     /// Adds the library at `path` in the background (the reachability check may take seconds).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn add_library(&mut self, path: String) {
         let Some(db) = self.db.clone() else { return };
         let scans = self.scans.clone();
@@ -431,11 +472,28 @@ impl AppState {
         });
     }
 
+    /// The browser has no paths to type (REQ-019-13).
+    #[cfg(target_arch = "wasm32")]
+    pub fn add_library(&mut self, _path: String) {}
+
     /// Opens the folder dialog; the picked folder is then added.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn browse_for_library(&mut self) {
         let picker = self.picker.clone();
         self.settings_page.picking = true;
         self.spawn(move || Event::FolderPicked(picker.pick_folder()));
+    }
+
+    /// Opens the browser's folder picker; the picked folder becomes a library and is scanned (REQ-019-02).
+    #[cfg(target_arch = "wasm32")]
+    pub fn browse_for_library(&mut self) {
+        let Some(db) = self.db.clone() else { return };
+        let (tx, scans) = (self.events.0.clone(), self.scans.clone());
+        self.settings_page.picking = true;
+        self.pending_jobs += 1;
+        crate::web::folders::pick_folder(db, scans, move |added| {
+            let _ = tx.send(Event::FolderAdded(added));
+        });
     }
 
     /// Removes a library in the background: deleting the media items of a large library takes a while.
@@ -533,6 +591,23 @@ impl AppState {
                     self.toasts.error(error);
                 }
                 self.refresh();
+            }
+            #[cfg(target_arch = "wasm32")]
+            Event::FolderAdded(result) => {
+                self.settings_page.picking = false;
+                match result {
+                    Ok(Some(picked)) => {
+                        let label = &picked.library.label;
+                        self.toasts.success(if picked.added {
+                            format!("Added {label}, indexing…")
+                        } else {
+                            format!("{label} is readable again, checking for changes…")
+                        });
+                        self.refresh();
+                    }
+                    Ok(None) => {}
+                    Err(error) => self.toasts.error(error),
+                }
             }
             Event::FolderPicked(folder) => {
                 self.settings_page.picking = false;

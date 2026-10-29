@@ -144,11 +144,29 @@ pub fn reduced_transparency(ctx: &egui::Context) -> bool {
     ctx.data(|data| data.get_temp(transparency_id())).unwrap_or(false)
 }
 
+/// The OS asks for reduced motion: Windows' _Animation effects_, GNOME's animations, or the browser's
+/// `prefers-reduced-motion`.
+fn os_reduced_motion() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    return crate::web::js::prefers_reduced_motion();
+    #[cfg(not(target_arch = "wasm32"))]
+    return media::helpers::reduced_motion();
+}
+
+/// The OS asks for reduced transparency: Windows' _Transparency effects_, or the browser's
+/// `prefers-reduced-transparency`.
+fn os_reduced_transparency() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    return crate::web::js::prefers_reduced_transparency();
+    #[cfg(not(target_arch = "wasm32"))]
+    return media::helpers::reduced_transparency();
+}
+
 /// Windows' _Animation effects_ and _Transparency effects_, read again at most every 2 s while the app draws frames,
 /// so it follows them while it runs (spec 013, Assumptions).
 #[derive(Debug, Default)]
 pub struct OsPreferences {
-    checked: Option<std::time::Instant>,
+    checked: Option<web_time::Instant>,
     reduced_motion: Option<bool>,
     reduced_transparency: Option<bool>,
 }
@@ -161,13 +179,13 @@ impl OsPreferences {
         if self.checked.is_some_and(|at| at.elapsed() < Self::EVERY) {
             return;
         }
-        self.checked = Some(std::time::Instant::now());
-        let motion = media::helpers::reduced_motion();
+        self.checked = Some(web_time::Instant::now());
+        let motion = os_reduced_motion();
         if self.reduced_motion != Some(motion) {
             self.reduced_motion = Some(motion);
             set_reduced_motion(ctx, motion);
         }
-        let transparency = media::helpers::reduced_transparency();
+        let transparency = os_reduced_transparency();
         if self.reduced_transparency != Some(transparency) {
             self.reduced_transparency = Some(transparency);
             set_reduced_transparency(ctx, transparency);
@@ -277,11 +295,7 @@ fn style(style: &mut egui::Style) {
     style.spacing.button_padding = egui::vec2(3.0 * SPACE, 1.5 * SPACE);
     style.spacing.interact_size.y = CONTROL_HEIGHT;
     // With Windows' animation effects off, transitions are instant (`docs/design.md`); see [`motion`].
-    style.animation_time = if media::helpers::reduced_motion() {
-        0.0
-    } else {
-        DURATION_FAST
-    };
+    style.animation_time = if os_reduced_motion() { 0.0 } else { DURATION_FAST };
 
     let v = &mut style.visuals;
     v.dark_mode = true;

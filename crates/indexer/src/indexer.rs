@@ -3,7 +3,7 @@
 
 use crate::scan::{MAX_CHANGED_PATHS, ScanDeps, ScanOptions, ScanOutcome, ScanProgress, ScanScope, scan_root};
 use crate::watcher::{LibraryWatcher, WatchEvent};
-use crate::{ScanKind, ScanRequests};
+use crate::{CurrentScan, IndexerEvent, IndexerStatus, ScanKind, ScanRequests, ScanResult};
 use db::writer::IndexWriter;
 use media::metadata::MetadataSource;
 use std::collections::HashMap;
@@ -13,39 +13,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
-
-/// How a scan ended.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ScanResult {
-    Completed,
-    Offline,
-    Cancelled,
-    /// An index error or a panic; the scan counts as finished (REQ-002-13).
-    Failed(String),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CurrentScan {
-    pub library: i64,
-    pub kind: ScanKind,
-    pub scanned: u64,
-    pub indexed: u64,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct IndexerStatus {
-    pub current: Option<CurrentScan>,
-    /// Libraries waiting to be scanned, in order.
-    pub queue: Vec<i64>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum IndexerEvent {
-    Status(IndexerStatus),
-    /// Files of the library were written to the index.
-    Written(i64),
-    Done(i64, ScanResult),
-}
 
 /// A scope covering both scans of a library.
 pub fn merge_scopes(a: ScanScope, b: ScanScope) -> ScanScope {

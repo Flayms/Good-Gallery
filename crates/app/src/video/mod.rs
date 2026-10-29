@@ -2,9 +2,12 @@
 //! a [`FakePlayback`]. [`Videos`] makes the player on first use, since loading libmpv costs time and memory.
 
 pub mod controls;
+#[cfg(not(target_arch = "wasm32"))]
 mod mpv;
+#[cfg(not(target_arch = "wasm32"))]
 mod player;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use player::MpvPlayer;
 
 use eframe::egui::TextureId;
@@ -109,7 +112,7 @@ impl Videos {
     /// The player, made now if it wasn't yet; or why there is none.
     pub fn player(&mut self) -> Result<&mut dyn Playback, String> {
         if self.player.is_none() {
-            let start = std::time::Instant::now();
+            let start = web_time::Instant::now();
             let made = match self.make.take() {
                 Some(make) => make(),
                 None => Err("no video player".to_owned()),

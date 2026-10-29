@@ -81,16 +81,68 @@ pub struct Originals {
     wanted: HashSet<i64>,
     /// A cancelled load came back for a photo that is wanted again: the next [`Originals::set`] queues it anew.
     requeue: bool,
+    /// The browser has no threads: loads are tasks on the page's event loop (see [`Self::pump`]).
+    #[cfg(target_arch = "wasm32")]
+    loads: (Sender<Done>, u32),
 }
 
 impl Originals {
     /// Starts the workers; they make wgpu textures with `render_state`, else egui textures. Without `ffmpeg`, AVIF
     /// originals fail.
+    #[cfg(target_arch = "wasm32")]
+    pub fn new(ctx: egui::Context, render_state: Option<egui_wgpu::RenderState>, _ffmpeg: Option<PathBuf>) -> Self {
+        let max_side = max_side(&ctx, render_state.as_ref());
+        let (done, results) = channel();
+        Self {
+            queue: Arc::new((Mutex::new(Queue::default()), Condvar::new())),
+            results,
+            ctx,
+            render_state,
+            loaded: HashMap::new(),
+            failed: HashMap::new(),
+            wanted: HashSet::new(),
+            requeue: false,
+            loads: (done, max_side),
+        }
+    }
+
+    /// Starts loading the wanted photos, as many at once as the desktop has workers: the browser decodes them on its
+    /// own threads (REQ-019-07).
+    #[cfg(target_arch = "wasm32")]
+    fn pump(&self) {
+        loop {
+            let request = {
+                let mut queue = self.queue.0.lock().unwrap_or_else(|p| p.into_inner());
+                if queue.in_flight.len() >= WORKERS || queue.waiting.is_empty() {
+                    return;
+                }
+                let request = queue.waiting.remove(0);
+                if !queue.in_flight.insert(request.media) {
+                    continue;
+                }
+                request
+            };
+            let (queue, done, ctx) = (self.queue.clone(), self.loads.0.clone(), self.ctx.clone());
+            let (render_state, max_side) = (self.render_state.clone(), self.loads.1);
+            crate::web::spawn(async move {
+                let wanted = || still_wanted(&queue, request.media);
+                let outcome = if wanted() {
+                    load_in_browser(&request, render_state.as_ref(), max_side, wanted).await
+                } else {
+                    Outcome::Cancelled
+                };
+                let _ = done.send(Done {
+                    media: request.media,
+                    outcome,
+                });
+                ctx.request_repaint();
+            });
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(ctx: egui::Context, render_state: Option<egui_wgpu::RenderState>, ffmpeg: Option<PathBuf>) -> Self {
-        let max_side = match &render_state {
-            Some(render_state) => render_state.device.limits().max_texture_dimension_2d,
-            None => ctx.input(|input| input.max_texture_side) as u32,
-        };
+        let max_side = max_side(&ctx, render_state.as_ref());
         let queue = Arc::new((Mutex::new(Queue::default()), Condvar::new()));
         let (tx, results) = channel();
         for i in 0..WORKERS {
@@ -138,7 +190,10 @@ impl Originals {
         queue.waiting = waiting;
         queue.wanted = set.clone();
         wake.notify_all();
+        drop(queue);
         self.wanted = set;
+        #[cfg(target_arch = "wasm32")]
+        self.pump();
     }
 
     /// Whether the same set is wanted and nothing was taken out of order: then the queue needs no update.
@@ -153,6 +208,8 @@ impl Originals {
         while let Ok(done) = self.results.try_recv() {
             self.apply(done);
         }
+        #[cfg(target_arch = "wasm32")]
+        self.pump();
     }
 
     fn apply(&mut self, done: Done) {
@@ -252,6 +309,68 @@ impl Drop for Originals {
     }
 }
 
+/// The largest texture side the renderer takes.
+fn max_side(ctx: &egui::Context, render_state: Option<&egui_wgpu::RenderState>) -> u32 {
+    match render_state {
+        Some(render_state) => render_state.device.limits().max_texture_dimension_2d,
+        None => ctx.input(|input| input.max_texture_side) as u32,
+    }
+}
+
+/// Decodes a photo with the browser (upright by its orientation), fit into `max_side`, and makes its texture.
+#[cfg(target_arch = "wasm32")]
+async fn load_in_browser(
+    request: &OriginalRequest,
+    render_state: Option<&egui_wgpu::RenderState>,
+    max_side: u32,
+    wanted: impl Fn() -> bool,
+) -> Outcome {
+    use crate::web::js;
+    let failed = |error: String| Outcome::Failed(format!("{}: {error}", request.path.display()));
+    let file = match crate::web::folders::file_at(&request.path).await {
+        Ok(file) => file,
+        Err(error) => return failed(error),
+    };
+    let bitmap = match js::wait(js::decode_image(&file)).await {
+        Ok(bitmap) => bitmap,
+        Err(error) => return failed(error),
+    };
+    let side = |name| crate::web::get(&bitmap, name).as_f64().unwrap_or(0.0) as u32;
+    let (full_width, full_height) = (side("width"), side("height"));
+    let outcome = if full_width == 0 || full_height == 0 {
+        failed("empty image".into())
+    } else if !wanted() {
+        Outcome::Cancelled
+    } else {
+        let (width, height) = domain::thumbs::fit_inside(full_width, full_height, max_side, max_side, false);
+        match js::rgba_of(&bitmap, width, height) {
+            Ok(rgba) => decoded([width, height], rgba.to_vec(), render_state),
+            Err(error) => failed(js::message(&error)),
+        }
+    };
+    if let Ok(bitmap) = wasm_bindgen::JsCast::dyn_into::<web_sys::ImageBitmap>(bitmap) {
+        bitmap.close();
+    }
+    outcome
+}
+
+/// A decoded photo's texture: own wgpu textures with mips, or egui's without a wgpu renderer.
+#[cfg(target_arch = "wasm32")]
+fn decoded(size: [u32; 2], rgba: Vec<u8>, render_state: Option<&egui_wgpu::RenderState>) -> Outcome {
+    let decoded = match render_state {
+        Some(render_state) => {
+            let levels = mip_chain(size, rgba);
+            Decoded::Gpu(upload(&render_state.device, &render_state.queue, size, &levels))
+        }
+        None => Decoded::Egui(egui::ColorImage::from_rgba_unmultiplied(
+            [size[0] as usize, size[1] as usize],
+            &rgba,
+        )),
+    };
+    Outcome::Loaded(size, decoded)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn next_request(queue: &(Mutex<Queue>, Condvar)) -> Option<OriginalRequest> {
     let (lock, wake) = queue;
     let mut queue = lock.lock().unwrap_or_else(|p| p.into_inner());
@@ -278,6 +397,7 @@ fn still_wanted(queue: &(Mutex<Queue>, Condvar), media: i64) -> bool {
         .contains(&media)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn work(
     queue: &(Mutex<Queue>, Condvar),
     results: &Sender<Done>,
@@ -308,6 +428,7 @@ fn work(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load(
     request: &OriginalRequest,
     ffmpeg: Option<&std::path::Path>,

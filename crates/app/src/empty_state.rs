@@ -6,9 +6,18 @@ use eframe::egui::{self, CornerRadius, FontId, Rect, RichText};
 
 const ICON: f32 = 40.0;
 
-/// First run: no library added yet. The response is the *Add a library* button's.
+/// First run: no library added yet. The response is the *Add a library* button's (*Pick a folder* in the browser,
+/// with what stays private: REQ-019-01, REQ-019-12).
 pub fn no_libraries(ui: &mut egui::Ui) -> egui::Response {
-    centered(ui, Icon::FolderPlus, "No libraries yet", None, Some("Add a library")).expect("the button was added")
+    let (detail, button) = if crate::WEB {
+        (
+            Some("Your photos are indexed in this browser and never leave your computer."),
+            "Pick a folder",
+        )
+    } else {
+        (None, "Add a library")
+    };
+    centered(ui, Icon::FolderPlus, "No libraries yet", detail, Some(button)).expect("the button was added")
 }
 
 /// Libraries exist, but nothing matches (or nothing is indexed yet).

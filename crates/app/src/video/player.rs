@@ -12,7 +12,8 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 /// mpv property reads take the core's lock and may stall for milliseconds: the UI reads them at most this often.
 const STATE_INTERVAL: Duration = Duration::from_millis(100);
