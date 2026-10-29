@@ -88,40 +88,67 @@ pub fn jpeg(data: &Bytes, tags: &mut Tags) -> Result<(), Missing> {
     if let Some(exif) = exif {
         tiff::read(&exif, tags);
     }
-    if let Some(iptc) = iptc {
-        photoshop_iptc(&iptc, tags);
-    }
+    let iptc = iptc.map(|iptc| photoshop_iptc(&iptc)).unwrap_or_default();
     if let Some(packet) = packet {
         xmp::read(&packet, tags);
+    }
+    // exiftool reads keywords as MWG reconciles them (`-use MWG`): the XMP ones when there are any, unless the IPTC
+    // changed after the XMP was written (its digest no longer matches the stored one).
+    let iptc_current = iptc.stored_digest.is_none() || iptc.stored_digest == iptc.digest;
+    if !(tags.contains_key("Subject") && iptc_current) {
+        match iptc.keywords.len() {
+            0 => {}
+            1 => put(tags, "Keywords", Value::from(iptc.keywords[0].clone())),
+            _ => put(tags, "Keywords", Value::from(iptc.keywords)),
+        }
     }
     Ok(())
 }
 
-/// Photoshop image resources (`8BIM`); resource 0x0404 holds IPTC IIM, whose 2:25 records are the keywords.
-fn photoshop_iptc(data: &[u8], tags: &mut Tags) {
+/// What a JPEG's Photoshop image resources say about its IPTC.
+#[derive(Default)]
+struct Iptc {
+    keywords: Vec<String>,
+    /// MD5 of the IPTC block (exiftool's `CurrentIPTCDigest`).
+    digest: Option<[u8; 16]>,
+    /// The digest a program stored when it last synchronized IPTC and XMP (`IPTCDigest`).
+    stored_digest: Option<[u8; 16]>,
+}
+
+/// Photoshop image resources (`8BIM`): resource 0x0404 holds IPTC IIM, whose 2:25 records are the keywords; 0x0425
+/// the IPTC digest.
+fn photoshop_iptc(data: &[u8]) -> Iptc {
+    use md5::{Digest as _, Md5};
+    let mut iptc = Iptc::default();
     let mut at = 0usize;
     for _ in 0..MAX_PARTS {
         if data.get(at..at + 4) != Some(b"8BIM") {
-            return;
+            break;
         }
-        let Some(id) = u16_be(data, at + 4) else { return };
-        let Some(&name_len) = data.get(at + 6) else { return };
+        let Some(id) = u16_be(data, at + 4) else { break };
+        let Some(&name_len) = data.get(at + 6) else { break };
         // Pascal string, padded to an even length (with its length byte).
         let name_size = (usize::from(name_len) + 2) & !1;
         let size_at = at + 6 + name_size;
-        let Some(size) = u32_be(data, size_at) else { return };
+        let Some(size) = u32_be(data, size_at) else { break };
         let body_at = size_at + 4;
         let Some(body) = data.get(body_at..body_at + size as usize) else {
-            return;
+            break;
         };
-        if id == 0x0404 {
-            iptc_keywords(body, tags);
+        match id {
+            0x0404 if iptc.digest.is_none() => {
+                iptc.digest = Some(Md5::digest(body).into());
+                iptc.keywords = iptc_keywords(body);
+            }
+            0x0425 => iptc.stored_digest = body.try_into().ok(),
+            _ => {}
         }
         at = body_at + ((size as usize + 1) & !1);
     }
+    iptc
 }
 
-fn iptc_keywords(data: &[u8], tags: &mut Tags) {
+fn iptc_keywords(data: &[u8]) -> Vec<String> {
     let mut keywords = Vec::new();
     let mut at = 0usize;
     while keywords.len() < 1000 && data.get(at) == Some(&0x1c) {
@@ -146,11 +173,7 @@ fn iptc_keywords(data: &[u8], tags: &mut Tags) {
         }
         at += 5 + usize::from(len);
     }
-    match keywords.len() {
-        0 => {}
-        1 => put(tags, "Keywords", Value::from(keywords.remove(0))),
-        _ => put(tags, "Keywords", Value::from(keywords)),
-    }
+    keywords
 }
 
 // --- PNG ---
@@ -636,6 +659,36 @@ mod tests {
             out.push(0);
         }
         out
+    }
+
+    /// REQ-019-04: keywords as exiftool's MWG mode reconciles them: XMP's over IPTC's, unless the IPTC changed after
+    /// the XMP was written.
+    #[test]
+    fn req_019_04_prefers_xmp_keywords_unless_the_iptc_changed_since() {
+        let jpeg_of = |stored_digest: Option<[u8; 16]>| {
+            let mut resources = iptc(&["Summer"]);
+            if let Some(digest) = stored_digest {
+                resources.extend(b"8BIM");
+                resources.extend(0x0425u16.to_be_bytes());
+                resources.extend([0, 0]);
+                resources.extend(16u32.to_be_bytes());
+                resources.extend(digest);
+            }
+            let mut packet = XMP_SIGNATURE.to_vec();
+            packet.extend(br#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:subject><rdf:Bag><rdf:li>Beach</rdf:li></rdf:Bag></dc:subject></rdf:Description></rdf:RDF></x:xmpmeta>"#);
+            let mut tags = Tags::new();
+            jpeg(
+                &Bytes::whole(jpeg_with(&[(0xed, resources), (0xe1, packet)])),
+                &mut tags,
+            )
+            .unwrap();
+            tags
+        };
+        // No digest stored: XMP and IPTC count as in sync.
+        assert_eq!(jpeg_of(None).get("Keywords"), None);
+        // The IPTC was changed by a program that doesn't update XMP.
+        assert_eq!(jpeg_of(Some([7; 16]))["Keywords"], json!("Summer"));
+        assert_eq!(jpeg_of(Some([7; 16]))["Subject"], json!("Beach"));
     }
 
     #[test]

@@ -61,4 +61,73 @@ mod exiftool_tests {
             [vec!["People".to_string(), "Anna".into()], vec!["Holiday".into()]]
         );
     }
+
+    /// Tags written with exiftool, as `-TAG=VALUE` arguments: the parts of spec 004 the readers in `meta` cover.
+    const PHOTO_TAGS: &[&str] = &[
+        "-DateTimeOriginal=2024:07:14 18:30:00",
+        "-OffsetTimeOriginal=+02:00",
+        "-Orientation#=6",
+        "-XMP-xmp:Rating=4",
+        "-XMP-dc:Subject=Beach",
+        "-XMP-dc:Subject=Sunset",
+        "-XMP-lr:HierarchicalSubject=Places|Italy|Rome",
+        "-IPTC:Keywords=Summer",
+        "-XPKeywords=Windows;Tagged",
+        "-XMP-iptcExt:PersonInImage=Anna",
+        "-XMP-mwg-rs:RegionInfo={AppliedToDimensions={W=64,H=48,Unit=pixel},\
+         RegionList=[{Area={X=0.5,Y=0.5,W=0.2,H=0.2,Unit=normalized},Name=Bob,Type=Face}]}",
+    ];
+
+    /// Runs exiftool's command line on `file`.
+    fn write_tags(file: &Path, args: &[&str]) {
+        let exiftool = crate::exiftool::find_exiftool().unwrap();
+        let output = std::process::Command::new(exiftool)
+            .args(["-q", "-overwrite_original"])
+            .args(args)
+            .arg(file)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    }
+
+    /// What `meta` reads from a whole file.
+    fn meta_tags(file: &Path) -> Tags {
+        let name = file.file_name().unwrap().to_str().unwrap();
+        meta::read(name, &meta::Bytes::whole(std::fs::read(file).unwrap())).unwrap()
+    }
+
+    /// REQ-019-04: `meta`'s readers, which the browser version uses, give the same metadata as exiftool.
+    #[test]
+    fn req_019_04_meta_reads_the_same_metadata_as_exiftool() {
+        let Some(exiftool) = crate::exiftool::tests::exiftool() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let jpeg = dir.path().join("photo.jpg");
+        image::RgbImage::new(64, 48).save(&jpeg).unwrap();
+        write_tags(&jpeg, PHOTO_TAGS);
+        let png = dir.path().join("plain.png");
+        image::RgbImage::new(30, 20).save(&png).unwrap();
+        write_tags(
+            &png,
+            &[
+                "-XMP-exif:DateTimeOriginal=2023:01:02 03:04:05",
+                "-XMP-dc:Subject=Garden",
+            ],
+        );
+        let sidecar = dir.path().join("plain.xmp");
+        std::fs::write(&sidecar, XMP).unwrap();
+        let movie = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/tests/fixtures/Holiday/walk.mp4");
+
+        for (file, sidecar) in [(&jpeg, None), (&png, Some(&sidecar)), (&movie, None)] {
+            let by_exiftool = MetadataSource::read(&exiftool, file, sidecar.map(|s| s.as_path())).unwrap();
+            let sidecar_tags = sidecar.map(|s| meta::read_sidecar(&std::fs::read(s).unwrap()));
+            let by_meta = extract_metadata(&meta_tags(file), sidecar_tags.as_ref());
+            assert_eq!(by_meta, by_exiftool, "{}", file.display());
+        }
+        // The comparison covers what the tags say, not only empty values.
+        let photo = MetadataSource::read(&exiftool, &jpeg, None).unwrap();
+        assert_eq!((photo.width, photo.height, photo.rating), (Some(48), Some(64), Some(4)));
+        assert!(photo.tags.len() >= 6, "{:?}", photo.tags);
+    }
 }
