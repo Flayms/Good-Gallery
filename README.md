@@ -46,7 +46,34 @@ Try it without installing at **[flayms.github.io/Good-Gallery](https://flayms.gi
 
 ## Development
 
-Requirements: Rust (pinned in `rust-toolchain.toml`, installed through rustup) and, on Windows, the MSVC C++ build tools with the Windows SDK. On Linux (Ubuntu): `sudo apt install build-essential pkg-config libimage-exiftool-perl ffmpeg libmpv2 mesa-vulkan-drivers` (the helpers come from the system there; `mesa-vulkan-drivers` gives the snapshot tests a software GPU, `xvfb` lets `--screenshot` run without a display). Indexing needs exiftool, thumbnails of videos ffmpeg, playback libmpv: run `./packaging/fetch-helpers.ps1` once and point `GOOD_GALLERY_EXIFTOOL`, `GOOD_GALLERY_FFMPEG` and `GOOD_GALLERY_MPV` at the files in `target/helpers/`, or put the programs on `PATH`. The browser version needs the `wasm32-unknown-unknown` target (installed through `rust-toolchain.toml`), clang (compiles SQLite for wasm), [Trunk](https://trunkrs.dev) (`cargo install --locked trunk`) and, for its tests, Node.js (`npm`; on Linux Playwright's Chromium needs `sudo npx playwright install-deps chromium` once). Releases need git-cliff, the version CI uses: `cargo install --locked git-cliff@2.14.2` (or point `GIT_CLIFF` at it). Builds other than the packaged app (`cargo xtask dist`) keep their data in `%APPDATA%\good-gallery-rust` (Linux: `~/.local/share/good-gallery-rust`), so development never touches the real index.
+### Requirements
+
+**Everywhere:** Rust through [rustup](https://rustup.rs). `rust-toolchain.toml` pins the version, and the first `cargo` command installs it.
+
+**Windows:**
+
+- The MSVC C++ build tools with the Windows SDK:
+  `winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`
+- The helpers (exiftool for indexing, ffmpeg for video thumbnails, libmpv for playback): run `./packaging/fetch-helpers.ps1` once. It puts them in `target/helpers/`. For `cargo run` and the tests, point `GOOD_GALLERY_EXIFTOOL`, `GOOD_GALLERY_FFMPEG` and `GOOD_GALLERY_MPV` at the files there, or put the programs on `PATH`. Without them, the tests that need them skip.
+- For the installer (`cargo xtask dist`): [NSIS](https://nsis.sourceforge.io), `winget install NSIS.NSIS`, or set `MAKENSIS` to a `makensis.exe`. `cargo xtask dist --no-installer` builds only the portable zip.
+
+**Linux (Ubuntu):**
+
+- `sudo apt install build-essential pkg-config libimage-exiftool-perl ffmpeg libmpv2 mesa-vulkan-drivers`. The helpers come from the system here. `mesa-vulkan-drivers` gives the snapshot tests a software GPU.
+- Optional: `xvfb`, so that `--screenshot` runs without a display.
+
+**Browser version:**
+
+- The `wasm32-unknown-unknown` target (`rust-toolchain.toml` installs it)
+- clang (compiles SQLite for wasm)
+- [Trunk](https://trunkrs.dev): `cargo install --locked trunk`
+- For its tests, Node.js with `npm`. On Linux, Playwright's Chromium needs `sudo npx playwright install-deps chromium` once.
+
+**Releases:** git-cliff, the version CI uses: `cargo install --locked git-cliff@2.14.2` (or point `GIT_CLIFF` at it).
+
+Builds other than the packaged app (`cargo xtask dist`) keep their data in `%APPDATA%\good-gallery-rust` (Linux: `~/.local/share/good-gallery-rust`), so development never touches the real index.
+
+### Commands
 
 | Command                             | Purpose                                                                                                        |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------- |
