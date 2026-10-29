@@ -51,7 +51,7 @@ The user adapts indexing and the thumbnail cache to their hardware and network: 
 ## Out of scope
 
 - Choosing the location of the index or the thumbnail cache.
-- Settings for themes (the app is dark only), language or keyboard shortcuts.
+- Settings for language or keyboard shortcuts. The appearance (light, dark or the system's) is in 020.
 - Per-library settings.
 - Importing or exporting settings.
 
