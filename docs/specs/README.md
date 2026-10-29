@@ -23,6 +23,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [017-tag-indicators](017-tag-indicators/spec.md)         | Rating, Places, People and Tags icons over tiles                 | Implemented |
 | [018-linux](018-linux/spec.md)                           | Linux: data folder, system helpers, title bar, package           | Implemented |
 | [019-web](019-web/spec.md)                               | Browser version: a static page, index kept in the browser        | Approved    |
+| [020-light-mode](020-light-mode/spec.md)                 | Light appearance, following the system or chosen in the settings | Draft       |
 
 ## Conventions
 
