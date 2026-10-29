@@ -22,7 +22,14 @@ fn view_icon(view: GalleryView) -> Icon {
 }
 
 /// Draws the toolbar over the top of `area`; without a gallery (no libraries yet) it stays empty.
-pub fn show(ui: &mut egui::Ui, area: Rect, gallery: Option<&mut Gallery>, bar_state: &mut SearchBar) {
+/// Draws the toolbar; whether _Show sidebar_ was clicked (shown while `sidebar_hidden`, REQ-008-08).
+pub fn show(
+    ui: &mut egui::Ui,
+    area: Rect,
+    gallery: Option<&mut Gallery>,
+    bar_state: &mut SearchBar,
+    sidebar_hidden: bool,
+) -> bool {
     let bar = Rect::from_min_size(area.min, vec2(area.width(), TOOLBAR_HEIGHT));
     // Tiles scrolled under the bar don't react to the pointer; its empty space moves the window.
     let background = ui.interact(bar, ui.make_persistent_id("toolbar"), egui::Sense::click_and_drag());
@@ -39,19 +46,29 @@ pub fn show(ui: &mut egui::Ui, area: Rect, gallery: Option<&mut Gallery>, bar_st
             bar.bottom() - 8.0,
         ),
     );
-    let Some(gallery) = gallery else { return };
     // A stable id: the widgets before the toolbar vary (an empty gallery has none), and auto ids would move the
     // menus' open state with them.
+    let mut gallery = gallery;
     ui.scope_builder(egui::UiBuilder::new().id_salt("toolbar").max_rect(controls), |ui| {
+        let mut show_sidebar = false;
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            view_button(ui, gallery);
-            filters_button(ui, gallery);
-            ui.add_space(8.0);
+            if let Some(gallery) = gallery.as_deref_mut() {
+                view_button(ui, gallery);
+                filters_button(ui, gallery);
+                ui.add_space(8.0);
+            }
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                search_bar::show(ui, bar_state, gallery);
+                if sidebar_hidden {
+                    show_sidebar = crate::sidebar::show_button(ui);
+                }
+                if let Some(gallery) = gallery {
+                    search_bar::show(ui, bar_state, gallery);
+                }
             });
         });
-    });
+        show_sidebar
+    })
+    .inner
 }
 
 /// "Any date", one day, a span, or an open start or end (REQ-007-08).

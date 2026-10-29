@@ -81,13 +81,23 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
         } else {
             state.gallery.as_mut()
         };
-        let sidebar = egui::Panel::left("sidebar")
-            .exact_size(sidebar::WIDTH)
-            .resizable(false)
-            .frame(egui::Frame::new().fill(theme::RECESS).inner_margin(8))
-            .show(ui, |ui| sidebar::show(ui, &mut state.sidebar, gallery, input));
-        // Behind the viewer the sidebar shows through the scrim too (REQ-013-14).
-        glass::record_solid(&ctx, sidebar.response.rect, theme::RECESS, true);
+        if let Some(db) = &input.db {
+            state.sidebar.load(db);
+        }
+        // Ctrl + B hides or shows the sidebar; the viewer's keys go to it alone (REQ-008-08).
+        if state.viewer.is_none() && ctx.input_mut(|input| input.consume_key(egui::Modifiers::COMMAND, egui::Key::B)) {
+            let hidden = !state.sidebar.is_hidden();
+            state.sidebar.set_hidden(hidden, input.db.as_ref());
+        }
+        if !state.sidebar.is_hidden() {
+            let sidebar = egui::Panel::left("sidebar")
+                .exact_size(sidebar::WIDTH)
+                .resizable(false)
+                .frame(egui::Frame::new().fill(theme::RECESS).inner_margin(8))
+                .show(ui, |ui| sidebar::show(ui, &mut state.sidebar, gallery, input));
+            // Behind the viewer the sidebar shows through the scrim too (REQ-013-14).
+            glass::record_solid(&ctx, sidebar.response.rect, theme::RECESS, true);
+        }
         // Not under the viewer: it has its own info panel.
         if state.page == Page::Gallery && state.info_sheet.is_some() && state.viewer.is_none() {
             egui::Panel::right("info sheet")
@@ -230,5 +240,8 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
     } else {
         state.gallery.as_mut()
     };
-    toolbar::show(ui, area, gallery, &mut state.search_bar);
+    let sidebar_hidden = state.sidebar.is_hidden();
+    if toolbar::show(ui, area, gallery, &mut state.search_bar, sidebar_hidden) {
+        state.sidebar.set_hidden(false, state.db.as_ref());
+    }
 }

@@ -33,6 +33,9 @@ fn page_header(ui: &mut egui::Ui, rect: Rect, state: &mut AppState) {
         egui::UiBuilder::new().id_salt("settings header").max_rect(controls),
         |ui| {
             ui.horizontal_centered(|ui| {
+                if state.sidebar.is_hidden() && crate::sidebar::show_button(ui) {
+                    state.sidebar.set_hidden(false, state.db.as_ref());
+                }
                 let back = icon_button(ui, Icon::ChevronLeft, "Back to gallery", "Back to gallery");
                 if back.clicked() {
                     state.page = Page::Gallery;

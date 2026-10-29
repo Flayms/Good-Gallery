@@ -12,7 +12,7 @@ Built in Rust with eframe / egui on wgpu.
 - **Network shares:** libraries can live on `\\server\share`. Thumbnails (WebP and ThumbHash placeholders) are cached locally, and the cached index stays browsable while a share is offline.
 - **Change detection:** a file watcher picks up changes, plus periodic quick scans. Manual rescans are also possible.
 - **Search:** combine tags (include or exclude, hierarchical), file name text and folder; media type, date range and rating are under _Filters_. Sort by date taken, date modified, name, path or size.
-- **Sidebar:** libraries with a folder tree, People and Places (from keyword hierarchies and face regions), ratings and popular tags.
+- **Sidebar:** libraries with a folder tree, People and Places (from keyword hierarchies and face regions), ratings and popular tags. Hide it with the button in its header or Ctrl + B.
 - **Viewer:** the photo floats over the blurred window, with controls that step aside while you look. Keyboard navigation, an optional filmstrip to jump through the gallery, zoom and pan, video playback, a metadata panel and "Show in Explorer".
 - **Look:** dark, neutral chrome so only your photos bring color; the toolbar and menus are frosted glass over the gallery.
 - **Read-only:** tags and ratings come from EXIF / IPTC / XMP and `.xmp` sidecars. Files are never modified.
