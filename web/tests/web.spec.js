@@ -131,8 +131,11 @@ test("REQ-019-01 to REQ-019-13: pick, scan, browse, search, view, reload, pick a
       const chooser = page.waitForEvent("filechooser");
       await click(page, ADD_FOLDER);
       await (await chooser).setFiles(copy);
+      // "Holiday is readable again" shows for 4 s (toasts::SHOWN_FOR); on a fast machine the scan ends sooner.
+      const toastGone = page.waitForTimeout(4500);
       await log.waitFor("scan of library 1 ended: Completed", from);
       await log.waitFor("thumbnails are up to date", from);
+      await toastGone;
       await settle();
       await expect(page).toHaveScreenshot("settings-after-picking-again.png");
       await click(page, ALL_LIBRARIES);
