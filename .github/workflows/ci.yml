@@ -105,6 +105,38 @@ jobs:
           path: crates/*/tests/snapshots/*.diff.png
           if-no-files-found: ignore
 
+  web:
+    name: Test (web)
+    # Release commits: see lint.
+    if: github.ref != 'refs/heads/main' || !startsWith(github.event.head_commit.message, 'chore(release)')
+    # The browser version (docs/specs/019-web): clippy for wasm, the page, and its end-to-end tests in Chromium. clang
+    # (preinstalled) compiles SQLite for wasm.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@0.22.1
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/tests/package-lock.json
+      - run: cargo clippy -p app -p meta --target wasm32-unknown-unknown -- -D warnings
+      - run: cargo xtask web
+      - name: Install Playwright and its Chromium
+        working-directory: web/tests
+        run: npm ci && npx playwright install --with-deps chromium
+      - run: cargo xtask web-test --no-build
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-test-results
+          path: web/tests/test-results
+          if-no-files-found: ignore
+
   # The ruleset on main requires the checks "Lint" and "Test" (REQ-014-02). The jobs above run per platform under
   # their own names, so these two report the overall result under the required names; a new platform only adds
   # itself to `needs`.
@@ -118,8 +150,10 @@ jobs:
 
   test-result:
     name: Test
-    needs: [test, test-linux]
+    needs: [test, test-linux, web]
     if: always() && (github.ref != 'refs/heads/main' || !startsWith(github.event.head_commit.message, 'chore(release)'))
     runs-on: ubuntu-latest
     steps:
-      - run: test "${{ needs.test.result }}" = success && test "${{ needs.test-linux.result }}" = success
+      - run: |
+          test "${{ needs.test.result }}" = success && test "${{ needs.test-linux.result }}" = success \
+            && test "${{ needs.web.result }}" = success
