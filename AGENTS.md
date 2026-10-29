@@ -69,7 +69,7 @@ Create a new worktree for a new feature, branched from `origin/main`. Use conven
 For issues and pull requests you create put the following note at the top of the description:
 
 ```md
-> [!Note]
+> [!NOTE]
 
 🤖 {Model e.g. Claude Opus 5.5} writing on behalf of {Human}
 ```
