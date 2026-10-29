@@ -48,9 +48,10 @@ fn main() -> ExitCode {
         },
         Some("thumbs") => report(thumbs::run(&args[1..])),
         Some("web") => report(web::run(&args[1..])),
+        Some("web-test") => report(web::test(&args[1..])),
         _ => {
             eprintln!(
-                "usage: cargo xtask check-specs [--summary] | libraries … | thumbs … | gallery-bench … | search-bench … | release … | dist … | screenshots … | web [--debug]"
+                "usage: cargo xtask check-specs [--summary] | libraries … | thumbs … | gallery-bench … | search-bench … | release … | dist … | screenshots … | web [--debug] | web-test …"
             );
             ExitCode::FAILURE
         }

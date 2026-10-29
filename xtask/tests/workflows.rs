@@ -104,7 +104,7 @@ fn req_018_01_req_018_09_ci_and_the_release_cover_linux() {
     assert!(commands(tests).contains(&"cargo test --workspace --no-fail-fast"));
     assert!(tests.contains("GG_REQUIRE_HELPERS: '1'"));
     // The ruleset on main requires "Lint" and "Test" (REQ-014-02): jobs of those names report every platform's result.
-    for (name, needs) in [("Lint", "needs: [lint]"), ("Test", "needs: [test, test-linux]")] {
+    for (name, needs) in [("Lint", "needs: [lint]"), ("Test", "needs: [test, test-linux, web]")] {
         let job = &ci[ci
             .find(&format!("    name: {name}\n"))
             .unwrap_or_else(|| panic!("no job named {name}"))..];
@@ -112,8 +112,36 @@ fn req_018_01_req_018_09_ci_and_the_release_cover_linux() {
         assert!(job.contains(needs) && job.contains("if: always() &&"), "{job}");
     }
     let release = workflow("release.yml");
-    let linux = &release[release.find("  linux:").expect("no linux job")..release.find("  release:").unwrap()];
+    let linux = &release[release.find("  linux:").expect("no linux job")..release.find("  pages:").unwrap()];
     assert!(linux.contains("runs-on: ubuntu-latest") && linux.contains("needs: checks"));
     assert!(commands(linux).contains(&"cargo xtask dist"));
     assert!(release.contains("needs: [checks, linux]"));
+}
+
+/// REQ-019-14: CI builds the page and runs its browser tests; a release publishes it to GitHub Pages.
+#[test]
+fn req_019_14_ci_tests_the_page_and_the_release_publishes_it() {
+    let ci = workflow("ci.yml");
+    let commands = commands(&ci);
+    for check in [
+        "cargo clippy -p app -p meta --target wasm32-unknown-unknown -- -D warnings",
+        "cargo xtask web",
+        "cargo xtask web-test --no-build",
+    ] {
+        assert!(commands.contains(&check), "ci.yml doesn't run {check}");
+    }
+    assert!(
+        ci.contains("needs: [test, test-linux, web]"),
+        "the required Test check ignores the web job"
+    );
+    let release = workflow("release.yml");
+    let pages = &release[release.find("\n  pages:").expect("release.yml has no pages job")..];
+    for step in [
+        "needs: checks",
+        "cargo xtask web",
+        "actions/upload-pages-artifact",
+        "actions/deploy-pages",
+    ] {
+        assert!(pages.contains(step), "release.yml's pages job lacks {step}");
+    }
 }
