@@ -1,5 +1,7 @@
 # Publishes a GitHub release with the Windows installer, the portable zip and the Linux archive for every version tag
-# pushed by `cargo xtask release` (xtask/src/release.rs, docs/specs/014-ci-release, docs/specs/018-linux).
+# pushed by `cargo xtask release` (xtask/src/release.rs, docs/specs/014-ci-release, docs/specs/018-linux), and the
+# browser version to the repository's GitHub Pages site (docs/specs/019-web). Pages' source must be set to "GitHub
+# Actions" in the repository's settings.
 name: Release
 
 on:
@@ -35,6 +37,30 @@ jobs:
           name: linux
           path: target/dist/*.tar.gz
           if-no-files-found: error
+
+  pages:
+    name: Publish the page
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: trunk@0.22.1
+      - run: cargo xtask web
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: target/web
+      - id: deploy
+        uses: actions/deploy-pages@v4
 
   release:
     name: Build and publish

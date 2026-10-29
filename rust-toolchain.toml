@@ -1,4 +1,6 @@
 [toolchain]
 channel = "1.95.0"
 components = ["clippy", "rustfmt"]
+# The browser version (docs/specs/019-web).
+targets = ["wasm32-unknown-unknown"]
 profile = "minimal"
