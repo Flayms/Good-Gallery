@@ -1,0 +1,18 @@
+[package]
+name = "meta"
+description = "Metadata of media files: exiftool-shaped tags to MediaMetadata, and pure-Rust readers for the web build."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+chrono.workspace = true
+domain.workspace = true
+quick-xml.workspace = true
+regex.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -4,20 +4,15 @@
 use crate::ffmpeg::{self, FfmpegError};
 use base64::Engine as _;
 use domain::media::MediaKind;
-use domain::thumbs::{MAX_THUMB_ASPECT, MAX_THUMB_WIDTH, THUMB_WIDTHS};
+pub(crate) use domain::thumbs::fit_inside;
+use domain::thumbs::{MAX_THUMB_HEIGHT, MAX_THUMB_WIDTH, THUMB_WIDTHS, THUMBHASH_SIZE, VIDEO_FRAME_POSITION};
 use image::metadata::Orientation;
 use image::{DynamicImage, ImageDecoder as _, ImageReader};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Thumbnails fit into `MAX_THUMB_WIDTH` × this: the masonry clamps tiles to 3 × as tall as wide and crops taller
-/// strips anyway.
-const MAX_HEIGHT: u32 = MAX_THUMB_WIDTH * MAX_THUMB_ASPECT;
 const WEBP_QUALITY: f32 = 80.0;
-const THUMBHASH_SIZE: u32 = 100;
-/// Video thumbnails show the frame at this share of the duration (REQ-005-05).
-const VIDEO_POSITION: f64 = 0.1;
 const PREVIEW_ASPECT_TOLERANCE: f64 = 0.02;
 /// What a decode may allocate: 268 402 689 pixels (16 383²) as RGBA. The `image` crate's own default (512 MiB) would
 /// fail on large panoramas.
@@ -87,7 +82,7 @@ impl Renderer {
             MediaKind::Video => {
                 let position = duration
                     .filter(|d| d.is_finite() && *d > 0.0)
-                    .map_or(0.0, |d| d * VIDEO_POSITION);
+                    .map_or(0.0, |d| d * VIDEO_FRAME_POSITION);
                 self.frame(file, position)?
             }
             MediaKind::Image => self.load_image(file)?,
@@ -203,10 +198,10 @@ fn decode_jpeg(data: &[u8], orientation: Option<Orientation>) -> Result<DynamicI
     } else {
         let (width, height) = (u32::from(info.width), u32::from(info.height));
         let (w, h) = if swaps_sides(orientation) {
-            let (h, w) = fit_inside(height, width, MAX_THUMB_WIDTH, MAX_HEIGHT, false);
+            let (h, w) = fit_inside(height, width, MAX_THUMB_WIDTH, MAX_THUMB_HEIGHT, false);
             (w, h)
         } else {
-            fit_inside(width, height, MAX_THUMB_WIDTH, MAX_HEIGHT, false)
+            fit_inside(width, height, MAX_THUMB_WIDTH, MAX_THUMB_HEIGHT, false)
         };
         decoder
             .scale(w.min(u32::from(u16::MAX)) as u16, h.min(u32::from(u16::MAX)) as u16)
@@ -244,13 +239,6 @@ pub(crate) fn decode_any(reader: impl std::io::BufRead + std::io::Seek) -> Resul
 }
 
 /// The size of `width` × `height` scaled to fit into `max_width` × `max_height`, keeping its aspect ratio.
-pub(crate) fn fit_inside(width: u32, height: u32, max_width: u32, max_height: u32, enlarge: bool) -> (u32, u32) {
-    let scale = (f64::from(max_width) / f64::from(width)).min(f64::from(max_height) / f64::from(height));
-    let scale = if enlarge { scale } else { scale.min(1.0) };
-    let side = |n: u32| ((f64::from(n) * scale).round() as u32).max(1);
-    (side(width), side(height))
-}
-
 pub(crate) fn resize(image: &DynamicImage, width: u32, height: u32) -> Result<DynamicImage, RenderError> {
     if (image.width(), image.height()) == (width, height) {
         return Ok(image.clone());
@@ -288,7 +276,7 @@ pub fn render_thumbnails(image: DynamicImage) -> Result<Thumbnails, RenderError>
     } else {
         DynamicImage::ImageRgb8(image.into_rgb8())
     };
-    let (width, height) = fit_inside(image.width(), image.height(), MAX_THUMB_WIDTH, MAX_HEIGHT, false);
+    let (width, height) = fit_inside(image.width(), image.height(), MAX_THUMB_WIDTH, MAX_THUMB_HEIGHT, false);
     let decoded = resize(&image, width, height)?;
     drop(image);
 
