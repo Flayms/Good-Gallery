@@ -1,6 +1,9 @@
 //! `cargo xtask web [--debug]`: the browser version's page (spec 019) in `target/web`, ready for any static host.
 //! Builds it with Trunk (`web/Trunk.toml`), then moves Trunk's inline start script into a file of its own, so the
 //! page's content security policy needs no `'unsafe-inline'` for scripts (REQ-019-12).
+//!
+//! `cargo xtask web-test [--no-build] [<playwright options>…]`: builds the page, then runs its end-to-end tests
+//! (`web/tests`) in Playwright's Chromium; e.g. `--update-snapshots` after a deliberate change to the UI.
 
 use anyhow::{Context as _, bail};
 use std::hash::{DefaultHasher, Hash as _, Hasher as _};
@@ -34,6 +37,49 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     std::fs::write(dist.join(&script_name), script)?;
     std::fs::write(&index, html)?;
     println!("the page is in {}", dist.display());
+    Ok(())
+}
+
+/// Builds the page (unless `--no-build`) and runs the browser tests; other arguments go to Playwright.
+pub fn test(args: &[String]) -> anyhow::Result<()> {
+    let build = !args.iter().any(|arg| arg == "--no-build");
+    let playwright_args: Vec<&String> = args.iter().filter(|arg| *arg != "--no-build").collect();
+    if build {
+        run(&[])?;
+    }
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("../web/tests");
+    // `npm` and `npx` are `.cmd` scripts on Windows, which `Command` doesn't run by their bare name.
+    let (npm, npx) = if cfg!(windows) {
+        ("npm.cmd", "npx.cmd")
+    } else {
+        ("npm", "npx")
+    };
+    if !tests.join("node_modules").exists() {
+        let status = Command::new(npm)
+            .arg("ci")
+            .current_dir(&tests)
+            .status()
+            .context("can't run npm; install Node.js")?;
+        if !status.success() {
+            bail!("npm ci failed");
+        }
+        let status = Command::new(npx)
+            .args(["playwright", "install", "chromium"])
+            .current_dir(&tests)
+            .status()?;
+        if !status.success() {
+            bail!("can't install Playwright's Chromium");
+        }
+    }
+    let status = Command::new(npx)
+        .args(["playwright", "test"])
+        .args(playwright_args)
+        .current_dir(&tests)
+        .status()
+        .context("can't run Playwright")?;
+    if !status.success() {
+        bail!("the browser tests failed");
+    }
     Ok(())
 }
 

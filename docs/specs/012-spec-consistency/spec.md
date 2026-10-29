@@ -65,7 +65,7 @@ Specs and tests reference each other: verification tables name the tests of a RE
 ## Assumptions
 
 - A test references a REQ by mentioning its ID in the test part of a file, by convention at the start of the test name (`fn req_007_01_filters_by_tag()`, the ID in lower case with underscores; several chained at the start: `fn req_007_01_req_007_02_…()`) or in a doc comment directly above the test (`/// REQ-007-01, REQ-007-02: …`). Both spellings count.
-- Test files are the `.rs` files below `crates/` and `xtask/` (except `target/` folders). Rust keeps unit tests next to the code, so only the test part of a file counts: everything from the first `#[cfg(test)]` on, or the whole file below a `tests/` or `benches/` folder. A REQ mentioned in production code is not a reference.
+- Test files are the `.rs` files below `crates/` and `xtask/` (except `target/` folders), and the browser tests `web/tests/*.spec.js` (spec 019). Rust keeps unit tests next to the code, so only the test part of a file counts: everything from the first `#[cfg(test)]` on, or the whole file below a `tests/` or `benches/` folder. A REQ mentioned in production code is not a reference.
 
 ## Verification
 

@@ -311,9 +311,13 @@ fn list_files(root: &Path, dir: &str, include: &dyn Fn(&str) -> bool) -> Vec<Sou
 /// Checks the repository at `root`; returns the exit code.
 pub fn run(root: &Path, args: &[String], log: &mut dyn FnMut(&str)) -> i32 {
     let specs = list_files(root, "docs/specs", &|path| SPEC_PATH.is_match(path));
+    let browser_tests = list_files(root, "web/tests", &|path| {
+        path.ends_with(".spec.js") && !path.contains("/node_modules/")
+    });
     let tests: Vec<SourceFile> = ["crates", "xtask"]
         .into_iter()
         .flat_map(|dir| list_files(root, dir, &|path| path.ends_with(".rs")))
+        .chain(browser_tests)
         .filter_map(|file| {
             let text = test_region(&file.path, &file.text)?.to_string();
             Some(SourceFile { path: file.path, text })
