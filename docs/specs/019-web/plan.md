@@ -73,4 +73,4 @@ Logic stays native-tested (`domain`, `db`, `meta`, `app`'s kittest UI tests). `w
 - [x] 11. `cargo xtask web`, `cargo xtask web-test` with Playwright end to end; CI job (REQ-019-01 to REQ-019-14)
 - [x] 12. Release workflow deploys to Pages; README, architecture decision, pitfalls (REQ-019-14)
 - [ ] 13. By hand in Chrome / Edge with a GPU (WebGPU): the directory picker, permission on the next visit, video playback with sound; Firefox and Safari smoke test
-- [ ] 14. Set the repository's Pages source to "GitHub Actions"; close #45 after the first deploy
+- [ ] 14. Set the repository's Pages source to "GitHub Actions" before the next release (#45 closes with this PR)
