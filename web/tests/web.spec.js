@@ -92,6 +92,8 @@ test("REQ-019-01 to REQ-019-13: pick, scan, browse, search, view, reload, pick a
   await test.step("REQ-019-06: search by tag", async () => {
     await click(page, SEARCH);
     await page.keyboard.type("Beach");
+    // The tag suggestions load in the background; Enter before they're there searches file names instead.
+    await settle();
     await page.keyboard.press("Enter");
     await settle();
     await expect(page).toHaveScreenshot("search.png");
