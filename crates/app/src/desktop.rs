@@ -17,6 +17,7 @@ struct Options {
     bench_scroll: Option<f32>,
     view: Option<usize>,
     info: bool,
+    edit: bool,
     scroll: Option<f32>,
 }
 
@@ -124,6 +125,8 @@ struct GalleryApp {
     view: Option<usize>,
     /// `--info`: the viewer opens with its info panel.
     info: bool,
+    /// `--edit`: the viewer opens editing, with a few adjustments made (README screenshot).
+    edit: bool,
     /// `--scroll`: how far to scroll the gallery once it has loaded.
     scroll: Option<f32>,
     /// Windows' animation and transparency effects, followed while the app runs.
@@ -141,7 +144,18 @@ impl eframe::App for GalleryApp {
         {
             self.view = None;
             viewer.set_info_open(self.info);
+            if self.edit {
+                viewer.request_edit();
+            }
             self.state.viewer = Some(viewer);
+            ui.ctx().request_repaint();
+        }
+        if self.edit
+            && let Some(session) = self.state.viewer.as_mut().and_then(app::viewer::Viewer::editing_mut)
+            && session.is_loaded()
+        {
+            self.edit = false;
+            session.commit(demo_recipe());
             ui.ctx().request_repaint();
         }
         if let Some(offset) = self.scroll
@@ -205,9 +219,27 @@ fn default_data_dir() -> anyhow::Result<PathBuf> {
     Ok(app::startup::default_data_dir(&base, cfg!(feature = "packaged")))
 }
 
+/// The adjustments the `--edit` screenshot shows: a little brighter and warmer, with more punch.
+fn demo_recipe() -> domain::edit::Recipe {
+    use domain::edit::Adjustment;
+    let mut recipe = domain::edit::Recipe::default();
+    for (adjustment, value) in [
+        (Adjustment::Exposure, 0.35),
+        (Adjustment::Contrast, 20.0),
+        (Adjustment::Highlights, -30.0),
+        (Adjustment::Shadows, 25.0),
+        (Adjustment::Temperature, 12.0),
+        (Adjustment::Vibrance, 30.0),
+        (Adjustment::Vignette, -25.0),
+    ] {
+        adjustment.set(&mut recipe, value);
+    }
+    recipe
+}
+
 fn parse_args() -> anyhow::Result<Options> {
     const USAGE: &str = "usage: app [--data-dir <folder>] [--screenshot <file.png> [--screenshot-after <seconds>]] \
-                         [--bench-scroll <seconds>] [--view <position> [--info]] [--scroll <points>]";
+                         [--bench-scroll <seconds>] [--view <position> [--info] [--edit]] [--scroll <points>]";
     let mut args = std::env::args().skip(1);
     let mut data_dir = None;
     let mut screenshot = None;
@@ -215,6 +247,7 @@ fn parse_args() -> anyhow::Result<Options> {
     let mut bench_scroll = None;
     let mut view = None;
     let mut info = false;
+    let mut edit = false;
     let mut scroll = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -231,6 +264,7 @@ fn parse_args() -> anyhow::Result<Options> {
             }
             "--view" => view = Some(args.next().context(USAGE)?.parse().context(USAGE)?),
             "--info" => info = true,
+            "--edit" => edit = true,
             "--scroll" => scroll = Some(args.next().context(USAGE)?.parse().context(USAGE)?),
             other => anyhow::bail!("unknown argument {other} ({USAGE})"),
         }
@@ -246,6 +280,7 @@ fn parse_args() -> anyhow::Result<Options> {
         bench_scroll,
         view,
         info,
+        edit,
         scroll,
     })
 }
@@ -575,6 +610,7 @@ fn run(options: Options) -> anyhow::Result<()> {
                 bench: options.bench_scroll.map(Bench::new),
                 view: options.view,
                 info: options.info,
+                edit: options.edit,
                 scroll: options.scroll,
                 preferences: Default::default(),
             }))
