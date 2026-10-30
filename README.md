@@ -1,6 +1,11 @@
 # Good Gallery
 
-A desktop gallery for large photo and video libraries (50k–500k files). Media appear in a virtualized masonry, justified, grid or list view. Libraries on network shares are supported, and thumbnails are cached locally. Search uses the tags that are already embedded in your files.
+A desktop gallery for large photo and video libraries on Windows and Linux.  
+Media appear in a virtualized masonry, justified, grid or list view. Libraries on network shares are supported, and thumbnails are cached locally. Search uses the tags that are already embedded in your files.
+
+There's also a web version available for you to try it out (all your data still stays local): Try it without installing at [flayms.github.io/Good-Gallery](https://flayms.github.io/Good-Gallery/)
+
+[Try the web version](https://good-gallery-web.example.com)
 
 Built in Rust with eframe / egui on wgpu.
 
