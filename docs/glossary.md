@@ -71,3 +71,4 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | **Viewer**        | The full-window overlay that shows one media item in original quality. (also: lightbox)                                                                          |
 | **Filmstrip**     | The optional row of thumbnails of the whole gallery below the media item in the viewer, with the shown item highlighted.         |
 | **Info panel**    | The panel in the viewer with file details, rating and tags. It opens as the **info sheet** when used from the gallery's context menu.                              |
+| **Appearance**    | Light or dark chrome: _System_ (as the OS or browser is), _Light_ or _Dark_. The viewer is always dark. (code: `Appearance`, `theme::Palette`)                     |

@@ -55,7 +55,7 @@ fn centered(
         // The detail wraps (e.g. an error with a path), so measure it at the width it gets.
         let font = FontId::new(theme::SIZE_BODY, egui::FontFamily::Proportional);
         let wrap_width = rect.width() - 48.0;
-        let galley = ui.fonts_mut(|f| f.layout(detail.to_owned(), font, theme::MIST, wrap_width));
+        let galley = ui.fonts_mut(|f| f.layout(detail.to_owned(), font, theme::muted(), wrap_width));
         height += gap + galley.size().y;
     }
     if button.is_some() {
@@ -71,10 +71,10 @@ fn centered(
             .layout(egui::Layout::top_down(egui::Align::Center)),
     );
     child.spacing_mut().item_spacing.y = gap;
-    child.add(icon.image(ICON, theme::MIST));
-    child.label(RichText::new(title).font(title_font).color(theme::PAPER));
+    child.add(icon.image(ICON, theme::muted()));
+    child.label(RichText::new(title).font(title_font).color(theme::text()));
     if let Some(detail) = detail {
-        child.label(RichText::new(detail).color(theme::MIST));
+        child.label(RichText::new(detail).color(theme::muted()));
     }
     button.map(|label| primary_button(&mut child, label))
 }
@@ -83,10 +83,10 @@ fn centered(
 pub fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     let text = RichText::new(label)
         .font(FontId::new(theme::SIZE_BODY, theme::semibold()))
-        .color(theme::DARKROOM);
+        .color(theme::base());
     ui.add(
         egui::Button::new(text)
-            .fill(theme::PAPER)
+            .fill(theme::text())
             .corner_radius(CornerRadius::same(theme::RADIUS_CONTROL)),
     )
 }

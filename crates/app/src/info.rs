@@ -89,7 +89,7 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail) -> Option<String> {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
             for name in names {
                 let chip = egui::Button::new(egui::RichText::new(name).size(theme::SIZE_CAPTION))
-                    .fill(theme::SELECTED)
+                    .fill(theme::selected())
                     .corner_radius(theme::RADIUS_CONTROL)
                     .min_size(egui::vec2(0.0, 24.0));
                 let response = ui.add(chip);
@@ -103,7 +103,11 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail) -> Option<String> {
 }
 
 fn caption(ui: &mut egui::Ui, text: &str) {
-    ui.label(egui::RichText::new(text).size(theme::SIZE_CAPTION).color(theme::MIST));
+    ui.label(
+        egui::RichText::new(text)
+            .size(theme::SIZE_CAPTION)
+            .color(theme::muted()),
+    );
 }
 
 /// A label above its value.
@@ -121,7 +125,7 @@ fn stars(ui: &mut egui::Ui, rating: i64) {
         .horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             for star in 1..=5 {
-                let color = if star <= rating { theme::STAR } else { theme::MIST };
+                let color = if star <= rating { theme::star() } else { theme::muted() };
                 ui.add(
                     Icon::Star
                         .image(theme::ICON_SIZE, color)

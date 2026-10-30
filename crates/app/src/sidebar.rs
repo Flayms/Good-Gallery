@@ -118,7 +118,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
     ui.horizontal(|ui| {
         ui.set_height(48.0);
         ui.add_space(8.0);
-        ui.add(Icon::Images.image(20.0, theme::PAPER));
+        ui.add(Icon::Images.image(20.0, theme::text()));
         ui.label(egui::RichText::new("Good Gallery").family(theme::semibold()));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let hide = crate::icons::icon_button(ui, Icon::PanelLeft, "Hide sidebar", "Hide sidebar (Ctrl + B)");
@@ -181,7 +181,7 @@ fn group_label(ui: &mut egui::Ui, label: &str) {
             egui::RichText::new(label)
                 .size(theme::SIZE_CAPTION)
                 .family(theme::semibold())
-                .color(theme::MIST),
+                .color(theme::muted()),
         );
     });
 }
@@ -198,17 +198,17 @@ fn collapsible(
     let open = !state.is_collapsed(id);
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), egui::Sense::click());
     if response.hovered() {
-        ui.painter().rect_filled(rect, theme::RADIUS_CONTROL, theme::HOVER);
+        ui.painter().rect_filled(rect, theme::RADIUS_CONTROL, theme::hover());
     }
     ui.painter().text(
         pos2(rect.left() + 8.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
         label,
         egui::FontId::new(theme::SIZE_CAPTION, theme::semibold()),
-        theme::MIST,
+        theme::muted(),
     );
     let chevron = if open { Icon::ChevronDown } else { Icon::ChevronRight };
-    chevron.image(14.0, theme::MIST).paint_at(
+    chevron.image(14.0, theme::muted()).paint_at(
         ui,
         Rect::from_center_size(pos2(rect.right() - 14.0, rect.center().y), Vec2::splat(14.0)),
     );
@@ -241,9 +241,9 @@ fn row(ui: &mut egui::Ui, row: Row) -> (egui::Response, Option<egui::Response>) 
     let active = row.active;
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, active, &label));
     if row.active {
-        ui.painter().rect_filled(rect, theme::RADIUS_CONTROL, theme::SELECTED);
+        ui.painter().rect_filled(rect, theme::RADIUS_CONTROL, theme::selected());
     } else if response.hovered() {
-        ui.painter().rect_filled(rect, theme::RADIUS_CONTROL, theme::HOVER);
+        ui.painter().rect_filled(rect, theme::RADIUS_CONTROL, theme::hover());
     }
     let mut x = rect.left() + 8.0 + row.depth as f32 * INDENT;
     let mut chevron = None;
@@ -253,7 +253,7 @@ fn row(ui: &mut egui::Ui, row: Row) -> (egui::Response, Option<egui::Response>) 
         let name = format!("{} {}", if open { "Collapse" } else { "Expand" }, row.label);
         toggle.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
         let icon = if open { Icon::ChevronDown } else { Icon::ChevronRight };
-        icon.image(14.0, theme::MIST)
+        icon.image(14.0, theme::muted())
             .paint_at(ui, Rect::from_center_size(area.center(), Vec2::splat(14.0)));
         chevron = Some(toggle);
     }
@@ -273,18 +273,18 @@ fn row(ui: &mut egui::Ui, row: Row) -> (egui::Response, Option<egui::Response>) 
     } else {
         egui::FontId::new(theme::SIZE_BODY, egui::FontFamily::Proportional)
     };
-    let mut job = egui::text::LayoutJob::simple_singleline(row.label.to_string(), font, theme::PAPER);
+    let mut job = egui::text::LayoutJob::simple_singleline(row.label.to_string(), font, theme::text());
     job.wrap = egui::text::TextWrapping::truncate_at_width((rect.right() - 8.0 - trailing_width - x).max(0.0));
     let galley = ui.painter().layout_job(job);
     ui.painter()
-        .galley(pos2(x, rect.center().y - galley.size().y / 2.0), galley, theme::PAPER);
+        .galley(pos2(x, rect.center().y - galley.size().y / 2.0), galley, theme::text());
     if let Some(trailing) = row.trailing {
         ui.painter().text(
             pos2(rect.right() - 8.0, rect.center().y),
             egui::Align2::RIGHT_CENTER,
             trailing,
             egui::FontId::new(theme::SIZE_CAPTION, theme::numbers()),
-            theme::MIST,
+            theme::muted(),
         );
     }
     (response, chevron)
@@ -303,7 +303,7 @@ fn libraries(
     let all = Row {
         depth: 0,
         chevron: None,
-        icon: Some((Icon::Layers, theme::PAPER)),
+        icon: Some((Icon::Layers, theme::text())),
         label: "All libraries",
         active: !on_settings && search.library.is_none(),
         trailing: None,
@@ -326,9 +326,9 @@ fn libraries(
                 depth: 0,
                 chevron: None,
                 icon: Some(if offline {
-                    (Icon::Unplug, theme::ALERT)
+                    (Icon::Unplug, theme::alert())
                 } else {
-                    (Icon::Folder, theme::PAPER)
+                    (Icon::Folder, theme::text())
                 }),
                 label: &library.label,
                 active: !on_settings && selected && search.folder.is_none(),
@@ -347,7 +347,7 @@ fn libraries(
         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, active, &state_label));
         if input.scanning == Some(library.id) {
             let rect = response.rect;
-            Icon::LoaderCircle.image(14.0, theme::MIST).paint_at(
+            Icon::LoaderCircle.image(14.0, theme::muted()).paint_at(
                 ui,
                 Rect::from_center_size(pos2(rect.right() - 16.0, rect.center().y), Vec2::splat(14.0)),
             );
@@ -383,7 +383,7 @@ fn folder_items(
             Row {
                 depth,
                 chevron: has_children.then_some(open),
-                icon: Some((if open { Icon::FolderOpen } else { Icon::Folder }, theme::PAPER)),
+                icon: Some((if open { Icon::FolderOpen } else { Icon::Folder }, theme::text())),
                 label: &node.name,
                 active: search.library == Some(library) && search.folder.as_deref() == Some(node.path.as_str()),
                 trailing: None,
@@ -429,7 +429,7 @@ fn tag_row(ui: &mut egui::Ui, state: &mut SidebarState, search: &mut GallerySear
             depth,
             chevron: has_children.then_some(open),
             // Only exclusions get an icon; a tag icon on every row would just repeat itself.
-            icon: (mode == Some(TagMode::Exclude)).then_some((Icon::Minus, theme::ALERT)),
+            icon: (mode == Some(TagMode::Exclude)).then_some((Icon::Minus, theme::alert())),
             label: &node.name,
             active: mode == Some(TagMode::Include),
             trailing: Some(format::count(node.count)),
@@ -511,7 +511,7 @@ fn ratings(
             Row {
                 depth: 0,
                 chevron: None,
-                icon: (rating == 0).then_some((Icon::StarOff, theme::PAPER)),
+                icon: (rating == 0).then_some((Icon::StarOff, theme::text())),
                 // Stars are drawn over the label's place.
                 label: if rating == 0 { &label } else { "" },
                 active: selected,
@@ -534,7 +534,7 @@ fn ratings(
                     ),
                     Vec2::splat(14.0),
                 );
-                Icon::Star.image(14.0, theme::STAR).paint_at(ui, at);
+                Icon::Star.image(14.0, theme::star()).paint_at(ui, at);
             }
         }
         if response.clicked() {
@@ -561,7 +561,7 @@ fn popular(ui: &mut egui::Ui, search: &mut GallerySearch, data: &SidebarData) {
             Row {
                 depth: 0,
                 chevron: None,
-                icon: (mode == Some(TagMode::Exclude)).then_some((Icon::Minus, theme::ALERT)),
+                icon: (mode == Some(TagMode::Exclude)).then_some((Icon::Minus, theme::alert())),
                 label: &tag.name,
                 active: mode == Some(TagMode::Include),
                 trailing: Some(format::count(tag.count)),
@@ -579,7 +579,7 @@ fn settings_row(ui: &mut egui::Ui, page: &mut Page) {
     let settings = Row {
         depth: 0,
         chevron: None,
-        icon: Some((Icon::Settings, theme::PAPER)),
+        icon: Some((Icon::Settings, theme::text())),
         label: "Settings",
         active: *page == Page::Settings,
         trailing: None,

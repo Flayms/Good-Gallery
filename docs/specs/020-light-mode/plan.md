@@ -2,9 +2,9 @@
 
 ## Approach
 
-### Decisions to approve
+### Decisions
 
-The issue left these open; this plan proposes:
+The issue left these open; approved as proposed:
 
 1. **Both, defaulting to the system.** An _Appearance_ setting with _System_ (default), _Light_ and _Dark_. _System_ is what most desktop apps do and needs no setup; the explicit choices cover users whose OS setting doesn't suit a photo app.
 2. **The viewer stays dark.** Photos are judged against a dark surround (Lightroom, Photos and Windows' Photos app all keep their loupe dark), the viewer's ambient tint (REQ-013-11) is clamped to dark lightness, and REQ-013-14 darkens the window behind the viewer anyway. A light viewer would need its own tint rules for little gain.
@@ -33,12 +33,14 @@ Proposed light values, neutral grey without hue (contrast computed with the WCAG
 | glass panel    | `rgb(36 36 36 / 0.86)`    | `rgb(255 255 255 / 0.86)`  | 12.6 / 5.1 over black          |
 | focus ring     | Paper + `rgb(0 0 0 / 0.6)` outside | text + `rgb(255 255 255 / 0.8)` outside | ≥ 4.4 over any grey |
 | scrollbar thumb | white 24 % / 40 %        | black 24 % / 40 %          |                                |
+| track          | white 25 %                | black 20 %                 |                                |
+| placeholder    | `#2A2A2A` (Raised)        | `#E0E0E0`                  |                                |
 
 For light glass the worst case is a black backdrop (dark glass: white), so the contrast test measures both palettes over both.
 
 ### Choosing the palette
 
-egui already tracks the system theme (eframe passes the OS and browser preference) and has a `ThemePreference` of `System`, `Light`, `Dark`. `theme::install` sets egui's visuals for both themes; the setting maps onto `ctx.options_mut(|o| o.theme_preference = …)`. `theme::colors(ctx) -> &'static Palette` returns `DARK` or `LIGHT` from `ctx.theme()`. It reads the context, not a global, so tests running in parallel with different appearances don't interfere. The viewer, filmstrip, video controls and info panel inside the viewer use `theme::DARK` directly (REQ-020-05).
+egui already tracks the system theme (eframe passes the OS and browser preference) and has a `ThemePreference` of `System`, `Light`, `Dark`. `theme::install` sets egui's visuals for both themes; the setting maps onto `ctx.options_mut(|o| o.theme_preference = …)`. The palette follows `ctx.theme()` (as built: a per-thread palette set from it each frame, see Deviations), so tests running in parallel with different appearances don't interfere. The viewer, filmstrip, video controls and info panel inside the viewer draw with `theme::DARK` (REQ-020-05).
 
 The setting is stored as `appearance` (`"system"`, `"light"`, `"dark"`) with the other settings (`db::settings`, REQ-010-01); unknown values fall back to `"system"` (REQ-010-02).
 
@@ -56,14 +58,23 @@ The setting is stored as `appearance` (`"system"`, `"light"`, `"dark"`) with the
 - Snapshots of the gallery, the sidebar, a menu and the Settings page in light (REQ-020-03), and of the viewer opened in light, which matches the dark one (REQ-020-05). Linux and Windows snapshot files, as today.
 - Reduced transparency in light (REQ-020-06) next to the existing glass test.
 
+### Deviations
+
+- **A thread-local palette instead of reading the context at every call site.** `theme::begin_frame(ctx)` picks `DARK` or `LIGHT` from `ctx.theme()` at the start of each frame; call sites read `theme::text()`, `theme::base()` and so on. The result is the same as passing the context everywhere (the palette follows the context's theme), with a mechanical rename instead of threading a context into ~170 call sites. It stays test-safe: the UI and each test harness draw on their own thread. `theme::with_palette(&DARK, …)` draws the viewer dark (REQ-020-05), and `theme::apply_style` gives egui's matching style to the viewer's area and to menus, which egui builds from the global style.
+- **Two roles more:** `track` (sliders, was a hardcoded white) and `placeholder` (tiles, rows and skeletons before their content). In light, Raised is white and placeholders would vanish against the page, so they get a grey a step darker than it.
+- **The window frame needs no code of its own:** `ctx.set_theme` makes egui send `ViewportCommand::SetTheme`, and winit sets the native frame (Windows' dark-mode attribute) from it.
+- **Browser tests** pin the existing screenshots to `colorScheme: "dark"` (Chromium's default is light) and add one test that emulates light.
+- **CI** uploads new snapshot renders (`*.new.png`) besides diffs, so snapshots that only exist on one platform yet can be taken from the other platform's run.
+
 ## Tasks
 
-- [ ] `Palette` with `DARK` and `LIGHT`; replace the color constants at their ~170 call sites with `theme::colors(ctx)` (mechanical; the viewer keeps `DARK`) — REQ-020-03, REQ-020-05
-- [ ] Contrast and neutrality tests for both palettes — REQ-020-04, REQ-020-03
-- [ ] egui visuals for the light theme in `theme::install` (widgets, selection, text cursor, scrollbars) — REQ-020-03
-- [ ] Glass: light fills and the light opaque fallback — REQ-020-03, REQ-020-06
-- [ ] _Appearance_ setting on the Settings page, stored and validated — REQ-020-01
-- [ ] Follow the system theme; dark when unknown — REQ-020-02
-- [ ] Windows frame border, Linux caption buttons, `web/page.css` — REQ-020-02, REQ-020-03
-- [ ] Light snapshots; README screenshot in light (`cargo xtask screenshots`)
-- [ ] `docs/design.md`: light values next to the dark ones; `docs/architecture.md`: palette from the context
+- [x] `Palette` with `DARK` and `LIGHT`; the color constants' call sites read the current palette (the viewer keeps `DARK`) — REQ-020-03, REQ-020-05
+- [x] Contrast and neutrality tests for both palettes — REQ-020-04, REQ-020-03
+- [x] egui visuals for the light theme in `theme::install` (widgets, selection, scrollbars) — REQ-020-03
+- [x] Glass: light fills and the light opaque fallback — REQ-020-03, REQ-020-06
+- [x] _Appearance_ setting on the Settings page, stored and validated — REQ-020-01
+- [x] Follow the system theme; dark when unknown — REQ-020-02
+- [x] Window frame (through egui), Linux caption buttons (palette colors), `web/page.css` — REQ-020-02, REQ-020-03
+- [x] Light snapshots (`gallery_light`, `view_menu_light`, `settings_light`, `viewer_light`) and a light browser screenshot
+- [ ] README screenshot in light (`cargo xtask screenshots`)
+- [x] `docs/design.md`: light values next to the dark ones; `docs/architecture.md`: the palette

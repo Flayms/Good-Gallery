@@ -52,13 +52,16 @@ pub fn setup(ctx: &egui::Context) {
 pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     state.poll();
     let ctx = ui.ctx().clone();
+    // Light, dark or the system's, from this frame on (REQ-020-01, REQ-020-02).
+    theme::set_appearance(&ctx, state.settings.appearance);
+    theme::begin_frame(&ctx);
     glass::begin_frame(&ctx);
     // The viewer's keys go to it alone (REQ-009-02).
     if let Some(viewer) = &mut state.viewer {
         viewer.input(&ctx);
     }
     ctx.layer_painter(egui::LayerId::background())
-        .rect_filled(ctx.content_rect(), 0.0, theme::DARKROOM);
+        .rect_filled(ctx.content_rect(), 0.0, theme::base());
     if state.is_active() {
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
@@ -93,17 +96,17 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
             let sidebar = egui::Panel::left("sidebar")
                 .exact_size(sidebar::WIDTH)
                 .resizable(false)
-                .frame(egui::Frame::new().fill(theme::RECESS).inner_margin(8))
+                .frame(egui::Frame::new().fill(theme::recess()).inner_margin(8))
                 .show(ui, |ui| sidebar::show(ui, &mut state.sidebar, gallery, input));
             // Behind the viewer the sidebar shows through the scrim too (REQ-013-14).
-            glass::record_solid(&ctx, sidebar.response.rect, theme::RECESS, true);
+            glass::record_solid(&ctx, sidebar.response.rect, theme::recess(), true);
         }
         // Not under the viewer: it has its own info panel.
         if state.page == Page::Gallery && state.info_sheet.is_some() && state.viewer.is_none() {
             egui::Panel::right("info sheet")
                 .exact_size(info::WIDTH)
                 .resizable(false)
-                .frame(egui::Frame::new().fill(theme::RECESS).inner_margin(16))
+                .frame(egui::Frame::new().fill(theme::recess()).inner_margin(16))
                 .show(ui, |ui| info_sheet(ui, state));
         }
         egui::CentralPanel::no_frame().show(ui, |ui| match state.page {
@@ -126,7 +129,10 @@ fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
     let originals = state
         .originals
         .get_or_insert_with(|| originals::Originals::new(ctx.clone(), None, None));
-    let action = viewer.show(ctx, gallery, originals, &state.libraries, &mut state.videos);
+    // The viewer stays dark in the light appearance (REQ-020-05).
+    let action = theme::with_palette(&theme::DARK, || {
+        viewer.show(ctx, gallery, originals, &state.libraries, &mut state.videos)
+    });
     let closed = |state: &mut AppState| {
         state.viewer = None;
         if let Some(gallery) = &mut state.gallery {

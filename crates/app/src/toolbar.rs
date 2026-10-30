@@ -34,10 +34,10 @@ pub fn show(
     // Tiles scrolled under the bar don't react to the pointer; its empty space moves the window.
     let background = ui.interact(bar, ui.make_persistent_id("toolbar"), egui::Sense::click_and_drag());
     crate::titlebar::drag_area(ui.ctx(), &background);
-    crate::glass::paint(ui.painter(), crate::glass::Surface::new(bar, 0.0, theme::GLASS_BAR));
-    crate::glass::record_solid(ui.ctx(), bar, theme::GLASS_BAR.fill(None), true);
+    crate::glass::paint(ui.painter(), crate::glass::Surface::new(bar, 0.0, theme::glass_bar()));
+    crate::glass::record_solid(ui.ctx(), bar, theme::glass_bar().fill(None), true);
     ui.painter()
-        .hline(bar.x_range(), bar.bottom() - 0.5, egui::Stroke::new(1.0, theme::RIM));
+        .hline(bar.x_range(), bar.bottom() - 0.5, egui::Stroke::new(1.0, theme::rim()));
     // The window controls' place stays free (REQ-013-02).
     let controls = Rect::from_min_max(
         pos2(bar.left() + 12.0, bar.top() + 8.0),
@@ -181,7 +181,7 @@ fn filters_menu(ui: &mut egui::Ui, gallery: &mut Gallery) {
         .spacing([8.0, 4.0])
         .show(ui, |ui| {
             let today = domain::time_zone::today();
-            ui.label(egui::RichText::new("From").color(theme::MIST));
+            ui.label(egui::RichText::new("From").color(theme::muted()));
             if let Some(day) = day_field(ui, "from", search.from, search.to.unwrap_or(today)) {
                 search.from = day;
                 // The end can't be before the start.
@@ -192,7 +192,7 @@ fn filters_menu(ui: &mut egui::Ui, gallery: &mut Gallery) {
                 }
             }
             ui.end_row();
-            ui.label(egui::RichText::new("To").color(theme::MIST));
+            ui.label(egui::RichText::new("To").color(theme::muted()));
             if let Some(day) = day_field(ui, "to", search.to, search.from.unwrap_or(today)) {
                 search.to = day;
                 if let (Some(from), Some(to)) = (search.from, search.to)
@@ -250,7 +250,7 @@ fn section_with_clear(ui: &mut egui::Ui, label: &str, value: &str, clearable: bo
     let mut cleared = false;
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(label).family(theme::semibold()));
-        ui.label(egui::RichText::new(value).color(theme::MIST));
+        ui.label(egui::RichText::new(value).color(theme::muted()));
         if clearable {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let response = ui.add(egui::Button::new("Clear").frame(false));
@@ -289,7 +289,7 @@ fn view_button(ui: &mut egui::Ui, gallery: &mut Gallery) {
     let button = egui::Button::new((
         view_icon(gallery.view()).small(),
         "View",
-        Icon::ChevronDown.image(theme::ICON_SIZE, theme::MIST),
+        Icon::ChevronDown.image(theme::ICON_SIZE, theme::muted()),
     ))
     .frame(false)
     .min_size(vec2(0.0, theme::CONTROL_HEIGHT));
@@ -304,7 +304,7 @@ fn section(ui: &mut egui::Ui, label: &str, value: Option<&str>) {
         ui.label(egui::RichText::new(label).family(theme::semibold()));
         if let Some(value) = value {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new(value).color(theme::MIST));
+                ui.label(egui::RichText::new(value).color(theme::muted()));
             });
         }
     });
@@ -411,7 +411,7 @@ fn view_menu(ui: &mut egui::Ui, gallery: &mut Gallery) {
         gallery.set_group_by_day(grouped);
     }
     if !date_sort {
-        ui.label(egui::RichText::new("Only when sorted by date").color(theme::MIST));
+        ui.label(egui::RichText::new("Only when sorted by date").color(theme::muted()));
     }
 
     // The List view has no tiles to show indicators on (it has a rating column).
@@ -423,7 +423,7 @@ fn view_menu(ui: &mut egui::Ui, gallery: &mut Gallery) {
         gallery.set_tag_indicators(choice.clone());
     }
     if !zoomable {
-        ui.label(egui::RichText::new("Not in the List view").color(theme::MIST));
+        ui.label(egui::RichText::new("Not in the List view").color(theme::muted()));
     }
     // The picks are kept while indicators are off, so turning them on again restores them.
     ui.horizontal(|ui| {

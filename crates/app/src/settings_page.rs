@@ -4,6 +4,7 @@ use crate::icons::{Icon, icon_button};
 use crate::state::{AppState, Page};
 use crate::{format, theme};
 use db::libraries::{Library, LibraryStatus};
+use domain::appearance::Appearance;
 use eframe::egui::{self, Color32, CornerRadius, FontId, Frame, Margin, Rect, RichText, Stroke, Vec2};
 
 /// Content width; descriptions stay below 70 characters (design guide).
@@ -19,9 +20,9 @@ fn page_header(ui: &mut egui::Ui, rect: Rect, state: &mut AppState) {
         egui::Sense::click_and_drag(),
     );
     crate::titlebar::drag_area(ui.ctx(), &background);
-    crate::glass::paint(ui.painter(), crate::glass::Surface::new(rect, 0.0, theme::GLASS_BAR));
+    crate::glass::paint(ui.painter(), crate::glass::Surface::new(rect, 0.0, theme::glass_bar()));
     ui.painter()
-        .hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1.0, theme::RIM));
+        .hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1.0, theme::rim()));
     let controls = Rect::from_min_max(
         egui::pos2(rect.left() + 12.0, rect.top() + 8.0),
         egui::pos2(
@@ -63,6 +64,8 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
                 ui.vertical(|ui| {
                     ui.set_width(width);
                     libraries(ui, state);
+                    ui.add_space(theme::SPACE * 10.0);
+                    appearance(ui, state);
                     ui.add_space(theme::SPACE * 10.0);
                     // The browser has no watchers, scheduled checks or parallel reads to tune (REQ-019-13).
                     if !crate::WEB {
@@ -125,7 +128,7 @@ fn section_title(ui: &mut egui::Ui, title: &str) {
 /// Rows in a bordered group, divided by hairlines.
 fn group(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     Frame::new()
-        .stroke(Stroke::new(1.0, theme::RIM))
+        .stroke(Stroke::new(1.0, theme::rim()))
         .corner_radius(CornerRadius::same(theme::RADIUS_PANEL))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -151,7 +154,7 @@ fn setting_row(
                 |ui| {
                     ui.spacing_mut().item_spacing.y = theme::SPACE;
                     ui.label(RichText::new(label).font(FontId::new(theme::SIZE_BODY, theme::semibold())));
-                    ui.add(egui::Label::new(RichText::new(description).color(theme::MIST)).wrap());
+                    ui.add(egui::Label::new(RichText::new(description).color(theme::muted())).wrap());
                 },
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), control);
@@ -171,7 +174,38 @@ fn name_combo(response: &egui::Response, name: &str, value: String) {
 fn divider(ui: &mut egui::Ui) {
     let rect = ui.available_rect_before_wrap();
     ui.painter()
-        .hline(rect.x_range(), rect.top(), Stroke::new(1.0, theme::RIM));
+        .hline(rect.x_range(), rect.top(), Stroke::new(1.0, theme::rim()));
+}
+
+/// _Appearance_: light, dark or the system's, applied from the next frame on (REQ-020-01).
+fn appearance(ui: &mut egui::Ui, state: &mut AppState) {
+    section_title(ui, "Appearance");
+    let mut settings = state.settings;
+    group(ui, |ui| {
+        setting_row(
+            ui,
+            "Light or dark",
+            "System follows your computer's or browser's setting. The viewer stays dark.",
+            160.0,
+            |ui| {
+                let current = settings.appearance;
+                let combo = egui::ComboBox::from_id_salt("appearance")
+                    .width(160.0)
+                    .selected_text(current.label())
+                    .show_ui(ui, |ui| {
+                        crate::glass::behind_menu(ui, |ui| {
+                            for option in Appearance::ALL {
+                                ui.selectable_value(&mut settings.appearance, option, option.label());
+                            }
+                        });
+                    });
+                name_combo(&combo.response, "Appearance", current.label().to_owned());
+            },
+        );
+    });
+    if settings != state.settings {
+        state.update_settings(settings);
+    }
 }
 
 /// _Indexing_: how often to check for missed changes and how many files to read at once (REQ-010-03, -04).
@@ -275,7 +309,7 @@ fn thumbnail_cache(ui: &mut egui::Ui, state: &mut AppState) {
             180.0,
             |ui| {
                 let button =
-                    egui::Button::image_and_text(Icon::Trash2.small(), "Clear").stroke(Stroke::new(1.0, theme::RIM));
+                    egui::Button::image_and_text(Icon::Trash2.small(), "Clear").stroke(Stroke::new(1.0, theme::rim()));
                 clear = ui.add_enabled(!state.settings_page.clearing, button).clicked();
                 ui.label(
                     RichText::new(state.cache_usage.label()).font(FontId::new(theme::SIZE_BODY, theme::numbers())),
@@ -317,7 +351,7 @@ fn libraries(ui: &mut egui::Ui, state: &mut AppState) {
     } else {
         "Folders on local disks or network shares, indexed recursively."
     };
-    ui.label(RichText::new(description).color(theme::MIST));
+    ui.label(RichText::new(description).color(theme::muted()));
     ui.add_space(theme::SPACE * 2.0);
 
     let page = &mut state.settings_page;
@@ -328,12 +362,12 @@ fn libraries(ui: &mut egui::Ui, state: &mut AppState) {
         // The browser has no paths to type: folders come from its picker (REQ-019-13).
         if crate::WEB {
             let button = egui::Button::image_and_text(
-                Icon::FolderPlus.image(theme::ICON_SIZE, theme::DARKROOM),
+                Icon::FolderPlus.image(theme::ICON_SIZE, theme::base()),
                 RichText::new("Add folder…")
-                    .color(theme::DARKROOM)
+                    .color(theme::base())
                     .font(FontId::new(theme::SIZE_BODY, theme::semibold())),
             )
-            .fill(theme::PAPER);
+            .fill(theme::text());
             browse = ui.add_enabled(!busy, button).clicked();
             return;
         }
@@ -348,15 +382,15 @@ fn libraries(ui: &mut egui::Ui, state: &mut AppState) {
         let enter = input.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let can_add = !page.path_input.trim().is_empty() && !busy;
         let add_button = egui::Button::image_and_text(
-            Icon::FolderPlus.image(theme::ICON_SIZE, theme::DARKROOM),
+            Icon::FolderPlus.image(theme::ICON_SIZE, theme::base()),
             RichText::new("Add")
-                .color(theme::DARKROOM)
+                .color(theme::base())
                 .font(FontId::new(theme::SIZE_BODY, theme::semibold())),
         )
-        .fill(theme::PAPER);
+        .fill(theme::text());
         add = ui.add_enabled(can_add, add_button).clicked() || (enter && can_add);
         let browse_button =
-            egui::Button::image_and_text(Icon::FolderOpen.small(), "Browse…").stroke(Stroke::new(1.0, theme::RIM));
+            egui::Button::image_and_text(Icon::FolderOpen.small(), "Browse…").stroke(Stroke::new(1.0, theme::rim()));
         browse = ui.add_enabled(!busy, browse_button).clicked();
     });
     if add {
@@ -371,13 +405,13 @@ fn libraries(ui: &mut egui::Ui, state: &mut AppState) {
     let mut rescan = None;
     let libraries = &state.libraries;
     Frame::new()
-        .stroke(Stroke::new(1.0, theme::RIM))
+        .stroke(Stroke::new(1.0, theme::rim()))
         .corner_radius(CornerRadius::same(theme::RADIUS_PANEL))
         .inner_margin(Margin::same(12))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             if libraries.is_empty() {
-                ui.label(RichText::new("No libraries yet.").color(theme::MIST));
+                ui.label(RichText::new("No libraries yet.").color(theme::muted()));
             }
             for (i, library) in libraries.iter().enumerate() {
                 if i > 0 {
@@ -416,7 +450,7 @@ fn library_row(ui: &mut egui::Ui, library: &Library) -> Option<RowAction> {
                     details.push_str(&format!(" · last indexed {}", format::medium_date_time(at)));
                 }
                 ui.add(
-                    egui::Label::new(RichText::new(details).size(theme::SIZE_CAPTION).color(theme::MIST)).truncate(),
+                    egui::Label::new(RichText::new(details).size(theme::SIZE_CAPTION).color(theme::muted())).truncate(),
                 )
                 .on_hover_text(&library.path);
             });
@@ -443,9 +477,9 @@ fn library_row(ui: &mut egui::Ui, library: &Library) -> Option<RowAction> {
 
 fn status_badge(ui: &mut egui::Ui, status: LibraryStatus) {
     let (fill, stroke, text) = match status {
-        LibraryStatus::Online => (theme::RAISED, Color32::TRANSPARENT, theme::PAPER),
-        LibraryStatus::Offline => (theme::ALERT, Color32::TRANSPARENT, theme::DARKROOM),
-        LibraryStatus::Unknown => (Color32::TRANSPARENT, theme::RIM, theme::MIST),
+        LibraryStatus::Online => (theme::raised(), Color32::TRANSPARENT, theme::text()),
+        LibraryStatus::Offline => (theme::alert(), Color32::TRANSPARENT, theme::base()),
+        LibraryStatus::Unknown => (Color32::TRANSPARENT, theme::rim(), theme::muted()),
     };
     Frame::new()
         .fill(fill)
@@ -484,8 +518,8 @@ fn confirm(ctx: &egui::Context, id: &str, title: &str, text: &str, verb: &str) -
     let modal = egui::Modal::new(egui::Id::unique(id))
         .frame(
             Frame::new()
-                .fill(theme::RAISED)
-                .stroke(Stroke::new(1.0, theme::RIM))
+                .fill(theme::raised())
+                .stroke(Stroke::new(1.0, theme::rim()))
                 .corner_radius(CornerRadius::same(theme::RADIUS_PANEL))
                 .inner_margin(Margin::same(20)),
         )
@@ -499,15 +533,15 @@ fn confirm(ctx: &egui::Context, id: &str, title: &str, text: &str, verb: &str) -
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let remove = egui::Button::new(
                         RichText::new(verb)
-                            .color(theme::DARKROOM)
+                            .color(theme::base())
                             .font(FontId::new(theme::SIZE_BODY, theme::semibold())),
                     )
-                    .fill(theme::PAPER);
+                    .fill(theme::text());
                     if ui.add(remove).clicked() {
                         decided = Some(true);
                     }
                     if ui
-                        .add(egui::Button::new("Cancel").stroke(Stroke::new(1.0, theme::RIM)))
+                        .add(egui::Button::new("Cancel").stroke(Stroke::new(1.0, theme::rim())))
                         .clicked()
                     {
                         decided = Some(false);

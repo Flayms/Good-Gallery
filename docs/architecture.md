@@ -182,3 +182,8 @@ Architectural decisions, newest last. One entry each: what was decided, why (wit
 - *Privacy:* a content security policy without inline scripts (`cargo xtask web` moves Trunk's start script into a file); `no_network.rs` checks the `web-sys` features and the page's scripts.
 - *Tests:* Playwright (`web/tests`, `cargo xtask web-test`) in Chromium with SwiftShader, clicking by position in a fixed viewport and comparing screenshots; npm only there.
 **Rejected:** an index worker with SQLite on OPFS (`sahpool`), a separate web UI, sql.js / IndexedDB, `image` + libwebp in wasm, a DOM `<video>` over the canvas, Chromium only.
+
+### 2026-10-30 · Appearance: light, dark or the system's
+
+**Decided:** `theme` holds two `Palette`s (`DARK`, `LIGHT`) named by role (`base`, `recess`, `raised`, `text`, `muted`, …). egui gets a style for each theme in `theme::install`; the _Appearance_ setting maps onto egui's `ThemePreference` (System follows eframe's report of the OS or browser preference, dark where there is none), and egui's own `ViewportCommand::SetTheme` sets the native window frame. Each frame, `theme::begin_frame` sets a per-thread current palette from `ctx.theme()`; call sites read `theme::text()` and so on. The viewer draws inside `theme::with_palette(&DARK, …)` and its area gets egui's dark style; menus apply the current palette's style themselves (egui builds popups from the global style). Details in spec 020's plan.
+**Rejected:** passing the context to every color lookup (the same result, threaded through ~170 call sites), a global (tests draw in parallel on their own threads, with different appearances).

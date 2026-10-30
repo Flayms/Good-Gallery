@@ -18,15 +18,15 @@ A personal archive of photos and videos, often on a NAS, browsed by one person w
 
 ## Surfaces
 
-| Surface         | Token (`theme`) | Value                                                     | Used for                                                     |
+| Surface         | Role (`theme`)  | Value                                                     | Used for                                                     |
 | --------------- | --------------- | --------------------------------------------------------- | ------------------------------------------------------------ |
-| Darkroom        | `DARKROOM`      | `#1F1F1F`                                                 | Gallery, settings page                                       |
-| Recess          | `RECESS`        | `#171717`                                                 | Sidebar (nothing is behind it, so it is solid)               |
-| Glass bar       | `GLASS_BAR`     | `rgb(28 28 28 / 0.72)`, blur 24px, saturate 160 %, Rim    | Toolbar, viewer control bar, viewer arrows, filmstrip        |
-| Glass panel     | `GLASS_PANEL`   | `rgb(36 36 36 / 0.86)`, blur 32px, saturate 140 %, Rim    | Menus, popovers, select lists, command list, dialogs, sheets, info panel |
-| Field           | `FIELD`         | `rgb(0 0 0 / 0.35)`                                       | Inputs and the search bar on glass                           |
+| Darkroom        | `base`          | `#1F1F1F`                                                 | Gallery, settings page                                       |
+| Recess          | `recess`        | `#171717`                                                 | Sidebar (nothing is behind it, so it is solid)               |
+| Glass bar       | `glass_bar`     | `rgb(28 28 28 / 0.72)`, blur 24px, saturate 160 %, Rim    | Toolbar, viewer control bar, viewer arrows, filmstrip        |
+| Glass panel     | `glass_panel`   | `rgb(36 36 36 / 0.86)`, blur 32px, saturate 140 %, Rim    | Menus, popovers, select lists, command list, dialogs, sheets, info panel |
+| Field           | `field`         | `rgb(0 0 0 / 0.35)`                                       | Inputs and the search bar on glass                           |
 | Scrim           | `SCRIM`         | `rgb(0 0 0 / 0.5)`, blur 28px, saturate 120 %             | The whole window behind the viewer                           |
-| Raised          | `RAISED`        | `#2A2A2A`                                                 | Opaque fallback for both glass levels (Darkroom for the Scrim) |
+| Raised          | `raised`        | `#2A2A2A`                                                 | Opaque fallback for both glass levels (Darkroom for the Scrim) |
 
 Glass is drawn by the app, not the OS: the tiles under a glass surface are rendered into an offscreen target at half resolution, blurred with a dual-Kawase chain and composited with saturation, tint and rounded corners in a wgpu paint callback (≈ 0.4 ms per surface; see `docs/architecture.md`). What lies under glass is the frame's backdrop: the tiles the gallery drew and the solid surfaces (page, sidebar), without text, which the blur hides anyway. The viewer's chrome reuses the scrim's blur. `app::glass` holds the pass; menus and dialogs get it through `glass::panel` / `glass::behind_menu`.
 
@@ -56,6 +56,31 @@ Rules:
 - **Ambient** is the media item's average color, taken from its placeholder. It is clamped to OKLCH lightness ≤ 0.28 and chroma ≤ 0.06 and mixed 30 % into both glass levels, so text contrast holds for any photo.
 - **Focus** is a 2px Paper ring with a 2px `rgb(0 0 0 / 0.6)` ring outside it, so it shows over white and over black. The app draws it for every focusable widget (one helper in `theme`); text inputs highlight their border instead.
 - **Contrast floor:** Paper and Mist reach 4.5:1 on every surface, glass measured over a white backdrop (the worst case). A test enforces this from the tokens in `theme`.
+
+### Light appearance
+
+The _Appearance_ setting (spec 020) is _System_ (the OS or browser decides, dark if it says nothing), _Light_ or _Dark_. Light keeps every surface, glass level and rule above; only values change, still neutral grey without hue. The viewer stays dark in both: photos are judged against a dark surround.
+
+| Role (`theme`)  | Light                      | Dark (above)              |
+| --------------- | -------------------------- | ------------------------- |
+| `base`          | `#F4F4F4`                  | `#1F1F1F` Darkroom        |
+| `recess`        | `#EAEAEA`                  | `#171717`                 |
+| `raised`        | `#FFFFFF`                  | `#2A2A2A`                 |
+| `placeholder`   | `#E0E0E0`                  | `#2A2A2A`                 |
+| `text`          | `#1A1A1A`                  | `#F2F2F2` Paper           |
+| `muted`         | `#595959`                  | `#B4B4B4` Mist            |
+| `star`          | `#8F6300`                  | `#F5C451`                 |
+| `alert`         | `#C42B1C`                  | `#F2706A`                 |
+| `rim`           | `rgb(0 0 0 / 0.12)`        | `rgb(255 255 255 / 0.10)` |
+| `hover`         | `rgb(0 0 0 / 0.05)`        | `rgb(255 255 255 / 0.06)` |
+| `selected`      | `rgb(0 0 0 / 0.10)`        | `rgb(255 255 255 / 0.12)` |
+| `field`         | `rgb(255 255 255 / 0.60)`  | `rgb(0 0 0 / 0.35)`       |
+| `glass_bar`     | `rgb(248 248 248 / 0.72)`  | `rgb(28 28 28 / 0.72)`    |
+| `glass_panel`   | `rgb(255 255 255 / 0.86)`  | `rgb(36 36 36 / 0.86)`    |
+| focus ring      | `text` + white 80 % outside | Paper + black 60 % outside |
+
+- **Contrast floor** as in dark; light glass is measured over a black backdrop, its worst case.
+- **Placeholders** are a step darker than the page in light (a step lighter in dark): white tiles would vanish.
 
 ## Type
 

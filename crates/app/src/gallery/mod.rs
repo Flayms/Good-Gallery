@@ -1102,7 +1102,7 @@ impl Gallery {
     /// "no image" icon when it can't be had (REQ-005-06, REQ-005-14).
     fn paint_thumbnail(&mut self, ui: &egui::Ui, rect: Rect, radius: u8, id: i64, frame: &mut FrameState) {
         let Some(item) = self.items.get(&id) else {
-            ui.painter().rect_filled(rect, radius, theme::RAISED);
+            ui.painter().rect_filled(rect, radius, theme::placeholder());
             return;
         };
         // Placeholder: the ThumbHash's blurred colors, else gray.
@@ -1122,7 +1122,7 @@ impl Gallery {
                 );
             }
             None => {
-                painter.rect_filled(rect, radius, theme::RAISED);
+                painter.rect_filled(rect, radius, theme::placeholder());
             }
         }
         let failed = item.thumb_status == ThumbStatus::Error
@@ -1135,7 +1135,7 @@ impl Gallery {
             .as_ref()
             .is_none_or(|loaded| (frame.now - loaded.at).as_secs_f32() < theme::DURATION_BASE)
         {
-            crate::glass::record_solid(ui.ctx(), rect, theme::RAISED, false);
+            crate::glass::record_solid(ui.ctx(), rect, theme::placeholder(), false);
         }
         if let Some(loaded) = loaded {
             let t = (frame.now - loaded.at).as_secs_f32() / theme::DURATION_BASE;
@@ -1156,7 +1156,7 @@ impl Gallery {
         } else if failed {
             let size = (rect.width().min(rect.height()) * 0.6).min(24.0);
             let icon = Rect::from_center_size(rect.center(), Vec2::splat(size));
-            Icon::ImageOff.image(size, theme::MIST).paint_at(ui, icon);
+            Icon::ImageOff.image(size, theme::muted()).paint_at(ui, icon);
         }
     }
 
@@ -1214,8 +1214,8 @@ fn paint_autoscroll_marker(ctx: &egui::Context, at: egui::Pos2) {
         egui::Order::Foreground,
         egui::Id::unique("autoscroll"),
     ));
-    painter.circle(at, 14.0, theme::RAISED, egui::Stroke::new(1.0, theme::MIST));
-    let stroke = egui::Stroke::new(1.5, theme::PAPER);
+    painter.circle(at, 14.0, theme::raised(), egui::Stroke::new(1.0, theme::muted()));
+    let stroke = egui::Stroke::new(1.5, theme::text());
     // Chevrons pointing up and down, 8 points wide, 2.5 points apart from the center.
     for direction in [-1.0, 1.0] {
         let tip = at + vec2(0.0, direction * 7.0);

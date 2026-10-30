@@ -1,6 +1,6 @@
 # 020 · Light mode
 
-**Status:** Draft
+**Status:** Implemented
 
 ## Goal
 
@@ -61,11 +61,11 @@ Some users work in bright rooms or simply prefer dark text on a light background
 
 ## Verification
 
-| REQ        | Test | Result  |
-| ---------- | ---- | ------- |
-| REQ-020-01 | —    | no test |
-| REQ-020-02 | —    | no test |
-| REQ-020-03 | —    | no test |
-| REQ-020-04 | —    | no test |
-| REQ-020-05 | —    | no test |
-| REQ-020-06 | —    | no test |
+| REQ        | Test | Result |
+| ---------- | ---- | ------ |
+| REQ-020-01 | `crates/domain/src/appearance.rs` › req_020_01_defaults_to_the_system_and_reads_back_what_it_stores; `crates/db/src/settings.rs` › req_020_01_stores_the_appearance_and_falls_back_to_the_system; `crates/app/tests/appearance.rs` › req_020_01_picks_the_appearance_in_the_settings_and_keeps_it_across_restarts (snapshot `settings_light`) | pass |
+| REQ-020-02 | `crates/app/tests/appearance.rs` › req_020_02_follows_the_system_and_is_dark_where_it_says_nothing; `crates/app/src/theme.rs` › req_013_01_req_020_02_uses_its_own_colors_whatever_the_os_theme; `web/tests/web.spec.js` › REQ-020-02: in a browser that prefers light, the page and the app are light | pass (switching while the app runs follows egui's system theme, checked in tests, not on every desktop) |
+| REQ-020-03 | `crates/app/src/theme.rs` › req_020_03_light_surfaces_are_neutral_grey; `crates/app/tests/appearance.rs` › req_020_03_draws_the_gallery_sidebar_and_menus_in_the_light_tokens (snapshots `gallery_light`, `view_menu_light`) | pass |
+| REQ-020-04 | `crates/app/src/theme.rs` › req_013_04_req_020_04_text_is_legible_on_the_solid_surfaces, req_013_04_req_020_04_text_is_legible_on_glass_over_any_photo, req_013_05_req_020_04_the_focus_ring_shows_over_any_background | pass |
+| REQ-020-05 | `crates/app/tests/viewer.rs` › req_020_05_the_viewer_stays_dark_in_the_light_appearance (snapshot `viewer_light`) | pass |
+| REQ-020-06 | `crates/app/src/glass.rs` › req_020_06_light_surfaces_are_opaque_without_glass | pass |

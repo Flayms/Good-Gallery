@@ -116,6 +116,7 @@ fn req_010_01_shows_the_defaults_and_keeps_changes_across_restarts() {
             quick_check_interval_minutes: 180,
             thumb_cache_gib: 20.0,
             io_concurrency: 4,
+            appearance: domain::appearance::Appearance::System,
         }
     );
 }
