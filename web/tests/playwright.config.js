@@ -16,6 +16,9 @@ export default defineConfig({
     deviceScaleFactor: 1,
     locale: "en-US",
     timezoneId: "UTC",
+    // The app follows the browser's light or dark preference (REQ-020-02), and Chromium's default is light. The
+    // screenshots are of the dark appearance; the light one has a test of its own.
+    colorScheme: "dark",
     screenshot: "only-on-failure",
   },
   projects: [

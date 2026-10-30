@@ -181,3 +181,13 @@ test("REQ-019-01: a browser without what the page needs is told which browsers w
   await expect(page.locator("#problem")).toContainText("storage for the index");
   await expect(page.locator("#problem")).toContainText("Chrome, Edge, Firefox and Safari");
 });
+
+test("REQ-020-02: in a browser that prefers light, the page and the app are light", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  const log = watchLog(page);
+  await page.goto("/");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(244, 244, 244)");
+  await log.waitFor("event handlers installed");
+  await page.waitForTimeout(1500);
+  await expect(page).toHaveScreenshot("empty-light.png");
+});
