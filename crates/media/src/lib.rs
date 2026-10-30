@@ -1,5 +1,6 @@
-//! Reading media files: metadata through exiftool, thumbnails, video frames through ffmpeg.
+//! Reading media files: metadata through exiftool, thumbnails, video frames through ffmpeg. Writing edited photos.
 
+pub mod edit;
 pub mod exiftool;
 pub mod ffmpeg;
 pub mod helpers;

@@ -37,6 +37,9 @@ pub struct MediaMetadata {
     pub rating: Option<i64>,
     /// Tag paths, outermost first; flat keywords are single-element paths.
     pub tags: Vec<Vec<String>>,
+    /// The edit the file was saved with (spec 021), from the file itself.
+    /// Boxed: most files have none, and scans move many of these around.
+    pub edit: Option<Box<crate::edit::SavedEdit>>,
 }
 
 /// Bump when metadata extraction changes, so the indexer re-reads files already marked unchanged. Existing indexes were

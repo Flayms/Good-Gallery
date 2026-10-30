@@ -1,5 +1,6 @@
 //! Good Gallery's UI. `main.rs` runs it in a window; tests drive the same [`ui`] with `egui_kittest`.
 
+pub mod edit;
 pub mod empty_state;
 pub mod format;
 pub mod gallery;
@@ -115,6 +116,7 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
         });
         show_viewer(&ctx, state);
     }
+    confirm_revert(&ctx, state);
     indexer_progress::show(&ctx, state);
     state.toasts.show(&ctx);
     // Over the viewer they go with its dark look (REQ-020-05).
@@ -156,12 +158,50 @@ fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
             filter_by_tag(state, &tag);
         }
         Some(viewer::Action::ShowInExplorer(file)) => state.show_in_explorer(file),
+        Some(viewer::Action::SaveEdit(request)) => state.save_edit(*request),
+        Some(viewer::Action::Revert(target)) => state.confirm_revert = Some(target),
         None => {}
     }
-    // Details are kept only while an info view shows them, else every reload would ask for them again.
-    let info_shown = state.info_sheet.is_some() || state.viewer.as_ref().is_some_and(viewer::Viewer::info_open);
+    // Details are kept only while an info view (or editing, which starts from them) shows them, else every reload
+    // would ask for them again.
+    let info_shown = state.info_sheet.is_some()
+        || state
+            .viewer
+            .as_ref()
+            .is_some_and(|viewer| viewer.info_open() || viewer.editing().is_some());
     if !info_shown && let Some(gallery) = &mut state.gallery {
         gallery.forget_detail();
+    }
+}
+
+/// "Revert to the original?" with Cancel / Revert (REQ-021-12); in the viewer's dark look while it is open.
+fn confirm_revert(ctx: &egui::Context, state: &mut AppState) {
+    let Some(target) = state.confirm_revert.clone() else {
+        return;
+    };
+    let text = format!(
+        "{} goes back to the unedited original, and the edit is discarded.",
+        target.file_name
+    );
+    let ask = || {
+        widgets::dialog(
+            ctx,
+            "confirm-revert",
+            "Revert to the original?",
+            &text,
+            &["Revert", "Cancel"],
+        )
+    };
+    let chosen = if state.viewer.is_some() {
+        theme::with_palette(&theme::DARK, ask)
+    } else {
+        ask()
+    };
+    if let Some(chosen) = chosen {
+        state.confirm_revert = None;
+        if chosen == 0 {
+            state.revert_edit(target);
+        }
     }
 }
 
@@ -202,8 +242,13 @@ fn info_sheet(ui: &mut egui::Ui, state: &mut AppState) {
     if close {
         state.info_sheet = None;
     }
-    if let Some(tag) = clicked {
-        filter_by_tag(state, &tag);
+    match clicked {
+        Some(info::InfoAction::FilterByTag(tag)) => filter_by_tag(state, &tag),
+        Some(info::InfoAction::Revert) => {
+            let detail = state.gallery.as_ref().and_then(|gallery| gallery.cached_detail(id));
+            state.confirm_revert = detail.map(state::RevertTarget::of);
+        }
+        None => {}
     }
 }
 
@@ -241,7 +286,7 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
                 }
             }
             Some((index, gallery::MediaAction::Information)) => state.info_sheet = gallery.id_at(index),
-            None => {}
+            Some((_, gallery::MediaAction::Edit | gallery::MediaAction::Revert)) | None => {}
         }
     }
     // The toolbar floats over the gallery, which scrolls underneath it (REQ-013-03).

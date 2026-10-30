@@ -107,6 +107,10 @@ enum Loaded {
 pub enum MediaAction {
     ShowInExplorer,
     Information,
+    /// Only in the viewer (REQ-021-01).
+    Edit,
+    /// Only in the viewer, for an edit saved over its original (REQ-021-12).
+    Revert,
 }
 
 /// A media item's details as loaded: `Ok(None)` when it isn't indexed (any more).
@@ -633,6 +637,14 @@ impl Gallery {
         self.detail.as_ref()?.1.as_ref()
     }
 
+    /// The details of `id` if they are loaded, without asking for them.
+    pub fn cached_detail(&self, id: i64) -> Option<&MediaDetail> {
+        match &self.detail {
+            Some((asked, Some(Ok(Some(detail))))) if *asked == id => Some(detail),
+            _ => None,
+        }
+    }
+
     /// Forgets the details asked for last: no info view shows them any more.
     pub fn forget_detail(&mut self) {
         self.detail = None;
@@ -753,6 +765,15 @@ impl Gallery {
                         self.chunks.clear();
                     }
                     for item in items {
+                        // A rewritten file (an edit saved over it): its thumbnail texture and placeholder are stale.
+                        if let Some(old) = self.items.get(&item.id)
+                            && (old.size, old.mtime, &old.thumbhash) != (item.size, item.mtime, &item.thumbhash)
+                        {
+                            self.placeholders.remove(&item.id);
+                            if let Some(thumbnails) = &mut self.thumbnails {
+                                thumbnails.streamer.forget(item.id);
+                            }
+                        }
                         self.items.insert(item.id, item);
                     }
                 }
@@ -1234,6 +1255,11 @@ fn paint_autoscroll_marker(ctx: &egui::Context, at: egui::Pos2) {
 
 /// _Show in Explorer_ and _Information_ in a context menu (REQ-009-11); what was chosen.
 pub fn context_menu(ui: &mut egui::Ui) -> Option<MediaAction> {
+    context_menu_with(ui, false, false)
+}
+
+/// The context menu with _Edit_ and _Revert to original_ where they apply (the viewer's, spec 021).
+pub fn context_menu_with(ui: &mut egui::Ui, edit: bool, revert: bool) -> Option<MediaAction> {
     crate::glass::behind_menu(ui, |ui| {
         let mut action = None;
         // The browser can't open a file manager (REQ-019-13).
@@ -1242,6 +1268,12 @@ pub fn context_menu(ui: &mut egui::Ui) -> Option<MediaAction> {
         }
         if ui.button("Information").clicked() {
             action = Some(MediaAction::Information);
+        }
+        if edit && ui.button("Edit").clicked() {
+            action = Some(MediaAction::Edit);
+        }
+        if revert && ui.button("Revert to original").clicked() {
+            action = Some(MediaAction::Revert);
         }
         if action.is_some() {
             ui.close();

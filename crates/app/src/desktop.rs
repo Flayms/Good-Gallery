@@ -364,11 +364,18 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
         }
         None => tracing::error!("no wgpu renderer: the gallery shows no thumbnails"),
     }
-    let state = state
+    let mut state = state
         .with_thumbnails(thumbnails.clone())
         .with_gallery(gallery)
         .with_originals(originals)
         .with_videos(videos);
+    // Saving edits copies metadata with exiftool, which needs our XMP namespace defined (spec 021).
+    if let Some(exiftool) = media::exiftool::find_exiftool() {
+        match media::edit::exiftool_config(data_dir) {
+            Ok(config) => state = state.with_edit_tools(media::edit::Tools { exiftool, config }),
+            Err(error) => tracing::error!("can't write exiftool's configuration for edits: {error}"),
+        }
+    }
     let Some(exiftool) = exiftool else {
         tracing::error!("exiftool not found: libraries can't be indexed");
         let mut state = state.with_settings_targets(Arc::new(RunningParts {
@@ -555,6 +562,7 @@ fn run(options: Options) -> anyhow::Result<()> {
             app::setup(&cc.egui_ctx);
             if let Some(render_state) = &cc.wgpu_render_state {
                 app::glass::install(&cc.egui_ctx, render_state);
+                app::edit::install(render_state);
             }
             app::titlebar::install(cc);
             Ok(Box::new(GalleryApp {
