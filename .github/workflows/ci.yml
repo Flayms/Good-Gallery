@@ -66,7 +66,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: snapshot-diffs-windows
-          path: crates/*/tests/snapshots/*.diff.png
+          # The new renders too: a snapshot that doesn't exist yet on this platform can be taken from them.
+          path: |
+            crates/*/tests/snapshots/*.diff.png
+            crates/*/tests/snapshots/*.new.png
           if-no-files-found: ignore
 
   test-linux:
@@ -102,7 +105,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: snapshot-diffs-linux
-          path: crates/*/tests/snapshots/*.diff.png
+          # The new renders too: a snapshot that doesn't exist yet on this platform can be taken from them.
+          path: |
+            crates/*/tests/snapshots/*.diff.png
+            crates/*/tests/snapshots/*.new.png
           if-no-files-found: ignore
 
   web:
