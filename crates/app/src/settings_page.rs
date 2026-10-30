@@ -1,4 +1,5 @@
-//! The Settings page: libraries (spec 001), indexing and the thumbnail cache (spec 010). Changes apply right away.
+//! The Settings page: libraries (spec 001), the sidebar's groups (spec 008), indexing and the thumbnail cache
+//! (spec 010). Changes apply right away.
 
 use crate::icons::{Icon, icon_button};
 use crate::state::{AppState, Page};
@@ -6,6 +7,7 @@ use crate::{format, theme};
 use db::libraries::{Library, LibraryStatus};
 use domain::appearance::Appearance;
 use domain::edit::MtimeOnSave;
+use domain::sidebar::SidebarLayout;
 use eframe::egui::{self, Color32, CornerRadius, FontId, Frame, Margin, Rect, RichText, Stroke, Vec2};
 
 /// Content width; descriptions stay below 70 characters (design guide).
@@ -67,6 +69,8 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
                     libraries(ui, state);
                     ui.add_space(theme::SPACE * 10.0);
                     appearance(ui, state);
+                    ui.add_space(theme::SPACE * 10.0);
+                    sidebar(ui, state);
                     ui.add_space(theme::SPACE * 10.0);
                     // The browser has no watchers, scheduled checks or parallel reads to tune (REQ-019-13).
                     if !crate::WEB {
@@ -208,6 +212,55 @@ fn appearance(ui: &mut egui::Ui, state: &mut AppState) {
     });
     if settings != state.settings {
         state.update_settings(settings);
+    }
+}
+
+/// _Sidebar_: the groups below the libraries, each with a switch and _Move up_ / _Move down_, and _Reset to default_
+/// (REQ-008-10, REQ-008-11).
+fn sidebar(ui: &mut egui::Ui, state: &mut AppState) {
+    ui.label(RichText::new("Sidebar").font(FontId::new(theme::SIZE_SECTION, theme::semibold())));
+    ui.label(RichText::new("Groups shown below the libraries, from top to bottom.").color(theme::muted()));
+    ui.add_space(theme::SPACE * 2.0);
+    let mut layout = state.sidebar.layout().clone();
+    let groups = layout.groups().to_vec();
+    group(ui, |ui| {
+        for (i, &(sidebar_group, on)) in groups.iter().enumerate() {
+            if i > 0 {
+                divider(ui);
+            }
+            let label = sidebar_group.label();
+            Frame::new().inner_margin(Margin::symmetric(12, 6)).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let mut checked = on;
+                    if ui.checkbox(&mut checked, label).changed() {
+                        layout.set_shown(sidebar_group, checked);
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let last = i + 1 == groups.len();
+                        let down = ui.add_enabled_ui(!last, |ui| {
+                            icon_button(ui, Icon::ChevronDown, &format!("Move {label} down"), "Move down")
+                        });
+                        if down.inner.clicked() {
+                            layout.move_down(sidebar_group);
+                        }
+                        let up = ui.add_enabled_ui(i > 0, |ui| {
+                            icon_button(ui, Icon::ChevronUp, &format!("Move {label} up"), "Move up")
+                        });
+                        if up.inner.clicked() {
+                            layout.move_up(sidebar_group);
+                        }
+                    });
+                });
+            });
+        }
+    });
+    ui.add_space(theme::SPACE * 3.0);
+    let reset = egui::Button::new("Reset to default").stroke(Stroke::new(1.0, theme::rim()));
+    if ui.add_enabled(!layout.is_default(), reset).clicked() {
+        layout = SidebarLayout::default();
+    }
+    if layout != *state.sidebar.layout() {
+        state.sidebar.set_layout(layout, state.db.as_ref());
     }
 }
 

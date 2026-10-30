@@ -9,6 +9,7 @@ use db::libraries::{Library, LibraryStatus};
 use db::rusqlite::Connection;
 use domain::folders::{FolderNode, TagNode, folder_ancestors};
 use domain::search::{GallerySearch, TagMode};
+use domain::sidebar::{SidebarGroup, SidebarLayout};
 use eframe::egui::{self, Color32, Rect, Vec2, pos2, vec2};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -20,6 +21,8 @@ const INDENT: f32 = 16.0;
 const PREVIEW: usize = 10;
 /// Collapsible groups, stored under the settings keys `sidebar.group.<id>`.
 const COLLAPSIBLE: [&str; 3] = ["people", "places", "ratings"];
+/// The settings key of the groups' order and which of them show (REQ-008-10, REQ-008-11).
+const GROUPS: &str = "sidebar.groups";
 
 /// What the sidebar remembers between frames.
 #[derive(Debug, Default)]
@@ -32,11 +35,13 @@ pub struct SidebarState {
     expanded_for: Option<(i64, Option<String>)>,
     /// Hidden with _Hide sidebar_ or Ctrl + B, stored under `sidebar.hidden` (REQ-008-08, REQ-008-09).
     hidden: bool,
+    /// Which groups show below the libraries, in which order (REQ-008-10).
+    layout: SidebarLayout,
     loaded: bool,
 }
 
 impl SidebarState {
-    /// Reads the collapsed groups and whether the sidebar is hidden, once.
+    /// Reads the collapsed groups, the groups' order and whether the sidebar is hidden, once.
     pub fn load(&mut self, db: &Arc<Mutex<Connection>>) {
         if self.loaded {
             return;
@@ -53,6 +58,24 @@ impl SidebarState {
             }
         }
         self.hidden = db::settings::value(&conn, "sidebar.hidden").ok().flatten() == Some(true.into());
+        if let Some(stored) = db::settings::value(&conn, GROUPS).ok().flatten() {
+            self.layout = SidebarLayout::from_value(&stored);
+        }
+    }
+
+    pub fn layout(&self) -> &SidebarLayout {
+        &self.layout
+    }
+
+    /// Changes which groups show and in which order, and remembers it (REQ-008-10, REQ-008-11).
+    pub fn set_layout(&mut self, layout: SidebarLayout, db: Option<&Arc<Mutex<Connection>>>) {
+        self.layout = layout;
+        // As for groups: if a background job holds the connection, the choice isn't stored this time.
+        if let Some(Ok(conn)) = db.map(|db| db.try_lock())
+            && let Err(error) = db::settings::set_value(&conn, GROUPS, &self.layout.to_value())
+        {
+            tracing::warn!("can't store the sidebar's groups: {error}");
+        }
     }
 
     pub fn is_hidden(&self) -> bool {
@@ -153,11 +176,20 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
             if libraries(ui, state, &mut search, data, &input, on_settings) {
                 *input.page = Page::Gallery;
             }
-            for (id, label, nodes) in [("people", "People", &data.people), ("places", "Places", &data.places)] {
-                category(ui, state, &mut search, id, label, nodes, input.db.as_ref());
+            // The groups in the user's order, without the switched-off ones (REQ-008-10).
+            let shown: Vec<SidebarGroup> = state.layout.shown().collect();
+            for group in shown {
+                match group {
+                    SidebarGroup::People => {
+                        category(ui, state, &mut search, group, &data.people, input.db.as_ref());
+                    }
+                    SidebarGroup::Places => {
+                        category(ui, state, &mut search, group, &data.places, input.db.as_ref());
+                    }
+                    SidebarGroup::Ratings => ratings(ui, state, &mut search, data, input.db.as_ref()),
+                    SidebarGroup::Tags => popular(ui, &mut search, data),
+                }
             }
-            ratings(ui, state, &mut search, data, input.db.as_ref());
-            popular(ui, &mut search, data);
         });
     settings_row(ui, input.page);
     if search != *gallery.search() {
@@ -455,11 +487,11 @@ fn category(
     ui: &mut egui::Ui,
     state: &mut SidebarState,
     search: &mut GallerySearch,
-    id: &'static str,
-    label: &str,
+    group: SidebarGroup,
     nodes: &[TagNode],
     db: Option<&Arc<Mutex<Connection>>>,
 ) {
+    let (id, label) = (group.key(), group.label());
     if nodes.is_empty() || !collapsible(ui, state, id, label, db) {
         return;
     }

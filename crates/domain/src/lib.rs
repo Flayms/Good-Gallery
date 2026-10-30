@@ -9,6 +9,7 @@ pub mod folders;
 pub mod layout;
 pub mod media;
 pub mod search;
+pub mod sidebar;
 pub mod tags;
 pub mod thumbs;
 pub mod time_zone;

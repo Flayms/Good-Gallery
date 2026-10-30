@@ -129,7 +129,7 @@ Architectural decisions, newest last. One entry each: what was decided, why (wit
 
 ### 2026-10-27 · Search bar, filters and sidebar
 
-**Decided:** the gallery owns the search (`Gallery::set_search` reloads from the top). _Filters_ and _View_ are `egui::Popup`s under fixed ids: a button's automatic id changes with its look and with the widgets drawn before it, which closed the menus. The sidebar is a fixed 256 px left panel; collapsed groups are stored as `sidebar.group.<id>` in `settings`.
+**Decided:** the gallery owns the search (`Gallery::set_search` reloads from the top). _Filters_ and _View_ are `egui::Popup`s under fixed ids: a button's automatic id changes with its look and with the widgets drawn before it, which closed the menus. The sidebar is a fixed 256 px left panel; collapsed groups are stored as `sidebar.group.<id>` in `settings`. The groups' order and which of them show (`domain::sidebar::SidebarLayout`) are stored once for the app as `sidebar.groups`, a list of `{group, shown}`; reading it repairs what an older or newer version left behind instead of rejecting it.
 
 ### 2026-10-27 · Viewer
 

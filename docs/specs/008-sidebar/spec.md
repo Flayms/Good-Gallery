@@ -72,12 +72,29 @@ The user browses by structure rather than by typing: libraries and their folders
 - **When** the app starts the next time
 - **Then** the sidebar is hidden or shown as it was
 
+### REQ-008-10 · Order and choose the groups
+
+- **Given** the _Sidebar_ section of the Settings page, which lists the People, Places, Ratings and Tags groups in their current order, each with a switch and _Move up_ / _Move down_ buttons
+- **When** the user moves a group up or down, or switches it off or on
+- **Then** the sidebar shows the switched-on groups in that order below the libraries, from the next frame on
+- **And** the libraries stay first and can't be hidden, and _Settings_ stays at the bottom
+- **And** a switched-on group without entries is still hidden (REQ-008-03, REQ-008-04, REQ-008-05)
+
+### REQ-008-11 · Remember and reset the groups
+
+- **Given** the user reordered or switched off sidebar groups
+- **When** the app starts the next time
+- **Then** the sidebar shows the same groups in the same order, for all libraries alike
+- **And** _Reset to default_ in the _Sidebar_ section brings back People, Places, Ratings, Tags, all switched on. It is disabled while that is already the case
+- **And** a stored choice that lacks a group (e.g. one added by an update) shows that group switched on at the end, and unknown or repeated entries are ignored
+
 ## Out of scope
 
 - Configuring which tag names count as People or Places roots, or adding categories.
 - Library-specific counts in the People, Places, Ratings and Tags groups (they count across all libraries).
 - Showing counts that reflect the current filters.
-- Drag and drop or context menus in the sidebar.
+- Drag and drop or context menus in the sidebar, or dragging the groups in the settings.
+- Moving or hiding the libraries and folder tree, or a different group order per library.
 - Resizing the sidebar, or hiding it automatically in narrow windows.
 
 ## Assumptions
@@ -98,3 +115,5 @@ The user browses by structure rather than by typing: libraries and their folders
 | REQ-008-07 | `crates/app/tests/search.rs` › req_008_04_req_008_07_toggles_ratings_and_remembers_collapsed_groups | pass |
 | REQ-008-08 | `crates/app/tests/search.rs` › req_008_08_req_008_09_hides_and_shows_the_sidebar_and_remembers_it | pass |
 | REQ-008-09 | `crates/app/tests/search.rs` › req_008_08_req_008_09_hides_and_shows_the_sidebar_and_remembers_it | pass |
+| REQ-008-10 | `crates/domain/src/sidebar.rs` › req_008_10_moves_groups_and_switches_them_off; `crates/app/tests/search.rs` › req_008_10_req_008_11_orders_and_hides_groups_from_the_settings_and_remembers_them (snapshot `settings_sidebar`) | pass |
+| REQ-008-11 | `crates/domain/src/sidebar.rs` › req_008_11_reads_back_what_it_stores_and_repairs_odd_values, req_008_11_resets_to_the_default; `crates/app/tests/search.rs` › req_008_10_req_008_11_orders_and_hides_groups_from_the_settings_and_remembers_them | pass |

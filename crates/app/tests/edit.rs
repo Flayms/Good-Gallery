@@ -388,7 +388,7 @@ fn req_021_15_the_date_modified_setting_is_on_the_settings_page() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, None, None);
     // Tall enough for the whole page.
-    harness.set_size(egui::vec2(900.0, 1400.0));
+    harness.set_size(egui::vec2(900.0, 1600.0));
     harness.state_mut().page = app::Page::Settings;
     settle(&mut harness);
     harness
