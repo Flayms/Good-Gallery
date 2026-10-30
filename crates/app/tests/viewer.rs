@@ -949,5 +949,15 @@ fn req_020_05_the_viewer_stays_dark_in_the_light_appearance() {
     let [r, g, b, _] = image.get_pixel(at.x as u32, at.y as u32).0;
     let lightness = (u32::from(r) + u32::from(g) + u32::from(b)) / 3;
     assert!(lightness < 80, "the control bar is light: {r} {g} {b}");
+    // The window controls the app draws on Linux stay visible over the viewer: the middle of the close button's ×.
+    if cfg!(target_os = "linux") {
+        let close = harness.get_by_label("Close window").rect().center();
+        let [r, g, b, _] = image.get_pixel(close.x as u32, close.y as u32).0;
+        let lightness = (u32::from(r) + u32::from(g) + u32::from(b)) / 3;
+        assert!(
+            lightness > 150,
+            "the close button's × is dark on the dark viewer: {r} {g} {b}"
+        );
+    }
     harness.snapshot(common::snapshot_name("viewer_light"));
 }
