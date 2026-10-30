@@ -117,7 +117,12 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     }
     indexer_progress::show(&ctx, state);
     state.toasts.show(&ctx);
-    titlebar::caption_buttons(&ctx);
+    // Over the viewer they go with its dark look (REQ-020-05).
+    if state.viewer.is_some() {
+        theme::with_palette(&theme::DARK, || titlebar::caption_buttons(&ctx));
+    } else {
+        titlebar::caption_buttons(&ctx);
+    }
     theme::draw_focus_ring(&ctx);
 }
 
