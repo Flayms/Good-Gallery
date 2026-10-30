@@ -36,7 +36,7 @@ A desktop gallery for large photo and video libraries (50k–500k files). Media 
 0. No behavior change → tests pass.
 1. Bug (code violates a REQ) → regression test referencing the REQ, then fix.
 2. Small feature or spec gap → `spec.md` first. A wrong or missing spec is a spec change, not a bug.
-3. Large or architectural → `spec.md` + `plan.md` (with tasks); wait for approval before implementing.
+3. Large or architectural → `spec.md` + `plan.md` (with tasks)
 
 ## Specs
 
@@ -58,6 +58,7 @@ A desktop gallery for large photo and video libraries (50k–500k files). Media 
 - Full test suite and lint run in this session and pass.
 - Verification table and spec status updated.
 - PR to main is green and mergeable.
+- If there's UI changes, attach screenshots to the PR to illustrate the changes.
 - Summary: tier, REQs touched, results, open issues.
 
 ## Git
@@ -70,6 +71,5 @@ For issues and pull requests you create put the following note at the top of the
 
 ```md
 > [!NOTE]
-
-🤖 {Model e.g. Claude Opus 5.5} writing on behalf of {Human}
+> 🤖 {Model e.g. Claude Opus 5.5} writing on behalf of {Human}
 ```
