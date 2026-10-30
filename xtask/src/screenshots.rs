@@ -413,8 +413,10 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         screenshot(&app, &data, &out.join(format!("{view}.png")), &[])?;
     }
     db::settings::set_value(&conn, "gallery.view", &serde_json::Value::from("masonry"))?;
-    db::settings::set_value(&conn, "viewer.filmstrip", &serde_json::Value::from(true))?;
+    db::settings::set_value(&conn, "viewer.filmstrip", &serde_json::Value::from("shown"))?;
     screenshot(&app, &data, &out.join("viewer.png"), &["--view", "3", "--info"])?;
+    db::settings::set_value(&conn, "viewer.filmstrip", &serde_json::Value::from("hidden"))?;
+    screenshot(&app, &data, &out.join("edit.png"), &["--view", "5", "--edit"])?;
     Ok(())
 }
 

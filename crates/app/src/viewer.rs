@@ -337,6 +337,11 @@ impl Viewer {
         }
     }
 
+    /// Starts editing the shown photo with the next frame, as `e` does.
+    pub fn request_edit(&mut self) {
+        self.toggle_edit = true;
+    }
+
     /// The edit of the shown photo, while editing (spec 021).
     pub fn editing(&self) -> Option<&EditSession> {
         self.edit.as_ref()
