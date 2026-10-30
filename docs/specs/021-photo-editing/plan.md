@@ -71,6 +71,8 @@ Split into four PRs, each green and usable on its own:
 - **Esc** while editing stops editing (asking first with unsaved changes); it no longer closes the viewer at once.
 - **Controls:** _Undo_, _Redo_ and _Compare_ sit in the panel's header, _Reset all_, _Cancel_, _Save as copy_ and _Save_ in its footer; the control bar only gains _Edit_ (a toggle). There is no `viewer::Mode`: the viewer holds an `Option<edit::EditSession>`.
 - **GPU and CPU agree within two levels** of 255, not one (different `pow` implementations; measured on lavapipe).
+- **Brightness** (#70, REQ-021-17) is a gamma on the perceptual luminance between the black and white points, `L^(2^(−brightness/100))`, applied before shadows, highlights and contrast. It sits in _Light_ after _Exposure_; old recipes read it as 0.
+- **The histogram** (#70, REQ-021-18) counts, in 128 bins, the values the curves receive (after white balance, exposure and tone), from about 25,000 pixels of the 512 px copy, recounted on the CPU when an adjustment before the curves changes. Bars are scaled to the tallest bin apart from the two ends, so clipped blacks or whites don't flatten the rest.
 - **Delivered in one PR**, not four (the user asked for all of it at once). Crop and rotate (#34) remain.
 
 ## Tasks
@@ -87,3 +89,5 @@ Split into four PRs, each green and usable on its own:
 - [x] 10. Curves editor and curve formulas (REQ-021-04)
 - [x] 11. Grain and vignette, deterministic grain test (REQ-021-06)
 - [x] 12. REQ-004-01, REQ-010-01, glossary, design.md, architecture decision, README screenshot of the editor
+- [x] 13. (#70) Brightness slider on CPU and GPU (REQ-021-17)
+- [x] 14. (#70) Histogram behind the curve editor (REQ-021-18)

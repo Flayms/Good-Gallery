@@ -12,7 +12,7 @@ struct Edit {
     gains: vec4<f32>,
     // Black point, white point, shadows, highlights.
     tone: vec4<f32>,
-    // Contrast, saturation, vibrance.
+    // Contrast, saturation, vibrance, brightness (the midtones' gamma).
     color: vec4<f32>,
     // Vignette, vignette start, grain, grain cell size.
     fx: vec4<f32>,
@@ -51,6 +51,9 @@ fn luminance(c: vec3<f32>) -> f32 {
 
 fn tone(value: f32) -> f32 {
     var l = (value - edit.tone.x) / (edit.tone.y - edit.tone.x);
+    if edit.color.w != 1.0 && l > 0.0 && l < 1.0 {
+        l = pow(l, edit.color.w);
+    }
     let t = clamp(l, 0.0, 1.0);
     l += edit.tone.z * 6.75 * t * (1.0 - t) * (1.0 - t);
     l += edit.tone.w * 6.75 * (1.0 - t) * t * t;

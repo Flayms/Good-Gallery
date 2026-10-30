@@ -306,6 +306,7 @@ pub struct Recipe {
     pub version: u32,
     /// EV, −5 to +5.
     pub exposure: f32,
+    pub brightness: f32,
     pub contrast: f32,
     pub highlights: f32,
     pub shadows: f32,
@@ -330,6 +331,7 @@ impl Default for Recipe {
         Self {
             version: RECIPE_VERSION,
             exposure: 0.0,
+            brightness: 0.0,
             contrast: 0.0,
             highlights: 0.0,
             shadows: 0.0,
@@ -414,6 +416,7 @@ impl Section {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Adjustment {
     Exposure,
+    Brightness,
     Contrast,
     Highlights,
     Shadows,
@@ -430,8 +433,9 @@ pub enum Adjustment {
 }
 
 impl Adjustment {
-    pub const ALL: [Adjustment; 14] = [
+    pub const ALL: [Adjustment; 15] = [
         Self::Exposure,
+        Self::Brightness,
         Self::Contrast,
         Self::Highlights,
         Self::Shadows,
@@ -449,9 +453,13 @@ impl Adjustment {
 
     pub fn section(self) -> Section {
         match self {
-            Self::Exposure | Self::Contrast | Self::Highlights | Self::Shadows | Self::Whites | Self::Blacks => {
-                Section::Light
-            }
+            Self::Exposure
+            | Self::Brightness
+            | Self::Contrast
+            | Self::Highlights
+            | Self::Shadows
+            | Self::Whites
+            | Self::Blacks => Section::Light,
             Self::Temperature | Self::Tint | Self::Vibrance | Self::Saturation => Section::Color,
             Self::Grain | Self::GrainSize | Self::Vignette | Self::VignetteMidpoint => Section::Effects,
         }
@@ -460,6 +468,7 @@ impl Adjustment {
     pub fn label(self) -> &'static str {
         match self {
             Self::Exposure => "Exposure",
+            Self::Brightness => "Brightness",
             Self::Contrast => "Contrast",
             Self::Highlights => "Highlights",
             Self::Shadows => "Shadows",
@@ -500,6 +509,7 @@ impl Adjustment {
     pub fn get(self, recipe: &Recipe) -> f32 {
         match self {
             Self::Exposure => recipe.exposure,
+            Self::Brightness => recipe.brightness,
             Self::Contrast => recipe.contrast,
             Self::Highlights => recipe.highlights,
             Self::Shadows => recipe.shadows,
@@ -521,6 +531,7 @@ impl Adjustment {
         let value = value.clamp(low, high);
         let field = match self {
             Self::Exposure => &mut recipe.exposure,
+            Self::Brightness => &mut recipe.brightness,
             Self::Contrast => &mut recipe.contrast,
             Self::Highlights => &mut recipe.highlights,
             Self::Shadows => &mut recipe.shadows,
@@ -611,6 +622,8 @@ pub struct Params {
     /// Black and white points of the perceptual luminance.
     pub black: f32,
     pub white: f32,
+    /// The midtones' gamma, 1 for none.
+    pub brightness: f32,
     pub shadows: f32,
     pub highlights: f32,
     pub contrast: f32,
@@ -641,6 +654,7 @@ impl Params {
             exposure: recipe.exposure.exp2(),
             black: -recipe.blacks / 100.0 * 0.1,
             white: 1.0 - recipe.whites / 100.0 * 0.2,
+            brightness: (-recipe.brightness / 100.0).exp2(),
             shadows: recipe.shadows / 100.0 * 0.25,
             highlights: recipe.highlights / 100.0 * 0.25,
             contrast: recipe.contrast / 100.0,
@@ -657,19 +671,7 @@ impl Params {
     /// One pixel: `rgb` as stored (sRGB-encoded, 0–1), at `uv` (0–1 across the photo) of a photo `size` pixels large
     /// at full resolution. Returns encoded values in 0–1.
     pub fn pixel(&self, rgb: [f32; 3], uv: [f32; 2], size: [f32; 2]) -> [f32; 3] {
-        let mut lin = rgb.map(to_linear);
-        // White balance and exposure: multiplications on linear light.
-        for (c, gain) in lin.iter_mut().zip(self.gains) {
-            *c *= gain * self.exposure;
-        }
-        // Tone on the perceptual luminance, keeping the RGB ratios so hues don't shift.
-        let y = luminance(lin).max(0.0);
-        let toned = to_linear(self.tone(to_encoded(y)).max(0.0));
-        if y > 1e-6 {
-            lin = lin.map(|c| c * toned / y);
-        } else {
-            lin = [toned; 3];
-        }
+        let mut lin = self.light(rgb);
         if let Some(table) = &self.curves {
             for (i, c) in lin.iter_mut().enumerate() {
                 *c = to_linear(lookup(table, i, to_encoded(c.max(0.0)).min(1.0)));
@@ -696,9 +698,42 @@ impl Params {
         out.map(|c| c.clamp(0.0, 1.0))
     }
 
-    /// The tone curve of blacks, whites, shadows, highlights and contrast, on a perceptual value.
+    /// White balance, exposure and tone: the steps before the curves, on linear light.
+    fn light(&self, rgb: [f32; 3]) -> [f32; 3] {
+        let mut lin = rgb.map(to_linear);
+        // White balance and exposure: multiplications on linear light.
+        for (c, gain) in lin.iter_mut().zip(self.gains) {
+            *c *= gain * self.exposure;
+        }
+        // Tone on the perceptual luminance, keeping the RGB ratios so hues don't shift.
+        let y = luminance(lin).max(0.0);
+        let toned = to_linear(self.tone(to_encoded(y)).max(0.0));
+        if y > 1e-6 {
+            lin.map(|c| c * toned / y)
+        } else {
+            [toned; 3]
+        }
+    }
+
+    /// The histogram of what the curves receive from `pixels` (sRGB-encoded, 0–1) (REQ-021-18).
+    pub fn histogram(&self, pixels: impl Iterator<Item = [f32; 3]>) -> Histogram {
+        let mut histogram = Histogram::default();
+        for rgb in pixels {
+            for (c, value) in self.light(rgb).into_iter().enumerate() {
+                let value = to_encoded(value.max(0.0)).min(1.0);
+                let bin = ((value * HISTOGRAM_BINS as f32) as usize).min(HISTOGRAM_BINS - 1);
+                histogram.channels[c][bin] += 1;
+            }
+        }
+        histogram
+    }
+
+    /// The tone curve of blacks, whites, brightness, shadows, highlights and contrast, on a perceptual value.
     fn tone(&self, l: f32) -> f32 {
         let mut l = (l - self.black) / (self.white - self.black);
+        if self.brightness != 1.0 && l > 0.0 && l < 1.0 {
+            l = l.powf(self.brightness);
+        }
         let t = l.clamp(0.0, 1.0);
         // Masks peaking at 1/3 and 2/3 of the range, zero at black and white.
         l += self.shadows * 6.75 * t * (1.0 - t) * (1.0 - t);
@@ -724,6 +759,35 @@ impl Params {
             factor *= 1.0 + self.vibrance * muted * protect;
         }
         from_oklab([l, a * factor, b * factor])
+    }
+}
+
+/// Bins of a [`Histogram`].
+pub const HISTOGRAM_BINS: usize = 128;
+
+/// Counts of the red, green and blue values in [`HISTOGRAM_BINS`] even steps from 0 to 1.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Histogram {
+    channels: [[u32; HISTOGRAM_BINS]; 3],
+}
+
+impl Default for Histogram {
+    fn default() -> Self {
+        Self {
+            channels: [[0; HISTOGRAM_BINS]; 3],
+        }
+    }
+}
+
+impl Histogram {
+    /// One channel's counts; for [`Channel::All`] the three channels' together.
+    pub fn get(&self, channel: Channel) -> [u32; HISTOGRAM_BINS] {
+        match channel {
+            Channel::All => std::array::from_fn(|i| self.channels.iter().map(|c| c[i]).sum()),
+            Channel::Red => self.channels[0],
+            Channel::Green => self.channels[1],
+            Channel::Blue => self.channels[2],
+        }
     }
 }
 
@@ -934,6 +998,42 @@ mod tests {
         assert!(render(&with(Adjustment::Blacks, -100.0), grey(0.08))[0] < 0.01);
         assert!(render(&with(Adjustment::Whites, 100.0), grey(0.85))[0] >= 0.999);
         assert!(render(&with(Adjustment::Whites, -100.0), grey(1.0))[0] < 0.9);
+    }
+
+    #[test]
+    fn req_021_17_brightness_lifts_or_lowers_the_midtones_only() {
+        let brighter = with(Adjustment::Brightness, 100.0);
+        let darker = with(Adjustment::Brightness, -100.0);
+        assert!(render(&brighter, grey(0.5))[0] > 0.6);
+        assert!(render(&darker, grey(0.5))[0] < 0.4);
+        for recipe in [&brighter, &darker] {
+            assert!(render(recipe, grey(0.0))[0] < 1e-4);
+            assert!((render(recipe, grey(1.0))[0] - 1.0).abs() < 1e-4);
+        }
+        // Old recipes without it read as 0.
+        let old = Recipe::from_json(r#"{"version":1,"exposure":0.5}"#).unwrap();
+        assert_eq!(old.brightness, 0.0);
+    }
+
+    #[test]
+    fn req_021_18_the_histogram_shows_the_tones_the_curve_receives() {
+        let pixels = [grey(0.25), grey(0.25), [1.0, 0.5, 0.0]];
+        let bin = |v: f32| ((v * HISTOGRAM_BINS as f32) as usize).min(HISTOGRAM_BINS - 1);
+        let histogram = Params::new(&Recipe::default()).histogram(pixels.iter().copied());
+        assert_eq!(histogram.get(Channel::Red)[bin(0.25)], 2);
+        assert_eq!(histogram.get(Channel::Red)[bin(1.0)], 1);
+        assert_eq!(histogram.get(Channel::Green)[bin(0.5)], 1);
+        assert_eq!(histogram.get(Channel::Blue)[bin(0.0)], 1);
+        // All channels together.
+        assert_eq!(histogram.get(Channel::All).iter().sum::<u32>(), 9);
+        assert_eq!(histogram.get(Channel::All)[bin(0.25)], 6);
+
+        // Adjustments before the curves move it, the curves don't.
+        let brighter = Params::new(&with(Adjustment::Exposure, 1.0)).histogram(pixels.iter().copied());
+        assert_eq!(brighter.get(Channel::Red)[bin(0.25)], 0);
+        let mut curved = Recipe::default();
+        curved.curves.all.add_point(0.25, 0.6);
+        assert_eq!(Params::new(&curved).histogram(pixels.iter().copied()), histogram);
     }
 
     #[test]
