@@ -1,7 +1,7 @@
 //! Small widgets drawn in the design's look where egui's own don't fit it.
 
 use crate::theme;
-use eframe::egui::{self, Color32, Rect, pos2, vec2};
+use eframe::egui::{self, Rect, pos2, vec2};
 use std::ops::RangeInclusive;
 
 /// Radius of a slider's knob while hovered or dragged.
@@ -56,18 +56,18 @@ pub fn slider(
     let track = Rect::from_center_size(rect.center(), vec2(track.width(), 4.0));
     let knob = pos2(track.left() + track.width() * fraction, track.center().y);
     let painter = ui.painter();
-    painter.rect_filled(track, 2.0, Color32::from_white_alpha(64));
+    painter.rect_filled(track, 2.0, theme::track());
     painter.rect_filled(
         Rect::from_min_max(track.min, pos2(knob.x, track.max.y)),
         2.0,
-        theme::PAPER,
+        theme::text(),
     );
     let radius = if response.hovered() || response.dragged() {
         KNOB
     } else {
         KNOB - 1.0
     };
-    painter.circle_filled(knob, radius, theme::PAPER);
+    painter.circle_filled(knob, radius, theme::text());
     let (label, value) = (label.to_owned(), *value);
     response.widget_info(|| egui::WidgetInfo::slider(true, value, &label));
     response

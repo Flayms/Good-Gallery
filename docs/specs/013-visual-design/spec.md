@@ -12,7 +12,7 @@ Good Gallery gets its own look instead of a UI toolkit's defaults. The photos ar
 
 - **Given** the app on Windows, macOS or Linux
 - **When** any screen is shown
-- **Then** it uses the bundled typeface and the app's own colors and surfaces, independent of OS theme, accent color and installed fonts
+- **Then** it uses the bundled typeface and the app's own colors and surfaces, independent of the OS accent color and installed fonts; whether they are light or dark follows the appearance setting (spec 020), never the OS's own colors
 - **And** only the native window controls differ between platforms
 
 ### REQ-013-02 · Content in the title bar
@@ -133,11 +133,11 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 
 | REQ        | Test | Result |
 | ---------- | ---- | ------ |
-| REQ-013-01 | `crates/app/src/theme.rs` › req_013_01_uses_its_own_colors_whatever_the_os_theme, install_uses_the_bundled_font_at_both_weights | pass (Windows and Linux; macOS is out of scope) |
+| REQ-013-01 | `crates/app/src/theme.rs` › req_013_01_req_020_02_uses_its_own_colors_whatever_the_os_theme, install_uses_the_bundled_font_at_both_weights | pass (Windows and Linux; macOS is out of scope) |
 | REQ-013-02 | `crates/app/src/titlebar.rs` › req_013_02_empty_caption_space_moves_and_maximizes_the_window, req_013_02_keeps_the_window_controls_place_free; `crates/app/tests/search.rs` › req_013_02_req_013_08_the_toolbar_fits_the_minimum_window_beside_the_window_controls | pass (native hit tests and snap layouts checked in the running app) |
 | REQ-013-03 | `crates/app/src/glass.rs` › req_013_03_surfaces_blur_the_tiles_under_them_but_not_other_glass | pass (the blur pass itself checked in the running app; kittest has no glass pass) |
-| REQ-013-04 | `crates/app/src/theme.rs` › req_013_04_text_is_legible_on_the_solid_surfaces, req_013_04_text_is_legible_on_glass_over_any_photo, req_013_04_req_013_11_text_is_legible_on_tinted_glass | pass |
-| REQ-013-05 | `crates/app/src/theme.rs` › req_013_05_the_focus_ring_shows_over_any_background; `crates/app/tests/settings.rs` › req_013_05_rings_the_focused_control_but_not_a_focused_text_input | pass |
+| REQ-013-04 | `crates/app/src/theme.rs` › req_013_04_req_020_04_text_is_legible_on_the_solid_surfaces, req_013_04_req_020_04_text_is_legible_on_glass_over_any_photo, req_013_04_req_013_11_text_is_legible_on_tinted_glass | pass |
+| REQ-013-05 | `crates/app/src/theme.rs` › req_013_05_req_020_04_the_focus_ring_shows_over_any_background; `crates/app/tests/settings.rs` › req_013_05_rings_the_focused_control_but_not_a_focused_text_input | pass |
 | REQ-013-06 | `crates/app/src/glass.rs` › req_013_06_req_013_14_surfaces_are_opaque_without_glass; `crates/app/src/theme.rs` › req_013_07_req_013_06_follows_the_os_settings_for_motion_and_transparency | pass |
 | REQ-013-07 | `crates/app/src/theme.rs` › req_013_07_req_013_06_follows_the_os_settings_for_motion_and_transparency; `crates/app/tests/viewer.rs` › req_013_12_the_photo_grows_from_its_tile_and_back | pass (the OS setting is read again every 2 s) |
 | REQ-013-08 | `crates/domain/src/search.rs` › req_013_08_counts_and_clears_only_the_filters_under_filters; `crates/app/tests/search.rs` › req_007_07_req_007_09_req_013_08_filters_by_kind_and_rating_and_counts_active_filters, req_013_02_req_013_08_the_toolbar_fits_the_minimum_window_beside_the_window_controls | pass |

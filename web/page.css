@@ -1,4 +1,5 @@
-/* The page around the canvas: the app's darkroom background (docs/design.md), so nothing flashes while it loads. */
+/* The page around the canvas: the app's page background (docs/design.md), so nothing flashes while it loads; light
+   when the browser prefers light, as the app's System appearance does (REQ-020-02). */
 html,
 body {
   margin: 0;
@@ -30,4 +31,14 @@ body {
 
 #noscript {
   display: flex;
+}
+
+@media (prefers-color-scheme: light) {
+  html,
+  body,
+  #problem,
+  #noscript {
+    background: #f4f4f4;
+    color: #1a1a1a;
+  }
 }

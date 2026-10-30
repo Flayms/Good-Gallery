@@ -101,8 +101,8 @@ pub struct Chrome {
 impl Chrome {
     fn new(tint: Option<Rgb>) -> Self {
         Self {
-            bar: theme::GLASS_BAR.fill(tint),
-            panel: theme::GLASS_PANEL.fill(tint),
+            bar: theme::glass_bar().fill(tint),
+            panel: theme::glass_panel().fill(tint),
             tint,
         }
     }
@@ -526,6 +526,8 @@ impl Viewer {
             .fixed_pos(screen.min)
             .constrain(false)
             .show(ctx, |ui| {
+                // egui's dark style too: the Area starts from the global one (REQ-020-05).
+                theme::apply_style(ui);
                 ui.set_min_size(screen.size());
                 // Without a tile to grow from, the whole viewer fades in and out.
                 if tile.is_none() {
@@ -1008,7 +1010,7 @@ impl Viewer {
         let mut step = None;
         ui.scope(|ui| {
             ui.multiply_opacity(shown);
-            let bar_backing = self.chrome.backing(theme::GLASS_BAR, self.scrim);
+            let bar_backing = self.chrome.backing(theme::glass_bar(), self.scrim);
             if let Some(rect) = video_bar
                 && let Some(playing) = &mut self.playing
                 && let Some(control) =
@@ -1059,7 +1061,7 @@ impl Viewer {
     /// The info panel at the right (REQ-009-08); a click on a tag filters the gallery by it (REQ-009-09).
     fn info_panel(&mut self, ui: &mut egui::Ui, rect: Rect, gallery: &mut Gallery) -> Option<Action> {
         self.chrome
-            .backing(theme::GLASS_PANEL, self.scrim)
+            .backing(theme::glass_panel(), self.scrim)
             .paint(ui.painter(), rect, f32::from(theme::RADIUS_PANEL));
         // Clicks and wheel turns on the panel stay in it.
         ui.interact(rect, ui.make_persistent_id("info panel"), egui::Sense::click());
@@ -1102,7 +1104,7 @@ impl Viewer {
             }
         }
         self.chrome
-            .backing(theme::GLASS_BAR, self.scrim)
+            .backing(theme::glass_bar(), self.scrim)
             .paint(ui.painter(), rect, f32::from(theme::RADIUS_PANEL));
         // A short row stays centered.
         let left = rect.left() + ((view - STRIP.width(count)) / 2.0).max(0.0) - self.strip_offset;
@@ -1116,7 +1118,7 @@ impl Viewer {
                 Vec2::splat(STRIP.size),
             );
             let Some(item) = gallery.item(index) else {
-                painter.rect_filled(thumb, 2.0, theme::RAISED);
+                painter.rect_filled(thumb, 2.0, theme::raised());
                 continue;
             };
             let (id, video, name) = (item.id, item.kind == MediaKind::Video, item.file_name.clone());
@@ -1150,7 +1152,7 @@ impl Viewer {
                     );
                 }
                 (None, None) => {
-                    painter.rect_filled(thumb, 2.0, theme::RAISED);
+                    painter.rect_filled(thumb, 2.0, theme::raised());
                 }
             }
             // The tile's duration badge doesn't fit; a play symbol still marks videos (REQ-015-07).
@@ -1166,7 +1168,12 @@ impl Viewer {
                 marker.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, "Video"));
             }
             if current {
-                painter.rect_stroke(thumb, 2, egui::Stroke::new(2.0, theme::PAPER), egui::StrokeKind::Inside);
+                painter.rect_stroke(
+                    thumb,
+                    2,
+                    egui::Stroke::new(2.0, theme::text()),
+                    egui::StrokeKind::Inside,
+                );
             }
         }
         clicked
@@ -1302,12 +1309,12 @@ fn preload(gallery: &mut Gallery, originals: &mut Originals, libraries: &[Librar
 fn message(ui: &mut egui::Ui, at: Pos2, text: &str) {
     let galley = ui
         .painter()
-        .layout_no_wrap(text.into(), egui::FontId::proportional(theme::SIZE_BODY), theme::PAPER);
+        .layout_no_wrap(text.into(), egui::FontId::proportional(theme::SIZE_BODY), theme::text());
     let rect = Rect::from_center_size(at, galley.size() + vec2(32.0, 12.0));
     ui.painter()
         .rect_filled(rect, rect.height() / 2.0, Chrome::new(None).bar);
     ui.painter()
-        .galley(rect.center() - galley.size() / 2.0, galley, theme::PAPER);
+        .galley(rect.center() - galley.size() / 2.0, galley, theme::text());
     // Hover only: clicks still reach the photo and the scrim below.
     let response = ui.interact(rect, ui.make_persistent_id(("message", text)), egui::Sense::hover());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, text));
@@ -1325,7 +1332,7 @@ fn round_button(
     let response = ui
         .put(
             rect,
-            egui::Button::image(icon.image(20.0, theme::PAPER)).corner_radius(NAV_SIZE / 2.0),
+            egui::Button::image(icon.image(20.0, theme::text())).corner_radius(NAV_SIZE / 2.0),
         )
         .on_hover_text(tooltip);
     let label = label.to_owned();
@@ -1345,7 +1352,7 @@ fn bar_text(ui: &egui::Ui, screen: Rect, item: Option<&GalleryItem>) -> BarText 
     let mut job = egui::text::LayoutJob::simple_singleline(
         name.to_owned(),
         egui::FontId::new(theme::SIZE_TITLE, theme::semibold()),
-        theme::PAPER,
+        theme::text(),
     );
     job.wrap = egui::text::TextWrapping {
         max_width: (screen.width() * 0.3).max(80.0),
@@ -1357,7 +1364,7 @@ fn bar_text(ui: &egui::Ui, screen: Rect, item: Option<&GalleryItem>) -> BarText 
         ui.painter().layout_no_wrap(
             format::medium_date_time(item.taken_at.unwrap_or(item.mtime)),
             egui::FontId::new(theme::SIZE_BODY, theme::numbers()),
-            theme::PAPER,
+            theme::text(),
         )
     });
     BarText {
@@ -1440,25 +1447,25 @@ fn control_bar(
     let painter = ui.painter().with_clip_rect(text_clip);
     let mut x = rect.left() + 20.0;
     let name_width = text.name.size().x;
-    painter.galley(pos2(x, y - text.name.size().y / 2.0), text.name, theme::PAPER);
+    painter.galley(pos2(x, y - text.name.size().y / 2.0), text.name, theme::text());
     x += name_width + BAR_GAP;
     if let Some(date) = text.date {
         let width = date.size().x;
-        painter.galley(pos2(x, y - date.size().y / 2.0), date, theme::PAPER);
+        painter.galley(pos2(x, y - date.size().y / 2.0), date, theme::text());
         x += width + BAR_GAP;
     }
     if text.stars > 0 {
         for _ in 0..text.stars {
             let star = Rect::from_min_size(pos2(x, y - STAR_SIZE / 2.0), Vec2::splat(STAR_SIZE));
             if text_clip.contains_rect(star) {
-                Icon::Star.image(STAR_SIZE, theme::STAR).paint_at(ui, star);
+                Icon::Star.image(STAR_SIZE, theme::star()).paint_at(ui, star);
             }
             x += STAR_SIZE + 2.0;
         }
     }
     let separator = rect.right() - buttons_width - BAR_GAP / 2.0;
     ui.painter()
-        .vline(separator, (y - 10.0)..=(y + 10.0), egui::Stroke::new(1.0, theme::RIM));
+        .vline(separator, (y - 10.0)..=(y + 10.0), egui::Stroke::new(1.0, theme::rim()));
     let mut clicked = None;
     for (i, &(button, icon, label, tooltip)) in bar_buttons().iter().enumerate() {
         let at = Rect::from_min_size(
@@ -1478,7 +1485,7 @@ fn control_bar(
             .corner_radius(theme::CONTROL_HEIGHT / 2.0);
         // A pressed toggle is filled; a fill turns the frame on.
         if pressed == Some(true) {
-            widget = widget.fill(theme::SELECTED).stroke(egui::Stroke::NONE);
+            widget = widget.fill(theme::selected()).stroke(egui::Stroke::NONE);
         }
         let response = ui.put(at, widget).on_hover_text(tooltip);
         response.widget_info(|| match pressed {

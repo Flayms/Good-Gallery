@@ -1,6 +1,7 @@
 //! User settings, stored as JSON values in the `settings` table.
 
 use crate::{Error, Result};
+use domain::appearance::Appearance;
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
 
@@ -12,6 +13,8 @@ pub struct Settings {
     pub quick_check_interval_minutes: u32,
     /// Parallel file reads (scanning, metadata, thumbnails), 1–16.
     pub io_concurrency: u32,
+    /// Light, dark or the system's (REQ-020-01).
+    pub appearance: Appearance,
 }
 
 impl Default for Settings {
@@ -20,6 +23,7 @@ impl Default for Settings {
             thumb_cache_gib: 5.0,
             quick_check_interval_minutes: 60,
             io_concurrency: 4,
+            appearance: Appearance::System,
         }
     }
 }
@@ -27,6 +31,7 @@ impl Default for Settings {
 const THUMB_CACHE: &str = "thumbCacheGiB";
 const QUICK_CHECK: &str = "quickCheckIntervalMinutes";
 const IO_CONCURRENCY: &str = "ioConcurrency";
+const APPEARANCE: &str = "appearance";
 const MAX_QUICK_CHECK: u32 = 7 * 24 * 60;
 
 fn thumb_cache(value: &Value) -> Option<f64> {
@@ -73,6 +78,12 @@ pub fn load(conn: &Connection) -> Result<Settings> {
                     integer(&value, 0..=MAX_QUICK_CHECK).unwrap_or(settings.quick_check_interval_minutes)
             }
             IO_CONCURRENCY => settings.io_concurrency = integer(&value, 1..=16).unwrap_or(settings.io_concurrency),
+            APPEARANCE => {
+                settings.appearance = value
+                    .as_str()
+                    .and_then(Appearance::from_key)
+                    .unwrap_or(settings.appearance)
+            }
             _ => {}
         }
     }
@@ -87,6 +98,7 @@ pub fn save(conn: &Connection, settings: &Settings) -> Result<()> {
         (THUMB_CACHE, Value::from(settings.thumb_cache_gib)),
         (QUICK_CHECK, Value::from(settings.quick_check_interval_minutes)),
         (IO_CONCURRENCY, Value::from(settings.io_concurrency)),
+        (APPEARANCE, Value::from(settings.appearance.key())),
     ] {
         tx.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
@@ -137,7 +149,8 @@ mod tests {
             Settings {
                 thumb_cache_gib: 5.0,
                 quick_check_interval_minutes: 60,
-                io_concurrency: 4
+                io_concurrency: 4,
+                appearance: Appearance::System,
             }
         );
 
@@ -145,10 +158,27 @@ mod tests {
             thumb_cache_gib: 20.0,
             quick_check_interval_minutes: 0,
             io_concurrency: 8,
+            appearance: Appearance::Dark,
         };
         save(&conn, &changed).unwrap();
 
         assert_eq!(load(&conn).unwrap(), changed);
+    }
+
+    #[test]
+    fn req_020_01_stores_the_appearance_and_falls_back_to_the_system() {
+        let conn = crate::open_in_memory().unwrap();
+        assert_eq!(load(&conn).unwrap().appearance, Appearance::System);
+        let light = Settings {
+            appearance: Appearance::Light,
+            ..Default::default()
+        };
+        save(&conn, &light).unwrap();
+        assert_eq!(load(&conn).unwrap().appearance, Appearance::Light);
+        assert_eq!(value(&conn, "appearance").unwrap(), Some(Value::from("light")));
+
+        set_value(&conn, "appearance", &Value::from("sepia")).unwrap();
+        assert_eq!(load(&conn).unwrap().appearance, Appearance::System);
     }
 
     #[test]

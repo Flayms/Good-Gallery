@@ -14,7 +14,7 @@ Built in Rust with eframe / egui on wgpu.
 - **Search:** combine tags (include or exclude, hierarchical), file name text and folder; media type, date range and rating are under _Filters_. Sort by date taken, date modified, name, path or size.
 - **Sidebar:** libraries with a folder tree, People and Places (from keyword hierarchies and face regions), ratings and popular tags. Hide it with the button in its header or Ctrl + B.
 - **Viewer:** the photo floats over the blurred window, with controls that step aside while you look. Keyboard navigation, an optional filmstrip to jump through the gallery, zoom and pan, video playback, a metadata panel and "Show in Explorer".
-- **Look:** dark, neutral chrome so only your photos bring color; the toolbar and menus are frosted glass over the gallery.
+- **Look:** neutral chrome so only your photos bring color, dark or light (following your system, or chosen in the settings); the toolbar and menus are frosted glass over the gallery, and the viewer is always dark.
 - **Read-only:** tags and ratings come from EXIF / IPTC / XMP and `.xmp` sidecars. Files are never modified.
 
 | Justified                                                             | Grid                                                     |

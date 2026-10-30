@@ -36,20 +36,20 @@ pub fn show(ctx: &egui::Context, state: &AppState) {
         .interactable(false)
         .show(ctx, |ui| {
             Frame::new()
-                .fill(theme::RAISED)
-                .stroke(Stroke::new(1.0, theme::RIM))
+                .fill(theme::raised())
+                .stroke(Stroke::new(1.0, theme::rim()))
                 .corner_radius(CornerRadius::same(theme::RADIUS_CONTROL))
                 .inner_margin(Margin::symmetric(10, 8))
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
                     ui.horizontal(|ui| {
                         spinner(ui);
-                        ui.label(RichText::new(format!("{verb} {label}")).color(theme::PAPER));
+                        ui.label(RichText::new(format!("{verb} {label}")).color(theme::text()));
                     });
                     ui.label(
                         RichText::new(details)
                             .font(FontId::new(theme::SIZE_CAPTION, theme::numbers()))
-                            .color(theme::MIST),
+                            .color(theme::muted()),
                     );
                 });
         });
@@ -60,7 +60,7 @@ fn spinner(ui: &mut egui::Ui) {
     let angle = (ui.input(|i| i.time) * std::f64::consts::TAU) as f32;
     ui.add(
         Icon::LoaderCircle
-            .image(14.0, theme::PAPER)
+            .image(14.0, theme::text())
             .rotate(angle, egui::vec2(0.5, 0.5)),
     );
     // 20 fps is smooth enough for a 14 px spinner and keeps an hours-long scan cheap.

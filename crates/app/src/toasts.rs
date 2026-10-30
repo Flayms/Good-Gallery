@@ -63,18 +63,18 @@ impl Toasts {
                 for toast in &mut self.toasts {
                     toast.shown_at.get_or_insert(now);
                     Frame::new()
-                        .fill(theme::RAISED)
-                        .stroke(Stroke::new(1.0, theme::RIM))
+                        .fill(theme::raised())
+                        .stroke(Stroke::new(1.0, theme::rim()))
                         .corner_radius(CornerRadius::same(theme::RADIUS_PANEL))
                         .inner_margin(Margin::symmetric(14, 10))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 let (icon, color) = match toast.kind {
-                                    ToastKind::Success => (Icon::Check, theme::PAPER),
-                                    ToastKind::Error => (Icon::TriangleAlert, theme::ALERT),
+                                    ToastKind::Success => (Icon::Check, theme::text()),
+                                    ToastKind::Error => (Icon::TriangleAlert, theme::alert()),
                                 };
                                 ui.add(icon.image(theme::ICON_SIZE, color));
-                                ui.label(RichText::new(&toast.text).color(theme::PAPER));
+                                ui.label(RichText::new(&toast.text).color(theme::text()));
                             });
                         });
                 }

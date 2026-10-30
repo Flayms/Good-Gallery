@@ -121,10 +121,10 @@ impl Surface {
     /// The opaque surface used without glass: Raised (Darkroom for the scrim), tinted like the glass.
     fn opaque(&self) -> Shape {
         let fill = if self.glass == theme::SCRIM {
-            theme::DARKROOM
+            theme::DARK.base
         } else {
             let base = Glass {
-                color: rgb_of(theme::RAISED),
+                color: rgb_of(theme::raised()),
                 alpha: 1.0,
                 ..self.glass
             };
@@ -186,6 +186,7 @@ pub fn shape(ctx: &egui::Context, surface: Surface, source: Source) -> (Shape, O
         saturate: surface.glass.saturate,
         radius: surface.radius,
         opacity: surface.opacity.clamp(0.0, 1.0),
+        background: theme::palette_of(ctx.theme()).base,
     };
     let shape = egui_wgpu::Callback::new_paint_callback(region, callback).into();
     (
@@ -261,12 +262,13 @@ impl Backing {
 pub fn panel<R>(ui: &mut egui::Ui, margin: egui::Margin, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let glass_slot = ui.painter().add(Shape::Noop);
     let rim_slot = ui.painter().add(Shape::Noop);
+    theme::apply_style(ui);
     let inner = egui::Frame::new().inner_margin(margin).show(ui, add);
     let rect = inner.response.rect;
     let radius = f32::from(theme::RADIUS_PANEL);
     let (shape, _) = place(
         ui.painter(),
-        Surface::new(rect, radius, theme::GLASS_PANEL),
+        Surface::new(rect, radius, theme::glass_panel()),
         Source::Backdrop,
     );
     ui.painter().set(glass_slot, shape);
@@ -278,7 +280,7 @@ fn rim(rect: Rect, radius: f32) -> Shape {
     egui::epaint::RectShape::stroke(
         rect,
         CornerRadius::same(radius as u8),
-        Stroke::new(1.0, theme::RIM),
+        Stroke::new(1.0, theme::rim()),
         StrokeKind::Inside,
     )
     .into()
@@ -292,20 +294,23 @@ pub fn behind_menu<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -
 }
 
 /// Paints glass and the Rim behind the content `add` lays out in an opaque frame with `margin` around it, covering the
-/// frame's fill; two shape slots are kept before the content and filled after it, when its size is known. Without
-/// glass the frame stays as it is.
+/// frame's fill; two shape slots are kept before the content and filled after it, when its size is known. Without glass
+/// the frame stays as it is, unless it comes from the other appearance (egui's global style, e.g. a menu in the dark
+/// viewer in light, REQ-020-05): then the opaque surface of the current palette covers it. The content always gets the
+/// current palette's style.
 pub fn behind_frame<R>(ui: &mut egui::Ui, margin: egui::Margin, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let glass_slot = ui.painter().add(Shape::Noop);
     let rim_slot = ui.painter().add(Shape::Noop);
+    theme::apply_style(ui);
     let inner = add(ui);
     let rect = ui.min_rect() + margin;
     let radius = f32::from(theme::RADIUS_PANEL);
     let (shape, _) = place(
         ui.painter(),
-        Surface::new(rect, radius, theme::GLASS_PANEL),
+        Surface::new(rect, radius, theme::glass_panel()),
         Source::Backdrop,
     );
-    if matches!(shape, Shape::Callback(_)) {
+    if matches!(shape, Shape::Callback(_)) || ui.ctx().theme() != theme::palette().theme {
         ui.painter().set(glass_slot, shape);
         ui.painter().set(rim_slot, rim(rect, radius));
     }
@@ -560,6 +565,8 @@ struct GlassCallback {
     saturate: f32,
     radius: f32,
     opacity: f32,
+    /// The page behind the recorded backdrop: the window's own appearance, also under the dark viewer's scrim.
+    background: Color32,
 }
 
 fn level_view(device: &wgpu::Device, [width, height]: [u32; 2]) -> wgpu::TextureView {
@@ -685,7 +692,7 @@ impl GlassCallback {
                 usage: wgpu::BufferUsages::VERTEX,
             })
         });
-        let [r, g, b, _] = theme::DARKROOM.to_normalized_gamma_f32();
+        let [r, g, b, _] = self.background.to_normalized_gamma_f32();
         let background = wgpu::Color {
             r: f64::from(r),
             g: f64::from(g),
@@ -830,7 +837,7 @@ mod tests {
         };
         record(&ctx, tile(rect(0.0, 20.0, 100.0, 100.0)));
         record(&ctx, tile(rect(0.0, 2000.0, 100.0, 100.0)));
-        record_solid(&ctx, rect(0.0, 0.0, 800.0, 48.0), theme::GLASS_BAR.fill(None), true);
+        record_solid(&ctx, rect(0.0, 0.0, 800.0, 48.0), theme::glass_bar().fill(None), true);
 
         let toolbar = rect(0.0, 0.0, 800.0, 48.0);
         let under_bar = under(&ctx, toolbar, false);
@@ -843,9 +850,28 @@ mod tests {
         // The scrim behind the viewer shows the whole window, toolbar included.
         assert_eq!(under(&ctx, rect(0.0, 0.0, 800.0, 600.0), true).len(), 2);
 
-        let (shape, painted) = shape(&ctx, Surface::new(toolbar, 0.0, theme::GLASS_BAR), Source::Backdrop);
+        let (shape, painted) = shape(&ctx, Surface::new(toolbar, 0.0, theme::glass_bar()), Source::Backdrop);
         assert!(matches!(shape, Shape::Callback(_)));
         assert!(painted.is_some());
+    }
+
+    /// REQ-020-06: in the light appearance glass becomes the light Raised; the scrim stays dark (REQ-020-05).
+    #[test]
+    fn req_020_06_light_surfaces_are_opaque_without_glass() {
+        let fill = |shape: Shape| match shape {
+            Shape::Rect(rect) => rect.fill,
+            other => panic!("not opaque: {other:?}"),
+        };
+        let reduced = ctx(true);
+        theme::set_reduced_transparency(&reduced, true);
+        theme::with_palette(&theme::LIGHT, || {
+            for glass in [theme::glass_bar(), theme::glass_panel()] {
+                let surface = Surface::new(rect(0.0, 0.0, 100.0, 48.0), 0.0, glass);
+                assert_eq!(fill(shape(&reduced, surface, Source::Backdrop).0), theme::LIGHT.raised);
+            }
+            let scrim = Surface::new(rect(0.0, 0.0, 800.0, 600.0), 0.0, theme::SCRIM);
+            assert_eq!(fill(shape(&reduced, scrim, Source::Backdrop).0), theme::DARK.base);
+        });
     }
 
     #[test]
@@ -854,18 +880,18 @@ mod tests {
             Shape::Rect(rect) => rect.fill,
             other => panic!("not opaque: {other:?}"),
         };
-        let bar = Surface::new(rect(0.0, 0.0, 100.0, 48.0), 0.0, theme::GLASS_BAR);
+        let bar = Surface::new(rect(0.0, 0.0, 100.0, 48.0), 0.0, theme::glass_bar());
         let scrim = Surface::new(rect(0.0, 0.0, 800.0, 600.0), 0.0, theme::SCRIM);
 
         // Reduced transparency.
         let reduced = ctx(true);
         theme::set_reduced_transparency(&reduced, true);
         assert!(!available(&reduced));
-        assert_eq!(raised(shape(&reduced, bar, Source::Backdrop).0), theme::RAISED);
-        assert_eq!(raised(shape(&reduced, scrim, Source::Backdrop).0), theme::DARKROOM);
+        assert_eq!(raised(shape(&reduced, bar, Source::Backdrop).0), theme::raised());
+        assert_eq!(raised(shape(&reduced, scrim, Source::Backdrop).0), theme::DARK.base);
         // No blur pass (no GPU, or tests).
         let none = ctx(false);
-        assert_eq!(raised(shape(&none, bar, Source::Backdrop).0), theme::RAISED);
+        assert_eq!(raised(shape(&none, bar, Source::Backdrop).0), theme::raised());
         assert_eq!(shape(&none, bar, Source::Backdrop).1.map(|p| p.slot), None);
         // The tint stays on the opaque surface (REQ-013-11).
         let tint = Rgb {

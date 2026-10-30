@@ -213,8 +213,8 @@ fn round_buttons(ctx: &egui::Context) {
         };
         let painter = ctx.layer_painter(response.layer_id);
         let c = rect.center();
-        painter.circle_filled(c, 12.0, theme::PAPER.gamma_multiply(alpha));
-        let stroke = Stroke::new(1.5, theme::PAPER);
+        painter.circle_filled(c, 12.0, theme::text().gamma_multiply(alpha));
+        let stroke = Stroke::new(1.5, theme::text());
         match i {
             0 => {
                 painter.hline((c.x - 4.0)..=(c.x + 4.0), c.y + 3.5, stroke);
@@ -257,13 +257,13 @@ fn paint_button(painter: &egui::Painter, rect: Rect, index: usize, hovered: bool
     let close = index == 2;
     let fill = match (hovered || pressed, close) {
         (true, true) => CLOSE_HOVER,
-        (true, false) if pressed => theme::SELECTED,
-        (true, false) => theme::HOVER,
+        (true, false) if pressed => theme::selected(),
+        (true, false) => theme::hover(),
         _ => egui::Color32::TRANSPARENT,
     };
     painter.rect_filled(rect, 0.0, fill);
     let c = rect.center();
-    let stroke = Stroke::new(1.0, theme::PAPER);
+    let stroke = Stroke::new(1.0, theme::text());
     match index {
         0 => {
             painter.hline((c.x - 5.0)..=(c.x + 5.0), c.y, stroke);

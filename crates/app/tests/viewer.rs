@@ -927,3 +927,27 @@ fn req_013_12_the_photo_grows_from_its_tile_and_back() {
     harness.run_steps(30);
     assert!(harness.state().viewer.is_none());
 }
+
+/// REQ-020-05: in the light appearance the viewer stays dark: its control bar, and egui's style inside it.
+#[test]
+fn req_020_05_the_viewer_stays_dark_in_the_light_appearance() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture, 3, &[]);
+    let mut settings = harness.state().settings;
+    settings.appearance = domain::appearance::Appearance::Light;
+    harness.state_mut().update_settings(settings);
+    settle(&mut harness);
+    assert_eq!(harness.ctx.theme(), egui::Theme::Light);
+
+    open(&mut harness, "1.png");
+    // Past the original's fade-in.
+    harness.run_steps(20);
+    // The control bar's glass, beside the Close button's icon.
+    let close = harness.get_by_role_and_label(Role::Button, "Close").rect();
+    let image = harness.render().unwrap();
+    let at = close.min + egui::vec2(3.0, 3.0);
+    let [r, g, b, _] = image.get_pixel(at.x as u32, at.y as u32).0;
+    let lightness = (u32::from(r) + u32::from(g) + u32::from(b)) / 3;
+    assert!(lightness < 80, "the control bar is light: {r} {g} {b}");
+    harness.snapshot(common::snapshot_name("viewer_light"));
+}

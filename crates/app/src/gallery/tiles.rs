@@ -157,21 +157,21 @@ pub(super) fn group_header(ui: &mut egui::Ui, rect: Rect, group: &DateGroup) {
         ui,
         &day,
         egui::FontId::new(theme::SIZE_BODY, theme::semibold()),
-        theme::PAPER,
+        theme::text(),
         rect.width() * 0.7,
     );
     let count = one_line(
         ui,
         &count,
         egui::FontId::new(theme::SIZE_CAPTION, theme::numbers()),
-        theme::MIST,
+        theme::muted(),
         rect.width() * 0.3,
     );
     let baseline = rect.bottom() - 8.0;
     let day_pos = pos2(rect.left(), baseline - day.size().y);
     let count_pos = pos2(day_pos.x + day.size().x + 8.0, baseline - count.size().y - 1.0);
-    ui.painter().galley(day_pos, day, theme::PAPER);
-    ui.painter().galley(count_pos, count, theme::MIST);
+    ui.painter().galley(day_pos, day, theme::text());
+    ui.painter().galley(count_pos, count, theme::muted());
 }
 
 /// A play badge with the duration in the tile's bottom-right corner (REQ-006-09).
@@ -228,7 +228,7 @@ fn indicator_badge(ui: &mut egui::Ui, tile: Rect, indicators: &[TagIndicator], v
             TagIndicatorKind::Rating => {
                 for star in 0..indicator.stars {
                     let at = Rect::from_min_size(area.min + vec2(f32::from(star) * ICON, 0.0), Vec2::splat(ICON));
-                    Icon::Star.image(ICON, theme::STAR).paint_at(ui, at);
+                    Icon::Star.image(ICON, theme::star()).paint_at(ui, at);
                 }
             }
             kind => {
@@ -269,7 +269,7 @@ pub(super) fn skeleton(ui: &egui::Ui, columns: usize, gap: f32) {
         for column in 0..columns {
             let min = pos2(area.left() + PADDING + column as f32 * (side + gap), y);
             ui.painter()
-                .rect_filled(Rect::from_min_size(min, Vec2::splat(side)), 4, theme::RAISED);
+                .rect_filled(Rect::from_min_size(min, Vec2::splat(side)), 4, theme::placeholder());
         }
     }
 }

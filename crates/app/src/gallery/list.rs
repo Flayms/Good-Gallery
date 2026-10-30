@@ -133,7 +133,8 @@ impl Gallery {
         });
         let Some(item) = self.items.get(&id) else {
             let bar = Rect::from_min_max(rect.min + vec2(PADDING, 6.0), rect.max - vec2(PADDING, 6.0));
-            ui.painter().rect_filled(bar, theme::RADIUS_CONTROL, theme::RAISED);
+            ui.painter()
+                .rect_filled(bar, theme::RADIUS_CONTROL, theme::placeholder());
             return;
         };
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Row, true, tile_label(item, &[])));
@@ -142,7 +143,7 @@ impl Gallery {
         }
         if response.hovered() {
             let hover = Rect::from_min_max(rect.min + vec2(4.0, 0.0), rect.max - vec2(4.0, 0.0));
-            ui.painter().rect_filled(hover, theme::RADIUS_CONTROL, theme::HOVER);
+            ui.painter().rect_filled(hover, theme::RADIUS_CONTROL, theme::hover());
         }
         let [thumb, name, folder, date, size, dims, rating] = columns(rect.left(), rect.width());
         let y = rect.center().y;
@@ -150,7 +151,7 @@ impl Gallery {
         self.paint_thumbnail(ui, thumb_rect, 4, id, frame);
         let Some(item) = self.items.get(&id) else { return };
         name_cell(ui, name, y, item);
-        text_cell(ui, folder, y, folder_of(&item.rel_path), theme::MIST, false);
+        text_cell(ui, folder, y, folder_of(&item.rel_path), theme::muted(), false);
 
         // The date taken; without one, the date modified, dimmed and explained (REQ-006-05).
         let undated = item.taken_at.is_none();
@@ -160,7 +161,7 @@ impl Gallery {
             date,
             y,
             &shown,
-            if undated { theme::MIST } else { theme::PAPER },
+            if undated { theme::muted() } else { theme::text() },
             true,
         );
         if undated {
@@ -168,19 +169,19 @@ impl Gallery {
                 .on_hover_text("Date modified (no capture date)");
         }
         let size_text = format::bytes(item.size);
-        let size_galley = one_line(ui, &size_text, numbers(), theme::PAPER, size.1);
+        let size_galley = one_line(ui, &size_text, numbers(), theme::text(), size.1);
         ui.painter().galley(
             pos2(size.0 + size.1 - size_galley.size().x, y - size_galley.size().y / 2.0),
             size_galley,
-            theme::PAPER,
+            theme::text(),
         );
         if let (Some(w), Some(h)) = (item.width, item.height) {
-            text_cell(ui, dims, y, &format!("{w} × {h}"), theme::MIST, true);
+            text_cell(ui, dims, y, &format!("{w} × {h}"), theme::muted(), true);
         }
         if let Some(stars) = item.rating.filter(|r| *r > 0) {
             for star in 0..stars.min(5) {
                 let at = Rect::from_min_size(pos2(rating.0 + star as f32 * 14.0, y - 6.0), Vec2::splat(12.0));
-                Icon::Star.image(12.0, theme::STAR).paint_at(ui, at);
+                Icon::Star.image(12.0, theme::star()).paint_at(ui, at);
             }
         }
     }
@@ -211,7 +212,7 @@ fn name_cell(ui: &egui::Ui, (x, width): (f32, f32), y: f32, item: &GalleryItem) 
             ui,
             text,
             egui::FontId::new(theme::SIZE_CAPTION, theme::numbers()),
-            theme::MIST,
+            theme::muted(),
             width,
         )
     });
@@ -220,17 +221,20 @@ fn name_cell(ui: &egui::Ui, (x, width): (f32, f32), y: f32, item: &GalleryItem) 
         ui,
         &item.file_name,
         egui::FontId::new(theme::SIZE_BODY, theme::semibold()),
-        theme::PAPER,
+        theme::text(),
         width - badge_width,
     );
     let name_width = name.size().x;
     ui.painter()
-        .galley(pos2(x, y - name.size().y / 2.0), name, theme::PAPER);
+        .galley(pos2(x, y - name.size().y / 2.0), name, theme::text());
     if let Some(galley) = badge_galley {
         let icon = Rect::from_min_size(pos2(x + name_width + 6.0, y - 6.0), Vec2::splat(12.0));
-        Icon::Play.image(12.0, theme::MIST).paint_at(ui, icon);
-        ui.painter()
-            .galley(pos2(icon.right() + 4.0, y - galley.size().y / 2.0), galley, theme::MIST);
+        Icon::Play.image(12.0, theme::muted()).paint_at(ui, icon);
+        ui.painter().galley(
+            pos2(icon.right() + 4.0, y - galley.size().y / 2.0),
+            galley,
+            theme::muted(),
+        );
     }
 }
 
@@ -245,7 +249,7 @@ pub(super) fn column_header(ui: &mut egui::Ui, area: Rect, width: f32) {
     ui.interact(rect, ui.make_persistent_id("list header"), egui::Sense::click());
     // Painted after the rows, so it covers them.
     let painter = ui.painter();
-    painter.rect_filled(rect, 0, theme::RAISED);
+    painter.rect_filled(rect, 0, theme::raised());
     let font = egui::FontId::new(theme::SIZE_CAPTION, theme::semibold());
     let names = ["", "Name", "Folder", "Date", "Size", "Dimensions", "Rating"];
     for (index, ((x, width), name)) in columns(rect.left(), width).into_iter().zip(names).enumerate() {
@@ -255,7 +259,7 @@ pub(super) fn column_header(ui: &mut egui::Ui, area: Rect, width: f32) {
         } else {
             (Align2::LEFT_CENTER, pos2(x, rect.center().y))
         };
-        painter.text(at, anchor, name, font.clone(), theme::MIST);
+        painter.text(at, anchor, name, font.clone(), theme::muted());
     }
 }
 
@@ -265,7 +269,8 @@ pub(super) fn skeleton(ui: &egui::Ui) {
     let mut y = area.top() + TOOLBAR_HEIGHT + PADDING;
     for _ in 0..12 {
         let rect = Rect::from_min_size(pos2(area.left() + PADDING, y), vec2(area.width() - 2.0 * PADDING, 40.0));
-        ui.painter().rect_filled(rect, theme::RADIUS_CONTROL, theme::RAISED);
+        ui.painter()
+            .rect_filled(rect, theme::RADIUS_CONTROL, theme::placeholder());
         y += 52.0;
     }
 }

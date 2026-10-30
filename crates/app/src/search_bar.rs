@@ -41,7 +41,7 @@ pub fn show(ui: &mut egui::Ui, bar: &mut SearchBar, gallery: &mut Gallery) {
     let search = gallery.search().clone();
     let width = ui.available_width().min(MAX_WIDTH);
     let (field, _) = ui.allocate_exact_size(vec2(width, theme::CONTROL_HEIGHT), egui::Sense::hover());
-    ui.painter().rect_filled(field, theme::RADIUS_CONTROL, theme::FIELD);
+    ui.painter().rect_filled(field, theme::RADIUS_CONTROL, theme::field());
     let mut next = search.clone();
     let mut input = None;
     let was_empty = bar.query.is_empty();
@@ -52,7 +52,7 @@ pub fn show(ui: &mut egui::Ui, bar: &mut SearchBar, gallery: &mut Gallery) {
             .layout(egui::Layout::left_to_right(egui::Align::Center)),
         |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            ui.add(Icon::Search.image(theme::ICON_SIZE, theme::MIST));
+            ui.add(Icon::Search.image(theme::ICON_SIZE, theme::muted()));
             let chips: Vec<(String, TagMode)> = search
                 .tags
                 .iter()
@@ -200,14 +200,14 @@ pub fn show(ui: &mut egui::Ui, bar: &mut SearchBar, gallery: &mut Gallery) {
         .fixed_pos(field.left_bottom() + vec2(0.0, 4.0))
         .show(ui.ctx(), |ui| {
             egui::Frame::popup(ui.style())
-                .fill(theme::RAISED)
+                .fill(theme::raised())
                 .corner_radius(theme::RADIUS_PANEL)
                 .inner_margin(4.0)
                 .show(ui, |ui| {
                     crate::glass::behind_frame(ui, egui::Margin::same(4), |ui| {
                         ui.set_width(width - 8.0);
                         if loaded && choices.is_empty() {
-                            ui.label(egui::RichText::new("No matching tags").color(theme::MIST));
+                            ui.label(egui::RichText::new("No matching tags").color(theme::muted()));
                         }
                         for (index, choice) in choices.iter().enumerate() {
                             let count = match choice {
@@ -221,7 +221,7 @@ pub fn show(ui: &mut egui::Ui, bar: &mut SearchBar, gallery: &mut Gallery) {
                         ui.label(
                             egui::RichText::new("Start with - to exclude a tag")
                                 .size(theme::SIZE_CAPTION)
-                                .color(theme::MIST),
+                                .color(theme::muted()),
                         );
                     });
                 });
@@ -252,13 +252,13 @@ enum ChipAction {
 fn tag_chip(ui: &mut egui::Ui, name: &str, mode: TagMode) -> Option<ChipAction> {
     let excluded = mode == TagMode::Exclude;
     let (icon, text, fill) = if excluded {
-        (
-            Icon::Minus,
-            egui::RichText::new(name).strikethrough(),
-            Color32::from_rgba_unmultiplied(242, 112, 106, 40),
-        )
+        (Icon::Minus, egui::RichText::new(name).strikethrough(), {
+            // Alert at 16 %.
+            let alert = theme::alert();
+            Color32::from_rgba_unmultiplied(alert.r(), alert.g(), alert.b(), 40)
+        })
     } else {
-        (Icon::Tag, egui::RichText::new(name), theme::SELECTED)
+        (Icon::Tag, egui::RichText::new(name), theme::selected())
     };
     let mut action = None;
     egui::Frame::new()
@@ -273,7 +273,7 @@ fn tag_chip(ui: &mut egui::Ui, name: &str, mode: TagMode) -> Option<ChipAction> 
                 format!("{name}, included")
             };
             let toggle = ui
-                .add(egui::Button::new((icon.image(12.0, theme::PAPER), text.size(theme::SIZE_CAPTION))).frame(false))
+                .add(egui::Button::new((icon.image(12.0, theme::text()), text.size(theme::SIZE_CAPTION))).frame(false))
                 .on_hover_text(if excluded {
                     "Excluded – click to include"
                 } else {
@@ -294,12 +294,12 @@ fn tag_chip(ui: &mut egui::Ui, name: &str, mode: TagMode) -> Option<ChipAction> 
 fn file_name_chip(ui: &mut egui::Ui, name: &str) -> bool {
     let mut removed = false;
     egui::Frame::new()
-        .stroke(egui::Stroke::new(1.0, theme::RIM))
+        .stroke(egui::Stroke::new(1.0, theme::rim()))
         .corner_radius(theme::RADIUS_CONTROL)
         .inner_margin(egui::Margin::symmetric(4, 1))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
-            ui.add(Icon::File.image(12.0, theme::PAPER));
+            ui.add(Icon::File.image(12.0, theme::text()));
             ui.label(egui::RichText::new(name).size(theme::SIZE_CAPTION))
                 .on_hover_text("File name contains");
             removed = remove_button(ui, &format!("Remove file name filter {name}"));
@@ -308,7 +308,7 @@ fn file_name_chip(ui: &mut egui::Ui, name: &str) -> bool {
 }
 
 fn remove_button(ui: &mut egui::Ui, label: &str) -> bool {
-    let response = ui.add(egui::Button::image(Icon::X.image(12.0, theme::MIST)).frame(false));
+    let response = ui.add(egui::Button::image(Icon::X.image(12.0, theme::muted())).frame(false));
     let label = label.to_string();
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
     response.clicked()
@@ -327,22 +327,22 @@ fn suggestion_row(
         ui.painter().rect_filled(
             rect,
             theme::RADIUS_CONTROL,
-            if highlighted { theme::SELECTED } else { theme::HOVER },
+            if highlighted { theme::selected() } else { theme::hover() },
         );
     }
     let (icon, color, text) = match choice {
-        Choice::Tag(name) if mode == TagMode::Exclude => (Icon::Minus, theme::ALERT, name.clone()),
-        Choice::Tag(name) => (Icon::Plus, theme::PAPER, name.clone()),
-        Choice::FileName(name) => (Icon::FileSearch, theme::PAPER, format!("File name contains “{name}”")),
+        Choice::Tag(name) if mode == TagMode::Exclude => (Icon::Minus, theme::alert(), name.clone()),
+        Choice::Tag(name) => (Icon::Plus, theme::text(), name.clone()),
+        Choice::FileName(name) => (Icon::FileSearch, theme::text(), format!("File name contains “{name}”")),
     };
     let icon_rect = Rect::from_min_size(pos2(rect.left() + 8.0, rect.center().y - 8.0), Vec2::splat(16.0));
     icon.image(16.0, color).paint_at(ui, icon_rect);
     let font = egui::FontId::new(theme::SIZE_BODY, egui::FontFamily::Proportional);
-    let galley = ui.painter().layout_no_wrap(text.clone(), font, theme::PAPER);
+    let galley = ui.painter().layout_no_wrap(text.clone(), font, theme::text());
     ui.painter().galley(
         pos2(icon_rect.right() + 8.0, rect.center().y - galley.size().y / 2.0),
         galley,
-        theme::PAPER,
+        theme::text(),
     );
     if let Some(count) = count {
         ui.painter().text(
@@ -350,7 +350,7 @@ fn suggestion_row(
             egui::Align2::RIGHT_CENTER,
             format::count(count),
             egui::FontId::new(theme::SIZE_CAPTION, theme::numbers()),
-            theme::MIST,
+            theme::muted(),
         );
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ListItem, true, &text));

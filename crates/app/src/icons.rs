@@ -89,7 +89,7 @@ impl Icon {
 
     /// The icon at the default size (16) in Paper.
     pub fn small(self) -> Image<'static> {
-        self.image(theme::ICON_SIZE, theme::PAPER)
+        self.image(theme::ICON_SIZE, theme::text())
     }
 }
 

@@ -76,11 +76,11 @@ pub fn show(
             format::duration(state.duration)
         ),
         egui::FontId::new(theme::SIZE_CAPTION, theme::numbers()),
-        theme::PAPER,
+        theme::text(),
     );
     let time_rect = Rect::from_min_size(pos2(x, y - time.size().y / 2.0), time.size());
     let time_label = time.text().to_owned();
-    ui.painter().galley(time_rect.min, time, theme::PAPER);
+    ui.painter().galley(time_rect.min, time, theme::text());
     ui.interact(time_rect, ui.make_persistent_id("video time"), egui::Sense::hover())
         .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &time_label));
     x = time_rect.right() + GAP;
