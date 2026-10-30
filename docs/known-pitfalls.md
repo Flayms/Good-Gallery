@@ -26,6 +26,7 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **`ctx.egui_wants_keyboard_input()` is true for any focused widget**, not only text inputs. Tell a focused text input by its state: `TextEditState::load(ctx, id).is_some()`.
 * **A paint callback ignores the painter's opacity** (`ui.multiply_opacity` / `set_opacity` reach only ordinary shapes): pass the opacity into the callback (`glass::place`).
 * **wgpu's `TextureView` is `Clone`** (cheap), so textures made on worker threads can hand their view to glass.
+* **Don't `destroy()` a texture a paint callback may still use.** Callbacks queued this frame run `prepare` after the UI code, so ending the edit session mid-frame (the _Discard_ button) and destroying its texture made `create_bind_group` fail fatally (#69). Drop the texture instead, wgpu frees it with its last view and bind group, and keep per-frame bind groups in the callback, not in `CallbackResources`, so they don't keep it alive.
 * **ICU4X formatters aren't `Send`** (yoke'd `Rc` data): cache them in a `thread_local!`, not a `static Mutex`.
 
 ## Visual checks

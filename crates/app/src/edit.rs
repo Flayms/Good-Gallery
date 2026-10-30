@@ -73,8 +73,8 @@ pub enum Outcome {
 }
 
 struct Loaded {
-    /// The original's texture as loaded (perhaps smaller than the file, within the GPU's limit).
-    texture: Option<wgpu::Texture>,
+    /// The original's texture as loaded (perhaps smaller than the file, within the GPU's limit). Not destroyed when
+    /// editing ends: a frame's queued preview may still draw it (#69); wgpu frees it with its last view.
     view: Option<wgpu::TextureView>,
     small: image::RgbaImage,
     /// The CPU preview and the recipe it shows.
@@ -348,6 +348,7 @@ impl EditSession {
                         PreviewCallback {
                             view: view.clone(),
                             uniform,
+                            group: std::sync::OnceLock::new(),
                         },
                     ));
             }
@@ -703,24 +704,13 @@ fn load(
     } else {
         image.clone()
     };
-    let texture = render_state.map(|render_state| {
+    let view = render_state.map(|render_state| {
         let size = [image.width(), image.height()];
         let levels = crate::textures::mip_chain(size, image.into_raw());
         crate::textures::upload(&render_state.device, &render_state.queue, size, &levels)
+            .create_view(&wgpu::TextureViewDescriptor::default())
     });
-    let view = texture
-        .as_ref()
-        .map(|texture| texture.create_view(&wgpu::TextureViewDescriptor::default()));
-    Ok((
-        source,
-        recipe,
-        Loaded {
-            texture,
-            view,
-            small,
-            cpu: None,
-        },
-    ))
+    Ok((source, recipe, Loaded { view, small, cpu: None }))
 }
 
 /// The browser version doesn't edit (REQ-021-01).
@@ -731,16 +721,6 @@ fn load(
     _render_state: Option<&egui_wgpu::RenderState>,
 ) -> Result<(String, Recipe, Loaded), String> {
     Err("editing isn't available here".into())
-}
-
-impl Drop for EditSession {
-    fn drop(&mut self) {
-        if let Base::Loaded(loaded) = &self.base
-            && let Some(texture) = &loaded.texture
-        {
-            texture.destroy();
-        }
-    }
 }
 
 /// `small` through `recipe`, on the CPU.
@@ -781,7 +761,6 @@ struct EditResources {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    group: Option<wgpu::BindGroup>,
 }
 
 impl EditResources {
@@ -862,7 +841,6 @@ impl EditResources {
             pipeline,
             layout,
             sampler,
-            group: None,
         }
     }
 
@@ -905,6 +883,8 @@ pub fn install(render_state: &egui_wgpu::RenderState) {
 struct PreviewCallback {
     view: wgpu::TextureView,
     uniform: Vec<f32>,
+    /// Made in `prepare`; dropped with the frame, so the photo's texture isn't kept alive after editing ends.
+    group: std::sync::OnceLock<wgpu::BindGroup>,
 }
 
 impl CallbackTrait for PreviewCallback {
@@ -916,8 +896,8 @@ impl CallbackTrait for PreviewCallback {
         _encoder: &mut wgpu::CommandEncoder,
         resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
-        if let Some(res) = resources.get_mut::<EditResources>() {
-            res.group = Some(res.bind(device, &self.view, &self.uniform));
+        if let Some(res) = resources.get::<EditResources>() {
+            let _ = self.group.set(res.bind(device, &self.view, &self.uniform));
         }
         Vec::new()
     }
@@ -931,7 +911,7 @@ impl CallbackTrait for PreviewCallback {
         let Some(res) = resources.get::<EditResources>() else {
             return;
         };
-        let Some(group) = &res.group else { return };
+        let Some(group) = self.group.get() else { return };
         pass.set_pipeline(&res.pipeline);
         pass.set_bind_group(0, group, &[]);
         pass.draw(0..3, 0..1);
@@ -1121,7 +1101,6 @@ mod tests {
         };
         let mut session = EditSession::new(target, None);
         session.base = Base::Loaded(Box::new(Loaded {
-            texture: None,
             view: None,
             small: image::RgbaImage::from_pixel(10, 10, image::Rgba([200, 150, 100, 255])),
             cpu: None,
@@ -1154,6 +1133,104 @@ mod tests {
         assert_eq!(session.leave(Leave::Exit), None);
     }
 
+    /// REQ-021-08 (#69): _Discard_ ends editing after the frame's preview was queued; drawing it must still work.
+    #[test]
+    fn req_021_08_discarding_after_the_preview_was_queued_still_draws_it() {
+        let render_state = egui_kittest::wgpu::create_render_state(
+            egui_kittest::wgpu::default_wgpu_setup(),
+            egui_wgpu::RendererOptions::default(),
+        );
+        let (device, queue) = (&render_state.device, &render_state.queue);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let size = [SIZE, SIZE];
+        let texture = crate::textures::upload(
+            device,
+            queue,
+            size,
+            &crate::textures::mip_chain(size, pattern().into_raw()),
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let target = Target {
+            media: 1,
+            root_id: 1,
+            rel_path: "a.jpg".into(),
+            file_name: "a.jpg".into(),
+            library: PathBuf::from("/photos"),
+            full_size: size,
+        };
+        let mut session = EditSession::new(target, Some(render_state.clone()));
+        session.base = Base::Loaded(Box::new(Loaded {
+            view: Some(view.clone()),
+            small: pattern(),
+            cpu: None,
+        }));
+        let callback = PreviewCallback {
+            view,
+            uniform: uniform(
+                &Params::new(&Recipe::default()),
+                [0.0, 0.0, SIZE as f32, SIZE as f32],
+                [0.0, 0.0, 1.0, 1.0],
+                [SIZE as f32; 2],
+                1.0,
+                0.0,
+            ),
+            group: std::sync::OnceLock::new(),
+        };
+        // Discard: the session ends, then the frame is drawn.
+        drop(session);
+        let mut resources = CallbackResources::default();
+        resources.insert(EditResources::new(device, format));
+        let screen = ScreenDescriptor {
+            size_in_pixels: size,
+            pixels_per_point: 1.0,
+        };
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        callback.prepare(device, queue, &screen, &mut encoder, &mut resources);
+        let frame = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("edit test"),
+            size: wgpu::Extent3d {
+                width: SIZE,
+                height: SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let frame_view = frame.create_view(&wgpu::TextureViewDescriptor::default());
+        {
+            let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("edit test"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &frame_view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            let mut pass = pass.forget_lifetime();
+            let info = egui::PaintCallbackInfo {
+                viewport: Rect::from_min_size(Pos2::ZERO, Vec2::splat(SIZE as f32)),
+                clip_rect: Rect::from_min_size(Pos2::ZERO, Vec2::splat(SIZE as f32)),
+                pixels_per_point: 1.0,
+                screen_size_px: size,
+            };
+            callback.paint(info, &mut pass, &resources);
+        }
+        queue.submit([encoder.finish()]);
+        device.poll(wgpu::PollType::wait_indefinitely()).expect("polled");
+    }
+
     #[test]
     fn req_021_05_the_picker_neutralizes_the_picked_spot() {
         let target = Target {
@@ -1167,7 +1244,6 @@ mod tests {
         let mut session = EditSession::new(target, None);
         let warm = image::RgbaImage::from_pixel(10, 10, image::Rgba([190, 160, 130, 255]));
         session.base = Base::Loaded(Box::new(Loaded {
-            texture: None,
             view: None,
             small: warm.clone(),
             cpu: None,
