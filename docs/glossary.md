@@ -14,7 +14,7 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | **Sidecar**              | An `.xmp` file next to a media file (`IMG_1.jpg.xmp` or `IMG_1.xmp`) that holds additional metadata.                                                                               |
 | **Folder**               | A subfolder of a library, addressed by its `/`-separated path relative to the library. A folder filter includes its subfolders.                                                     |
 | **Housekeeping folder**  | A folder created by an OS or NAS that is never indexed: dot folders, `$` folders, `@eaDir`, `#recycle`, `#snapshot`, `.@__thumb`, `System Volume Information`.                      |
-| **Read-only**            | Good Gallery never modifies media files or sidecars. All metadata comes from what other tools wrote into them.                                                                    |
+| **Read-only**            | Good Gallery never modifies media files or sidecars on its own. All metadata comes from what other tools wrote into them; only an edit the user saves writes a file (spec 021). |
 
 ## Metadata
 
@@ -73,3 +73,13 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | **Filmstrip**     | The optional row of thumbnails of the whole gallery below the media item in the viewer, with the shown item highlighted.         |
 | **Info panel**    | The panel in the viewer with file details, rating and tags. It opens as the **info sheet** when used from the gallery's context menu.                              |
 | **Appearance**    | Light or dark chrome: _System_ (as the OS or browser is), _Light_ or _Dark_. The viewer is always dark. (code: `Appearance`, `theme::Palette`)                     |
+
+## Editing
+
+| Term                     | Definition                                                                                                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Edit**                 | Light, curves, color and effects adjustments of a photo, made in the viewer and saved into a file. (UI: _Edit_)                                                     |
+| **Recipe**               | The values of an edit's adjustments. A saved file carries it in its XMP (`gg:EditRecipe`), so editing again starts where it was left. (code: `domain::edit::Recipe`) |
+| **Unedited original**    | The file an edit is rendered from: the photo itself, its backup once an edit replaced it, or the source of a copy. (code: `source`, `gg:EditSource`)                |
+| **Backup of the original** | The unedited original of a photo whose edit was saved over it, kept in `<library>/.good-gallery/originals/` (a housekeeping folder). _Revert to original_ puts it back. |
+| **Edited copy**          | A new file `<name> (edited).<ext>` beside the original, written by _Save as copy_.                                                                                  |

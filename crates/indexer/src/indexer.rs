@@ -253,6 +253,10 @@ impl Indexer {
 }
 
 impl ScanRequests for Indexer {
+    fn request_paths(&self, library: i64, paths: Vec<String>) {
+        self.request(library, ScanScope::Changes(paths));
+    }
+
     fn request_scan(&self, library: i64, kind: ScanKind) {
         match kind {
             ScanKind::Full => self.request(library, ScanScope::Full),

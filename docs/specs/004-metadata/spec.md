@@ -4,7 +4,7 @@
 
 ## Goal
 
-Search and sorting rely on the tags, ratings and dates that photo tools (Lightroom, digiKam, darktable, Picasa, Windows Photos, cameras) already wrote into the files or their sidecars. Good Gallery reads them as they are, in all the common places, and never modifies a file.
+Search and sorting rely on the tags, ratings and dates that photo tools (Lightroom, digiKam, darktable, Picasa, Windows Photos, cameras) already wrote into the files or their sidecars. Good Gallery reads them as they are, in all the common places, and never modifies a file on its own: only an edit the user saves writes one (spec 021).
 
 ## Requirements
 
@@ -13,6 +13,7 @@ Search and sorting rely on the tags, ratings and dates that photo tools (Lightro
 - **Given** any library
 - **When** it is indexed, browsed or viewed
 - **Then** no media file or sidecar is created, modified, renamed or deleted
+- **And** only saving or reverting an edit writes files, as spec 021 describes
 
 ### REQ-004-02 · Dimensions as displayed
 

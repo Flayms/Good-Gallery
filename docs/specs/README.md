@@ -24,6 +24,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [018-linux](018-linux/spec.md)                           | Linux: data folder, system helpers, title bar, package           | Implemented |
 | [019-web](019-web/spec.md)                               | Browser version: a static page, index kept in the browser        | Approved    |
 | [020-light-mode](020-light-mode/spec.md)                 | Light appearance, following the system or chosen in the settings | Implemented |
+| [021-photo-editing](021-photo-editing/spec.md)           | Light, curves, color, effects in the viewer; reversible saves    | Implemented |
 
 ## Conventions
 

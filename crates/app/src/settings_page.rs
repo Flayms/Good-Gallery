@@ -6,6 +6,7 @@ use crate::state::{AppState, Page};
 use crate::{format, theme};
 use db::libraries::{Library, LibraryStatus};
 use domain::appearance::Appearance;
+use domain::edit::MtimeOnSave;
 use domain::sidebar::SidebarLayout;
 use eframe::egui::{self, Color32, CornerRadius, FontId, Frame, Margin, Rect, RichText, Stroke, Vec2};
 
@@ -74,6 +75,8 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
                     // The browser has no watchers, scheduled checks or parallel reads to tune (REQ-019-13).
                     if !crate::WEB {
                         indexing(ui, state);
+                        ui.add_space(theme::SPACE * 10.0);
+                        editing(ui, state);
                         ui.add_space(theme::SPACE * 10.0);
                     }
                     thumbnail_cache(ui, state);
@@ -258,6 +261,45 @@ fn sidebar(ui: &mut egui::Ui, state: &mut AppState) {
     }
     if layout != *state.sidebar.layout() {
         state.sidebar.set_layout(layout, state.db.as_ref());
+    }
+}
+
+/// The choices of _When saving edits_ (REQ-021-15).
+fn mtime_label(choice: MtimeOnSave) -> &'static str {
+    match choice {
+        MtimeOnSave::Keep => "Keep date modified",
+        MtimeOnSave::Update => "Update date modified",
+    }
+}
+
+/// _Editing_: what saving an edit does to the file's date modified (REQ-021-15).
+fn editing(ui: &mut egui::Ui, state: &mut AppState) {
+    section_title(ui, "Editing");
+    let mut settings = state.settings;
+    group(ui, |ui| {
+        setting_row(
+            ui,
+            "When saving edits",
+            "Keeping it leaves photos without a date taken in their place. Some sync tools only notice updated files.",
+            224.0,
+            |ui| {
+                let current = settings.mtime_on_save;
+                let combo = egui::ComboBox::from_id_salt("mtime on save")
+                    .width(224.0)
+                    .selected_text(mtime_label(current))
+                    .show_ui(ui, |ui| {
+                        crate::glass::behind_menu(ui, |ui| {
+                            for option in [MtimeOnSave::Keep, MtimeOnSave::Update] {
+                                ui.selectable_value(&mut settings.mtime_on_save, option, mtime_label(option));
+                            }
+                        });
+                    });
+                name_combo(&combo.response, "When saving edits", mtime_label(current).to_owned());
+            },
+        );
+    });
+    if settings != state.settings {
+        state.update_settings(settings);
     }
 }
 
@@ -567,45 +609,7 @@ fn confirm_remove(ctx: &egui::Context, state: &mut AppState) {
 
 /// A dialog with `title`, `text`, Cancel and `verb`: `Some(true)` once confirmed, `Some(false)` once cancelled.
 fn confirm(ctx: &egui::Context, id: &str, title: &str, text: &str, verb: &str) -> Option<bool> {
-    let mut decided = None;
-    let modal = egui::Modal::new(egui::Id::unique(id))
-        .frame(
-            Frame::new()
-                .fill(theme::raised())
-                .stroke(Stroke::new(1.0, theme::rim()))
-                .corner_radius(CornerRadius::same(theme::RADIUS_PANEL))
-                .inner_margin(Margin::same(20)),
-        )
-        .show(ctx, |ui| {
-            crate::glass::behind_frame(ui, Margin::same(20), |ui| {
-                ui.set_max_width(400.0);
-                ui.label(RichText::new(title).font(FontId::new(theme::SIZE_TITLE, theme::semibold())));
-                ui.add_space(theme::SPACE * 2.0);
-                ui.label(text);
-                ui.add_space(theme::SPACE * 4.0);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let remove = egui::Button::new(
-                        RichText::new(verb)
-                            .color(theme::base())
-                            .font(FontId::new(theme::SIZE_BODY, theme::semibold())),
-                    )
-                    .fill(theme::text());
-                    if ui.add(remove).clicked() {
-                        decided = Some(true);
-                    }
-                    if ui
-                        .add(egui::Button::new("Cancel").stroke(Stroke::new(1.0, theme::rim())))
-                        .clicked()
-                    {
-                        decided = Some(false);
-                    }
-                });
-            });
-        });
-    if modal.should_close() && decided.is_none() {
-        decided = Some(false);
-    }
-    decided
+    crate::widgets::dialog(ctx, id, title, text, &[verb, "Cancel"]).map(|chosen| chosen == 0)
 }
 
 #[cfg(test)]

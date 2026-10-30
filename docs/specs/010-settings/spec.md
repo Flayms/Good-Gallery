@@ -12,7 +12,7 @@ The user adapts indexing and the thumbnail cache to their hardware and network: 
 
 - **Given** a fresh installation
 - **When** the user opens the Settings page
-- **Then** the quick check interval is "Every hour", parallel file reads is 4 and the thumbnail cache limit is 5 GB
+- **Then** the quick check interval is "Every hour", parallel file reads is 4, the thumbnail cache limit is 5 GB and saving an edit keeps the date modified (REQ-021-15)
 - **And** changed values are kept across restarts
 
 ### REQ-010-02 · Valid values only

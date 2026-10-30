@@ -160,6 +160,12 @@ pub fn extract_metadata(tags: &Tags, sidecar: Option<&Tags>) -> MediaMetadata {
         taken_at,
         rating: extract_rating(&sources),
         tags: extract_tags(&sources),
+        // Only the file's own: a copy of a sidecar doesn't carry another file's edit.
+        edit: domain::edit::SavedEdit::parse(
+            tags.get("EditRecipe").and_then(Value::as_str),
+            tags.get("EditSource").and_then(Value::as_str),
+        )
+        .map(Box::new),
     }
 }
 
@@ -404,6 +410,17 @@ mod tests {
             extract_tags(&[&t]),
             strings(&[&["Places", "Germany", "Berlin"], &["Places", "Germany"], &["Travel"]])
         );
+    }
+
+    #[test]
+    fn req_021_11_reads_the_saved_edit_from_the_file_but_not_from_its_sidecar() {
+        let recipe = domain::edit::Recipe::default().to_json();
+        let file = tags(json!({ "EditRecipe": recipe, "EditSource": ".good-gallery/originals/a.jpg" }));
+        let edit = extract_metadata(&file, None).edit.unwrap();
+        assert_eq!(edit.source, ".good-gallery/originals/a.jpg");
+        assert_eq!(extract_metadata(&tags(json!({})), Some(&file)).edit, None);
+        let outside = tags(json!({ "EditRecipe": recipe, "EditSource": "../a.jpg" }));
+        assert_eq!(extract_metadata(&outside, None).edit, None);
     }
 
     #[test]

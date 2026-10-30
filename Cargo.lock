@@ -963,6 +963,7 @@ name = "domain"
 version = "0.2.1"
 dependencies = [
  "chrono",
+ "serde",
  "serde_json",
  "sha1",
  "unicode-normalization",

@@ -3,8 +3,10 @@
 //! below the scrim and keeps the shown item in view. An info panel (REQ-009-08) and a filmstrip (spec 015) open beside
 //! and below the media; the chrome takes a tint of the item's colors (REQ-013-11), and the photo grows from its tile
 //! and back (REQ-013-12). Videos play in a [`Playback`](crate::video::Playback) with their controls along the bottom of
-//! the video (REQ-009-06).
+//! the video (REQ-009-06). A photo can be edited (spec 021): the adjustments panel takes the info panel's place and
+//! the photo shows through the recipe (`edit`).
 
+use crate::edit::{self, Dialog, EditSession, Leave, Outcome};
 use crate::gallery::{self, Gallery, MediaAction};
 use crate::icons::Icon;
 use crate::originals::{OriginalRequest, OriginalState, Originals};
@@ -55,6 +57,10 @@ pub enum Action {
     FilterByTag(String),
     /// Explorer should show this file (REQ-009-10); the viewer stays.
     ShowInExplorer(PathBuf),
+    /// Save an edit (REQ-021-09, REQ-021-10); the viewer stays and hears back through [`Viewer::edit_saved`].
+    SaveEdit(Box<edit::SaveEdit>),
+    /// Ask to put the unedited original of this item back (REQ-021-12).
+    Revert(crate::state::RevertTarget),
 }
 
 /// What the keys and the mouse's back button asked for since the last frame.
@@ -70,6 +76,10 @@ struct Keys {
     space: bool,
     /// ↑ / ↓: volume steps.
     volume: i32,
+    /// `e`: start or stop editing.
+    edit: bool,
+    undo: bool,
+    redo: bool,
 }
 
 /// The video the viewer plays (REQ-009-06).
@@ -192,6 +202,17 @@ pub struct Viewer {
     playing: Option<Playing>,
     /// The last click was on the video or its controls: ← / → seek instead of stepping (REQ-009-02).
     video_focus: bool,
+    /// Editing the shown photo (spec 021).
+    edit: Option<EditSession>,
+    /// The bar's button or the context menu asked to start or stop editing.
+    toggle_edit: bool,
+    /// Where to go once the save that was asked for on leaving has finished (REQ-021-08).
+    after_save: Option<Leave>,
+    leave_next: Option<Leave>,
+    /// A saved copy to show once it is in the gallery (REQ-021-09).
+    show_next: Option<i64>,
+    /// _Compare_ is held in the panel (REQ-021-07).
+    comparing: bool,
 }
 
 impl Viewer {
@@ -222,6 +243,12 @@ impl Viewer {
             chrome_for: None,
             playing: None,
             video_focus: false,
+            edit: None,
+            toggle_edit: false,
+            after_save: None,
+            leave_next: None,
+            show_next: None,
+            comparing: false,
         }
     }
 
@@ -310,6 +337,42 @@ impl Viewer {
         }
     }
 
+    /// Starts editing the shown photo with the next frame, as `e` does.
+    pub fn request_edit(&mut self) {
+        self.toggle_edit = true;
+    }
+
+    /// The edit of the shown photo, while editing (spec 021).
+    pub fn editing(&self) -> Option<&EditSession> {
+        self.edit.as_ref()
+    }
+
+    pub fn editing_mut(&mut self) -> Option<&mut EditSession> {
+        self.edit.as_mut()
+    }
+
+    /// The app finished the save it was asked for: editing ends (and leaves as asked), or stays open after a failure,
+    /// which the app shows (REQ-021-16).
+    pub fn edit_saved(&mut self, media: i64, saved: bool) {
+        let Some(session) = self.edit.as_mut().filter(|session| session.media() == media) else {
+            return;
+        };
+        session.saving = false;
+        if saved {
+            self.edit = None;
+            self.leave_next = self.after_save.take();
+        } else {
+            self.after_save = None;
+        }
+    }
+
+    /// Shows media item `id` once the gallery has it (a saved copy, REQ-021-09).
+    pub fn show_when_listed(&mut self, id: i64) {
+        self.show_next = Some(id);
+        // Checked against the next result, or the current one.
+        self.version = self.version.wrapping_sub(1);
+    }
+
     /// Whether the shown photo's original was loaded when it came up, so it shows without fading in (REQ-009-14).
     pub fn shows_original_at_once(&self) -> bool {
         self.instant == Some(true)
@@ -361,8 +424,22 @@ impl Viewer {
                     input.consume_key(Modifiers::SHIFT, key);
                 }
             }
+            if self.edit.is_some() {
+                // Ctrl + Shift + Z first: Ctrl + Z also matches it.
+                if input.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z)
+                    || input.consume_key(Modifiers::COMMAND, Key::Y)
+                {
+                    self.keys.redo = true;
+                }
+                if input.consume_key(Modifiers::COMMAND, Key::Z) {
+                    self.keys.undo = true;
+                }
+            }
             if input.modifiers.ctrl || input.modifiers.alt || input.modifiers.command {
                 return;
+            }
+            if input.consume_key(Modifiers::NONE, Key::E) {
+                self.keys.edit = true;
             }
             if input.consume_key(Modifiers::NONE, Key::ArrowLeft) {
                 self.keys.step -= 1;
@@ -411,6 +488,14 @@ impl Viewer {
             return;
         }
         self.version = gallery.data_version();
+        if let Some(next) = self.show_next
+            && self.edit.is_none()
+            && let Some(index) = gallery.position_of(next)
+        {
+            self.show_next = None;
+            self.go_to(index, gallery);
+            return;
+        }
         if gallery.id_at(self.index) == Some(self.id) {
             self.missing = false;
         } else if let Some(index) = gallery.position_of(self.id) {
@@ -450,8 +535,17 @@ impl Viewer {
     ) -> Option<Action> {
         self.follow(gallery);
         let count = gallery.count().unwrap_or(0);
-        let keys = std::mem::take(&mut self.keys);
+        let mut keys = std::mem::take(&mut self.keys);
         self.track_video_focus(ctx);
+        if let Some(session) = &mut self.edit {
+            session.poll();
+        }
+        if let Some(leave) = self.leave_next.take() {
+            self.apply_leave(leave, gallery);
+        }
+        if self.closing.is_none() && self.edit.is_some() {
+            keys = self.edit_keys(keys, count, gallery);
+        }
         if self.closing.is_none() {
             if keys.close || self.close_at.is_some_and(|at| Instant::now() >= at) {
                 self.close(gallery, Action::Close);
@@ -518,8 +612,12 @@ impl Viewer {
             self.chrome_for = Some(self.id);
         }
 
+        if let Some(item) = &item {
+            self.sync_edit(ctx, item, libraries, originals, gallery, keys.edit);
+        }
+
         let screen = ctx.content_rect();
-        let layout = Layout::new(screen, self.info_open, self.filmstrip);
+        let layout = Layout::new(screen, self.info_open || self.edit.is_some(), self.filmstrip);
         let mut action = None;
         egui::Area::new(Self::layer().id)
             .order(Self::layer().order)
@@ -545,9 +643,20 @@ impl Viewer {
                 let closing = self.closing.is_some();
                 // The context menu's choice (REQ-009-11).
                 if !closing && let Some(item) = &item {
-                    backdrop.context_menu(|ui| match gallery::context_menu(ui) {
+                    let editable = editable(item, libraries) && self.edit.is_none();
+                    let revert = gallery
+                        .cached_detail(item.id)
+                        .filter(|_| !crate::WEB && self.edit.is_none())
+                        .and_then(|detail| {
+                            let edit = detail.edit.as_ref()?;
+                            edit.replaced_original(&detail.rel_path)
+                                .then(|| crate::state::RevertTarget::of(detail))
+                        });
+                    backdrop.context_menu(|ui| match gallery::context_menu_with(ui, editable, revert.is_some()) {
                         Some(MediaAction::ShowInExplorer) => action = Self::explorer_action(item, libraries),
                         Some(MediaAction::Information) => self.info_open = true,
+                        Some(MediaAction::Edit) => self.toggle_edit = true,
+                        Some(MediaAction::Revert) => action = revert.clone().map(Action::Revert),
                         None => {}
                     });
                 }
@@ -574,14 +683,27 @@ impl Viewer {
                     if let Some(chosen) = self.controls(ui, &layout, item.as_ref(), count, gallery, libraries) {
                         action = Some(chosen);
                     }
+                    if let Some(chosen) = self.edit_panel(ui, &layout, gallery) {
+                        action = Some(chosen);
+                    }
                 });
             });
+        if let Some(chosen) = self.edit_dialog(ctx, gallery) {
+            action = Some(chosen);
+        }
         if let Some(at) = self.close_at {
             ctx.request_repaint_after(at.saturating_duration_since(Instant::now()));
         }
         self.apply_video_control(videos);
         match action {
             Some(Action::ShowInExplorer(path)) => Some(Action::ShowInExplorer(path)),
+            Some(Action::SaveEdit(request)) => Some(Action::SaveEdit(request)),
+            Some(Action::Revert(target)) => Some(Action::Revert(target)),
+            // Closing while editing asks about unsaved changes first (REQ-021-08).
+            Some(Action::Close) if self.edit.is_some() => {
+                self.leave_edit(Leave::Close, gallery);
+                None
+            }
             Some(other) => {
                 self.close(gallery, other);
                 // Without motion it closes at once.
@@ -782,11 +904,30 @@ impl Viewer {
         let viewport = Size::new(area.width(), area.height());
         let fitted = zoom::fit_size(natural, viewport);
         let photo = item.kind == MediaKind::Image;
+        let editing = self.edit.as_ref().is_some_and(|session| session.media() == item.id);
+        let picking = editing && self.edit.as_ref().is_some_and(EditSession::is_picking);
 
         // Not over the chrome: its own widgets take those clicks and wheel turns.
         let over_chrome = backdrop.hover_pos().is_some_and(|pos| layout.is_chrome(pos));
-        if photo && !over_chrome {
+        if picking && !over_chrome {
+            // The white balance picker takes the click on the photo (REQ-021-05).
+            let target = photo_rect(area, fitted, self.view);
+            if backdrop.clicked()
+                && let Some(pos) = backdrop.interact_pointer_pos()
+                && target.contains(pos)
+                && let Some(session) = &mut self.edit
+            {
+                session.pick(pos2(
+                    (pos.x - target.left()) / target.width(),
+                    (pos.y - target.top()) / target.height(),
+                ));
+            }
+        } else if photo && !over_chrome {
             self.handle_zoom(ui, backdrop, area, natural, fitted, viewport, keys);
+            // A click beside the photo doesn't close while editing.
+            if editing {
+                self.close_at = None;
+            }
         } else if playing.is_some() && !over_chrome {
             // A click on the video plays or pauses it, as in a browser; beside it, it closes (REQ-009-03).
             let video = photo_rect(area, fitted, FIT);
@@ -818,6 +959,8 @@ impl Viewer {
         {
             let icon = if !target.intersect(area).contains(pos) {
                 CursorIcon::Default
+            } else if picking {
+                CursorIcon::Crosshair
             } else if !view.is_zoomed() {
                 CursorIcon::ZoomIn
             } else if backdrop.dragged() {
@@ -855,7 +998,16 @@ impl Viewer {
                 }
             }
         }
-        if let Some(loaded) = loaded {
+        // While editing, the photo through the recipe; held `\` or _Compare_ shows the original (REQ-021-02, REQ-021-07).
+        let compare = self.comparing || ui.input(|input| input.key_down(Key::Backslash));
+        let edited = editing
+            && transition.is_none()
+            && self
+                .edit
+                .as_mut()
+                .is_some_and(|session| session.paint(ui, rect, uv, clip, compare, 1.0));
+        if edited {
+        } else if let Some(loaded) = loaded {
             painter.image(loaded.id, rect, uv, Color32::WHITE.gamma_multiply(fade));
             if fade < 1.0 {
                 ui.ctx().request_repaint();
@@ -865,7 +1017,9 @@ impl Viewer {
             painter.add(rotated_image(frame.id, rect, quarters));
         }
         let at = pos2(target.center().x, target.bottom().min(area.bottom()) - 28.0);
-        if let OriginalState::Failed(_) = original {
+        if editing && self.edit.as_ref().is_some_and(|session| session.failed().is_some()) {
+            message(ui, at, "Can't load the original to edit.");
+        } else if let OriginalState::Failed(_) = original {
             message(ui, at, "Can't load the original. Showing a preview.");
         }
         if item.kind == MediaKind::Video && self.video_unavailable().is_some() {
@@ -952,7 +1106,7 @@ impl Viewer {
     ) -> Option<Action> {
         let ctx = ui.ctx().clone();
         let screen = layout.screen;
-        let text = bar_text(ui, screen, item);
+        let text = bar_text(ui, screen, item, libraries);
         let bar = control_bar_rect(layout, &text);
         let previous = (self.index > 0).then(|| {
             Rect::from_center_size(
@@ -986,7 +1140,7 @@ impl Viewer {
         });
         let idle = self.last_activity.elapsed() >= IDLE;
         // A paused video keeps them (REQ-013-10).
-        let hidden = zoom::controls_hidden(idle, hovering, self.info_open, paused);
+        let hidden = zoom::controls_hidden(idle, hovering, self.info_open || self.edit.is_some(), paused);
         if !idle {
             ctx.request_repaint_after(IDLE.saturating_sub(self.last_activity.elapsed()));
         }
@@ -997,6 +1151,7 @@ impl Viewer {
 
         let mut action = None;
         if self.info_open
+            && self.edit.is_none()
             && let Some(panel) = layout.info
         {
             action = self.info_panel(ui, panel, gallery);
@@ -1033,7 +1188,9 @@ impl Viewer {
             {
                 step = Some(index);
             }
-            match control_bar(ui, bar, text, bar_backing, self.info_open, self.filmstrip) {
+            let editing = self.edit.is_some();
+            match control_bar(ui, bar, text, bar_backing, self.info_open, self.filmstrip, editing) {
+                Some(BarButton::Edit) => self.toggle_edit = true,
                 Some(BarButton::ShowInExplorer) => {
                     if let Some(item) = item {
                         action = Self::explorer_action(item, libraries);
@@ -1052,7 +1209,11 @@ impl Viewer {
             && index < count
             && index != self.index
         {
-            self.go_to(index, gallery);
+            if self.edit.is_some() {
+                self.leave_edit(Leave::Step(index), gallery);
+            } else {
+                self.go_to(index, gallery);
+            }
             ctx.request_repaint();
         }
         action
@@ -1079,7 +1240,181 @@ impl Viewer {
             .show(&mut panel, |ui| {
                 clicked = info::show_loaded(ui, gallery.detail(self.id))
             });
-        clicked.map(Action::FilterByTag)
+        match clicked? {
+            info::InfoAction::FilterByTag(tag) => Some(Action::FilterByTag(tag)),
+            info::InfoAction::Revert => gallery
+                .cached_detail(self.id)
+                .map(|detail| Action::Revert(crate::state::RevertTarget::of(detail))),
+        }
+    }
+
+    /// Starts or stops editing the shown photo as asked (`e`, the bar's button, the context menu); loads the
+    /// original once the item's details say which it is (REQ-021-01, REQ-021-11).
+    fn sync_edit(
+        &mut self,
+        ctx: &egui::Context,
+        item: &GalleryItem,
+        libraries: &[Library],
+        originals: &Originals,
+        gallery: &mut Gallery,
+        key: bool,
+    ) {
+        let toggle = key | std::mem::take(&mut self.toggle_edit);
+        if self.edit.as_ref().is_some_and(|session| session.media() != item.id) {
+            self.edit = None;
+        }
+        if toggle && self.closing.is_none() {
+            if self.edit.is_some() {
+                self.leave_edit(Leave::Exit, gallery);
+            } else if editable(item, libraries)
+                && let Some(library) = libraries.iter().find(|library| library.id == item.root_id)
+            {
+                let side = |side: Option<i64>| side.and_then(|side| u32::try_from(side).ok()).unwrap_or(0);
+                let target = edit::Target {
+                    media: item.id,
+                    root_id: item.root_id,
+                    rel_path: item.rel_path.clone(),
+                    file_name: item.file_name.clone(),
+                    library: PathBuf::from(&library.path),
+                    full_size: [side(item.width), side(item.height)],
+                };
+                self.edit = Some(EditSession::new(target, originals.render_state()));
+            }
+        }
+        if let Some(session) = &mut self.edit
+            && session.is_waiting()
+        {
+            match gallery.detail(item.id) {
+                Some(Ok(Some(detail))) => session.start(detail.edit.clone(), ctx),
+                Some(_) => session.start(None, ctx),
+                None => {}
+            }
+        }
+    }
+
+    /// The keys while editing (REQ-021-07, REQ-021-08): undo and redo; `Esc` stops editing, stepping asks first.
+    /// Returns the keys left for the viewer.
+    fn edit_keys(&mut self, keys: Keys, count: usize, gallery: &Gallery) -> Keys {
+        let Some(session) = &mut self.edit else { return keys };
+        if session.dialog.is_some() {
+            if keys.close {
+                session.dialog = None;
+            }
+            return Keys::default();
+        }
+        if keys.undo {
+            session.undo();
+        }
+        if keys.redo {
+            session.redo();
+        }
+        if keys.close {
+            self.leave_edit(Leave::Exit, gallery);
+        }
+        if keys.step != 0 {
+            let target = self.index as i64 + i64::from(keys.step.signum());
+            if target >= 0 && (target as usize) < count {
+                self.leave_edit(Leave::Step(target as usize), gallery);
+            }
+        }
+        Keys {
+            zoom: keys.zoom,
+            fit: keys.fit,
+            filmstrip: keys.filmstrip,
+            edit: keys.edit,
+            ..Keys::default()
+        }
+    }
+
+    /// Leaves editing as asked, unless there are unsaved changes: then a dialog asks first (REQ-021-08).
+    fn leave_edit(&mut self, leave: Leave, gallery: &Gallery) {
+        if let Some(session) = &mut self.edit
+            && let Some(Outcome::Leave(leave)) = session.leave(leave)
+        {
+            self.apply_leave(leave, gallery);
+        }
+    }
+
+    fn apply_leave(&mut self, leave: Leave, gallery: &Gallery) {
+        self.edit = None;
+        self.comparing = false;
+        match leave {
+            Leave::Close => self.close(gallery, Action::Close),
+            Leave::Step(index) => self.go_to(index, gallery),
+            Leave::Exit => {}
+        }
+    }
+
+    fn apply_outcome(&mut self, outcome: Option<Outcome>, gallery: &Gallery) -> Option<Action> {
+        match outcome? {
+            Outcome::Save(request, then) => {
+                self.after_save = then;
+                Some(Action::SaveEdit(request))
+            }
+            Outcome::Leave(leave) => {
+                self.apply_leave(leave, gallery);
+                None
+            }
+        }
+    }
+
+    /// The adjustments panel in the info panel's place (REQ-021-01).
+    fn edit_panel(&mut self, ui: &mut egui::Ui, layout: &Layout, gallery: &Gallery) -> Option<Action> {
+        let rect = layout.info?;
+        let backing = self.chrome.backing(theme::glass_panel(), self.scrim);
+        let session = self.edit.as_mut()?;
+        backing.paint(ui.painter(), rect, f32::from(theme::RADIUS_PANEL));
+        // Clicks and wheel turns on the panel stay in it.
+        ui.interact(rect, ui.make_persistent_id("edit panel"), egui::Sense::click());
+        let (outcome, compare) = session.panel(ui, rect);
+        self.comparing = compare;
+        self.apply_outcome(outcome, gallery)
+    }
+
+    /// The dialogs of editing: unsaved changes (REQ-021-08), replacing the original (REQ-021-10).
+    fn edit_dialog(&mut self, ctx: &egui::Context, gallery: &Gallery) -> Option<Action> {
+        let session = self.edit.as_mut()?;
+        let dialog = session.dialog?;
+        let name = session.target.file_name.clone();
+        let mut outcome = None;
+        match dialog {
+            Dialog::Leave(leave) => {
+                let text = format!("Your changes to {name} aren't saved yet.");
+                match crate::widgets::dialog(
+                    ctx,
+                    "edit-leave",
+                    "Save your changes?",
+                    &text,
+                    &["Save", "Discard", "Cancel"],
+                ) {
+                    Some(0) => outcome = session.save(false, Some(leave)),
+                    Some(1) => {
+                        session.dialog = None;
+                        outcome = Some(Outcome::Leave(leave));
+                    }
+                    Some(_) => session.dialog = None,
+                    None => {}
+                }
+            }
+            Dialog::Replace(then) => {
+                let text = format!(
+                    "The edited photo replaces {name}. The original is kept in the library's .good-gallery folder, and \
+                     Revert to original brings it back."
+                );
+                match crate::widgets::dialog(
+                    ctx,
+                    "edit-replace",
+                    "Replace the original?",
+                    &text,
+                    &["Replace", "Cancel"],
+                ) {
+                    Some(0) => outcome = session.save(false, then),
+                    Some(_) => session.dialog = None,
+                    None => {}
+                }
+            }
+        }
+        self.apply_outcome(outcome, gallery)
     }
 
     /// The filmstrip (spec 015): thumbnails of the whole gallery in one row, the shown item highlighted and centered;
@@ -1340,14 +1675,26 @@ fn round_button(
     response
 }
 
-/// What the control bar shows: file name, date and rating of the item.
+/// What the control bar shows: file name, date and rating of the item, and whether it can be edited.
 struct BarText {
     name: std::sync::Arc<egui::Galley>,
     date: Option<std::sync::Arc<egui::Galley>>,
     stars: usize,
+    editable: bool,
 }
 
-fn bar_text(ui: &egui::Ui, screen: Rect, item: Option<&GalleryItem>) -> BarText {
+/// Whether the item is a photo that can be edited here: JPEG, PNG or WebP in an online library, not in the browser
+/// (REQ-021-01).
+fn editable(item: &GalleryItem, libraries: &[Library]) -> bool {
+    !crate::WEB
+        && item.kind == MediaKind::Image
+        && domain::edit::is_editable(&item.file_name)
+        && libraries
+            .iter()
+            .any(|library| library.id == item.root_id && library.status != db::libraries::LibraryStatus::Offline)
+}
+
+fn bar_text(ui: &egui::Ui, screen: Rect, item: Option<&GalleryItem>, libraries: &[Library]) -> BarText {
     let name = item.map_or("", |item| item.file_name.as_str());
     let mut job = egui::text::LayoutJob::simple_singleline(
         name.to_owned(),
@@ -1371,6 +1718,7 @@ fn bar_text(ui: &egui::Ui, screen: Rect, item: Option<&GalleryItem>) -> BarText 
         name: ui.painter().layout_job(job),
         date,
         stars: item.and_then(|item| item.rating).unwrap_or(0).clamp(0, 5) as usize,
+        editable: item.is_some_and(|item| editable(item, libraries)),
     }
 }
 
@@ -1380,13 +1728,15 @@ const STAR_SIZE: f32 = 14.0;
 /// The control bar's buttons, right of the separator.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BarButton {
+    Edit,
     ShowInExplorer,
     Info,
     Filmstrip,
     Close,
 }
 
-const BAR_BUTTONS: [(BarButton, Icon, &str, &str); 4] = [
+const BAR_BUTTONS: [(BarButton, Icon, &str, &str); 5] = [
+    (BarButton::Edit, Icon::SlidersHorizontal, "Edit", "Edit (e)"),
     (
         BarButton::ShowInExplorer,
         Icon::FolderOpen,
@@ -1403,9 +1753,17 @@ const BAR_BUTTONS: [(BarButton, Icon, &str, &str); 4] = [
     (BarButton::Close, Icon::X, "Close", "Close (Esc)"),
 ];
 
-/// The bar's buttons on this platform: the browser can't open a file manager (REQ-019-13).
-fn bar_buttons() -> &'static [(BarButton, Icon, &'static str, &'static str)] {
-    &BAR_BUTTONS[usize::from(crate::WEB)..]
+/// The bar's buttons on this platform and for this item: the browser can't open a file manager (REQ-019-13), only
+/// photos that can be edited have _Edit_ (REQ-021-01).
+fn bar_buttons(editable: bool) -> Vec<(BarButton, Icon, &'static str, &'static str)> {
+    BAR_BUTTONS
+        .into_iter()
+        .filter(|(button, ..)| match button {
+            BarButton::Edit => editable,
+            BarButton::ShowInExplorer => !crate::WEB,
+            _ => true,
+        })
+        .collect()
 }
 
 fn control_bar_rect(layout: &Layout, text: &BarText) -> Rect {
@@ -1417,7 +1775,7 @@ fn control_bar_rect(layout: &Layout, text: &BarText) -> Rect {
         width += text.stars as f32 * (STAR_SIZE + 2.0) + BAR_GAP;
     }
     // Separator, the buttons and the right padding.
-    width += 1.0 + BAR_GAP + bar_buttons().len() as f32 * theme::CONTROL_HEIGHT + 6.0;
+    width += 1.0 + BAR_GAP + bar_buttons(text.editable).len() as f32 * theme::CONTROL_HEIGHT + 6.0;
     let room = layout.right - layout.screen.left();
     let width = width.min(room - 32.0);
     Rect::from_center_size(
@@ -1437,12 +1795,14 @@ fn control_bar(
     backing: crate::glass::Backing,
     info_open: bool,
     filmstrip: bool,
+    editing: bool,
 ) -> Option<BarButton> {
+    let buttons = bar_buttons(text.editable || editing);
     backing.paint(ui.painter(), rect, rect.height() / 2.0);
     // Clicks on the bar's background don't reach the scrim behind it.
     ui.interact(rect, ui.make_persistent_id("control bar"), egui::Sense::click());
     let y = rect.center().y;
-    let buttons_width = bar_buttons().len() as f32 * theme::CONTROL_HEIGHT + 6.0;
+    let buttons_width = buttons.len() as f32 * theme::CONTROL_HEIGHT + 6.0;
     let text_clip = Rect::from_min_max(rect.min, pos2(rect.right() - buttons_width - BAR_GAP, rect.bottom()));
     let painter = ui.painter().with_clip_rect(text_clip);
     let mut x = rect.left() + 20.0;
@@ -1467,16 +1827,17 @@ fn control_bar(
     ui.painter()
         .vline(separator, (y - 10.0)..=(y + 10.0), egui::Stroke::new(1.0, theme::rim()));
     let mut clicked = None;
-    for (i, &(button, icon, label, tooltip)) in bar_buttons().iter().enumerate() {
+    for (i, &(button, icon, label, tooltip)) in buttons.iter().enumerate() {
         let at = Rect::from_min_size(
             pos2(
-                rect.right() - 6.0 - (bar_buttons().len() - i) as f32 * theme::CONTROL_HEIGHT,
+                rect.right() - 6.0 - (buttons.len() - i) as f32 * theme::CONTROL_HEIGHT,
                 y - theme::CONTROL_HEIGHT / 2.0,
             ),
             Vec2::splat(theme::CONTROL_HEIGHT),
         );
         let pressed = match button {
-            BarButton::Info => Some(info_open),
+            BarButton::Edit => Some(editing),
+            BarButton::Info => Some(info_open && !editing),
             BarButton::Filmstrip => Some(filmstrip),
             _ => None,
         };

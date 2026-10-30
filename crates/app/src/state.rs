@@ -119,6 +119,37 @@ pub fn gib_to_bytes(gib: f64) -> u64 {
     (gib * 1024f64.powi(3)).round() as u64
 }
 
+/// A media item whose edit _Revert to original_ would take back (REQ-021-12).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevertTarget {
+    pub media: i64,
+    pub root_id: i64,
+    pub rel_path: String,
+    pub file_name: String,
+}
+
+impl RevertTarget {
+    pub fn of(detail: &db::media::MediaDetail) -> Self {
+        Self {
+            media: detail.id,
+            root_id: detail.root_id,
+            rel_path: detail.rel_path.clone(),
+            file_name: detail.file_name.clone(),
+        }
+    }
+}
+
+/// A file the app wrote into a library (spec 021).
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+struct Written {
+    /// The media item that was edited.
+    media: i64,
+    root_id: i64,
+    /// The file written, relative to the library: the item's own, or a new copy.
+    rel_path: String,
+    copy: bool,
+}
+
 /// Results of background jobs, applied on the UI thread. The browser has no background threads or folder dialog, so
 /// some never happen there.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -134,6 +165,10 @@ enum Event {
     ExplorerFailed(Option<String>),
     /// The thumbnail cache was cleared; its new size.
     CacheCleared(u64),
+    /// An edit was saved (REQ-021-09, REQ-021-10), or why not.
+    EditSaved(i64, Result<Written, String>),
+    /// An original was put back (REQ-021-12), or why not.
+    Reverted(Result<Written, String>),
     /// The job panicked; its flags are reset and the user gets an error.
     Failed,
 }
@@ -198,6 +233,13 @@ pub struct AppState {
     /// When the cache's size was last read, and until when it is read more often after a change.
     usage_read_at: Option<Instant>,
     usage_fast_until: Option<Instant>,
+    /// exiftool and its `gg` configuration for saving edits (spec 021); `None` without exiftool.
+    #[cfg(not(target_arch = "wasm32"))]
+    edit_tools: Option<media::edit::Tools>,
+    /// _Revert to original_ waits for confirmation (REQ-021-12).
+    pub confirm_revert: Option<RevertTarget>,
+    /// A saved copy to show in the viewer once it is indexed: its library and path (REQ-021-09).
+    pending_copy: Option<(i64, String)>,
 }
 
 impl AppState {
@@ -342,6 +384,125 @@ impl AppState {
         self
     }
 
+    /// Saves edits with exiftool (spec 021).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_edit_tools(mut self, tools: media::edit::Tools) -> Self {
+        self.edit_tools = Some(tools);
+        self
+    }
+
+    /// Saves an edit in the background (REQ-021-09, REQ-021-10); the viewer hears back when it is done.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn save_edit(&mut self, request: crate::edit::SaveEdit) {
+        let media = request.media;
+        let (Some(tools), Some(library)) = (
+            self.edit_tools.clone(),
+            self.libraries.iter().find(|library| library.id == request.root_id),
+        ) else {
+            self.toasts
+                .error("Can't save: exiftool, which copies the metadata, wasn't found.");
+            if let Some(viewer) = &mut self.viewer {
+                viewer.edit_saved(media, false);
+            }
+            return;
+        };
+        let save = media::edit::SaveRequest {
+            library: PathBuf::from(&library.path),
+            rel_path: request.rel_path,
+            source: request.source,
+            recipe: request.recipe,
+            copy: request.copy,
+            mtime: self.settings.mtime_on_save,
+        };
+        let (db, cache) = (self.db.clone(), self.thumbnail_cache());
+        let (root_id, copy) = (request.root_id, request.copy);
+        self.spawn(move || {
+            let result = media::edit::save(&tools, &save).map_err(|error| {
+                tracing::error!("can't save the edit of {}: {error}", save.rel_path);
+                error.to_string()
+            });
+            Event::EditSaved(
+                media,
+                result.map(|rel_path| {
+                    forget_index_entry(db.as_deref(), cache.as_ref(), root_id, &rel_path);
+                    Written {
+                        media,
+                        root_id,
+                        rel_path,
+                        copy,
+                    }
+                }),
+            )
+        });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn save_edit(&mut self, request: crate::edit::SaveEdit) {
+        if let Some(viewer) = &mut self.viewer {
+            viewer.edit_saved(request.media, false);
+        }
+    }
+
+    /// Puts the unedited original back in the background (REQ-021-12).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn revert_edit(&mut self, target: RevertTarget) {
+        let Some(library) = self.libraries.iter().find(|library| library.id == target.root_id) else {
+            return;
+        };
+        let (folder, mtime) = (PathBuf::from(&library.path), self.settings.mtime_on_save);
+        let (db, cache) = (self.db.clone(), self.thumbnail_cache());
+        self.spawn(move || {
+            let result = media::edit::revert(&folder, &target.rel_path, mtime).map_err(|error| {
+                tracing::error!("can't revert {}: {error}", target.rel_path);
+                error.to_string()
+            });
+            Event::Reverted(result.map(|()| {
+                forget_index_entry(db.as_deref(), cache.as_ref(), target.root_id, &target.rel_path);
+                Written {
+                    media: target.media,
+                    root_id: target.root_id,
+                    rel_path: target.rel_path,
+                    copy: false,
+                }
+            }))
+        });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn revert_edit(&mut self, _target: RevertTarget) {}
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn thumbnail_cache(&self) -> Option<indexer::thumb_cache::ThumbCache> {
+        self.thumbnails.as_ref().map(|service| service.cache().clone())
+    }
+
+    /// After a file was written: the index reads it again, the viewer shows it anew (REQ-021-10, REQ-021-12).
+    fn written(&mut self, written: &Written) {
+        self.scans
+            .request_paths(written.root_id, vec![written.rel_path.clone()]);
+        if let Some(originals) = &mut self.originals {
+            originals.forget(written.media);
+        }
+        if written.copy {
+            self.pending_copy = Some((written.root_id, written.rel_path.clone()));
+        }
+        self.refresh();
+    }
+
+    /// Shows a saved copy in the viewer once the index has it (REQ-021-09).
+    fn show_pending_copy(&mut self) {
+        let (Some((root_id, rel_path)), Some(db)) = (&self.pending_copy, &self.db) else {
+            return;
+        };
+        let Ok(Some(id)) = db::media::id_of(&lock(db), *root_id, rel_path) else {
+            return;
+        };
+        self.pending_copy = None;
+        if let Some(viewer) = &mut self.viewer {
+            viewer.show_when_listed(id);
+        }
+    }
+
     /// The index couldn't be opened: the app shows `error` instead of the gallery.
     pub fn failed(error: String) -> Self {
         let mut state = Self::empty(Arc::new(indexer::NoScans), Arc::new(NoFolderPicker));
@@ -383,6 +544,10 @@ impl AppState {
             cache_usage: CacheUsage::default(),
             usage_read_at: None,
             usage_fast_until: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            edit_tools: None,
+            confirm_revert: None,
+            pending_copy: None,
         }
     }
 
@@ -549,6 +714,7 @@ impl AppState {
                 self.written_since_refresh = false;
                 self.last_written_refresh = None;
                 self.refresh();
+                self.show_pending_copy();
             }
         }
     }
@@ -629,13 +795,62 @@ impl AppState {
                 self.usage_read_at = Some(Instant::now());
                 self.toasts.success("Thumbnail cache cleared");
             }
+            Event::EditSaved(media, result) => {
+                let saved = result.is_ok();
+                match result {
+                    Ok(written) => {
+                        self.toasts.success(if written.copy { "Saved a copy" } else { "Saved" });
+                        self.written(&written);
+                    }
+                    Err(error) => self.toasts.error(format!("Couldn't save: {error}")),
+                }
+                if let Some(viewer) = &mut self.viewer {
+                    viewer.edit_saved(media, saved);
+                }
+            }
+            Event::Reverted(result) => match result {
+                Ok(written) => {
+                    self.toasts.success("Reverted to the original");
+                    self.written(&written);
+                }
+                Err(error) => self.toasts.error(format!("Couldn't revert: {error}")),
+            },
             Event::Failed => {
+                if let Some(viewer) = &mut self.viewer
+                    && let Some(media) = viewer.editing().filter(|session| session.saving).map(|s| s.media())
+                {
+                    viewer.edit_saved(media, false);
+                }
                 self.settings_page.adding = false;
                 self.settings_page.picking = false;
                 self.settings_page.clearing = false;
                 self.toasts.error("Something went wrong. Details are in the log.");
                 self.refresh();
             }
+        }
+    }
+}
+
+/// Marks a file the app rewrote, so the index reads it again, and deletes the thumbnails of its old version: with the
+/// date modified kept, a same-sized file would keep its cache key (REQ-021-15).
+#[cfg(not(target_arch = "wasm32"))]
+fn forget_index_entry(
+    db: Option<&Mutex<Connection>>,
+    cache: Option<&indexer::thumb_cache::ThumbCache>,
+    root_id: i64,
+    rel_path: &str,
+) {
+    let Some(db) = db else { return };
+    let key = match db::media::mark_rewritten(&lock(db), root_id, rel_path) {
+        Ok(key) => key,
+        Err(error) => {
+            tracing::error!("can't mark {rel_path} for reading again: {error}");
+            None
+        }
+    };
+    if let (Some(key), Some(cache)) = (key, cache) {
+        for width in domain::thumbs::THUMB_WIDTHS {
+            let _ = std::fs::remove_file(cache.path(&key, width));
         }
     }
 }
