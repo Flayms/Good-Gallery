@@ -251,6 +251,12 @@ fn write_file(
 
     tx.prepare_cached("DELETE FROM media_tags WHERE media_id = ?1")?
         .execute([id])?;
+    tx.prepare_cached("DELETE FROM media_edits WHERE media_id = ?1")?
+        .execute([id])?;
+    if let Some(edit) = &m.edit {
+        tx.prepare_cached("INSERT INTO media_edits (media_id, recipe, source) VALUES (?1, ?2, ?3)")?
+            .execute(params![id, edit.recipe, edit.source])?;
+    }
     let mut linked = Vec::new();
     for path in &m.tags {
         if let Some(tag) = tag_path_id(tx, tag_ids, parents, path)?
@@ -470,6 +476,35 @@ mod tests {
             .map(|row| row.unwrap())
             .collect();
         assert_eq!(rows, [("pending".into(), None), ("ready".into(), Some("abc".into()))]);
+    }
+
+    #[test]
+    fn req_021_11_stores_the_saved_edit_and_drops_it_when_the_file_has_none() {
+        let (mut writer, root) = writer();
+        let edit = domain::edit::SavedEdit {
+            recipe: domain::edit::Recipe::default().to_json(),
+            source: ".good-gallery/originals/a.jpg".into(),
+        };
+        let mut edited = file("a.jpg", &[]);
+        edited.metadata.edit = Some(Box::new(edit.clone()));
+        writer.write(root, &[edited]).unwrap();
+        let id: i64 = writer
+            .conn()
+            .query_row("SELECT id FROM media", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            crate::media::detail(writer.conn(), id).unwrap().unwrap().edit,
+            Some(edit)
+        );
+
+        // Reverted: the file has no edit any more.
+        writer.write(root, &[file("a.jpg", &[])]).unwrap();
+        assert_eq!(crate::media::detail(writer.conn(), id).unwrap().unwrap().edit, None);
+        let rows: i64 = writer
+            .conn()
+            .query_row("SELECT count(*) FROM media_edits", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0);
     }
 
     #[test]

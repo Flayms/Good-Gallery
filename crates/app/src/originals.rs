@@ -270,6 +270,20 @@ impl Originals {
         }
     }
 
+    /// Drops a loaded or failed original, so it is read again the next time it is wanted (its file was rewritten).
+    pub fn forget(&mut self, media: i64) {
+        self.poll();
+        self.free(media);
+        self.failed.remove(&media);
+        // `set` with the same wanted set would skip the queue otherwise.
+        self.requeue = true;
+    }
+
+    /// The renderer the originals' textures are made for, if there is one.
+    pub fn render_state(&self) -> Option<egui_wgpu::RenderState> {
+        self.render_state.clone()
+    }
+
     pub fn get(&self, media: i64) -> OriginalState {
         if let Some((loaded, _)) = self.loaded.get(&media) {
             OriginalState::Loaded(*loaded)

@@ -44,6 +44,12 @@ pub enum ScanKind {
 /// Where library operations send their scan requests: the scan queue, or nothing.
 pub trait ScanRequests: Send + Sync {
     fn request_scan(&self, library: i64, kind: ScanKind);
+    /// A changes scan of these files (relative, `/`-separated), e.g. after the app wrote them (spec 021). Without a
+    /// scan queue that knows paths: unknown changes.
+    fn request_paths(&self, library: i64, paths: Vec<String>) {
+        let _ = paths;
+        self.request_scan(library, ScanKind::Changes);
+    }
     /// Drops the library's queued scan, cancels its running scan (and waits until it has stopped) and stops its
     /// watcher.
     fn remove_library(&self, library: i64);

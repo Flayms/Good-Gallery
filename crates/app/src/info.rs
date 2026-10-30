@@ -11,8 +11,17 @@ use eframe::egui::{self, Vec2};
 /// Width of the info panel and sheet.
 pub const WIDTH: f32 = 320.0;
 
-/// The details as loaded: a spinner while loading, "Media not found" or the error; a clicked tag as [`show`].
-pub fn show_loaded(ui: &mut egui::Ui, detail: Option<&crate::gallery::DetailResult>) -> Option<String> {
+/// What a click in the details asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InfoAction {
+    /// Filter the gallery by this tag (REQ-009-09).
+    FilterByTag(String),
+    /// Put the unedited original back (REQ-021-12).
+    Revert,
+}
+
+/// The details as loaded: a spinner while loading, "Media not found" or the error; what was clicked as [`show`].
+pub fn show_loaded(ui: &mut egui::Ui, detail: Option<&crate::gallery::DetailResult>) -> Option<InfoAction> {
     match detail {
         Some(Ok(Some(detail))) => return show(ui, detail),
         Some(Ok(None)) => {
@@ -28,8 +37,9 @@ pub fn show_loaded(ui: &mut egui::Ui, detail: Option<&crate::gallery::DetailResu
     None
 }
 
-/// Shows `detail`; returns the name of a tag the user clicked, to filter the gallery by it (REQ-009-09).
-pub fn show(ui: &mut egui::Ui, detail: &MediaDetail) -> Option<String> {
+/// Shows `detail`; returns a tag the user clicked, to filter the gallery by it (REQ-009-09), or _Revert to original_
+/// (REQ-021-12).
+pub fn show(ui: &mut egui::Ui, detail: &MediaDetail) -> Option<InfoAction> {
     let mut clicked = None;
     ui.spacing_mut().item_spacing.y = 12.0;
     field(ui, "File", |ui| {
@@ -70,6 +80,21 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail) -> Option<String> {
     if let Some(rating) = detail.rating {
         field(ui, "Rating", |ui| stars(ui, rating));
     }
+    if let Some(edit) = &detail.edit {
+        let replaced = edit.replaced_original(&detail.rel_path);
+        field(ui, "Edited", |ui| {
+            if replaced {
+                ui.add(egui::Label::new("Saved over the original, which is kept").wrap());
+                // The browser version doesn't edit (REQ-021-01).
+                if !crate::WEB && ui.button("Revert to original").clicked() {
+                    clicked = Some(InfoAction::Revert);
+                }
+            } else {
+                let name = edit.source.rsplit('/').next().unwrap_or(&edit.source);
+                ui.add(egui::Label::new(format!("An edited copy of {name}")).wrap());
+            }
+        });
+    }
     for (label, category) in [
         ("People", Some(TagCategory::People)),
         ("Places", Some(TagCategory::Places)),
@@ -94,7 +119,7 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail) -> Option<String> {
                     .min_size(egui::vec2(0.0, 24.0));
                 let response = ui.add(chip);
                 if response.on_hover_text(format!("Show only {name}")).clicked() {
-                    clicked = Some(name.to_owned());
+                    clicked = Some(InfoAction::FilterByTag(name.to_owned()));
                 }
             }
         });

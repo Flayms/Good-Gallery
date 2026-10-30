@@ -2,6 +2,7 @@
 
 use crate::{Error, Result};
 use domain::appearance::Appearance;
+use domain::edit::MtimeOnSave;
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
 
@@ -15,6 +16,8 @@ pub struct Settings {
     pub io_concurrency: u32,
     /// Light, dark or the system's (REQ-020-01).
     pub appearance: Appearance,
+    /// What saving an edit does to the file's date modified (REQ-021-15).
+    pub mtime_on_save: MtimeOnSave,
 }
 
 impl Default for Settings {
@@ -24,6 +27,7 @@ impl Default for Settings {
             quick_check_interval_minutes: 60,
             io_concurrency: 4,
             appearance: Appearance::System,
+            mtime_on_save: MtimeOnSave::Keep,
         }
     }
 }
@@ -32,6 +36,7 @@ const THUMB_CACHE: &str = "thumbCacheGiB";
 const QUICK_CHECK: &str = "quickCheckIntervalMinutes";
 const IO_CONCURRENCY: &str = "ioConcurrency";
 const APPEARANCE: &str = "appearance";
+const MTIME_ON_SAVE: &str = "editingMtime";
 const MAX_QUICK_CHECK: u32 = 7 * 24 * 60;
 
 fn thumb_cache(value: &Value) -> Option<f64> {
@@ -84,6 +89,12 @@ pub fn load(conn: &Connection) -> Result<Settings> {
                     .and_then(Appearance::from_key)
                     .unwrap_or(settings.appearance)
             }
+            MTIME_ON_SAVE => {
+                settings.mtime_on_save = value
+                    .as_str()
+                    .and_then(MtimeOnSave::parse)
+                    .unwrap_or(settings.mtime_on_save)
+            }
             _ => {}
         }
     }
@@ -99,6 +110,7 @@ pub fn save(conn: &Connection, settings: &Settings) -> Result<()> {
         (QUICK_CHECK, Value::from(settings.quick_check_interval_minutes)),
         (IO_CONCURRENCY, Value::from(settings.io_concurrency)),
         (APPEARANCE, Value::from(settings.appearance.key())),
+        (MTIME_ON_SAVE, Value::from(settings.mtime_on_save.as_str())),
     ] {
         tx.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
@@ -151,6 +163,7 @@ mod tests {
                 quick_check_interval_minutes: 60,
                 io_concurrency: 4,
                 appearance: Appearance::System,
+                mtime_on_save: MtimeOnSave::Keep,
             }
         );
 
@@ -159,6 +172,7 @@ mod tests {
             quick_check_interval_minutes: 0,
             io_concurrency: 8,
             appearance: Appearance::Dark,
+            mtime_on_save: MtimeOnSave::Update,
         };
         save(&conn, &changed).unwrap();
 
@@ -179,6 +193,21 @@ mod tests {
 
         set_value(&conn, "appearance", &Value::from("sepia")).unwrap();
         assert_eq!(load(&conn).unwrap().appearance, Appearance::System);
+    }
+
+    #[test]
+    fn req_021_15_stores_the_date_modified_choice_and_falls_back_to_keep() {
+        let conn = crate::open_in_memory().unwrap();
+        assert_eq!(load(&conn).unwrap().mtime_on_save, MtimeOnSave::Keep);
+        let update = Settings {
+            mtime_on_save: MtimeOnSave::Update,
+            ..Default::default()
+        };
+        save(&conn, &update).unwrap();
+        assert_eq!(load(&conn).unwrap().mtime_on_save, MtimeOnSave::Update);
+        assert_eq!(value(&conn, MTIME_ON_SAVE).unwrap(), Some(Value::from("update")));
+        set_value(&conn, MTIME_ON_SAVE, &Value::from("never")).unwrap();
+        assert_eq!(load(&conn).unwrap().mtime_on_save, MtimeOnSave::Keep);
     }
 
     #[test]

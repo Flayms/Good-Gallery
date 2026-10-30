@@ -354,6 +354,14 @@ impl TextureStreamer {
         self.broken.remove(&media);
     }
 
+    /// Drops the item's texture, so its thumbnail is read again (its file was rewritten).
+    pub fn forget(&mut self, media: i64) {
+        self.retry(media);
+        if let Some(entry) = self.entries.remove(&media) {
+            self.free(entry);
+        }
+    }
+
     /// Forgets everything known about missing thumbnails, e.g. after the gallery reloaded.
     pub fn retry_all(&mut self) {
         self.missing.clear();

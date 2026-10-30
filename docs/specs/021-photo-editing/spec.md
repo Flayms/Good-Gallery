@@ -1,10 +1,10 @@
 # 021 · Photo editing
 
-**Status:** Draft
+**Status:** Implemented
 
 ## Goal
 
-Users who find a photo that is too dark, has a colour cast or lacks punch fix it in the viewer, without exporting it to another program. They adjust light, curves, colour and a few effects with live feedback, then either keep the original and save an edited copy, or replace the original. Either way the edit can be taken back: the unedited original is never lost, and reopening an edited photo shows the sliders where they were left. Colours, bit depth and metadata survive the round trip.
+Users who find a photo that is too dark, has a color cast or lacks punch fix it in the viewer, without exporting it to another program. They adjust light, curves, color and a few effects with live feedback, then either keep the original and save an edited copy, or replace the original. Either way the edit can be taken back: the unedited original is never lost, and reopening an edited photo shows the sliders where they were left. Colors, bit depth and metadata survive the round trip.
 
 ## Requirements
 
@@ -35,11 +35,11 @@ Users who find a photo that is too dark, has a colour cast or lacks punch fix it
 - **Then** the tones are mapped through a smooth, monotonic curve through those points
 - **And** a straight curve from black to white leaves the photo unchanged
 
-### REQ-021-05 · Colour
+### REQ-021-05 · Color
 
 - **Given** editing
 - **When** the user changes _Temperature_, _Tint_, _Vibrance_ or _Saturation_ (each −100 to +100), or picks a neutral point with the white balance picker
-- **Then** temperature shifts the colours towards blue or yellow, tint towards green or magenta; saturation scales all colours alike, vibrance mostly the muted ones and spares skin tones; the picker sets temperature and tint so the picked spot turns neutral grey
+- **Then** temperature shifts the colors towards blue or yellow, tint towards green or magenta; saturation scales all colors alike, vibrance mostly the muted ones and spares skin tones; the picker sets temperature and tint so the picked spot turns neutral grey
 - **And** each at 0 leaves the photo unchanged
 
 ### REQ-021-06 · Effects
@@ -88,11 +88,11 @@ Users who find a photo that is too dark, has a colour cast or lacks punch fix it
 - **Then** the file is the unedited original again, byte for byte, and the backup is removed
 - **And** a copy saved with _Save as copy_ has no _Revert_; the original is still there, and the copy can be deleted with other tools
 
-### REQ-021-13 · Faithful colours and depth
+### REQ-021-13 · Faithful colors and depth
 
-- **Given** a photo with an embedded colour profile, or a PNG with 16 bits per channel
+- **Given** a photo with an embedded color profile, or a PNG with 16 bits per channel
 - **When** it is edited and saved
-- **Then** the saved file keeps the colour profile and the bit depth, and adjustments at 0 give the same colours as the original (within one level per channel)
+- **Then** the saved file keeps the color profile and the bit depth, and adjustments at 0 give the same colors as the original (within one level per channel)
 - **And** smooth gradients don't band (no 8-bit intermediate steps)
 
 ### REQ-021-14 · Metadata kept
@@ -131,21 +131,21 @@ Users who find a photo that is too dark, has a colour cast or lacks punch fix it
 
 ## Verification
 
-| REQ        | Test | Result  |
-| ---------- | ---- | ------- |
-| REQ-021-01 |      | no test |
-| REQ-021-02 |      | no test |
-| REQ-021-03 |      | no test |
-| REQ-021-04 |      | no test |
-| REQ-021-05 |      | no test |
-| REQ-021-06 |      | no test |
-| REQ-021-07 |      | no test |
-| REQ-021-08 |      | no test |
-| REQ-021-09 |      | no test |
-| REQ-021-10 |      | no test |
-| REQ-021-11 |      | no test |
-| REQ-021-12 |      | no test |
-| REQ-021-13 |      | no test |
-| REQ-021-14 |      | no test |
-| REQ-021-15 |      | no test |
-| REQ-021-16 |      | no test |
+| REQ        | Test | Result |
+| ---------- | ---- | ------ |
+| REQ-021-01 | `crates/app/tests/edit.rs` › req_021_01_edit_is_offered_for_jpeg_png_and_webp_photos_in_online_libraries; `crates/domain/src/edit.rs` › req_021_01_jpeg_png_and_webp_are_editable | pass |
+| REQ-021-02 | `crates/app/src/edit.rs` › req_021_02_req_021_06_the_gpu_preview_matches_the_cpu_render; `crates/app/tests/edit.rs` › req_021_02_req_021_07_previews_compares_undoes_and_resets | pass |
+| REQ-021-03 | `crates/domain/src/edit.rs` › req_021_03_* (exposure, contrast, shadows and highlights, whites and blacks, neutral values) | pass |
+| REQ-021-04 | `crates/domain/src/edit.rs` › req_021_04_a_curve_maps_tones_through_its_points_without_overshooting, req_021_04_curve_points_are_added_moved_and_removed_within_bounds | pass |
+| REQ-021-05 | `crates/domain/src/edit.rs` › req_021_05_* (temperature and tint, picker, saturation and vibrance); `crates/app/src/edit.rs` › req_021_05_the_picker_neutralizes_the_picked_spot | pass |
+| REQ-021-06 | `crates/domain/src/edit.rs` › req_021_06_vignette_darkens_or_lightens_the_edges_only, req_021_06_grain_is_the_same_for_the_same_position_and_follows_the_photo_not_the_screen; `crates/app/src/edit.rs` › req_021_02_req_021_06_the_gpu_preview_matches_the_cpu_render | pass |
+| REQ-021-07 | `crates/domain/src/edit.rs` › req_021_07_history_undoes_and_redoes_changes; `crates/app/src/edit.rs` › req_021_07_req_021_08_tracks_changes_undo_and_asks_before_leaving; `crates/app/tests/edit.rs` › req_021_02_req_021_07_previews_compares_undoes_and_resets | pass |
+| REQ-021-08 | `crates/app/tests/edit.rs` › req_021_08_asks_before_leaving_with_unsaved_changes; `crates/app/src/edit.rs` › req_021_07_req_021_08_tracks_changes_undo_and_asks_before_leaving | pass |
+| REQ-021-09 | `crates/media/src/edit.rs` › req_021_09_req_021_14_saves_a_copy_beside_the_original_with_its_metadata_and_sidecar (exiftool); `crates/app/tests/edit.rs` › req_021_09_saves_a_copy (exiftool); `crates/domain/src/edit.rs` › req_021_09_copies_are_named_after_the_original_and_numbered | pass |
+| REQ-021-10 | `crates/media/src/edit.rs` › req_021_10_req_021_12_replacing_keeps_a_backup_and_reverting_restores_the_original_byte_for_byte (exiftool); `crates/app/tests/edit.rs` › req_021_10_req_021_12_saves_over_the_original_and_reverts (exiftool); `crates/db/src/media.rs` › req_021_10_a_rewritten_file_is_read_again_and_gets_a_new_thumbnail | pass |
+| REQ-021-11 | `crates/app/tests/edit.rs` › req_021_11_edits_again_from_the_original_with_the_saved_recipe; `crates/domain/src/edit.rs` › req_021_11_*; `crates/db/src/writer.rs` › req_021_11_stores_the_saved_edit_and_drops_it_when_the_file_has_none; `crates/meta/src/rules.rs` › req_021_11_reads_the_saved_edit_from_the_file_but_not_from_its_sidecar | pass |
+| REQ-021-12 | `crates/media/src/edit.rs` › req_021_10_req_021_12_replacing_keeps_a_backup_and_reverting_restores_the_original_byte_for_byte (exiftool); `crates/app/tests/edit.rs` › req_021_10_req_021_12_saves_over_the_original_and_reverts (exiftool) | pass |
+| REQ-021-13 | `crates/media/src/edit.rs` › req_021_13_* (16 bits and profile, banding, lossless WebP) (exiftool); `crates/domain/src/edit.rs` › req_021_13_dither_stays_within_one_step_and_repeats | pass |
+| REQ-021-14 | `crates/media/src/edit.rs` › req_021_09_req_021_14_saves_a_copy_beside_the_original_with_its_metadata_and_sidecar, req_021_14_bakes_the_orientation_into_the_pixels (exiftool) | pass |
+| REQ-021-15 | `crates/media/src/edit.rs` › req_021_15_keeps_or_updates_the_date_modified (exiftool); `crates/db/src/settings.rs` › req_021_15_stores_the_date_modified_choice_and_falls_back_to_keep; `crates/app/tests/edit.rs` › req_021_15_the_date_modified_setting_is_on_the_settings_page | pass |
+| REQ-021-16 | `crates/media/src/edit.rs` › req_021_16_a_failed_save_leaves_the_original_and_no_temporary_file, req_021_16_a_read_only_folder_fails_and_changes_nothing (exiftool); `crates/app/tests/edit.rs` › req_021_16_a_failed_save_keeps_editing_open | pass |

@@ -31,6 +31,7 @@ const FILES: &[(&str, &str)] = &[
         "0009_retry_thumb_errors",
         include_str!("../migrations/0009_retry_thumb_errors.sql"),
     ),
+    ("0010_media_edits", include_str!("../migrations/0010_media_edits.sql")),
 ];
 const JOURNAL: &str = include_str!("../migrations/meta/_journal.json");
 

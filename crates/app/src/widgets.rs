@@ -1,7 +1,7 @@
 //! Small widgets drawn in the design's look where egui's own don't fit it.
 
 use crate::theme;
-use eframe::egui::{self, Rect, pos2, vec2};
+use eframe::egui::{self, CornerRadius, FontId, Frame, Margin, Rect, RichText, Stroke, pos2, vec2};
 use std::ops::RangeInclusive;
 
 /// Radius of a slider's knob while hovered or dragged.
@@ -71,4 +71,48 @@ pub fn slider(
     let (label, value) = (label.to_owned(), *value);
     response.widget_info(|| egui::WidgetInfo::slider(true, value, &label));
     response
+}
+
+/// A dialog with `title`, `text` and `buttons`, the first one filled (the main choice), right to left. Returns the
+/// index of the button chosen; closing it otherwise (a click beside it) chooses the last one.
+pub fn dialog(ctx: &egui::Context, id: &str, title: &str, text: &str, buttons: &[&str]) -> Option<usize> {
+    let mut decided = None;
+    let modal = egui::Modal::new(egui::Id::unique(id))
+        .frame(
+            Frame::new()
+                .fill(theme::raised())
+                .stroke(Stroke::new(1.0, theme::rim()))
+                .corner_radius(CornerRadius::same(theme::RADIUS_PANEL))
+                .inner_margin(Margin::same(20)),
+        )
+        .show(ctx, |ui| {
+            crate::glass::behind_frame(ui, Margin::same(20), |ui| {
+                ui.set_max_width(400.0);
+                ui.label(RichText::new(title).font(FontId::new(theme::SIZE_TITLE, theme::semibold())));
+                ui.add_space(theme::SPACE * 2.0);
+                ui.label(text);
+                ui.add_space(theme::SPACE * 4.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    for (i, label) in buttons.iter().enumerate() {
+                        let button = if i == 0 {
+                            egui::Button::new(
+                                RichText::new(*label)
+                                    .color(theme::base())
+                                    .font(FontId::new(theme::SIZE_BODY, theme::semibold())),
+                            )
+                            .fill(theme::text())
+                        } else {
+                            egui::Button::new(*label).stroke(Stroke::new(1.0, theme::rim()))
+                        };
+                        if ui.add(button).clicked() {
+                            decided = Some(i);
+                        }
+                    }
+                });
+            });
+        });
+    if modal.should_close() && decided.is_none() {
+        decided = Some(buttons.len().saturating_sub(1));
+    }
+    decided
 }

@@ -6,7 +6,7 @@ Spec: [013 · Visual design](specs/013-visual-design/spec.md).
 
 ## Subject
 
-A personal archive of photos and videos, often on a NAS, browsed by one person who knows their library. The job is **finding and looking**, not editing. The interface is a frame around the user's photos and should never compete with them.
+A personal archive of photos and videos, often on a NAS, browsed by one person who knows their library. The job is **finding and looking**. Light edits (spec 021) happen in the viewer, in the info panel's place, without a separate editing workspace. The interface is a frame around the user's photos and should never compete with them.
 
 ## Principles
 

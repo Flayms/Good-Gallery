@@ -28,6 +28,10 @@ pub struct MediaDetail {
     pub rating: Option<i64>,
     /// The item's own tags (not their ancestors), by normalized name.
     pub tags: Vec<DetailTag>,
+    /// `/`-separated, relative to the library.
+    pub rel_path: String,
+    /// The edit the file was saved with (spec 021).
+    pub edit: Option<domain::edit::SavedEdit>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,8 +66,9 @@ pub fn detail(conn: &Connection, id: i64) -> Result<Option<MediaDetail>> {
         .prepare_cached(
             "SELECT media.id, media.root_id, library_roots.label, library_roots.path, media.rel_path, media.file_name,
                     media.kind, media.size, media.width, media.height, media.duration, media.taken_at, media.mtime,
-                    media.thumbhash, media.rating
+                    media.thumbhash, media.rating, media_edits.recipe, media_edits.source
              FROM media JOIN library_roots ON library_roots.id = media.root_id
+             LEFT JOIN media_edits ON media_edits.media_id = media.id
              WHERE media.id = ?1",
         )?
         .query_row([id], |row| {
@@ -86,6 +91,11 @@ pub fn detail(conn: &Connection, id: i64) -> Result<Option<MediaDetail>> {
                 thumbhash: row.get(13)?,
                 rating: row.get(14)?,
                 tags: Vec::new(),
+                rel_path: row.get(4)?,
+                edit: domain::edit::SavedEdit::parse(
+                    row.get::<_, Option<String>>(15)?.as_deref(),
+                    row.get::<_, Option<String>>(16)?.as_deref(),
+                ),
             }))
         })
         .optional()?
@@ -108,6 +118,34 @@ pub fn detail(conn: &Connection, id: i64) -> Result<Option<MediaDetail>> {
         })
         .collect();
     Ok(Some(detail))
+}
+
+/// Marks the file of `rel_path` as rewritten by the app (an edit saved or reverted, spec 021): its metadata is read
+/// again and its thumbnail rendered again even if its size and date modified stayed. Returns the thumbnail cache key
+/// it had, so its stale files can be deleted; `None` if it isn't indexed.
+pub fn mark_rewritten(conn: &Connection, root_id: i64, rel_path: &str) -> Result<Option<domain::thumbs::ThumbKey>> {
+    Ok(conn
+        .prepare_cached(
+            "UPDATE media SET meta_version = 0, thumbhash = NULL, thumb_status = 'pending'
+             WHERE root_id = ?1 AND rel_path = ?2 RETURNING size, mtime",
+        )?
+        .query_row((root_id, rel_path), |row| {
+            Ok(domain::thumbs::ThumbKey {
+                root_id,
+                rel_path: rel_path.to_owned(),
+                size: row.get(0)?,
+                mtime: row.get(1)?,
+            })
+        })
+        .optional()?)
+}
+
+/// The id of the media item at `rel_path` of a library, if it is indexed.
+pub fn id_of(conn: &Connection, root_id: i64, rel_path: &str) -> Result<Option<i64>> {
+    Ok(conn
+        .prepare_cached("SELECT id FROM media WHERE root_id = ?1 AND rel_path = ?2")?
+        .query_row((root_id, rel_path), |row| row.get(0))
+        .optional()?)
 }
 
 /// The category of each tag of media item `media`, by the name of its top-level ancestor.
@@ -231,6 +269,31 @@ mod tests {
         );
         let source = crate::thumbs::thumb_source(&conn, media).unwrap().unwrap();
         assert_eq!(source.file(), None);
+    }
+
+    #[test]
+    fn req_021_10_a_rewritten_file_is_read_again_and_gets_a_new_thumbnail() {
+        let conn = crate::open_in_memory().unwrap();
+        let root = libraries::insert(&conn, ROOT, "Photos", LibraryStatus::Online)
+            .unwrap()
+            .id;
+        conn.execute(
+            "INSERT INTO media (root_id, rel_path, file_name, kind, size, mtime, thumbhash, thumb_status, meta_version)
+             VALUES (?1, 'a.jpg', 'a.jpg', 'image', 10, 5, 'hash', 'ready', 1)",
+            [root],
+        )
+        .unwrap();
+        let key = mark_rewritten(&conn, root, "a.jpg").unwrap().unwrap();
+        assert_eq!((key.size, key.mtime, key.rel_path.as_str()), (10, 5, "a.jpg"));
+        let row: (i64, Option<String>, String) = conn
+            .query_row("SELECT meta_version, thumbhash, thumb_status FROM media", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
+            .unwrap();
+        assert_eq!(row, (0, None, "pending".into()));
+        assert_eq!(mark_rewritten(&conn, root, "b.jpg").unwrap(), None);
+        assert!(id_of(&conn, root, "a.jpg").unwrap().is_some());
+        assert_eq!(id_of(&conn, root, "b.jpg").unwrap(), None);
     }
 
     #[test]
