@@ -61,7 +61,7 @@ const GIB: u64 = 1 << 30;
 fn on_settings(fixture: &Fixture, db: &std::path::Path, targets: Arc<FakeTargets>) -> Harness<'static, AppState> {
     let state = fixture.state(db::open(db).unwrap()).with_settings_targets(targets);
     let mut harness = common::harness(state);
-    harness.set_size(eframe::egui::vec2(900.0, 1100.0));
+    harness.set_size(eframe::egui::vec2(900.0, 1400.0));
     harness.state_mut().page = Page::Settings;
     settle(&mut harness);
     harness
@@ -278,7 +278,7 @@ fn req_010_06_shows_usage_and_clears_after_confirmation() {
 fn req_010_06_says_unknown_without_a_thumbnail_cache() {
     let fixture = Fixture::new();
     let mut harness = fixture.harness(db::open_in_memory().unwrap());
-    harness.set_size(eframe::egui::vec2(900.0, 1100.0));
+    harness.set_size(eframe::egui::vec2(900.0, 1400.0));
     harness.state_mut().page = Page::Settings;
     settle(&mut harness);
     harness.get_by_label("unknown");

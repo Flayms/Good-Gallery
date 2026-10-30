@@ -67,7 +67,8 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | **Search**        | The filters and sort order of the gallery: tags, file name, library, folder, media kind, date range, rating. Kept while the viewer is open. (code: `GallerySearch`)            |
 | **Included / excluded tag** | A tag that matching media items must have (including descendants), or must not have.                                                             |
 | **Search bar**    | The toolbar input with chips for included / excluded tags and the file name filter, plus tag suggestions.                                                       |
-| **Sidebar**       | Navigation on the left: libraries with their folder tree, People, Places, Ratings, Tags, indexer progress and Settings.                                          |
+| **Sidebar**       | Navigation on the left: libraries with their folder tree, the sidebar groups, indexer progress and Settings.                                                    |
+| **Sidebar group** | People, Places, Ratings or Tags in the sidebar. The user orders them and switches them off in the settings; the libraries always come first.                    |
 | **Viewer**        | The full-window overlay that shows one media item in original quality. (also: lightbox)                                                                          |
 | **Filmstrip**     | The optional row of thumbnails of the whole gallery below the media item in the viewer, with the shown item highlighted.         |
 | **Info panel**    | The panel in the viewer with file details, rating and tags. It opens as the **info sheet** when used from the gallery's context menu.                              |

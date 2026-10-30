@@ -10,7 +10,7 @@ use domain::media::{MediaKind, MediaMetadata};
 use domain::search::SortBy;
 use eframe::egui::{self, accesskit::Role};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 type App = Harness<'static, app::AppState>;
 
@@ -403,4 +403,74 @@ fn req_013_02_req_013_08_the_toolbar_fits_the_minimum_window_beside_the_window_c
             );
         }
     }
+}
+
+/// The y of a sidebar row, to compare the groups' order.
+fn row_top(harness: &App, label: &str) -> f32 {
+    harness.get_by_role_and_label(Role::Button, label).rect().top()
+}
+
+#[test]
+fn req_008_10_req_008_11_orders_and_hides_groups_from_the_settings_and_remembers_them() {
+    let fixture = Fixture::new();
+    let open_settings = |conn: Connection| {
+        let mut harness = fixture.harness(conn);
+        harness.set_size(egui::vec2(1000.0, 1000.0));
+        harness.state_mut().page = app::Page::Settings;
+        settle(&mut harness);
+        harness
+    };
+    let disabled = |harness: &App, label: &str| {
+        harness
+            .get_by_role_and_label(Role::Button, label)
+            .accesskit_node()
+            .is_disabled()
+    };
+    let mut harness = open_settings(index());
+    // Default: People (Anna), Places (Italy), Ratings (5 stars), Tags (Beach).
+    assert!(row_top(&harness, "Anna") < row_top(&harness, "Italy"));
+    assert!(row_top(&harness, "Italy") < row_top(&harness, "5 stars"));
+    assert!(row_top(&harness, "5 stars") < row_top(&harness, "Beach"));
+    assert!(disabled(&harness, "Reset to default"), "nothing to reset");
+    assert!(disabled(&harness, "Move People up"));
+    assert!(disabled(&harness, "Move Tags down"));
+    harness.snapshot(common::snapshot_name("settings_sidebar"));
+
+    // Tags to the top, Ratings off.
+    for _ in 0..3 {
+        harness.get_by_role_and_label(Role::Button, "Move Tags up").click();
+        // Two frames: the rows show where they moved to.
+        harness.run_steps(2);
+    }
+    harness.get_by_role_and_label(Role::CheckBox, "Ratings").click();
+    settle(&mut harness);
+    assert!(row_top(&harness, "Beach") < row_top(&harness, "Anna"));
+    assert!(row_top(&harness, "Anna") < row_top(&harness, "Italy"));
+    assert!(harness.query_by_role_and_label(Role::Button, "5 stars").is_none());
+    // The libraries stay first.
+    assert!(row_top(&harness, "All libraries") < row_top(&harness, "Beach"));
+    assert!(!disabled(&harness, "Reset to default"));
+    let db = harness.state().db().unwrap();
+    let stored = db::settings::value(&db.lock().unwrap(), "sidebar.groups")
+        .unwrap()
+        .unwrap();
+    drop(harness);
+
+    // The next start shows the same.
+    let conn = index();
+    db::settings::set_value(&conn, "sidebar.groups", &stored).unwrap();
+    let mut harness = open_settings(conn);
+    assert!(row_top(&harness, "Beach") < row_top(&harness, "Anna"));
+    assert!(harness.query_by_role_and_label(Role::Button, "5 stars").is_none());
+    let checkbox = harness.get_by_role_and_label(Role::CheckBox, "Ratings");
+    assert_eq!(
+        checkbox.accesskit_node().toggled(),
+        Some(egui::accesskit::Toggled::False)
+    );
+
+    harness.get_by_role_and_label(Role::Button, "Reset to default").click();
+    settle(&mut harness);
+    assert!(row_top(&harness, "Anna") < row_top(&harness, "Beach"));
+    assert!(row_top(&harness, "5 stars") < row_top(&harness, "Beach"));
+    assert!(disabled(&harness, "Reset to default"));
 }

@@ -11,7 +11,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [005-thumbnails](005-thumbnails/spec.md)                 | Thumbnail rendering, placeholders, thumbnail cache               | Implemented |
 | [006-gallery-views](006-gallery-views/spec.md)           | Masonry, Justified, Grid and List views, zoom                    | Implemented |
 | [007-search](007-search/spec.md)                         | Tag, file name, date, rating, kind and folder filters, sorting   | Implemented |
-| [008-sidebar](008-sidebar/spec.md)                       | Libraries, folder tree, People, Places, Ratings, Tags            | Implemented |
+| [008-sidebar](008-sidebar/spec.md)                       | Libraries, folders, People, Places, Ratings, Tags, group order   | Implemented |
 | [009-media-viewer](009-media-viewer/spec.md)             | Viewer, zoom and pan, info panel, context menu                   | Implemented |
 | [010-settings](010-settings/spec.md)                     | Indexing and thumbnail cache settings                            | Implemented |
 | [011-security](011-security/spec.md)                     | File access, helper programs, hostile metadata, no network       | Implemented |
