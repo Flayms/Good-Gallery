@@ -235,19 +235,39 @@ impl ThumbCache {
     }
 }
 
-/// Windows refuses to replace a file someone has open (a reader, or Defender scanning the file just written), so a
-/// refused rename is retried for a moment (≈ 1.4 s; under load, Defender holds new files that long).
+/// How long a refused rename is retried: under load, Defender holds new files open for seconds.
+const BUSY_FOR: Duration = Duration::from_secs(5);
+
+/// Windows refuses to replace a file someone has open (a reader: access denied), or to move one (Defender scanning
+/// the file just written: a sharing violation), so a refused rename is retried for a moment (REQ-005-13).
 fn rename_replacing(from: &Path, to: &Path) -> io::Result<()> {
-    let mut attempt = 0;
+    retry_while_busy(BUSY_FOR, || std::fs::rename(from, to))
+}
+
+/// Runs `op` until it succeeds, fails for another reason than a file held open by someone else, or `patience` is
+/// over; the waits in between grow from 10 ms to 250 ms.
+fn retry_while_busy(patience: Duration, mut op: impl FnMut() -> io::Result<()>) -> io::Result<()> {
+    let deadline = std::time::Instant::now() + patience;
+    let mut wait = Duration::from_millis(10);
     loop {
-        match std::fs::rename(from, to) {
-            Err(error) if error.kind() == io::ErrorKind::PermissionDenied && attempt < 10 => {
-                attempt += 1;
-                std::thread::sleep(Duration::from_millis(25 * attempt));
+        match op() {
+            Err(error) if is_busy(&error) && std::time::Instant::now() + wait < deadline => {
+                std::thread::sleep(wait);
+                wait = (wait * 2).min(Duration::from_millis(250));
             }
             result => return result,
         }
     }
+}
+
+/// Whether `error` means someone else has the file open: access denied, or (Windows) a sharing or lock violation.
+fn is_busy(error: &io::Error) -> bool {
+    /// `ERROR_SHARING_VIOLATION`, `ERROR_LOCK_VIOLATION`.
+    #[cfg(windows)]
+    const HELD: [i32; 2] = [32, 33];
+    #[cfg(not(windows))]
+    const HELD: [i32; 0] = [];
+    error.kind() == io::ErrorKind::PermissionDenied || error.raw_os_error().is_some_and(|code| HELD.contains(&code))
 }
 
 /// `<path>.<process id>-<n>.tmp`: unique among concurrent writes, and tells this process's writes from leftovers.
@@ -430,6 +450,68 @@ mod tests {
         cache.wait_ready();
 
         assert!(in_progress.exists());
+    }
+
+    /// REQ-005-13: a rename refused while someone holds the file is retried until it goes through; other errors and
+    /// a file held too long give up.
+    #[test]
+    fn req_005_13_retries_renames_while_the_file_is_held() {
+        let busy = || io::Error::from(io::ErrorKind::PermissionDenied);
+        let mut refusals = 3;
+        let result = retry_while_busy(Duration::from_secs(5), || {
+            if refusals == 0 {
+                return Ok(());
+            }
+            refusals -= 1;
+            Err(busy())
+        });
+        assert!(result.is_ok());
+        assert_eq!(refusals, 0);
+
+        let mut calls = 0;
+        let other = retry_while_busy(Duration::from_secs(5), || {
+            calls += 1;
+            Err(io::Error::from(io::ErrorKind::NotFound))
+        });
+        assert_eq!((other.unwrap_err().kind(), calls), (io::ErrorKind::NotFound, 1));
+
+        let started = std::time::Instant::now();
+        let held = retry_while_busy(Duration::from_millis(100), || Err(busy()));
+        assert_eq!(held.unwrap_err().kind(), io::ErrorKind::PermissionDenied);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    /// REQ-005-13: on Windows a file held open by another process (Defender) fails with a sharing violation, which is
+    /// retried too.
+    #[cfg(windows)]
+    #[test]
+    fn req_005_13_sharing_violations_count_as_held() {
+        assert!(is_busy(&io::Error::from_raw_os_error(32)));
+        assert!(is_busy(&io::Error::from_raw_os_error(33)));
+        assert!(!is_busy(&io::Error::from_raw_os_error(2)));
+    }
+
+    /// REQ-005-13: a thumbnail held open for longer than a moment (Defender under load holds new files for seconds) is
+    /// still replaced.
+    #[cfg(windows)]
+    #[test]
+    fn req_005_13_replaces_a_thumbnail_held_open_for_seconds() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let cache = ThumbCache::open(dir.path().into(), 100);
+        let path = cache.path(&key(), 400);
+        cache.write(&path, b"webp").unwrap();
+        let held = std::fs::File::options().read(true).share_mode(1).open(&path).unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(2));
+            drop(held);
+        });
+
+        cache.write(&path, b"newer").unwrap();
+
+        release.join().unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"newer");
+        assert_eq!(files(dir.path()).len(), 1);
     }
 
     /// A thumbnail held open for a moment (as Defender does with new files) is still replaced.
