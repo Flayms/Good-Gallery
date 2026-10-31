@@ -4,7 +4,7 @@
 //! original first copies it into the library's backup folder; reverting moves the backup back.
 
 use crate::thumbnail::{decode_error, limits};
-use domain::edit::{Mask, MtimeOnSave, Params, Recipe, backup_rel_path, copy_name, dither};
+use domain::edit::{Mask, MtimeOnSave, Params, Pyramid, Recipe, backup_rel_path, blur_lod, copy_name, dither};
 use image::{DynamicImage, ImageDecoder as _, ImageReader, Rgba32FImage};
 use std::io::{Cursor, Write as _};
 use std::path::{Path, PathBuf};
@@ -365,10 +365,15 @@ fn is_lossless_webp(data: &[u8]) -> bool {
 }
 
 /// Applies `params` to every pixel, on all cores, the subject's and the background's own adjustments by `subject`
-/// (REQ-022-03).
+/// (REQ-022-03); a blur first, from a pyramid of the photo (REQ-023-04).
 pub fn render(params: &Params, image: &mut Rgba32FImage, subject: Option<&Mask>) {
     let (width, height) = image.dimensions();
     let size = [width as f32, height as f32];
+    let pyramid = (params.blur > 0.0).then(|| {
+        let pixels = image.pixels().map(|pixel| pixel.0).collect();
+        Pyramid::new(width, height, pixels)
+    });
+    let pyramid = pyramid.as_ref();
     let threads = std::thread::available_parallelism().map_or(1, usize::from);
     let row = width as usize * 4;
     let rows_per_chunk = (height as usize).div_ceil(threads).max(1);
@@ -379,9 +384,16 @@ pub fn render(params: &Params, image: &mut Rgba32FImage, subject: Option<&Mask>)
                     let x = (i % width as usize) as f32;
                     let y = (chunk * rows_per_chunk + i / width as usize) as f32;
                     let uv = [(x + 0.5) / size[0], (y + 0.5) / size[1]];
+                    let inside = subject.map_or(0.0, |mask| mask.sample(uv));
+                    if let Some(pyramid) = pyramid {
+                        let lod = blur_lod(params.blur_sigma(uv, size, inside), pyramid.levels());
+                        let sharp = [pixel[0], pixel[1], pixel[2], pixel[3]];
+                        // Transparency stays sharp, as in the preview.
+                        pixel[..3].copy_from_slice(&pyramid.blurred(sharp, uv, lod)[..3]);
+                    }
                     let rgb = [pixel[0], pixel[1], pixel[2]];
                     let [r, g, b] = match subject {
-                        Some(mask) => params.pixel_masked(rgb, uv, size, mask.sample(uv)),
+                        Some(_) => params.pixel_masked(rgb, uv, size, inside),
                         None => params.pixel(rgb, uv, size),
                     };
                     pixel[..3].copy_from_slice(&[r, g, b]);
@@ -398,7 +410,7 @@ fn render_file(source: &Path, recipe: &Recipe, subject: Option<&Mask>, format: F
     drop(data);
     let found;
     let subject = match subject {
-        _ if !recipe.has_parts() => None,
+        _ if !recipe.needs_subject() => None,
         Some(mask) => Some(mask),
         None => {
             let rgba = DynamicImage::ImageRgba32F(decoded.image.clone()).into_rgba8();
@@ -833,6 +845,26 @@ mod tests {
             "the subject is brighter"
         );
         assert_eq!(saved.get_pixel(3, 3), disc.get_pixel(3, 3), "the background stays");
+    }
+
+    /// REQ-023-04: saving blurs from the photo's pyramid: away from the focus a hard edge softens, at the focus it
+    /// stays.
+    #[test]
+    fn req_023_04_saving_blurs_away_from_the_focus() {
+        let edge = |x: u32| if x < 128 { 0.1 } else { 0.9 };
+        let mut image = Rgba32FImage::from_fn(256, 256, |x, _| image::Rgba([edge(x), edge(x), edge(x), 1.0]));
+        let recipe = Recipe {
+            blur_kind: domain::edit::BlurKind::TiltShift,
+            blur_focus: [0.5, 0.1],
+            blur: 100.0,
+            ..Recipe::default()
+        };
+        render(&Params::new(&recipe), &mut image, None);
+        // In the focus: still hard. Far from it: in between next to the edge, but flat far from it.
+        assert_eq!(image.get_pixel(126, 25)[0], 0.1);
+        let soft = image.get_pixel(126, 240)[0];
+        assert!(soft > 0.15 && soft < 0.5, "{soft}");
+        assert!((image.get_pixel(20, 240)[0] - 0.1).abs() < 1e-4);
     }
 
     #[test]

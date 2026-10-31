@@ -324,6 +324,17 @@ pub struct Recipe {
     pub vignette: f32,
     /// 0 to 100.
     pub vignette_midpoint: f32,
+    /// How the photo is blurred (REQ-023-01); a kind only a newer version knows reads as none.
+    #[serde(deserialize_with = "blur_kind_or_none")]
+    pub blur_kind: BlurKind,
+    /// 0 to 100.
+    pub blur: f32,
+    /// The sharp area's size, 0 to 100.
+    pub blur_size: f32,
+    /// How far the blur takes to grow beyond it, 0 to 100.
+    pub blur_feather: f32,
+    /// Where the sharp area is, 0–1 across the photo.
+    pub blur_focus: [f32; 2],
     /// The subject's own light and color, on top of the rest (REQ-022-03); `None` while neutral.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subject: Option<Box<Recipe>>,
@@ -352,6 +363,11 @@ impl Default for Recipe {
             grain_size: 25.0,
             vignette: 0.0,
             vignette_midpoint: 50.0,
+            blur_kind: BlurKind::None,
+            blur: 0.0,
+            blur_size: 30.0,
+            blur_feather: 50.0,
+            blur_focus: [0.5, 0.5],
             subject: None,
             background: None,
         }
@@ -364,6 +380,8 @@ impl Recipe {
         Adjustment::ALL
             .iter()
             .filter(|adjustment| adjustment.changes_pixels())
+            // A blur strength without a kind of blur does nothing.
+            .filter(|adjustment| **adjustment != Adjustment::Blur || self.blur_kind != BlurKind::None)
             .all(|adjustment| adjustment.get(self) == adjustment.neutral())
             && self.curves.is_identity()
             && [&self.subject, &self.background]
@@ -387,6 +405,11 @@ impl Recipe {
             Part::Subject => self.subject.get_or_insert_default(),
             Part::Background => self.background.get_or_insert_default(),
         }
+    }
+
+    /// Whether rendering needs the photo's subject: for the parts' adjustments or a background blur.
+    pub fn needs_subject(&self) -> bool {
+        self.has_parts() || (self.blur_kind == BlurKind::Background && self.blur > 0.0)
     }
 
     /// Whether the subject or the background has adjustments of its own.
@@ -445,6 +468,9 @@ impl Recipe {
         for channel in Channel::ALL {
             self.curves.get_mut(channel).sanitize();
         }
+        self.blur_focus = self
+            .blur_focus
+            .map(|c| if c.is_finite() { c.clamp(0.0, 1.0) } else { 0.5 });
     }
 }
 
@@ -514,6 +540,142 @@ impl Mask {
     }
 }
 
+/// How a photo is blurred (REQ-023-01).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BlurKind {
+    #[default]
+    None,
+    /// Everything but the subject (spec 022).
+    Background,
+    /// All but a horizontal band through the focus.
+    TiltShift,
+    /// All but a round spot around the focus.
+    Radial,
+}
+
+impl BlurKind {
+    pub const ALL: [BlurKind; 4] = [Self::None, Self::Background, Self::TiltShift, Self::Radial];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Background => "Behind subject",
+            Self::TiltShift => "Tilt-shift",
+            Self::Radial => "Radial",
+        }
+    }
+
+    /// Whether it has a focus to place, a size and a transition.
+    pub fn has_focus(self) -> bool {
+        matches!(self, Self::TiltShift | Self::Radial)
+    }
+}
+
+fn blur_kind_or_none<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<BlurKind, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+
+/// The strongest blur, as σ in parts of the photo's longer side.
+const MAX_BLUR: f32 = 0.015;
+/// The σ, in pixels of a pyramid's base, of one level of [`Pyramid`] (a 2 × 2 box per level, then a B-spline).
+pub const BLUR_SIGMA_PER_LEVEL: f32 = 0.65;
+
+/// The level of detail of a [`Pyramid`] with `levels` levels for a blur of `sigma` pixels of its base (REQ-023-04).
+pub fn blur_lod(sigma: f32, levels: usize) -> f32 {
+    if sigma <= 0.0 {
+        return 0.0;
+    }
+    (sigma / BLUR_SIGMA_PER_LEVEL)
+        .log2()
+        .clamp(0.0, levels.saturating_sub(1) as f32)
+}
+
+/// A photo halved again and again by 2 × 2 boxes while its shorter side is at least 32 px, as the GPU's mip chain
+/// (`app::textures::mip_chain`); blurs sample it with a cubic B-spline (REQ-023-04).
+#[derive(Debug, Clone)]
+pub struct Pyramid {
+    /// From the second level on: the first is the photo itself.
+    levels: Vec<(usize, usize, Vec<[f32; 4]>)>,
+}
+
+impl Pyramid {
+    /// From the photo's RGBA values (as stored, 0–1), row by row.
+    pub fn new(width: u32, height: u32, pixels: Vec<[f32; 4]>) -> Self {
+        let mut levels = Vec::new();
+        let (mut w, mut h) = (width as usize, height as usize);
+        let mut source = pixels;
+        while w.min(h) >= 32 {
+            let (nw, nh) = (w / 2, h / 2);
+            let half: Vec<[f32; 4]> = (0..nw * nh)
+                .map(|i| {
+                    let (x, y) = (2 * (i % nw), 2 * (i / nw));
+                    let at = |x: usize, y: usize| source[y * w + x];
+                    let (a, b, c, d) = (at(x, y), at(x + 1, y), at(x, y + 1), at(x + 1, y + 1));
+                    std::array::from_fn(|k| (a[k] + b[k] + c[k] + d[k]) / 4.0)
+                })
+                .collect();
+            levels.push((nw, nh, half.clone()));
+            source = half;
+            (w, h) = (nw, nh);
+        }
+        Self { levels }
+    }
+
+    /// Levels, the photo itself included.
+    pub fn levels(&self) -> usize {
+        self.levels.len() + 1
+    }
+
+    /// The photo at `uv` blurred to level of detail `lod`: `sharp` (the pixel itself) at 0, between levels a mix.
+    pub fn blurred(&self, sharp: [f32; 4], uv: [f32; 2], lod: f32) -> [f32; 4] {
+        let lod = lod.clamp(0.0, self.levels.len() as f32);
+        if lod <= 0.0 {
+            return sharp;
+        }
+        let low = lod.floor() as usize;
+        let t = lod - low as f32;
+        let below = if low == 0 { sharp } else { self.bspline(low, uv) };
+        if t <= 0.0 {
+            return below;
+        }
+        let above = self.bspline(low + 1, uv);
+        std::array::from_fn(|k| below[k] + (above[k] - below[k]) * t)
+    }
+
+    /// Level `level` (1 or more) at `uv`, a cubic B-spline over its pixels, clamped at the edges.
+    fn bspline(&self, level: usize, uv: [f32; 2]) -> [f32; 4] {
+        let (w, h, pixels) = &self.levels[level - 1];
+        let (px, py) = (uv[0] * *w as f32 - 0.5, uv[1] * *h as f32 - 0.5);
+        let (ix, iy) = (px.floor(), py.floor());
+        let (wx, wy) = (bspline_weights(px - ix), bspline_weights(py - iy));
+        let mut out = [0.0; 4];
+        for (j, wy) in wy.into_iter().enumerate() {
+            let y = (iy as i64 - 1 + j as i64).clamp(0, *h as i64 - 1) as usize;
+            for (i, wx) in wx.into_iter().enumerate() {
+                let x = (ix as i64 - 1 + i as i64).clamp(0, *w as i64 - 1) as usize;
+                let pixel = pixels[y * w + x];
+                for k in 0..4 {
+                    out[k] += pixel[k] * wx * wy;
+                }
+            }
+        }
+        out
+    }
+}
+
+/// The cubic B-spline's weights of the four pixels around a position `f` (0–1) past the second.
+fn bspline_weights(f: f32) -> [f32; 4] {
+    let (f2, f3) = (f * f, f * f * f);
+    [
+        (1.0 - f).powi(3) / 6.0,
+        (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0,
+        (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0,
+        f3 / 6.0,
+    ]
+}
+
 /// The groups of the adjustments panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
@@ -554,10 +716,13 @@ pub enum Adjustment {
     GrainSize,
     Vignette,
     VignetteMidpoint,
+    Blur,
+    BlurSize,
+    BlurFeather,
 }
 
 impl Adjustment {
-    pub const ALL: [Adjustment; 15] = [
+    pub const ALL: [Adjustment; 18] = [
         Self::Exposure,
         Self::Brightness,
         Self::Contrast,
@@ -569,6 +734,9 @@ impl Adjustment {
         Self::Tint,
         Self::Vibrance,
         Self::Saturation,
+        Self::Blur,
+        Self::BlurSize,
+        Self::BlurFeather,
         Self::Grain,
         Self::GrainSize,
         Self::Vignette,
@@ -585,7 +753,13 @@ impl Adjustment {
             | Self::Whites
             | Self::Blacks => Section::Light,
             Self::Temperature | Self::Tint | Self::Vibrance | Self::Saturation => Section::Color,
-            Self::Grain | Self::GrainSize | Self::Vignette | Self::VignetteMidpoint => Section::Effects,
+            Self::Grain
+            | Self::GrainSize
+            | Self::Vignette
+            | Self::VignetteMidpoint
+            | Self::Blur
+            | Self::BlurSize
+            | Self::BlurFeather => Section::Effects,
         }
     }
 
@@ -606,13 +780,21 @@ impl Adjustment {
             Self::GrainSize => "Grain size",
             Self::Vignette => "Vignette",
             Self::VignetteMidpoint => "Midpoint",
+            Self::Blur => "Strength",
+            Self::BlurSize => "Focus size",
+            Self::BlurFeather => "Transition",
         }
     }
 
     pub fn range(self) -> (f32, f32) {
         match self {
             Self::Exposure => (-5.0, 5.0),
-            Self::Grain | Self::GrainSize | Self::VignetteMidpoint => (0.0, 100.0),
+            Self::Grain
+            | Self::GrainSize
+            | Self::VignetteMidpoint
+            | Self::Blur
+            | Self::BlurSize
+            | Self::BlurFeather => (0.0, 100.0),
             _ => (-100.0, 100.0),
         }
     }
@@ -620,7 +802,8 @@ impl Adjustment {
     pub fn neutral(self) -> f32 {
         match self {
             Self::GrainSize => 25.0,
-            Self::VignetteMidpoint => 50.0,
+            Self::VignetteMidpoint | Self::BlurFeather => 50.0,
+            Self::BlurSize => 30.0,
             _ => 0.0,
         }
     }
@@ -632,7 +815,10 @@ impl Adjustment {
 
     /// False for the shape of an effect (grain size, vignette midpoint), which alone changes nothing.
     pub fn changes_pixels(self) -> bool {
-        !matches!(self, Self::GrainSize | Self::VignetteMidpoint)
+        !matches!(
+            self,
+            Self::GrainSize | Self::VignetteMidpoint | Self::BlurSize | Self::BlurFeather
+        )
     }
 
     pub fn get(self, recipe: &Recipe) -> f32 {
@@ -652,6 +838,9 @@ impl Adjustment {
             Self::GrainSize => recipe.grain_size,
             Self::Vignette => recipe.vignette,
             Self::VignetteMidpoint => recipe.vignette_midpoint,
+            Self::Blur => recipe.blur,
+            Self::BlurSize => recipe.blur_size,
+            Self::BlurFeather => recipe.blur_feather,
         }
     }
 
@@ -674,6 +863,9 @@ impl Adjustment {
             Self::GrainSize => &mut recipe.grain_size,
             Self::Vignette => &mut recipe.vignette,
             Self::VignetteMidpoint => &mut recipe.vignette_midpoint,
+            Self::Blur => &mut recipe.blur,
+            Self::BlurSize => &mut recipe.blur_size,
+            Self::BlurFeather => &mut recipe.blur_feather,
         };
         *field = value;
     }
@@ -765,6 +957,13 @@ pub struct Params {
     pub grain_cell: f32,
     /// The curves, all channels composed into one table per channel; `None` for straight curves.
     pub curves: Option<Vec<[f32; 3]>>,
+    pub blur_kind: BlurKind,
+    /// The strongest blur, as σ in parts of the longer side; 0 for none.
+    pub blur: f32,
+    /// Half the sharp area's size and the transition's width, in parts of the longer side.
+    pub blur_size: f32,
+    pub blur_feather: f32,
+    pub blur_focus: [f32; 2],
     /// The subject's and the background's own numbers (REQ-022-03).
     pub subject: Option<Box<Params>>,
     pub background: Option<Box<Params>>,
@@ -797,6 +996,15 @@ impl Params {
             grain: recipe.grain / 100.0,
             grain_cell: 1.0 + recipe.grain_size / 100.0 * 3.0,
             curves,
+            blur_kind: recipe.blur_kind,
+            blur: if recipe.blur_kind == BlurKind::None {
+                0.0
+            } else {
+                recipe.blur / 100.0 * MAX_BLUR
+            },
+            blur_size: recipe.blur_size / 100.0 * 0.5,
+            blur_feather: 0.02 + recipe.blur_feather / 100.0 * 0.5,
+            blur_focus: recipe.blur_focus,
             subject: recipe.subject.as_deref().map(|part| Box::new(Self::new(part))),
             background: recipe.background.as_deref().map(|part| Box::new(Self::new(part))),
         }
@@ -817,6 +1025,32 @@ impl Params {
         let (inside, outside) = (part(&self.subject), part(&self.background));
         let lin = std::array::from_fn(|c| outside[c] + (inside[c] - outside[c]) * subject);
         self.finish(lin, uv, size)
+    }
+
+    /// The blur at `uv` of a photo `size` pixels large, as σ in its pixels, `subject` being how much the spot belongs to
+    /// the subject (REQ-023-02, REQ-023-03). The photo is first blurred so, then developed.
+    pub fn blur_sigma(&self, uv: [f32; 2], size: [f32; 2], subject: f32) -> f32 {
+        if self.blur <= 0.0 {
+            return 0.0;
+        }
+        let longer = size[0].max(size[1]);
+        let offset = [
+            (uv[0] - self.blur_focus[0]) * size[0],
+            (uv[1] - self.blur_focus[1]) * size[1],
+        ];
+        let weight = match self.blur_kind {
+            BlurKind::None => 0.0,
+            BlurKind::Background => 1.0 - subject.clamp(0.0, 1.0),
+            BlurKind::TiltShift | BlurKind::Radial => {
+                let distance = if self.blur_kind == BlurKind::TiltShift {
+                    offset[1].abs()
+                } else {
+                    (offset[0] * offset[0] + offset[1] * offset[1]).sqrt()
+                } / longer;
+                smoothstep(self.blur_size, self.blur_size + self.blur_feather, distance)
+            }
+        };
+        weight * self.blur * longer
     }
 
     /// White balance, exposure, tone, curves and chroma, on linear light.
@@ -1101,7 +1335,11 @@ mod tests {
                 assert!(close(out, rgb), "{rgb:?} → {out:?}");
             }
         }
-        for adjustment in Adjustment::ALL.into_iter().filter(|a| a.changes_pixels()) {
+        // Blur needs a kind too (REQ-023-01).
+        for adjustment in Adjustment::ALL
+            .into_iter()
+            .filter(|a| a.changes_pixels() && *a != Adjustment::Blur)
+        {
             assert!(
                 !with(adjustment, 50.0f32.min(adjustment.range().1)).is_neutral(),
                 "{adjustment:?}"
@@ -1261,6 +1499,103 @@ mod tests {
         assert_eq!(subject.grain, 0.0);
         assert!(subject.curves.is_identity() && !subject.has_parts());
         assert!(hostile.part(Part::Background).is_none());
+    }
+
+    fn blurred(kind: BlurKind) -> Recipe {
+        let mut recipe = with(Adjustment::Blur, 100.0);
+        recipe.blur_kind = kind;
+        recipe
+    }
+
+    #[test]
+    fn req_023_01_no_blur_or_blur_at_zero_changes_nothing() {
+        let size = [4000.0, 3000.0];
+        for kind in BlurKind::ALL {
+            let mut recipe = blurred(kind);
+            Adjustment::Blur.set(&mut recipe, 0.0);
+            assert!(recipe.is_neutral(), "{kind:?}");
+            assert_eq!(Params::new(&recipe).blur_sigma([0.1, 0.1], size, 0.0), 0.0);
+        }
+        // A strength without a kind changes nothing either.
+        assert!(blurred(BlurKind::None).is_neutral());
+        assert!(!blurred(BlurKind::Radial).is_neutral());
+        // Strong blurs reach about 1.5 % of the longer side.
+        let corner = Params::new(&blurred(BlurKind::Radial)).blur_sigma([0.0, 0.0], size, 0.0);
+        assert!((corner - 60.0).abs() < 1.0, "{corner}");
+        // Unknown kinds from newer versions read as none; the focus stays on the photo.
+        let recipe = Recipe::from_json(r#"{"blurKind":"swirl","blur":50,"blurFocus":[3,-1]}"#).unwrap();
+        assert_eq!(recipe.blur_kind, BlurKind::None);
+        assert_eq!(recipe.blur_focus, [1.0, 0.0]);
+        let round = blurred(BlurKind::TiltShift);
+        assert_eq!(Recipe::from_json(&round.to_json()), Some(round));
+    }
+
+    #[test]
+    fn req_023_02_background_blur_spares_the_subject() {
+        let params = Params::new(&blurred(BlurKind::Background));
+        let size = [1000.0, 1000.0];
+        assert_eq!(params.blur_sigma(MID, size, 1.0), 0.0);
+        let edge = params.blur_sigma(MID, size, 0.5);
+        let background = params.blur_sigma(MID, size, 0.0);
+        assert!(background > 10.0 && edge > 0.0 && edge < background);
+    }
+
+    #[test]
+    fn req_023_03_tilt_shift_and_radial_keep_the_focus_sharp() {
+        let size = [1000.0, 1000.0];
+        let mut tilt = blurred(BlurKind::TiltShift);
+        tilt.blur_focus = [0.5, 0.3];
+        let tilt = Params::new(&tilt);
+        // The band through the focus is sharp across the whole width, the rest grows blurrier.
+        assert_eq!(tilt.blur_sigma([0.0, 0.3], size, 0.0), 0.0);
+        assert_eq!(tilt.blur_sigma([1.0, 0.32], size, 0.0), 0.0);
+        let (near, far) = (
+            tilt.blur_sigma([0.5, 0.6], size, 0.0),
+            tilt.blur_sigma([0.5, 1.0], size, 0.0),
+        );
+        assert!(near < far, "{near} < {far}");
+        let radial = Params::new(&blurred(BlurKind::Radial));
+        assert_eq!(radial.blur_sigma(MID, size, 0.0), 0.0);
+        assert!(radial.blur_sigma([0.5, 0.2], size, 0.0) > 0.0);
+        assert!(radial.blur_sigma([0.5, 0.2], size, 0.0) < radial.blur_sigma([0.0, 0.0], size, 0.0));
+        // A larger focus keeps more sharp.
+        let mut wide = blurred(BlurKind::Radial);
+        Adjustment::BlurSize.set(&mut wide, 100.0);
+        assert!(Params::new(&wide).blur_sigma([0.5, 0.2], size, 0.0) < radial.blur_sigma([0.5, 0.2], size, 0.0));
+        assert_eq!(Recipe::default().blur_focus, [0.5, 0.5]);
+    }
+
+    #[test]
+    fn req_023_04_the_pyramid_blurs_smoothly_and_keeps_flat_areas() {
+        // Halving down to at least 16 px, as the GPU's mip chain.
+        let flat = Pyramid::new(64, 40, vec![[0.3, 0.5, 0.7, 1.0]; 64 * 40]);
+        assert_eq!(flat.levels(), 2);
+        let out = flat.blurred([0.0; 4], [0.2, 0.9], 1.0);
+        assert!(
+            out.iter().zip([0.3, 0.5, 0.7, 1.0]).all(|(a, b)| (a - b).abs() < 1e-5),
+            "{out:?}"
+        );
+        // lod 0 is the sharp pixel itself.
+        assert_eq!(flat.blurred([0.1, 0.2, 0.3, 0.4], MID, 0.0), [0.1, 0.2, 0.3, 0.4]);
+        // An edge: blurrier with a higher lod, monotone across.
+        let edge = Pyramid::new(
+            128,
+            128,
+            (0..128 * 128).map(|i| [f32::from(i % 128 >= 64); 4]).collect(),
+        );
+        let at = |x: f32, lod: f32| edge.blurred([f32::from(x >= 0.5); 4], [x, 0.5], lod)[0];
+        let row: Vec<f32> = (0..=40).map(|i| at(0.3 + i as f32 * 0.01, 2.0)).collect();
+        assert!(row.windows(2).all(|w| w[1] >= w[0] - 1e-5), "{row:?}");
+        assert!(
+            at(0.47, 2.0) > 0.01 && at(0.47, 2.0) < at(0.47, 3.0),
+            "{} {}",
+            at(0.47, 2.0),
+            at(0.47, 3.0)
+        );
+        // The lod for a blur measured in pixels of the pyramid's base.
+        assert_eq!(blur_lod(0.0, 5), 0.0);
+        assert!((blur_lod(BLUR_SIGMA_PER_LEVEL * 4.0, 5) - 2.0).abs() < 1e-5);
+        assert_eq!(blur_lod(1e6, 5), 4.0);
     }
 
     #[test]
