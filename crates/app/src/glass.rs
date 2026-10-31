@@ -4,7 +4,8 @@
 //!
 //! What lies under glass is the frame's **backdrop**: the gallery records every tile it draws (its rect, its texture or
 //! placeholder color) and the solid surfaces (page, sidebar); text isn't part of it, which a 24–32 px blur hides
-//! anyway. Glass never blurs other glass. The viewer's chrome reuses the scrim's blur instead of blurring again.
+//! anyway. Glass never blurs other glass. The viewer's chrome reuses the scrim's blur; the scrim's darkening and the
+//! photo are recorded over the window, for menus over the viewer and for the chrome while the photo grows under it.
 //!
 //! Without the pass (no wgpu render state, as in tests, or pipelines that couldn't be made) and with Windows'
 //! _Transparency effects_ off (REQ-013-06), surfaces are opaque: Raised, Darkroom for the scrim.
@@ -65,6 +66,65 @@ pub fn record(ctx: &egui::Context, item: BackdropItem) {
     ctx.data_mut(|data| {
         data.get_temp_mut_or_default::<Backdrop>(backdrop_id()).items.push(item);
     });
+}
+
+/// Records an image drawn into `rect` with `uv` and `tint`, as far as it shows inside `clip`.
+pub fn record_image(ctx: &egui::Context, rect: Rect, uv: Rect, clip: Rect, view: &wgpu::TextureView, tint: Color32) {
+    if let Some((rect, uv)) = clip_image(rect, uv, clip) {
+        record(
+            ctx,
+            BackdropItem {
+                rect,
+                uv,
+                view: Some(view.clone()),
+                color: tint,
+                chrome: false,
+            },
+        );
+    }
+}
+
+/// The part of an image drawn into `rect` with `uv` that shows inside `clip`, and its UV rect; `None` if none does.
+fn clip_image(rect: Rect, uv: Rect, clip: Rect) -> Option<(Rect, Rect)> {
+    let shown = rect.intersect(clip);
+    if !shown.is_positive() || !rect.is_positive() {
+        return None;
+    }
+    let at = |p: egui::Pos2| {
+        egui::pos2(
+            uv.min.x + (p.x - rect.min.x) / rect.width() * uv.width(),
+            uv.min.y + (p.y - rect.min.y) / rect.height() * uv.height(),
+        )
+    };
+    Some((shown, Rect::from_min_max(at(shown.min), at(shown.max))))
+}
+
+/// Records the scrim's darkening over `rect` (at `opacity`), so what the viewer draws next lies on it (REQ-013-03).
+pub fn record_scrim(ctx: &egui::Context, rect: Rect, opacity: f32) {
+    record_solid(ctx, rect, theme::SCRIM.fill(None).gamma_multiply(opacity), false);
+}
+
+/// A surface that draws nothing: only its blur is used, by the viewer's chrome.
+const CLEAR: Glass = Glass {
+    color: Rgb { r: 0.0, g: 0.0, b: 0.0 },
+    alpha: 0.0,
+    blur: 28.0,
+    saturate: 1.0,
+};
+
+/// Blurs everything recorded under `rect` so far once (the window, the scrim's darkening, the photo), for the
+/// viewer's chrome to show with [`Source::Over`] (REQ-013-03). Draws nothing itself; `None` without glass.
+pub fn blur_for_chrome(painter: &egui::Painter, rect: Rect) -> Option<Painted> {
+    if !available(painter.ctx()) {
+        return None;
+    }
+    let (shape, painted) = shape(
+        painter.ctx(),
+        Surface::new(rect, 0.0, CLEAR).opacity(0.0),
+        Source::Backdrop,
+    );
+    painter.add(shape);
+    painted
 }
 
 /// Records a solid surface (the page, the sidebar), or with `chrome` a glass surface only the scrim shows.
@@ -172,7 +232,10 @@ pub fn shape(ctx: &egui::Context, surface: Surface, source: Source) -> (Shape, O
         backdrop.surfaces
     });
     let (items, over) = match source {
-        Source::Backdrop => (Arc::new(under(ctx, region, surface.glass == theme::SCRIM)), None),
+        Source::Backdrop => {
+            let everything = surface.glass == theme::SCRIM || surface.glass == CLEAR;
+            (Arc::new(under(ctx, region, everything)), None)
+        }
         Source::Over(painted) => (Arc::new(Vec::new()), Some(painted)),
     };
     let tint = surface.glass.fill(surface.tint);
@@ -233,12 +296,13 @@ pub fn paint(painter: &egui::Painter, surface: Surface) -> Option<Painted> {
     painted
 }
 
-/// The look of the viewer's chrome (REQ-013-11): a glass level tinted by the item, over the scrim's blur.
+/// The look of the viewer's chrome (REQ-013-11): a glass level tinted by the item, over the scrim's blur, or while the
+/// photo grows under it, over [`blur_for_chrome`].
 #[derive(Debug, Clone, Copy)]
 pub struct Backing {
     pub glass: Glass,
     pub tint: Option<Rgb>,
-    /// The scrim painted this frame, whose blur the chrome shows.
+    /// The scrim or [`blur_for_chrome`] painted this frame, whose blur the chrome shows.
     pub over: Option<Painted>,
 }
 
@@ -853,6 +917,43 @@ mod tests {
         let (shape, painted) = shape(&ctx, Surface::new(toolbar, 0.0, theme::glass_bar()), Source::Backdrop);
         assert!(matches!(shape, Shape::Callback(_)));
         assert!(painted.is_some());
+    }
+
+    /// REQ-013-03: the viewer's chrome shares one blur of the window (toolbar included), the scrim's darkening and
+    /// the photo over it, as far as the photo shows inside its area.
+    #[test]
+    fn req_013_03_the_viewers_chrome_blurs_the_photo_over_the_scrim() {
+        let ctx = ctx(true);
+        let screen = rect(0.0, 0.0, 800.0, 600.0);
+        record_solid(&ctx, rect(0.0, 0.0, 800.0, 48.0), theme::glass_bar().fill(None), true);
+        let (_, scrim) = shape(&ctx, Surface::new(screen, 0.0, theme::SCRIM), Source::Backdrop);
+        record_scrim(&ctx, screen, 1.0);
+        let photo = rect(100.0, 0.0, 600.0, 600.0);
+        let full = rect(0.0, 0.0, 1.0, 1.0);
+        record_solid(&ctx, photo, Color32::WHITE, false);
+
+        let chrome = blur_for_chrome(
+            &egui::Painter::new(ctx.clone(), egui::LayerId::background(), screen),
+            screen,
+        )
+        .expect("a blur with glass");
+        assert_ne!(chrome.slot, scrim.unwrap().slot, "its own blur, not the scrim's");
+        let colors: Vec<Color32> = under(&ctx, screen, true).iter().map(|item| item.color).collect();
+        assert_eq!(
+            colors,
+            [theme::glass_bar().fill(None), theme::SCRIM.fill(None), Color32::WHITE],
+            "the toolbar, the scrim's darkening, then the photo"
+        );
+        // It draws nothing over the photo, and adds nothing to the blur the chrome shows.
+        assert_eq!(
+            (chrome.glass.alpha, unpremultiplied(chrome.glass.fill(None))[3]),
+            (0.0, 0.0)
+        );
+
+        // A zoomed photo clipped to its area: only the part inside, with its UVs.
+        let clipped = clip_image(rect(-400.0, 0.0, 1600.0, 600.0), full, rect(0.0, 0.0, 800.0, 600.0));
+        assert_eq!(clipped, Some((rect(0.0, 0.0, 800.0, 600.0), rect(0.25, 0.0, 0.5, 1.0))));
+        assert_eq!(clip_image(rect(900.0, 0.0, 100.0, 100.0), full, screen), None);
     }
 
     /// REQ-020-06: in the light appearance glass becomes the light Raised; the scrim stays dark (REQ-020-05).

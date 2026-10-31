@@ -197,8 +197,9 @@ pub struct Viewer {
     chrome: Chrome,
     /// The media item the chrome was tinted for.
     chrome_for: Option<i64>,
-    /// The scrim painted this frame: the chrome shows its blur.
-    scrim: Option<crate::glass::Painted>,
+    /// The scrim, or the blur of it and the photo while the photo grows under the chrome, painted this frame: the
+    /// chrome shows its blur (REQ-013-03).
+    chrome_blur: Option<crate::glass::Painted>,
     playing: Option<Playing>,
     /// The last click was on the video or its controls: ← / → seek instead of stepping (REQ-009-02).
     video_focus: bool,
@@ -239,7 +240,7 @@ impl Viewer {
             closing: None,
             photo: None,
             chrome: Chrome::new(None),
-            scrim: None,
+            chrome_blur: None,
             chrome_for: None,
             playing: None,
             video_focus: false,
@@ -633,7 +634,9 @@ impl Viewer {
                 }
                 // The window behind, blurred and darkened; opaque without glass (REQ-013-14, REQ-013-06).
                 let scrim = crate::glass::Surface::new(screen, 0.0, theme::SCRIM).opacity(progress);
-                self.scrim = crate::glass::paint(ui.painter(), scrim);
+                let scrim = crate::glass::paint(ui.painter(), scrim);
+                // What the chrome blurs: the window under the scrim's darkening, then the photo (REQ-013-03).
+                crate::glass::record_scrim(ui.ctx(), screen, progress);
                 let backdrop = ui.interact(screen, ui.make_persistent_id("backdrop"), egui::Sense::click_and_drag());
                 let label = item
                     .as_ref()
@@ -641,7 +644,22 @@ impl Viewer {
                     .to_owned();
                 backdrop.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Dialog, true, &label));
                 let closing = self.closing.is_some();
-                // The context menu's choice (REQ-009-11).
+                match &item {
+                    Some(item) => {
+                        let keys = if closing { Keys::default() } else { keys };
+                        let transition = tile.filter(|_| progress < 1.0).map(|tile| (tile, progress));
+                        let drawn = self.media(ui, &backdrop, &layout, item, gallery, &original, keys, transition);
+                        self.photo = Some(drawn);
+                    }
+                    None if self.missing => {
+                        message(ui, layout.media.center(), "Media not found");
+                        self.backdrop_clicks(&backdrop);
+                    }
+                    None => {
+                        self.backdrop_clicks(&backdrop);
+                    }
+                }
+                // The context menu's choice (REQ-009-11); after the photo, so its glass blurs it (REQ-013-03).
                 if !closing && let Some(item) = &item {
                     let editable = editable(item, libraries) && self.edit.is_none();
                     let revert = gallery
@@ -660,24 +678,17 @@ impl Viewer {
                         None => {}
                     });
                 }
-                match &item {
-                    Some(item) => {
-                        let keys = if closing { Keys::default() } else { keys };
-                        let transition = tile.filter(|_| progress < 1.0).map(|tile| (tile, progress));
-                        let drawn = self.media(ui, &backdrop, &layout, item, gallery, &original, keys, transition);
-                        self.photo = Some(drawn);
-                    }
-                    None if self.missing => {
-                        message(ui, layout.media.center(), "Media not found");
-                        self.backdrop_clicks(&backdrop);
-                    }
-                    None => {
-                        self.backdrop_clicks(&backdrop);
-                    }
-                }
                 if closing {
                     return;
                 }
+                // Open, the photo stays in its area, clear of the chrome, which shows the scrim's blur; only while it
+                // grows from its tile does the chrome cover it, and blur it (REQ-013-03).
+                let growing = item.is_some() && tile.is_some() && progress < 1.0;
+                self.chrome_blur = if growing {
+                    crate::glass::blur_for_chrome(ui.painter(), screen).or(scrim)
+                } else {
+                    scrim
+                };
                 ui.scope(|ui| {
                     ui.multiply_opacity(progress);
                     if let Some(chosen) = self.controls(ui, &layout, item.as_ref(), count, gallery, libraries) {
@@ -879,7 +890,7 @@ impl Viewer {
         let area = layout.media;
         let thumbnail = gallery.thumbnail(item.id);
         let loaded = match original {
-            OriginalState::Loaded(loaded) => Some(*loaded),
+            OriginalState::Loaded(loaded) => Some(loaded.clone()),
             _ => None,
         };
         let playing = self
@@ -887,7 +898,7 @@ impl Viewer {
             .filter(|playing| playing.id == item.id)
             .map(|playing| (playing.state.video_size, playing.state.quarters, playing.frame));
         let video_size = playing.and_then(|(size, quarters, _)| Some(domain::video::shown_size(size?, quarters)));
-        let natural = match (item.width, item.height, loaded, &thumbnail) {
+        let natural = match (item.width, item.height, &loaded, &thumbnail) {
             // A video's own size once the player knows it (turned as it is shown), else its upright thumbnail's.
             _ if video_size.is_some() => {
                 let [width, height] = video_size.unwrap_or_default();
@@ -990,6 +1001,7 @@ impl Viewer {
             match thumbnail {
                 Some(thumbnail) => {
                     painter.image(thumbnail.id, rect, uv, Color32::WHITE);
+                    crate::glass::record_image(ui.ctx(), rect, uv, clip, &thumbnail.view, Color32::WHITE);
                 }
                 None => {
                     if let Some(placeholder) = gallery.placeholder(ui.ctx(), item.id) {
@@ -1007,8 +1019,12 @@ impl Viewer {
                 .as_mut()
                 .is_some_and(|session| session.paint(ui, rect, uv, clip, compare, 1.0));
         if edited {
-        } else if let Some(loaded) = loaded {
-            painter.image(loaded.id, rect, uv, Color32::WHITE.gamma_multiply(fade));
+        } else if let Some(loaded) = &loaded {
+            let tint = Color32::WHITE.gamma_multiply(fade);
+            painter.image(loaded.id, rect, uv, tint);
+            if let Some(view) = &loaded.view {
+                crate::glass::record_image(ui.ctx(), rect, uv, clip, view, tint);
+            }
             if fade < 1.0 {
                 ui.ctx().request_repaint();
             }
@@ -1165,7 +1181,7 @@ impl Viewer {
         let mut step = None;
         ui.scope(|ui| {
             ui.multiply_opacity(shown);
-            let bar_backing = self.chrome.backing(theme::glass_bar(), self.scrim);
+            let bar_backing = self.chrome.backing(theme::glass_bar(), self.chrome_blur);
             if let Some(rect) = video_bar
                 && let Some(playing) = &mut self.playing
                 && let Some(control) =
@@ -1221,9 +1237,11 @@ impl Viewer {
 
     /// The info panel at the right (REQ-009-08); a click on a tag filters the gallery by it (REQ-009-09).
     fn info_panel(&mut self, ui: &mut egui::Ui, rect: Rect, gallery: &mut Gallery) -> Option<Action> {
-        self.chrome
-            .backing(theme::glass_panel(), self.scrim)
-            .paint(ui.painter(), rect, f32::from(theme::RADIUS_PANEL));
+        self.chrome.backing(theme::glass_panel(), self.chrome_blur).paint(
+            ui.painter(),
+            rect,
+            f32::from(theme::RADIUS_PANEL),
+        );
         // Clicks and wheel turns on the panel stay in it.
         ui.interact(rect, ui.make_persistent_id("info panel"), egui::Sense::click());
         let mut clicked = None;
@@ -1361,7 +1379,7 @@ impl Viewer {
     /// The adjustments panel in the info panel's place (REQ-021-01).
     fn edit_panel(&mut self, ui: &mut egui::Ui, layout: &Layout, gallery: &Gallery) -> Option<Action> {
         let rect = layout.info?;
-        let backing = self.chrome.backing(theme::glass_panel(), self.scrim);
+        let backing = self.chrome.backing(theme::glass_panel(), self.chrome_blur);
         let session = self.edit.as_mut()?;
         backing.paint(ui.painter(), rect, f32::from(theme::RADIUS_PANEL));
         // Clicks and wheel turns on the panel stay in it.
@@ -1438,9 +1456,11 @@ impl Viewer {
                 self.strip_offset = STRIP.clamp(self.strip_offset + sideways, count, view);
             }
         }
-        self.chrome
-            .backing(theme::glass_bar(), self.scrim)
-            .paint(ui.painter(), rect, f32::from(theme::RADIUS_PANEL));
+        self.chrome.backing(theme::glass_bar(), self.chrome_blur).paint(
+            ui.painter(),
+            rect,
+            f32::from(theme::RADIUS_PANEL),
+        );
         // A short row stays centered.
         let left = rect.left() + ((view - STRIP.width(count)) / 2.0).max(0.0) - self.strip_offset;
         let visible = STRIP.visible(count, self.strip_offset, view);
