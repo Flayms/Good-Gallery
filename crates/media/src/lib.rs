@@ -6,4 +6,5 @@ pub mod ffmpeg;
 pub mod helpers;
 pub mod metadata;
 pub mod original;
+pub mod subject;
 pub mod thumbnail;

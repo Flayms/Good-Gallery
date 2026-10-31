@@ -34,6 +34,8 @@ jpeg-decoder = { version = "0.3.2", default-features = false }
 libc = "0.2.191"
 libloading = "0.8.9"
 thumbhash = "0.1.0"
+# Finding the subject of a photo (spec 022), pure Rust on the CPU.
+tract-onnx = { version = "0.23.9", default-features = false }
 webp = { version = "=0.3.1", default-features = false }
 egui_extras = { version = "=0.37.0", default-features = false, features = ["svg", "datepicker"] }
 rfd = "0.17.2"

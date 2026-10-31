@@ -23,4 +23,6 @@ And, built into good-gallery.exe:
 Atkinson Hyperlegible Next, the typeface. Copyright the Braille Institute of America.
   License: SIL Open Font License 1.1.
 Lucide icons. License: ISC.
+U²-Net-p, the network that finds a photo's subject. Copyright Xuebin Qin et al.
+  License: Apache-2.0. https://github.com/xuebinqin/U-2-Net
 Rust crates as listed in the source's Cargo.lock, under their licenses (mostly MIT and Apache-2.0).
