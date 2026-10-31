@@ -9,6 +9,11 @@
       "args": [],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
+      "environment": [
+        { "name": "GOOD_GALLERY_EXIFTOOL", "value": "${workspaceFolder}\\target\\helpers\\exiftool\\exiftool.exe" },
+        { "name": "GOOD_GALLERY_FFMPEG", "value": "${workspaceFolder}\\target\\helpers\\ffmpeg\\ffmpeg.exe" },
+        { "name": "GOOD_GALLERY_MPV", "value": "${workspaceFolder}\\target\\helpers\\mpv\\libmpv-2.dll" }
+      ],
       "preLaunchTask": "cargo build app"
     },
     {
@@ -19,6 +24,11 @@
       "args": [],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
+      "environment": [
+        { "name": "GOOD_GALLERY_EXIFTOOL", "value": "${workspaceFolder}\\target\\helpers\\exiftool\\exiftool.exe" },
+        { "name": "GOOD_GALLERY_FFMPEG", "value": "${workspaceFolder}\\target\\helpers\\ffmpeg\\ffmpeg.exe" },
+        { "name": "GOOD_GALLERY_MPV", "value": "${workspaceFolder}\\target\\helpers\\mpv\\libmpv-2.dll" }
+      ],
       "preLaunchTask": "cargo build app (release)"
     }
   ]
