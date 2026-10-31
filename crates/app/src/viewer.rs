@@ -1277,6 +1277,7 @@ impl Viewer {
                     file_name: item.file_name.clone(),
                     library: PathBuf::from(&library.path),
                     full_size: [side(item.width), side(item.height)],
+                    sidecar_orientation: item.sidecar_orientation,
                 };
                 self.edit = Some(EditSession::new(target, originals.render_state()));
             }
@@ -1635,7 +1636,11 @@ fn preload(gallery: &mut Gallery, originals: &mut Originals, libraries: &[Librar
         let Some(path) = file_in(libraries, item.root_id, &item.rel_path) else {
             continue;
         };
-        wanted.push(OriginalRequest { media: item.id, path });
+        wanted.push(OriginalRequest {
+            media: item.id,
+            path,
+            sidecar_orientation: item.sidecar_orientation,
+        });
     }
     originals.set(wanted);
 }

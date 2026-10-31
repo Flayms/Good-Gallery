@@ -81,12 +81,21 @@ Search and sorting rely on the tags, ratings and dates that photo tools (Lightro
 - **When** they are indexed or searched
 - **Then** they are the same tag, displayed with collapsed whitespace in the spelling first seen
 
+### REQ-004-12 · Orientation from XMP
+
+- **Given** a photo whose orientation is stored only in XMP, embedded in the file or in its sidecar, not in EXIF
+- **When** it is indexed, and its thumbnail, the viewer and the editor show it
+- **Then** it is upright, and its width and height are swapped for orientations 5–8 as for EXIF ones (REQ-004-02)
+- **And** EXIF wins over embedded XMP, which wins over the sidecar
+- **And** a sidecar whose orientation changes makes the thumbnail be rendered again
+
 ## Out of scope
 
 - Editing, adding or removing tags or ratings, and writing anything back to files.
 - Automatic tagging (AI, face recognition, reverse geocoding of GPS data).
 - GPS coordinates, camera and lens data, captions and titles.
 - Color labels, flags and picks.
+- Orientations only in XMP in the browser version (spec 019): the browser turns photos by their EXIF orientation alone.
 
 ## Assumptions
 
@@ -108,3 +117,4 @@ Search and sorting rely on the tags, ratings and dates that photo tools (Lightro
 | REQ-004-09 | `crates/media/src/metadata.rs` › adds_face_region_names…, does_not_duplicate_a_face_region… | pass |
 | REQ-004-10 | `crates/domain/src/media.rs` › prefers_the_full_name_sidecar…; `crates/media/src/metadata.rs` › reads_dimensions_from_the_file_and_tags_from_its_sidecar; `crates/indexer/src/scan.rs` › rescans_incrementally; `tests/end_to_end.rs` | pass |
 | REQ-004-11 | `crates/domain/src/tags.rs` › trims_collapses…, applies_nfkc…; `crates/db/src/writer.rs` › one_tag_per_normalized_name_with_the_first_spelling | pass |
+| REQ-004-12 | `crates/meta/src/rules.rs` › req_004_12_takes_the_orientation_from_the_sidecar_when_the_file_has_none; `crates/media/src/metadata.rs` › req_004_12_reads_the_orientation_of_a_sidecar_and_of_embedded_xmp (exiftool); `crates/media/src/thumbnail.rs` › req_004_12_req_005_03_turns_photos_upright_by_an_orientation_only_in_xmp; `crates/media/src/original.rs` › req_004_12_req_009_04_turns_photos_oriented_only_in_xmp_upright; `crates/db/src/writer.rs` › req_004_12_a_changed_sidecar_orientation_resets_the_thumbnail | pass (thumbnails rendered before metadata version 2 for photos turned only in their embedded XMP are rendered again only when the file changes or the thumbnail cache is cleared) |

@@ -22,7 +22,7 @@ Tiles appear instantly and stay sharp, even for libraries on slow network shares
 
 ### REQ-005-03 · Correct orientation
 
-- **Given** an image with any EXIF orientation (1–8)
+- **Given** an image with any orientation (1–8), in EXIF or only in XMP (REQ-004-12)
 - **When** its thumbnail is rendered
 - **Then** the thumbnail is upright, the same as the image would be when auto-oriented
 
@@ -124,7 +124,7 @@ Tiles appear instantly and stay sharp, even for libraries on slow network shares
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | REQ-005-01 | `crates/media/src/thumbnail.rs` › req_005_01_renders_every_width_as_webp_without_upscaling_plus_a_thumbhash, req_005_01_fits_tall_strips_into_2400_pixels; `crates/indexer/tests/end_to_end.rs` › req_005_08_renders_thumbnails_of_scanned_media | pass |
 | REQ-005-02 | `crates/domain/src/thumbs.rs` › req_005_02_picks_the_smallest_thumbnail_covering_the_physical_width | pass (the gallery picks each tile's width with it) |
-| REQ-005-03 | `crates/media/src/thumbnail.rs` › req_005_03_turns_every_orientation_upright, req_005_03_turns_jpegs_upright_by_their_exif_orientation | pass |
+| REQ-005-03 | `crates/media/src/thumbnail.rs` › req_005_03_turns_every_orientation_upright, req_005_03_turns_jpegs_upright_by_their_exif_orientation, req_004_12_req_005_03_turns_photos_upright_by_an_orientation_only_in_xmp | pass |
 | REQ-005-04 | `crates/media/src/thumbnail.rs` › req_005_04_uses_a_large_enough_embedded_preview_with_the_original_orientation, req_005_04_ignores_small_differently_shaped_or_invalid_previews, req_005_04_decodes_a_truncated_jpeg_partially, req_005_04_shrinks_large_jpegs_while_decoding; `crates/media/src/exiftool.rs` › req_005_04_reads_embedded_images | pass |
 | REQ-005-05 | `crates/media/src/ffmpeg.rs` › req_005_05_shows_the_frame_at_a_tenth_of_the_duration | pass |
 | REQ-005-06 | `crates/indexer/src/thumbnails.rs` › req_005_08_req_005_06_renders_pending_media_in_the_background_newest_first | partial: placeholders stored; tiles draw the ThumbHash, fade in and show the "no image" icon (checked in the app), without an automated tile test since thumbnails need the GPU streamer |

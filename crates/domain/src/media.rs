@@ -35,6 +35,9 @@ pub struct MediaMetadata {
     pub taken_at: Option<i64>,
     /// 1–5, `None` when unrated or rejected.
     pub rating: Option<i64>,
+    /// The sidecar's orientation (1–8, as EXIF numbers it): decoders turn a photo by it when the file has none of its
+    /// own (REQ-004-12).
+    pub sidecar_orientation: Option<u8>,
     /// Tag paths, outermost first; flat keywords are single-element paths.
     pub tags: Vec<Vec<String>>,
     /// The edit the file was saved with (spec 021), from the file itself.
@@ -43,8 +46,8 @@ pub struct MediaMetadata {
 }
 
 /// Bump when metadata extraction changes, so the indexer re-reads files already marked unchanged. Existing indexes were
-/// written at version 1.
-pub const METADATA_VERSION: i64 = 1;
+/// written at version 1; version 2 reads orientations from sidecars (REQ-004-12).
+pub const METADATA_VERSION: i64 = 2;
 
 fn extension(file_name: &str) -> Option<String> {
     let dot = file_name.rfind('.')?;

@@ -19,6 +19,8 @@ const WORKERS: usize = 2;
 pub struct OriginalRequest {
     pub media: i64,
     pub path: PathBuf,
+    /// Turns a photo without an orientation of its own (REQ-004-12).
+    pub sidecar_orientation: Option<u8>,
 }
 
 /// How far an original is.
@@ -450,7 +452,7 @@ fn load(
     max_side: u32,
     wanted: impl Fn() -> bool,
 ) -> Outcome {
-    let image = match media::original::load_original(&request.path, ffmpeg, max_side) {
+    let image = match media::original::load_original(&request.path, ffmpeg, max_side, request.sidecar_orientation) {
         Ok(image) => image,
         Err(error) => return Outcome::Failed(format!("{}: {error}", request.path.display())),
     };
@@ -484,7 +486,11 @@ mod tests {
     }
 
     fn request(media: i64, path: PathBuf) -> OriginalRequest {
-        OriginalRequest { media, path }
+        OriginalRequest {
+            media,
+            path,
+            sidecar_orientation: None,
+        }
     }
 
     fn originals() -> Originals {

@@ -156,12 +156,12 @@ pub(crate) mod tests {
         assert!(made, "can't make the clip");
         let renderer = renderer(ffmpeg);
 
-        let at_tenth = renderer.render(&clip, MediaKind::Video, Some(10.0)).unwrap();
+        let at_tenth = renderer.render(&clip, MediaKind::Video, Some(10.0), None).unwrap();
         assert_eq!(sizes(&at_tenth), [(400, (320, 240)), (800, (320, 240))]);
         let [r, _, b] = average_color(&at_tenth);
         assert!(b > 200 && r < 50, "blue at 1 s: {r} {b}");
 
-        let unknown = renderer.render(&clip, MediaKind::Video, None).unwrap();
+        let unknown = renderer.render(&clip, MediaKind::Video, None, None).unwrap();
         let [r, _, b] = average_color(&unknown);
         assert!(r > 200 && b < 50, "red at 0 s: {r} {b}");
     }
@@ -184,7 +184,7 @@ pub(crate) mod tests {
             return;
         }
 
-        let thumbnails = renderer(ffmpeg).render(&file, MediaKind::Image, None).unwrap();
+        let thumbnails = renderer(ffmpeg).render(&file, MediaKind::Image, None, None).unwrap();
 
         assert_eq!(sizes(&thumbnails)[0], (400, (300, 200)));
         let [r, g, b] = average_color(&thumbnails);
@@ -210,7 +210,7 @@ pub(crate) mod tests {
             return;
         }
 
-        let image = crate::original::load_original(&file, Some(&ffmpeg), 8192).unwrap();
+        let image = crate::original::load_original(&file, Some(&ffmpeg), 8192, None).unwrap();
 
         assert_eq!(image.dimensions(), (1200, 600));
         assert!(image.get_pixel(600, 300)[1] > 100);
