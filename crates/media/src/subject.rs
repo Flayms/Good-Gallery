@@ -51,10 +51,11 @@ pub fn find(image: &image::RgbaImage) -> Result<Mask, String> {
     let (low, high) = values
         .iter()
         .fold((f32::MAX, f32::MIN), |(low, high), &v| (low.min(v), high.max(v)));
-    if !(high - low > 1e-3) {
+    let spread = high - low;
+    if spread.is_nan() || spread <= 1e-3 {
         return Err("no subject stands out".into());
     }
-    let values = values.into_iter().map(|v| (v - low) / (high - low)).collect();
+    let values = values.into_iter().map(|v| (v - low) / spread).collect();
     Mask::new(SIDE as u32, SIDE as u32, values).ok_or_else(|| "the subject model gave a mask of another size".into())
 }
 

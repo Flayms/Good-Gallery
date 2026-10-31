@@ -239,13 +239,13 @@ fn req_021_18_the_curve_editor_shows_the_histogram() {
         session(&harness).unwrap().histogram().is_none(),
         "only with Curves open"
     );
+    // Light folded away, so the curve is in view.
+    harness.get_by_role_and_label(Role::Button, "Light").click();
+    harness.run_steps(2);
     harness.get_by_role_and_label(Role::Button, "Curves").click();
     harness.run_steps(2);
     let shown = session(&harness).unwrap().histogram().expect("a histogram").clone();
     assert!(shown.get(Channel::All).iter().sum::<u32>() > 0);
-    // Light folded away, so the curve is in view.
-    harness.get_by_role_and_label(Role::Button, "Light").click();
-    harness.run_steps(2);
     harness.snapshot(common::snapshot_name("edit_curves"));
 
     set_recipe(&mut harness, brighter());

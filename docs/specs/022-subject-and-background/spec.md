@@ -58,3 +58,8 @@ A portrait with a dull sky behind it, or a product shot against a busy wall, nee
 
 | REQ        | Test | Result |
 | ---------- | ---- | ------ |
+| REQ-022-01 | `crates/app/tests/edit.rs` › req_022_01_req_022_02_req_022_04_edits_the_subject_found_in_the_photo | pass |
+| REQ-022-02 | `crates/media/src/subject.rs` › req_022_02_finds_the_subject_that_stands_out; `crates/app/tests/edit.rs` › req_022_01_req_022_02_req_022_04_edits_the_subject_found_in_the_photo | pass |
+| REQ-022-03 | `crates/domain/src/edit.rs` › req_022_03_parts_change_only_their_part_on_top_of_the_photo, req_022_03_the_mask_fades_across_the_subjects_edge; `crates/app/src/edit.rs` › req_021_02_req_021_06_the_gpu_preview_matches_the_cpu_render | pass |
+| REQ-022-04 | `crates/app/tests/edit.rs` › req_022_01_req_022_02_req_022_04_edits_the_subject_found_in_the_photo; `crates/app/src/edit.rs` › req_021_02_req_021_06_the_gpu_preview_matches_the_cpu_render | pass |
+| REQ-022-05 | `crates/domain/src/edit.rs` › req_022_05_parts_are_saved_with_the_recipe; `crates/media/src/edit.rs` › req_022_05_saving_applies_the_parts_by_the_subject; `crates/app/tests/edit.rs` › req_022_05_edits_again_with_the_saved_parts | pass |
