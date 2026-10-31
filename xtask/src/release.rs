@@ -234,6 +234,93 @@ pub fn next_version(tools: &Tools, cwd: &Path, bump: Option<Bump>) -> Result<Str
     Ok(version.strip_prefix('v').unwrap_or(&version).to_owned())
 }
 
+/// `v1.2.3` as numbers, so tags sort by version.
+fn tag_version(tag: &str) -> Option<(u64, u64, u64)> {
+    let version = tag.strip_prefix('v')?;
+    if !is_version(version) {
+        return None;
+    }
+    let mut parts = version.split('.').map(|part| part.parse().ok());
+    Some((parts.next()??, parts.next()??, parts.next()??))
+}
+
+/// For the release of `tag`: the last published release before it, and the tags in between, whose releases weren't
+/// published (their release run failed). Their changes go into `tag`'s notes (REQ-014-11).
+pub fn unpublished_before(tag: &str, tags: &[String], published: &[String]) -> (Option<String>, Vec<String>) {
+    let Some(version) = tag_version(tag) else {
+        return (None, Vec::new());
+    };
+    let mut earlier: Vec<(_, &String)> = tags
+        .iter()
+        .filter_map(|t| tag_version(t).filter(|v| *v < version).map(|v| (v, t)))
+        .collect();
+    earlier.sort();
+    let last_published = earlier.iter().rposition(|(_, t)| published.contains(t));
+    let skipped = earlier[last_published.map_or(0, |i| i + 1)..]
+        .iter()
+        .map(|(_, t)| (*t).clone())
+        .collect();
+    (last_published.map(|i| earlier[i].1.clone()), skipped)
+}
+
+/// The GitHub release notes of `tag`: its changelog section without the heading (the release title names the
+/// version), with the changes of every unpublished version since the last published one in `published`.
+pub fn release_notes(tools: &Tools, cwd: &Path, tag: &str, published: &[String]) -> Result<String, ReleaseError> {
+    let tags: Vec<String> = git(cwd, &["tag", "--list", "v*"])?.lines().map(str::to_owned).collect();
+    let (previous, skipped) = unpublished_before(tag, &tags, published);
+    // git-cliff takes a range, or a single commit for everything up to it.
+    let range = match &previous {
+        Some(previous) => format!("{previous}..{tag}"),
+        None => git(cwd, &["rev-parse", &format!("{tag}^{{commit}}")])?,
+    };
+    let ignore = format!(
+        "^({})$",
+        skipped
+            .iter()
+            .map(|t| t.replace('.', "\\."))
+            .collect::<Vec<_>>()
+            .join("|")
+    );
+    let mut args = vec!["--strip", "all"];
+    if !skipped.is_empty() {
+        args.extend(["--ignore-tags", &ignore]);
+    }
+    args.push(&range);
+    let section = tools.cliff(cwd, &args)?;
+    let body = section.split_once('\n').map_or("", |(_, body)| body).trim();
+    if skipped.is_empty() {
+        return Ok(body.to_owned());
+    }
+    let versions: Vec<&str> = skipped.iter().map(|t| t.trim_start_matches('v')).collect();
+    let (list, verb) = match versions.as_slice() {
+        [one] => ((*one).to_owned(), "wasn't"),
+        [rest @ .., last] => (format!("{} and {last}", rest.join(", ")), "weren't"),
+        [] => unreachable!(),
+    };
+    Ok(format!(
+        "Includes the changes of {list}, which {verb} published as a release.\n\n{body}"
+    ))
+}
+
+/// `cargo xtask release-notes <tag> [<published tag>…]`: prints the release notes of `tag` (release workflow).
+pub fn run_notes(args: &[String]) -> u8 {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let Some((tag, published)) = args.split_first() else {
+        eprintln!("usage: cargo xtask release-notes <tag> [<published tag>…]");
+        return 1;
+    };
+    match Tools::find().and_then(|tools| release_notes(&tools, &root, tag, published)) {
+        Ok(notes) => {
+            println!("{notes}");
+            0
+        }
+        Err(ReleaseError(message)) => {
+            eprintln!("✖ {message}");
+            1
+        }
+    }
+}
+
 /// Asks on the terminal; anything but y / yes is a no.
 pub fn confirm(question: &str) -> bool {
     use std::io::Write as _;
@@ -663,6 +750,66 @@ mod tests {
         assert!(changelog.contains("- **viewer:** Zoom"));
         assert!(!changelog.contains("update stuff"));
         assert!(!changelog.contains("chore(release)"));
+    }
+
+    #[test]
+    fn req_014_11_finds_the_versions_that_werent_published() {
+        let tags = strings(&[
+            "v0.1.0",
+            "v0.1.1",
+            "v0.1.2",
+            "v0.2.0",
+            "v0.10.0",
+            "v0.2.1",
+            "not-a-version",
+        ]);
+        assert_eq!(
+            unpublished_before("v0.2.1", &tags, &strings(&["v0.1.2"])),
+            (Some("v0.1.2".to_owned()), strings(&["v0.2.0"]))
+        );
+        assert_eq!(
+            unpublished_before("v0.10.0", &tags, &strings(&["v0.1.2", "v0.2.1"])),
+            (Some("v0.2.1".to_owned()), Vec::new())
+        );
+        assert_eq!(
+            unpublished_before("v0.1.2", &tags, &[]),
+            (None, strings(&["v0.1.0", "v0.1.1"]))
+        );
+    }
+
+    #[test]
+    fn req_014_11_release_notes_bring_the_unpublished_changes() {
+        let Some(repo) = Repo::new() else { return };
+        repo.commit("feat: first");
+        repo.tag("v0.1.0");
+        repo.commit("fix: lost in 0.1.1");
+        repo.tag("v0.1.1");
+        repo.commit("feat: lost in 0.2.0");
+        repo.tag("v0.2.0");
+        repo.commit("fix: in 0.2.1");
+        repo.tag("v0.2.1");
+        let notes = |published: &[&str]| release_notes(&repo.tools, &repo.repo, "v0.2.1", &strings(published)).unwrap();
+
+        let all_published = notes(&["v0.1.0", "v0.1.1", "v0.2.0"]);
+        assert!(
+            !all_published.lines().any(|line| line.starts_with("## ")),
+            "{all_published}"
+        );
+        assert!(all_published.contains("- In 0.2.1"), "{all_published}");
+        assert!(!all_published.contains("Lost in 0.2.0"), "{all_published}");
+        assert!(all_published.contains("compare/v0.2.0...v0.2.1"), "{all_published}");
+
+        let failed = notes(&["v0.1.0"]);
+        assert!(failed.starts_with("Includes the changes of 0.1.1 and 0.2.0, which weren't published"));
+        for entry in ["- Lost in 0.1.1", "- Lost in 0.2.0", "- In 0.2.1"] {
+            assert!(failed.contains(entry), "{failed}");
+        }
+        assert!(!failed.contains("- First"), "{failed}");
+        assert_eq!(failed.matches("### ✨ Features").count(), 1, "{failed}");
+        assert!(failed.contains("compare/v0.1.0...v0.2.1"), "{failed}");
+
+        let none = notes(&[]);
+        assert!(none.contains("- First") && none.contains("- In 0.2.1"), "{none}");
     }
 
     #[test]

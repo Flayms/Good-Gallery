@@ -128,9 +128,12 @@ jobs:
           path: target/dist
 
       - name: Write the release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # The release title already names the version, so drop the section heading.
-          git-cliff --current --strip all | tail -n +2 > release-notes.md
+          # The notes also list the changes of earlier versions whose release run failed (REQ-014-11).
+          published=$(gh release list --exclude-drafts --limit 1000 --json tagName --jq '.[].tagName')
+          cargo xtask release-notes "$TAG" $published > release-notes.md
           cat >> release-notes.md <<NOTES
 
           ### 📥 Download

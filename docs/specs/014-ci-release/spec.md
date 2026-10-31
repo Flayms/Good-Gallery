@@ -55,7 +55,7 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 
 - **Given** a pushed `vX.Y.Z` tag
 - **When** the release workflow runs
-- **Then** it runs the checks of REQ-014-01, builds the Windows installer (`setup.exe`) and the portable zip, and publishes a GitHub release named after the version, whose notes are the version's changelog section plus download instructions and which has both attached
+- **Then** it runs the checks of REQ-014-01, builds the Windows installer (`setup.exe`) and the portable zip, and publishes a GitHub release named after the version, whose notes are the version's changelog section (with the unpublished versions of REQ-014-11) plus download instructions and which has both attached
 
 ### REQ-014-09 · Installer and portable app
 
@@ -70,6 +70,13 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 - **Given** a release's downloads
 - **When** a user looks at their file names
 - **Then** each name says the app, the version, the operating system and the processor architecture it is for, and for Windows whether it is the installer or the portable zip: `good-gallery-<version>-windows-x64-setup.exe`, `good-gallery-<version>-windows-x64-portable.zip`, `good-gallery-<version>-linux-x64.tar.gz`
+
+### REQ-014-11 · Notes of unpublished versions
+
+- **Given** versions tagged since the last published GitHub release whose release run failed, so they never got a release
+- **When** the release workflow publishes the next version
+- **Then** its notes list the changes of those versions too, in one section per type, say which versions they come from, and the comparison link starts at the last published release
+- **And** `CHANGELOG.md` keeps one section per tagged version
 
 ## Out of scope
 
@@ -99,3 +106,4 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 | REQ-014-08 | `xtask/tests/workflows.rs` › release_publishes_both_downloads_after_the_checks; `xtask/src/dist.rs` › stages_the_helpers_where_the_app_finds_them, req_014_10_names_say_the_system_and_the_architecture; `cargo xtask dist` built both locally | partial (publishing runs with the first release) |
 | REQ-014-09 | `xtask/src/dist.rs` › stages_the_helpers_where_the_app_finds_them; `packaging/smoke-test.ps1` (release workflow; run locally: silent install, app run, uninstall keeps the data folder) | pass |
 | REQ-014-10 | `xtask/src/dist.rs` › req_014_10_names_say_the_system_and_the_architecture; `xtask/tests/workflows.rs` › release_publishes_both_downloads_after_the_checks | pass |
+| REQ-014-11 | `xtask/src/release.rs` › req_014_11_finds_the_versions_that_werent_published, req_014_11_release_notes_bring_the_unpublished_changes; `xtask/tests/workflows.rs` › release_publishes_both_downloads_after_the_checks; `cargo xtask release-notes v0.2.1 v0.1.2` on this repository lists 0.2.0's changes | pass |
