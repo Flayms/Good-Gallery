@@ -141,8 +141,8 @@ struct Job {
 }
 
 enum JobResult {
-    /// Stat succeeded; `None` when nothing changed.
-    Seen(String, Option<IndexedFile>),
+    /// Stat succeeded; `None` when nothing changed. Boxed: most files are unchanged.
+    Seen(String, Option<Box<IndexedFile>>),
     /// The file is gone; it stays unseen and is removed.
     Vanished,
     /// Couldn't be read; it keeps its last indexed state.
@@ -204,7 +204,7 @@ fn read_file(job: Job, deps: &WorkerDeps, root_path: &Path) -> JobResult {
         sidecar_mtime,
         metadata,
     };
-    JobResult::Seen(job.rel_path, Some(file))
+    JobResult::Seen(job.rel_path, Some(Box::new(file)))
 }
 
 struct WorkerDeps<'a> {
@@ -534,7 +534,7 @@ impl Sink<'_> {
             JobResult::Seen(rel_path, file) => {
                 unseen.remove(&rel_path);
                 self.progress.scanned += 1;
-                self.pending.extend(file);
+                self.pending.extend(file.map(|file| *file));
             }
             JobResult::Failed(rel_path) => {
                 unseen.remove(&rel_path);

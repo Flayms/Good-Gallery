@@ -7,6 +7,7 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **MSVC C++ build tools are required** on Windows (`link.exe`); without them even a hello world fails with "`link.exe` returned an unexpected error". Install the "Desktop development with C++" / VC Tools workload, e.g. `winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`. C dependencies (libwebp, dav1d, a video backend) need them too.
 * **`cargo` may be missing from `PATH` in the Bash tool**: rustup lives in `~/.cargo/bin`, which is on the Windows user `PATH` but not always in Git Bash. Use the PowerShell tool or `export PATH="$HOME/.cargo/bin:$PATH"`.
 * **egui / eframe / wgpu APIs change between minor versions.** Pin exact versions and check docs.rs for the pinned one; examples from memory are often for another version.
+* **One `CARGO_TARGET_DIR` for several worktrees builds stale code:** cargo names a workspace crate's artifacts by its path relative to the workspace, so every worktree shares them, and a crate unchanged since another worktree's build counts as fresh. Code from the other branch is linked in, which shows up as missing fields or methods. After switching worktrees run `cargo clean -p domain -p meta -p db -p media -p indexer -p app -p xtask` (dependencies stay built), or give each worktree its own target folder.
 
 ## egui / eframe 0.37
 

@@ -140,12 +140,14 @@ fn extract_rating(sources: &[&Tags]) -> Option<i64> {
 pub fn extract_metadata(tags: &Tags, sidecar: Option<&Tags>) -> MediaMetadata {
     let mut sources = vec![tags];
     sources.extend(sidecar);
+    let sidecar_orientation = sidecar.and_then(orientation);
     let (mut width, mut height) = (None, None);
     if let (Some(w), Some(h)) = (positive(tags.get("ImageWidth")), positive(tags.get("ImageHeight"))) {
-        // EXIF orientations 5–8 and 90° / 270° video rotations swap the displayed axes.
-        let orientation = tags.get("Orientation").and_then(Value::as_f64).unwrap_or(1.0);
+        // Orientations 5–8 (the file's, EXIF before XMP, else the sidecar's: REQ-004-12) and 90° / 270° video
+        // rotations swap the displayed axes.
+        let orientation = orientation(tags).or(sidecar_orientation).unwrap_or(1);
         let rotation = tags.get("Rotation").and_then(Value::as_f64);
-        let swapped = orientation >= 5.0 || rotation == Some(90.0) || rotation == Some(270.0);
+        let swapped = orientation >= 5 || rotation == Some(90.0) || rotation == Some(270.0);
         let (w, h) = if swapped { (h, w) } else { (w, h) };
         (width, height) = (Some(w as i64), Some(h as i64));
     }
@@ -159,6 +161,7 @@ pub fn extract_metadata(tags: &Tags, sidecar: Option<&Tags>) -> MediaMetadata {
         duration: positive(tags.get("Duration")),
         taken_at,
         rating: extract_rating(&sources),
+        sidecar_orientation,
         tags: extract_tags(&sources),
         // Only the file's own: a copy of a sidecar doesn't carry another file's edit.
         edit: domain::edit::SavedEdit::parse(
@@ -167,6 +170,12 @@ pub fn extract_metadata(tags: &Tags, sidecar: Option<&Tags>) -> MediaMetadata {
         )
         .map(Box::new),
     }
+}
+
+/// An orientation as EXIF numbers it (1–8); others count as none.
+fn orientation(tags: &Tags) -> Option<u8> {
+    let value = tags.get("Orientation")?.as_f64()?;
+    (1.0..=8.0).contains(&value).then_some(value as u8)
 }
 
 // --- Dates, as exiftool-vendored (v38) turns them into instants ---
@@ -491,6 +500,24 @@ mod tests {
         assert_eq!((video.width, video.height), (Some(1080), Some(1920)));
         let unknown = extract_metadata(&tags(json!({ "ImageWidth": 0, "ImageHeight": 3000 })), None);
         assert_eq!((unknown.width, unknown.height), (None, None));
+    }
+
+    /// REQ-004-12: an orientation only in the sidecar swaps the dimensions too and is kept for the decoders; the
+    /// file's own (EXIF, else its embedded XMP, as exiftool prefers them) wins.
+    #[test]
+    fn req_004_12_takes_the_orientation_from_the_sidecar_when_the_file_has_none() {
+        let file = tags(json!({ "ImageWidth": 4000, "ImageHeight": 3000 }));
+        let turned = tags(json!({ "Orientation": 6 }));
+        let from_sidecar = extract_metadata(&file, Some(&turned));
+        assert_eq!((from_sidecar.width, from_sidecar.height), (Some(3000), Some(4000)));
+        assert_eq!(from_sidecar.sidecar_orientation, Some(6));
+
+        let upright = tags(json!({ "ImageWidth": 4000, "ImageHeight": 3000, "Orientation": 1 }));
+        let own_wins = extract_metadata(&upright, Some(&turned));
+        assert_eq!((own_wins.width, own_wins.height), (Some(4000), Some(3000)));
+
+        let invalid = extract_metadata(&file, Some(&tags(json!({ "Orientation": 9 }))));
+        assert_eq!((invalid.width, invalid.sidecar_orientation), (Some(4000), None));
     }
 
     #[test]
