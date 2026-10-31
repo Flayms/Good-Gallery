@@ -474,20 +474,37 @@ fn req_009_03_a_click_beside_a_zoomed_photo_closes() {
     assert!(harness.state().viewer.is_none());
 }
 
-/// REQ-009-01: while the viewer is open, Tab, Enter and Space don't reach the gallery, toolbar or sidebar below it.
+/// REQ-009-01: while the viewer is open, Tab, Enter and Space don't reach the gallery, toolbar or sidebar below it:
+/// Tab only moves focus among the viewer's own controls (REQ-015-04), and Enter and Space press those.
 #[test]
 fn req_009_01_keys_dont_reach_the_window_below() {
     let fixture = Fixture::new();
     let mut harness = app(&fixture, 3, &[]);
     open(&mut harness, "1.png");
-    for key in [Key::Tab, Key::Tab, Key::Enter, Key::Tab, Key::Space, Key::Enter] {
+    // Without focus, Enter and Space do nothing.
+    for key in [Key::Enter, Key::Space] {
         harness.key_press(key);
         harness.run_steps(1);
     }
     settle(&mut harness);
     assert_eq!(shown(&harness).as_deref(), Some("1.png"));
-    assert_eq!(harness.state().page, app::Page::Gallery);
     assert_eq!(viewer(&harness).view(), domain::viewer::FIT);
+
+    for key in [Key::Tab, Key::Tab, Key::Enter, Key::Tab, Key::Space, Key::Enter] {
+        harness.key_press(key);
+        harness.run_steps(1);
+        let ctx = harness.ctx.clone();
+        let focused_layer = ctx
+            .memory(|memory| memory.focused())
+            .and_then(|id| ctx.read_response(id))
+            .map(|response| response.layer_id.order);
+        assert!(
+            focused_layer.is_none_or(|order| order >= egui::Order::Middle),
+            "{key:?} focused something below the viewer"
+        );
+    }
+    settle(&mut harness);
+    assert_eq!(harness.state().page, app::Page::Gallery);
 }
 
 /// Records which files Explorer was asked to show.
@@ -854,6 +871,54 @@ fn req_015_04_req_015_05_jumps_to_and_browses_the_filmstrip() {
     assert!(after.left() < before.left() - 100.0, "{before:?} → {after:?}");
     assert_eq!(shown(&harness).as_deref(), Some("23.png"));
     assert_eq!(viewer(&harness).view(), domain::viewer::FIT, "the photo didn't zoom");
+}
+
+/// REQ-015-04: Tab moves focus into the viewer's controls and the filmstrip, never to the gallery below, so a thumbnail
+/// can be focused and opened with Enter; Shift + Tab goes the other way.
+#[test]
+fn req_015_04_tab_moves_focus_into_the_viewer_and_the_filmstrip() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture, 40, &[]);
+    open(&mut harness, "20.png");
+    harness.key_press(Key::F);
+    settle(&mut harness);
+
+    // The viewer is the only layer at `Middle` and above that takes focus.
+    let focus_in_viewer = |harness: &App| {
+        let ctx = harness.ctx.clone();
+        ctx.memory(|memory| memory.focused())
+            .and_then(|id| ctx.read_response(id))
+            .is_some_and(|response| response.layer_id.order >= egui::Order::Middle)
+    };
+    let mut reached = None;
+    for _ in 0..60 {
+        harness.key_press(Key::Tab);
+        harness.run_steps(2);
+        assert!(focus_in_viewer(&harness), "focus stays in the viewer");
+        reached = (18..=23)
+            .map(|i| format!("{i}.png"))
+            .find(|name| *name != "20.png" && strip_item(&harness, name).is_focused());
+        if reached.is_some() {
+            break;
+        }
+    }
+    let reached = reached.expect("Tab reaches a filmstrip thumbnail");
+    harness.key_press(Key::Enter);
+    settle_viewer(&mut harness);
+    assert_eq!(shown(&harness), Some(reached));
+
+    harness.ctx.memory_mut(|memory| {
+        if let Some(focused) = memory.focused() {
+            memory.surrender_focus(focused);
+        }
+    });
+    harness.run_steps(1);
+    harness.key_press_modifiers(Modifiers::SHIFT, Key::Tab);
+    harness.run_steps(2);
+    assert!(
+        focus_in_viewer(&harness),
+        "Shift + Tab focuses the viewer's last control"
+    );
 }
 
 /// REQ-015-06: the filmstrip steps aside with the controls; the photo stays where it is.

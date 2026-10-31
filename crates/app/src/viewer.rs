@@ -384,12 +384,16 @@ impl Viewer {
 
     /// Takes the viewer's keys before anything else sees them; call at the start of the frame.
     pub fn input(&mut self, ctx: &egui::Context) {
-        // Focus stays in the viewer (the filmstrip's thumbnails); nothing under it takes focus or acts on Enter or
-        // Space.
+        // Focus stays in the viewer (its controls, the filmstrip's thumbnails) and what lies above it; nothing under it
+        // takes focus or acts on Enter or Space. As the modal layer, Tab only moves focus among them (REQ-015-04).
+        ctx.memory_mut(|memory| memory.set_modal_layer(Self::layer()));
         let focused = ctx.memory(|memory| memory.focused());
-        let focus_inside = focused
-            .and_then(|id| ctx.read_response(id))
-            .is_some_and(|response| response.layer_id == Self::layer());
+        let focus_inside = focused.and_then(|id| ctx.read_response(id)).is_some_and(|response| {
+            response.layer_id == Self::layer()
+                || ctx.memory(|memory| {
+                    memory.top_modal_layer() == Some(Self::layer()) && memory.is_above_modal_layer(response.layer_id)
+                })
+        });
         if let Some(focused) = focused
             && !focus_inside
         {

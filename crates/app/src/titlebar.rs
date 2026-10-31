@@ -164,8 +164,9 @@ fn resize_handles(ctx: &egui::Context) {
     }
     for (direction, rect) in resize_handles_in(ctx.content_rect()) {
         let id = egui::Id::unique(("resize handle", direction as u8));
-        // Below menus and popups (`Foreground`), so items near the window's edge stay clickable.
-        let response = on_top(ctx, id, rect, egui::Order::Middle, egui::Sense::drag());
+        // Below menus and popups (`Foreground`), so items near the window's edge stay clickable; not focusable, so Tab
+        // skips them.
+        let response = on_top(ctx, id, rect, egui::Order::Middle, egui::Sense::DRAG);
         let cursor = match direction {
             D::North => C::ResizeNorth,
             D::South => C::ResizeSouth,
