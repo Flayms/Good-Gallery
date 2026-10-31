@@ -432,6 +432,29 @@ mod tests {
         assert!(in_progress.exists());
     }
 
+    /// REQ-005-13: a thumbnail held open for longer than a moment (Defender under load holds new files for seconds) is
+    /// still replaced.
+    #[cfg(windows)]
+    #[test]
+    fn req_005_13_replaces_a_thumbnail_held_open_for_seconds() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let cache = ThumbCache::open(dir.path().into(), 100);
+        let path = cache.path(&key(), 400);
+        cache.write(&path, b"webp").unwrap();
+        let held = std::fs::File::options().read(true).share_mode(1).open(&path).unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(2));
+            drop(held);
+        });
+
+        cache.write(&path, b"newer").unwrap();
+
+        release.join().unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"newer");
+        assert_eq!(files(dir.path()).len(), 1);
+    }
+
     /// A thumbnail held open for a moment (as Defender does with new files) is still replaced.
     #[cfg(windows)]
     #[test]
