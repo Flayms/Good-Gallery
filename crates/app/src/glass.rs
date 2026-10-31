@@ -48,6 +48,12 @@ fn backdrop_id() -> egui::Id {
     egui::Id::unique("glass backdrop")
 }
 
+/// Makes `ctx` paint glass as if the blur pass were installed (tests have no GPU).
+#[cfg(test)]
+pub(crate) fn pretend_installed(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.insert_temp(installed_id(), true));
+}
+
 fn installed_id() -> egui::Id {
     egui::Id::unique("glass installed")
 }
@@ -313,6 +319,35 @@ pub fn behind_frame<R>(ui: &mut egui::Ui, margin: egui::Margin, add: impl FnOnce
     if matches!(shape, Shape::Callback(_)) || ui.ctx().theme() != theme::palette().theme {
         ui.painter().set(glass_slot, shape);
         ui.painter().set(rim_slot, rim(rect, radius));
+    }
+    inner
+}
+
+/// Paints glass and the Rim behind an area that `add` shows with its own opaque frame, one that can't be framed from
+/// outside (egui_extras' date picker popup, REQ-013-03). The frame is the first shape on the area's `layer`; it gives
+/// way to its shadow, the glass (or Raised) and the Rim, in slots kept before `add`.
+pub fn behind_area<R>(ctx: &egui::Context, layer: egui::LayerId, add: impl FnOnce() -> R) -> R {
+    let painter = ctx.layer_painter(layer);
+    let shadow_slot = painter.add(Shape::Noop);
+    let glass_slot = painter.add(Shape::Noop);
+    let frame_slot = egui::layers::ShapeIdx(glass_slot.0 + 1);
+    let inner = add();
+    let shown = ctx.graphics(|graphics| graphics.get(layer).is_some_and(|list| list.next_idx().0 > frame_slot.0));
+    if shown && let Some(rect) = ctx.memory(|memory| memory.area_rect(layer.id)) {
+        let radius = f32::from(theme::RADIUS_PANEL);
+        let (glass, _) = place(
+            &painter,
+            Surface::new(rect, radius, theme::glass_panel()),
+            Source::Backdrop,
+        );
+        let shadow = ctx
+            .global_style()
+            .visuals
+            .popup_shadow
+            .as_shape(rect, theme::RADIUS_PANEL);
+        painter.set(shadow_slot, shadow);
+        painter.set(glass_slot, glass);
+        painter.set(frame_slot, rim(rect, radius));
     }
     inner
 }
