@@ -102,6 +102,11 @@ jobs:
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
+      # The verified downloads, which the script reuses: a download from SourceForge sometimes isn't the file.
+      - uses: actions/cache@v4
+        with:
+          path: target/helpers/downloads
+          key: helpers-${{ hashFiles('packaging/fetch-helpers.ps1') }}
       - name: Fetch exiftool, ffmpeg and libmpv
         shell: pwsh
         run: ./packaging/fetch-helpers.ps1

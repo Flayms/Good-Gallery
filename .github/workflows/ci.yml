@@ -56,10 +56,16 @@ jobs:
           # Only main saves the cache, which pull requests restore: saving takes a minute, and caches saved by pull
           # requests would push main's out of GitHub's 10 GB limit.
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      # The release script's tests (xtask/src/release.rs) run git-cliff; with CI set they fail without it.
+      # nextest runs the tests; the release script's tests (xtask/src/release.rs) run git-cliff, with CI set they fail
+      # without it.
       - uses: taiki-e/install-action@v2
         with:
           tool: git-cliff@2.14.2,cargo-nextest@0.9.150
+      # The verified downloads, which the script reuses: a download from SourceForge sometimes isn't the file.
+      - uses: actions/cache@v4
+        with:
+          path: target/helpers/downloads
+          key: helpers-${{ hashFiles('packaging/fetch-helpers.ps1') }}
       # The bundled exiftool and ffmpeg, so the indexing and thumbnail tests run instead of skipping. libmpv isn't
       # set: it needs the Vulkan loader, which the runner images may lack (the video tests skip without it).
       - name: Fetch exiftool, ffmpeg and libmpv

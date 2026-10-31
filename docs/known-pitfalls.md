@@ -33,6 +33,7 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 
 * **Screenshot of the real app:** `cargo run -p app -- --screenshot <file.png>` renders 3 frames, saves the window and exits. Save into the scratchpad, then look at the PNG. Snapshot tests: `cargo test -p app`; `UPDATE_SNAPSHOTS=1` rewrites `crates/app/tests/snapshots/*.png` (check the new PNG before committing it; `*.new.png` / `*.diff.png` are ignored).
 * **Snapshots must not depend on the machine.** `tests/common` pins the locale (`format::set_locale`) and the time zone (`domain::time_zone::set_fixed`, UTC) for every harness. Go through `domain::time_zone` instead of `chrono::Local` for anything shown, grouped or searched by day, or snapshots taken in Europe fail on the UTC CI runner.
+* **UI tests wait for background results, they don't count frames.** CI runs every test in its own process, several at once (nextest), so a loader thread may not answer within a few frames. `common::settle` waits for the jobs and the gallery's loads, again after the frame that asks for the items in view; a test that clicks a tile right after a few `run_steps` fails on a busy machine.
 
 ## libmpv
 
