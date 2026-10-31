@@ -99,7 +99,11 @@ pub fn harness_with_step(state: AppState, step_dt: f32) -> Harness<'static, AppS
 pub fn settle(harness: &mut Harness<'_, AppState>) {
     harness.run_steps(2);
     harness.state_mut().wait_for_jobs();
-    harness.run_steps(3);
+    // The frame after a new layout asks for the items in view; waiting for them too keeps a busy machine (tests in
+    // parallel processes) from showing tiles without their items.
+    harness.run_steps(1);
+    harness.state_mut().wait_for_jobs();
+    harness.run_steps(2);
 }
 
 /// A snapshot's name on this platform. Linux draws its own caption buttons and keeps less room for them (REQ-018-04),

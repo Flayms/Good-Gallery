@@ -1,0 +1,10 @@
+# cargo-nextest runs every test in its own process and the test binaries in parallel; CI uses it to cut the time the
+# tests take (docs/specs/014-ci-release). `cargo test --workspace` keeps working locally.
+
+[profile.ci]
+# Every test runs, so the uploaded diffs show all failing snapshots, not just the first one's.
+fail-fast = false
+# A hung test fails after 5 minutes instead of blocking the job until GitHub's 6-hour limit.
+slow-timeout = { period = "60s", terminate-after = 5 }
+# Failures again at the end, so they aren't lost between the parallel output.
+failure-output = "immediate-final"

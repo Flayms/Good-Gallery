@@ -35,11 +35,39 @@ fn ci_runs_every_check_on_main_and_pull_requests() {
         "cargo fmt --all --check",
         "cargo clippy --workspace --all-targets -- -D warnings",
         "cargo xtask check-specs",
-        "cargo test --workspace --no-fail-fast",
+        TESTS,
+        DOCTESTS,
     ] {
         assert!(commands.contains(&check), "ci.yml doesn't run {check}");
     }
     assert!(!ci.contains("continue-on-error"), "a failing check must fail the run");
+    // Every test runs, so the uploaded diffs show all failing snapshots.
+    let nextest = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.config/nextest.toml"))
+        .expect("can't read .config/nextest.toml");
+    assert!(nextest.contains("[profile.ci]") && nextest.contains("fail-fast = false"));
+}
+
+/// The tests in CI: nextest runs the test binaries in parallel, and cargo test the doctests nextest skips.
+const TESTS: &str = "cargo nextest run --workspace --profile ci";
+const DOCTESTS: &str = "cargo test --workspace --doc";
+
+/// REQ-014-01: only `main` saves the Rust cache. Pull requests restore it; their own caches would push it out.
+#[test]
+fn only_main_saves_the_rust_cache() {
+    for (name, save_if) in [
+        ("ci.yml", "save-if: ${{ github.ref == 'refs/heads/main' }}"),
+        // A tag's cache can't be restored by any other ref.
+        ("release.yml", "save-if: false"),
+    ] {
+        let workflow = workflow(name);
+        let caches = workflow.matches("uses: Swatinem/rust-cache@v2").count();
+        assert!(caches > 0, "{name} doesn't cache");
+        assert_eq!(
+            workflow.matches(save_if).count(),
+            caches,
+            "{name}: every rust-cache needs {save_if}"
+        );
+    }
 }
 
 /// REQ-014-01: a release commit pushed to `main` skips CI, since its tag's release run checks the same commit.
@@ -102,7 +130,7 @@ fn req_018_01_req_018_09_ci_and_the_release_cover_linux() {
     // The release the Linux snapshots were rendered on.
     assert!(tests.contains("container: ubuntu:26.04"));
     assert!(tests.contains("libimage-exiftool-perl ffmpeg libmpv2 mesa-vulkan-drivers"));
-    assert!(commands(tests).contains(&"cargo test --workspace --no-fail-fast"));
+    assert!(commands(tests).contains(&TESTS) && commands(tests).contains(&DOCTESTS));
     assert!(tests.contains("GG_REQUIRE_HELPERS: '1'"));
     // The ruleset on main requires "Lint" and "Test" (REQ-014-02): jobs of those names report every platform's result.
     for (name, needs) in [("Lint", "needs: [lint]"), ("Test", "needs: [test, test-linux, web]")] {
