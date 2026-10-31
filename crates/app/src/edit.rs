@@ -924,6 +924,17 @@ mod tests {
 
     const SIZE: u32 = 48;
 
+    /// A wgpu device, one test at a time: devices on parallel test threads crash the test process (lavapipe, WARP).
+    fn render_state() -> (std::sync::MutexGuard<'static, ()>, egui_wgpu::RenderState) {
+        static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let guard = GPU.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let render_state = egui_kittest::wgpu::create_render_state(
+            egui_kittest::wgpu::default_wgpu_setup(),
+            egui_wgpu::RendererOptions::default(),
+        );
+        (guard, render_state)
+    }
+
     /// Colors across the range, with a ramp, saturated and skin-like patches.
     fn pattern() -> image::RgbaImage {
         image::RgbaImage::from_fn(SIZE, SIZE, |x, y| {
@@ -1066,10 +1077,7 @@ mod tests {
     /// vignette included.
     #[test]
     fn req_021_02_req_021_06_the_gpu_preview_matches_the_cpu_render() {
-        let render_state = egui_kittest::wgpu::create_render_state(
-            egui_kittest::wgpu::default_wgpu_setup(),
-            egui_wgpu::RendererOptions::default(),
-        );
+        let (_gpu, render_state) = render_state();
         let image = pattern();
         for recipe in recipes() {
             let gpu = render_gpu(&render_state, &image, &recipe);
@@ -1136,10 +1144,7 @@ mod tests {
     /// REQ-021-08 (#69): _Discard_ ends editing after the frame's preview was queued; drawing it must still work.
     #[test]
     fn req_021_08_discarding_after_the_preview_was_queued_still_draws_it() {
-        let render_state = egui_kittest::wgpu::create_render_state(
-            egui_kittest::wgpu::default_wgpu_setup(),
-            egui_wgpu::RendererOptions::default(),
-        );
+        let (_gpu, render_state) = render_state();
         let (device, queue) = (&render_state.device, &render_state.queue);
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let size = [SIZE, SIZE];
