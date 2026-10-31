@@ -38,6 +38,7 @@ fn main() -> ExitCode {
         Some("dist") => report(dist::run(&args[1..])),
         Some("screenshots") => report(screenshots::run(&args[1..])),
         Some("release") => ExitCode::from(release::run(&args[1..])),
+        Some("release-notes") => ExitCode::from(release::run_notes(&args[1..])),
         Some("search-bench") => match search_bench::run(&args[1..]) {
             Ok(true) => ExitCode::SUCCESS,
             Ok(false) => ExitCode::FAILURE,
@@ -51,7 +52,7 @@ fn main() -> ExitCode {
         Some("web-test") => report(web::test(&args[1..])),
         _ => {
             eprintln!(
-                "usage: cargo xtask check-specs [--summary] | libraries … | thumbs … | gallery-bench … | search-bench … | release … | dist … | screenshots … | web [--debug] | web-test …"
+                "usage: cargo xtask check-specs [--summary] | libraries … | thumbs … | gallery-bench … | search-bench … | release … | release-notes <tag> … | dist … | screenshots … | web [--debug] | web-test …"
             );
             ExitCode::FAILURE
         }

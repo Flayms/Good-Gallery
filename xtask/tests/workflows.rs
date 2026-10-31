@@ -89,7 +89,7 @@ fn ci_leaves_release_commits_to_the_release_run() {
 }
 
 /// REQ-014-08, REQ-014-10: a version tag runs the checks, builds both downloads and publishes them, named after the
-/// system and the architecture, with the changelog's notes.
+/// system and the architecture, with the changelog's notes. REQ-014-11: and the changes of unpublished versions.
 #[test]
 fn release_publishes_both_downloads_after_the_checks() {
     let release = workflow("release.yml");
@@ -107,7 +107,17 @@ fn release_publishes_both_downloads_after_the_checks() {
         nsis.is_some_and(|nsis| nsis < dist.unwrap()),
         "release.yml doesn't install NSIS before cargo xtask dist"
     );
-    assert!(commands.iter().any(|line| line.starts_with("git-cliff --current")));
+    // REQ-014-11: the notes bring the changes of versions whose release run failed.
+    let published = commands
+        .iter()
+        .position(|line| line.starts_with("published=$(gh release list"));
+    let notes = commands
+        .iter()
+        .position(|line| line.starts_with("cargo xtask release-notes \"$TAG\" $published"));
+    assert!(
+        published.is_some_and(|published| notes.is_some_and(|notes| published < notes)),
+        "release.yml doesn't write the notes with cargo xtask release-notes and the published releases"
+    );
     let publish = &release[release.find("gh release create").expect("no gh release create")..];
     for part in [
         "good-gallery-$VERSION-windows-x64-setup.exe",
