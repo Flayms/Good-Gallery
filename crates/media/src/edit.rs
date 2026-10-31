@@ -4,11 +4,12 @@
 //! original first copies it into the library's backup folder; reverting moves the backup back.
 
 use crate::thumbnail::{decode_error, limits};
-use domain::edit::{MtimeOnSave, Params, Recipe, backup_rel_path, copy_name, dither};
+use domain::edit::{Mask, MtimeOnSave, Params, Recipe, backup_rel_path, copy_name, dither};
 use image::{DynamicImage, ImageDecoder as _, ImageReader, Rgba32FImage};
 use std::io::{Cursor, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 const JPEG_QUALITY: u8 = 95;
@@ -46,6 +47,8 @@ pub enum EditError {
     NoOriginal,
     #[error("the path leaves its library")]
     UnsafePath,
+    #[error("can't find the subject: {0}")]
+    Subject(String),
 }
 
 /// Writes exiftool's configuration for the `gg` namespace into `dir` (the app's data folder, not a shared temporary
@@ -72,6 +75,8 @@ pub struct SaveRequest {
     /// Save as a copy beside the file, or replace the file.
     pub copy: bool,
     pub mtime: MtimeOnSave,
+    /// The subject as the preview showed it, for a recipe with parts (REQ-022-05); found again without one.
+    pub subject: Option<Arc<Mask>>,
 }
 
 /// exiftool and its configuration for the `gg` namespace.
@@ -105,7 +110,7 @@ pub fn save(tools: &Tools, request: &SaveRequest) -> Result<String, EditError> {
     let temp = folder.join(format!(".{}.gg-edit.{}", file_name(&target_rel), format.extension()));
     let mut made_backup = None;
     let written = (|| {
-        let encoded = render_file(&source, &request.recipe, format)?;
+        let encoded = render_file(&source, &request.recipe, request.subject.as_deref(), format)?;
         write_synced(&temp, &encoded)?;
         // Replacing an unedited original: keep it first (REQ-021-10). A file already edited keeps its first backup;
         // a copy saved over has its source elsewhere.
@@ -359,8 +364,9 @@ fn is_lossless_webp(data: &[u8]) -> bool {
     false
 }
 
-/// Applies `params` to every pixel, on all cores. `size` is the photo's full size, which grain is measured in.
-pub fn render(params: &Params, image: &mut Rgba32FImage) {
+/// Applies `params` to every pixel, on all cores, the subject's and the background's own adjustments by `subject`
+/// (REQ-022-03).
+pub fn render(params: &Params, image: &mut Rgba32FImage, subject: Option<&Mask>) {
     let (width, height) = image.dimensions();
     let size = [width as f32, height as f32];
     let threads = std::thread::available_parallelism().map_or(1, usize::from);
@@ -373,7 +379,11 @@ pub fn render(params: &Params, image: &mut Rgba32FImage) {
                     let x = (i % width as usize) as f32;
                     let y = (chunk * rows_per_chunk + i / width as usize) as f32;
                     let uv = [(x + 0.5) / size[0], (y + 0.5) / size[1]];
-                    let [r, g, b] = params.pixel([pixel[0], pixel[1], pixel[2]], uv, size);
+                    let rgb = [pixel[0], pixel[1], pixel[2]];
+                    let [r, g, b] = match subject {
+                        Some(mask) => params.pixel_masked(rgb, uv, size, mask.sample(uv)),
+                        None => params.pixel(rgb, uv, size),
+                    };
                     pixel[..3].copy_from_slice(&[r, g, b]);
                 }
             });
@@ -382,11 +392,21 @@ pub fn render(params: &Params, image: &mut Rgba32FImage) {
 }
 
 /// The original at `source` with `recipe` applied, encoded as `format`.
-fn render_file(source: &Path, recipe: &Recipe, format: Format) -> Result<Vec<u8>, EditError> {
+fn render_file(source: &Path, recipe: &Recipe, subject: Option<&Mask>, format: Format) -> Result<Vec<u8>, EditError> {
     let data = std::fs::read(source)?;
     let mut decoded = decode(&data)?;
     drop(data);
-    render(&Params::new(recipe), &mut decoded.image);
+    let found;
+    let subject = match subject {
+        _ if !recipe.has_parts() => None,
+        Some(mask) => Some(mask),
+        None => {
+            let rgba = DynamicImage::ImageRgba32F(decoded.image.clone()).into_rgba8();
+            found = crate::subject::find(&rgba).map_err(EditError::Subject)?;
+            Some(&found)
+        }
+    };
+    render(&Params::new(recipe), &mut decoded.image, subject);
     encode(&decoded, format)
 }
 
@@ -588,6 +608,7 @@ mod tests {
                 recipe,
                 copy,
                 mtime: MtimeOnSave::Keep,
+                subject: None,
             }
         }
     }
@@ -780,6 +801,40 @@ mod tests {
         assert_eq!(image::open(lib.path(&written)).unwrap().into_rgb8(), gradient(64, 32));
     }
 
+    /// REQ-022-05: a recipe with parts renders them by the subject handed over, or by the subject found again.
+    #[test]
+    fn req_022_05_saving_applies_the_parts_by_the_subject() {
+        let mut recipe = Recipe::default();
+        Adjustment::Exposure.set(recipe.part_mut(domain::edit::Part::Subject), 1.0);
+        let params = Params::new(&recipe);
+        // Handed over: the right half is the subject.
+        let mut image = Rgba32FImage::from_pixel(4, 2, image::Rgba([0.4, 0.4, 0.4, 1.0]));
+        let mask = Mask::new(2, 1, vec![0.0, 1.0]).unwrap();
+        render(&params, &mut image, Some(&mask));
+        assert!((image.get_pixel(0, 0)[0] - 0.4).abs() < 1e-4);
+        assert!(image.get_pixel(3, 0)[0] > 0.5);
+
+        // Found again: a disc on a plain wall.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("disc.png");
+        let disc = image::RgbImage::from_fn(240, 180, |x, y| {
+            let (dx, dy) = (x as f32 - 120.0, y as f32 - 90.0);
+            if dx * dx + dy * dy < 45.0 * 45.0 {
+                image::Rgb([200, 70, 40])
+            } else {
+                image::Rgb([60, 80, 100])
+            }
+        });
+        disc.save(&path).unwrap();
+        let encoded = render_file(&path, &recipe, None, Format::of(&path).unwrap()).unwrap();
+        let saved = image::load_from_memory(&encoded).unwrap().into_rgb8();
+        assert!(
+            saved.get_pixel(120, 90)[1] > disc.get_pixel(120, 90)[1] + 20,
+            "the subject is brighter"
+        );
+        assert_eq!(saved.get_pixel(3, 3), disc.get_pixel(3, 3), "the background stays");
+    }
+
     #[test]
     fn req_021_13_smooth_gradients_dont_band_after_an_edit() {
         // A dark 16-bit ramp brightened a lot: without dithering, 8-bit output would show long flat steps.
@@ -792,7 +847,7 @@ mod tests {
         };
         let mut recipe = Recipe::default();
         Adjustment::Exposure.set(&mut recipe, 3.0);
-        render(&Params::new(&recipe), &mut decoded.image);
+        render(&Params::new(&recipe), &mut decoded.image, None);
         let image = quantize8(&decoded.image, false).into_rgb8();
         // Along a row, neighbouring rows differ: the steps are broken up.
         let differing = (0..1024)

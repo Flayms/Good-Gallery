@@ -83,3 +83,5 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | **Unedited original**    | The file an edit is rendered from: the photo itself, its backup once an edit replaced it, or the source of a copy. (code: `source`, `gg:EditSource`)                |
 | **Backup of the original** | The unedited original of a photo whose edit was saved over it, kept in `<library>/.good-gallery/originals/` (a housekeeping folder). _Revert to original_ puts it back. |
 | **Edited copy**          | A new file `<name> (edited).<ext>` beside the original, written by _Save as copy_.                                                                                  |
+| **Subject**              | What stands out in a photo, found by the app itself (salient object detection, spec 022). It and the **background** (everything else) can have light and color of their own. (code: `domain::edit::Part`, `Mask`) |
+| **Part**                 | What the panel's adjustments change: the whole _Photo_, its _Subject_ or its _Background_.                                                                         |

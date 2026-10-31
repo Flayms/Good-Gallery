@@ -7,7 +7,7 @@ use common::{Fixture, settle};
 use db::libraries::LibraryStatus;
 use db::rusqlite::Connection;
 use db::writer::{IndexWriter, IndexedFile};
-use domain::edit::{Adjustment, Channel, Recipe, SavedEdit};
+use domain::edit::{Adjustment, Channel, Part, Recipe, SavedEdit};
 use domain::media::{MediaKind, MediaMetadata};
 use eframe::egui::accesskit::Role;
 use eframe::egui::{self, Key, Modifiers};
@@ -239,13 +239,13 @@ fn req_021_18_the_curve_editor_shows_the_histogram() {
         session(&harness).unwrap().histogram().is_none(),
         "only with Curves open"
     );
+    // Light folded away, so the curve is in view.
+    harness.get_by_role_and_label(Role::Button, "Light").click();
+    harness.run_steps(2);
     harness.get_by_role_and_label(Role::Button, "Curves").click();
     harness.run_steps(2);
     let shown = session(&harness).unwrap().histogram().expect("a histogram").clone();
     assert!(shown.get(Channel::All).iter().sum::<u32>() > 0);
-    // Light folded away, so the curve is in view.
-    harness.get_by_role_and_label(Role::Button, "Light").click();
-    harness.run_steps(2);
     harness.snapshot(common::snapshot_name("edit_curves"));
 
     set_recipe(&mut harness, brighter());
@@ -471,4 +471,89 @@ fn req_021_16_a_failed_save_keeps_editing_open() {
     assert!(!session.saving && session.has_changes());
     assert_eq!(std::fs::read(dir.join("a.jpg")).unwrap(), before);
     assert!(!dir.join("a (edited).jpg").exists());
+}
+
+/// Replaces `a.jpg` with a red disc on a grey-blue wall, the same size, so it has a subject.
+fn disc_photo(dir: &Path) {
+    let disc = image::RgbImage::from_fn(120, 80, |x, y| {
+        let (dx, dy) = (x as f32 - 60.0, y as f32 - 40.0);
+        if dx * dx + dy * dy < 22.0 * 22.0 {
+            image::Rgb([220, 70, 40])
+        } else {
+            image::Rgb([70, 90, 110])
+        }
+    });
+    disc.save(dir.join("a.jpg")).unwrap();
+}
+
+/// REQ-022-01, REQ-022-02, REQ-022-04: _Subject_ looks for the subject, then offers light and color only for it, and
+/// _Show selection_ tints it; _Photo_ has everything again.
+#[test]
+fn req_022_01_req_022_02_req_022_04_edits_the_subject_found_in_the_photo() {
+    let fixture = Fixture::new();
+    let (mut harness, dir) = app(&fixture, None, None);
+    disc_photo(&dir);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    assert_eq!(session(&harness).unwrap().part(), Part::Photo);
+    assert!(
+        session(&harness).unwrap().subject().is_none(),
+        "only looked for when needed"
+    );
+
+    harness.get_by_role_and_label(Role::Button, "Subject").click();
+    harness.run_steps(2);
+    assert!(harness.query_by_label("Finding the subject…").is_some());
+    settle_all(&mut harness);
+    let found = session(&harness).unwrap().subject().expect("a subject");
+    assert!(found.sample([0.5, 0.5]) > 0.8 && found.sample([0.03, 0.05]) < 0.2);
+    // Light and color only.
+    assert!(harness.query_by_label("Exposure").is_some() && harness.query_by_label("Saturation").is_some());
+    assert!(harness.query_by_label("Curves").is_none() && harness.query_by_label("Effects").is_none());
+
+    let viewer = harness.state_mut().viewer.as_mut().unwrap();
+    let session = viewer.editing_mut().unwrap();
+    let mut recipe = session.recipe().clone();
+    Adjustment::Exposure.set(recipe.part_mut(Part::Subject), 1.5);
+    session.commit(recipe);
+    harness.get_by_role_and_label(Role::Button, "Show selection").click();
+    harness.run_steps(2);
+    harness.snapshot(common::snapshot_name("edit_subject"));
+    assert_eq!(
+        self::session(&harness)
+            .unwrap()
+            .recipe()
+            .part(Part::Subject)
+            .unwrap()
+            .exposure,
+        1.5
+    );
+    assert_eq!(
+        self::session(&harness).unwrap().recipe().exposure,
+        0.0,
+        "the photo's stays"
+    );
+
+    harness.get_by_role_and_label(Role::Button, "Photo").click();
+    harness.run_steps(2);
+    assert!(harness.query_by_label("Curves").is_some() && harness.query_by_label("Effects").is_some());
+}
+
+/// REQ-022-05: a photo saved with subject adjustments is edited again with them, and its subject is looked for again.
+#[test]
+fn req_022_05_edits_again_with_the_saved_parts() {
+    let fixture = Fixture::new();
+    let mut recipe = Recipe::default();
+    Adjustment::Shadows.set(recipe.part_mut(Part::Background), -40.0);
+    let edit = SavedEdit {
+        recipe: recipe.to_json(),
+        source: "a.jpg".into(),
+    };
+    let (mut harness, dir) = app(&fixture, Some(edit), None);
+    disc_photo(&dir);
+    open(&mut harness, "a.jpg");
+    edit_and_check(&mut harness, Some("a.jpg"), 0.0);
+    let session = session(&harness).unwrap();
+    assert_eq!(session.recipe().part(Part::Background).unwrap().shadows, -40.0);
+    assert!(session.subject().is_some(), "found again without choosing a part");
 }

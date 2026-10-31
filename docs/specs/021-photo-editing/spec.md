@@ -133,7 +133,7 @@ Users who find a photo that is too dark, has a color cast or lacks punch fix it 
 
 - Crop and rotate (#34), which will be more adjustments of the same edit.
 - Editing videos, GIFs and AVIF photos, raw files, and in the browser version.
-- Local adjustments (brushes, masks, gradients), presets, copying an edit to other photos, batch editing.
+- Local adjustments (brushes, masks, gradients; the subject and background of spec 022 aside), presets, copying an edit to other photos, batch editing.
 - Reading or writing other tools' edit settings (Lightroom's `crs:` tags, darktable's history); see the plan.
 - Managing backups of originals whose edited file was moved or deleted with other tools.
 

@@ -324,6 +324,12 @@ pub struct Recipe {
     pub vignette: f32,
     /// 0 to 100.
     pub vignette_midpoint: f32,
+    /// The subject's own light and color, on top of the rest (REQ-022-03); `None` while neutral.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<Box<Recipe>>,
+    /// The background's own light and color.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background: Option<Box<Recipe>>,
 }
 
 impl Default for Recipe {
@@ -346,6 +352,8 @@ impl Default for Recipe {
             grain_size: 25.0,
             vignette: 0.0,
             vignette_midpoint: 50.0,
+            subject: None,
+            background: None,
         }
     }
 }
@@ -358,6 +366,48 @@ impl Recipe {
             .filter(|adjustment| adjustment.changes_pixels())
             .all(|adjustment| adjustment.get(self) == adjustment.neutral())
             && self.curves.is_identity()
+            && [&self.subject, &self.background]
+                .into_iter()
+                .all(|part| part.as_ref().is_none_or(|part| part.is_neutral()))
+    }
+
+    /// The adjustments of `part`: the recipe itself for [`Part::Photo`], `None` for a part without any.
+    pub fn part(&self, part: Part) -> Option<&Recipe> {
+        match part {
+            Part::Photo => Some(self),
+            Part::Subject => self.subject.as_deref(),
+            Part::Background => self.background.as_deref(),
+        }
+    }
+
+    /// The adjustments of `part`, made neutral if it had none yet; [`Self::tidy`] drops them again while neutral.
+    pub fn part_mut(&mut self, part: Part) -> &mut Recipe {
+        match part {
+            Part::Photo => self,
+            Part::Subject => self.subject.get_or_insert_default(),
+            Part::Background => self.background.get_or_insert_default(),
+        }
+    }
+
+    /// Whether the subject or the background has adjustments of its own.
+    pub fn has_parts(&self) -> bool {
+        self.subject.is_some() || self.background.is_some()
+    }
+
+    /// Drops the parts that are neutral, and from the parts everything but light and color.
+    pub fn tidy(&mut self) {
+        for part in [&mut self.subject, &mut self.background] {
+            if let Some(recipe) = part {
+                let mut kept = Recipe::default();
+                for adjustment in Adjustment::ALL.into_iter().filter(|a| a.in_parts()) {
+                    adjustment.set(&mut kept, adjustment.get(recipe));
+                }
+                **recipe = kept;
+            }
+            if part.as_ref().is_some_and(|recipe| recipe.is_neutral()) {
+                *part = None;
+            }
+        }
     }
 
     /// Compact JSON, as stored in a saved file (`gg:EditRecipe`) and the index.
@@ -372,21 +422,95 @@ impl Recipe {
         if recipe.version > RECIPE_VERSION {
             return None;
         }
-        recipe.version = RECIPE_VERSION;
+        recipe.sanitize();
+        for part in [&mut recipe.subject, &mut recipe.background].into_iter().flatten() {
+            part.sanitize();
+        }
+        recipe.tidy();
+        Some(recipe)
+    }
+
+    fn sanitize(&mut self) {
+        self.version = RECIPE_VERSION;
         for adjustment in Adjustment::ALL {
-            let value = adjustment.get(&recipe);
+            let value = adjustment.get(self);
             let (low, high) = adjustment.range();
             let value = if value.is_finite() {
                 value.clamp(low, high)
             } else {
                 adjustment.neutral()
             };
-            adjustment.set(&mut recipe, value);
+            adjustment.set(self, value);
         }
         for channel in Channel::ALL {
-            recipe.curves.get_mut(channel).sanitize();
+            self.curves.get_mut(channel).sanitize();
         }
-        Some(recipe)
+    }
+}
+
+/// What the adjustments of the panel change: the whole photo, or only its subject or its background (REQ-022-01).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Part {
+    #[default]
+    Photo,
+    Subject,
+    Background,
+}
+
+impl Part {
+    pub const ALL: [Part; 3] = [Self::Photo, Self::Subject, Self::Background];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Photo => "Photo",
+            Self::Subject => "Subject",
+            Self::Background => "Background",
+        }
+    }
+}
+
+/// How much each spot of a photo belongs to its subject, 0 to 1, on a grid laid over the whole photo (REQ-022-03).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Mask {
+    width: u32,
+    height: u32,
+    values: Vec<f32>,
+}
+
+impl Mask {
+    /// `None` unless there are `width × height` values.
+    pub fn new(width: u32, height: u32, values: Vec<f32>) -> Option<Self> {
+        (width > 0 && height > 0 && values.len() == width as usize * height as usize).then_some(Self {
+            width,
+            height,
+            values,
+        })
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// Row by row from the top left.
+    pub fn values(&self) -> &[f32] {
+        &self.values
+    }
+
+    /// The value at `uv` (0–1 across the photo), bilinear between the grid's cell centers, as a GPU samples it.
+    pub fn sample(&self, uv: [f32; 2]) -> f32 {
+        let at = |c: f32, side: u32| (c * side as f32 - 0.5).clamp(0.0, (side - 1) as f32);
+        let (x, y) = (at(uv[0], self.width), at(uv[1], self.height));
+        let (x0, y0) = (x.floor() as u32, y.floor() as u32);
+        let (x1, y1) = ((x0 + 1).min(self.width - 1), (y0 + 1).min(self.height - 1));
+        let (tx, ty) = (x - x0 as f32, y - y0 as f32);
+        let value = |x: u32, y: u32| self.values[(y * self.width + x) as usize];
+        let top = value(x0, y0) * (1.0 - tx) + value(x1, y0) * tx;
+        let bottom = value(x0, y1) * (1.0 - tx) + value(x1, y1) * tx;
+        top * (1.0 - ty) + bottom * ty
     }
 }
 
@@ -499,6 +623,11 @@ impl Adjustment {
             Self::VignetteMidpoint => 50.0,
             _ => 0.0,
         }
+    }
+
+    /// Whether the subject and the background have it of their own: light and color (REQ-022-01).
+    pub fn in_parts(self) -> bool {
+        matches!(self.section(), Section::Light | Section::Color)
     }
 
     /// False for the shape of an effect (grain size, vignette midpoint), which alone changes nothing.
@@ -636,6 +765,9 @@ pub struct Params {
     pub grain_cell: f32,
     /// The curves, all channels composed into one table per channel; `None` for straight curves.
     pub curves: Option<Vec<[f32; 3]>>,
+    /// The subject's and the background's own numbers (REQ-022-03).
+    pub subject: Option<Box<Params>>,
+    pub background: Option<Box<Params>>,
 }
 
 impl Params {
@@ -665,13 +797,31 @@ impl Params {
             grain: recipe.grain / 100.0,
             grain_cell: 1.0 + recipe.grain_size / 100.0 * 3.0,
             curves,
+            subject: recipe.subject.as_deref().map(|part| Box::new(Self::new(part))),
+            background: recipe.background.as_deref().map(|part| Box::new(Self::new(part))),
         }
     }
 
     /// One pixel: `rgb` as stored (sRGB-encoded, 0–1), at `uv` (0–1 across the photo) of a photo `size` pixels large
     /// at full resolution. Returns encoded values in 0–1.
     pub fn pixel(&self, rgb: [f32; 3], uv: [f32; 2], size: [f32; 2]) -> [f32; 3] {
-        let mut lin = self.light(rgb);
+        let lin = self.develop(rgb.map(to_linear));
+        self.finish(lin, uv, size)
+    }
+
+    /// [`Self::pixel`] with the subject's and the background's own adjustments, `subject` being how much the pixel
+    /// belongs to the subject (REQ-022-03).
+    pub fn pixel_masked(&self, rgb: [f32; 3], uv: [f32; 2], size: [f32; 2], subject: f32) -> [f32; 3] {
+        let lin = self.develop(rgb.map(to_linear));
+        let part = |params: &Option<Box<Params>>| params.as_ref().map_or(lin, |params| params.develop(lin));
+        let (inside, outside) = (part(&self.subject), part(&self.background));
+        let lin = std::array::from_fn(|c| outside[c] + (inside[c] - outside[c]) * subject);
+        self.finish(lin, uv, size)
+    }
+
+    /// White balance, exposure, tone, curves and chroma, on linear light.
+    fn develop(&self, lin: [f32; 3]) -> [f32; 3] {
+        let mut lin = self.light(lin);
         if let Some(table) = &self.curves {
             for (i, c) in lin.iter_mut().enumerate() {
                 *c = to_linear(lookup(table, i, to_encoded(c.max(0.0)).min(1.0)));
@@ -680,6 +830,11 @@ impl Params {
         if self.saturation != 0.0 || self.vibrance != 0.0 {
             lin = self.chroma(lin);
         }
+        lin
+    }
+
+    /// Vignette and grain, over the whole photo; returns encoded values in 0–1.
+    fn finish(&self, mut lin: [f32; 3], uv: [f32; 2], size: [f32; 2]) -> [f32; 3] {
         if self.vignette != 0.0 {
             let (u, v) = ((uv[0] - 0.5) * 2.0, (uv[1] - 0.5) * 2.0);
             let r = (u * u + v * v).sqrt() / std::f32::consts::SQRT_2;
@@ -699,8 +854,7 @@ impl Params {
     }
 
     /// White balance, exposure and tone: the steps before the curves, on linear light.
-    fn light(&self, rgb: [f32; 3]) -> [f32; 3] {
-        let mut lin = rgb.map(to_linear);
+    fn light(&self, mut lin: [f32; 3]) -> [f32; 3] {
         // White balance and exposure: multiplications on linear light.
         for (c, gain) in lin.iter_mut().zip(self.gains) {
             *c *= gain * self.exposure;
@@ -719,7 +873,7 @@ impl Params {
     pub fn histogram(&self, pixels: impl Iterator<Item = [f32; 3]>) -> Histogram {
         let mut histogram = Histogram::default();
         for rgb in pixels {
-            for (c, value) in self.light(rgb).into_iter().enumerate() {
+            for (c, value) in self.light(rgb.map(to_linear)).into_iter().enumerate() {
                 let value = to_encoded(value.max(0.0)).min(1.0);
                 let bin = ((value * HISTOGRAM_BINS as f32) as usize).min(HISTOGRAM_BINS - 1);
                 histogram.channels[c][bin] += 1;
@@ -1034,6 +1188,79 @@ mod tests {
         let mut curved = Recipe::default();
         curved.curves.all.add_point(0.25, 0.6);
         assert_eq!(Params::new(&curved).histogram(pixels.iter().copied()), histogram);
+    }
+
+    #[test]
+    fn req_022_03_parts_change_only_their_part_on_top_of_the_photo() {
+        let rgb = [0.6, 0.3, 0.2];
+        let photo = with(Adjustment::Exposure, 0.5);
+        let mut recipe = photo.clone();
+        Adjustment::Exposure.set(recipe.part_mut(Part::Subject), 1.0);
+        Adjustment::Saturation.set(recipe.part_mut(Part::Background), -100.0);
+        assert!(!recipe.is_neutral());
+        let params = Params::new(&recipe);
+        let whole = render(&photo, rgb);
+
+        // The subject: the photo's exposure, then its own.
+        let subject = params.pixel_masked(rgb, MID, SIZE, 1.0);
+        assert!(
+            (to_linear(subject[1]) - 2.0 * to_linear(whole[1])).abs() < 1e-3,
+            "{subject:?}"
+        );
+        // The background: grey, at the photo's exposure.
+        let background = params.pixel_masked(rgb, MID, SIZE, 0.0);
+        assert!((background[0] - background[2]).abs() < 1e-3, "{background:?}");
+        // Across the edge, in between.
+        let edge = params.pixel_masked(rgb, MID, SIZE, 0.5);
+        assert!(edge[1] > background[1] && edge[1] < subject[1]);
+        // Without a mask, the photo alone.
+        assert!(close(params.pixel(rgb, MID, SIZE), whole));
+
+        // Parts at 0 change nothing and aren't kept.
+        let mut neutral = Recipe::default();
+        Adjustment::Contrast.set(neutral.part_mut(Part::Subject), 0.0);
+        neutral.tidy();
+        assert_eq!(neutral, Recipe::default());
+        assert!(close(
+            Params::new(&neutral).pixel_masked(rgb, MID, SIZE, 1.0),
+            render(&neutral, rgb)
+        ));
+        // Only light and color have parts.
+        assert!(Adjustment::Exposure.in_parts() && Adjustment::Tint.in_parts());
+        assert!(!Adjustment::Grain.in_parts() && !Adjustment::Vignette.in_parts());
+    }
+
+    #[test]
+    fn req_022_03_the_mask_fades_across_the_subjects_edge() {
+        let mask = Mask::new(2, 1, vec![0.0, 1.0]).unwrap();
+        assert_eq!(mask.sample([0.25, 0.5]), 0.0);
+        assert_eq!(mask.sample([0.75, 0.5]), 1.0);
+        assert!((mask.sample([0.5, 0.5]) - 0.5).abs() < 1e-6);
+        assert_eq!(mask.sample([-1.0, 2.0]), 0.0);
+        assert!(Mask::new(2, 2, vec![0.0]).is_none());
+    }
+
+    #[test]
+    fn req_022_05_parts_are_saved_with_the_recipe() {
+        let mut recipe = Recipe::default();
+        Adjustment::Shadows.set(recipe.part_mut(Part::Subject), 40.0);
+        Adjustment::Temperature.set(recipe.part_mut(Part::Background), -20.0);
+        let json = recipe.to_json();
+        assert_eq!(Recipe::from_json(&json), Some(recipe.clone()));
+        // Older recipes have none.
+        let old = Recipe::from_json(r#"{"version":1,"exposure":0.5}"#).unwrap();
+        assert!(old.part(Part::Subject).is_none() && !old.has_parts());
+        // A hostile part: only light and color are kept, no nested parts; a neutral one is dropped.
+        let hostile = Recipe::from_json(
+            r#"{"subject":{"exposure":9,"grain":50,"curves":{"all":[[0,0],[0.5,0.9],[1,1]]},
+                "subject":{"exposure":1}},"background":{"vignette":-50}}"#,
+        )
+        .unwrap();
+        let subject = hostile.part(Part::Subject).unwrap();
+        assert_eq!(subject.exposure, 5.0);
+        assert_eq!(subject.grain, 0.0);
+        assert!(subject.curves.is_identity() && !subject.has_parts());
+        assert!(hostile.part(Part::Background).is_none());
     }
 
     #[test]

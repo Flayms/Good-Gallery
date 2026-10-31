@@ -6,11 +6,13 @@
 use crate::icons::Icon;
 use crate::theme;
 use domain::edit::{
-    Adjustment, CURVE_SAMPLES, Channel, HISTOGRAM_BINS, Histogram, History, Params, Recipe, SavedEdit, Section,
+    Adjustment, CURVE_SAMPLES, Channel, HISTOGRAM_BINS, Histogram, History, Mask, Params, Part, Recipe, SavedEdit,
+    Section,
 };
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2, pos2, vec2};
 use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, ScreenDescriptor, wgpu};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
 /// The small copy for the white balance picker and the CPU preview.
@@ -47,6 +49,8 @@ pub struct SaveEdit {
     pub source: String,
     pub recipe: Recipe,
     pub copy: bool,
+    /// The subject the preview showed, for a recipe with parts (REQ-022-05).
+    pub subject: Option<Arc<Mask>>,
 }
 
 /// Where the user wanted to go when editing had unsaved changes (REQ-021-08).
@@ -81,8 +85,18 @@ struct Loaded {
     /// editing ends: a frame's queued preview may still draw it (#69); wgpu frees it with its last view.
     view: Option<wgpu::TextureView>,
     small: image::RgbaImage,
-    /// The CPU preview and the recipe it shows.
-    cpu: Option<(Recipe, egui::TextureHandle)>,
+    /// The CPU preview, and the recipe and the flags it shows.
+    cpu: Option<(Recipe, u32, egui::TextureHandle)>,
+}
+
+/// The photo's subject (REQ-022-02).
+enum Subject {
+    /// Not looked for yet.
+    Unknown,
+    Finding(Receiver<Result<Mask, String>>),
+    /// Found, with its texture for the preview.
+    Found(Arc<Mask>, Option<wgpu::TextureView>),
+    Failed(String),
 }
 
 enum Base {
@@ -109,6 +123,11 @@ pub struct EditSession {
     picking: bool,
     /// The histogram behind the curve and the steps before the curves it was counted with (REQ-021-18).
     histogram: Option<(Recipe, Histogram)>,
+    /// The part the panel's light and color change (REQ-022-01).
+    part: Part,
+    subject: Subject,
+    /// Tint the chosen part in the preview (REQ-022-04).
+    show_selection: bool,
     pub dialog: Option<Dialog>,
     pub saving: bool,
     render_state: Option<egui_wgpu::RenderState>,
@@ -129,6 +148,9 @@ impl EditSession {
             dragging_point: None,
             picking: false,
             histogram: None,
+            part: Part::Photo,
+            subject: Subject::Unknown,
+            show_selection: false,
             dialog: None,
             saving: false,
             render_state,
@@ -167,8 +189,25 @@ impl EditSession {
         self.base = Base::Loading(rx);
     }
 
-    /// Applies a finished load. Call once per frame.
+    /// Applies a finished load or search for the subject. Call once per frame.
     pub fn poll(&mut self) {
+        if let Subject::Finding(rx) = &self.subject
+            && let Ok(result) = rx.try_recv()
+        {
+            self.subject = match result {
+                Ok(mask) => {
+                    let view = self
+                        .render_state
+                        .as_ref()
+                        .map(|render_state| upload_mask(render_state, &mask));
+                    Subject::Found(Arc::new(mask), view)
+                }
+                Err(error) => {
+                    tracing::warn!("can't find the subject: {error}");
+                    Subject::Failed(error)
+                }
+            };
+        }
         let Base::Loading(rx) = &self.base else { return };
         let Ok(result) = rx.try_recv() else { return };
         match result {
@@ -178,6 +217,10 @@ impl EditSession {
                 self.draft = recipe.clone();
                 self.saved = recipe;
                 self.base = Base::Loaded(Box::new(loaded));
+                // Saved with parts: they need the subject again (REQ-022-05).
+                if self.draft.has_parts() {
+                    self.find_subject();
+                }
             }
             Err(error) => {
                 tracing::warn!("can't load the original to edit: {error}");
@@ -186,7 +229,7 @@ impl EditSession {
         }
     }
 
-    /// Waits until the original has loaded or failed (tests).
+    /// Waits until the original has loaded or failed, and the subject was found or not if it is looked for (tests).
     pub fn wait(&mut self) {
         if let Base::Loading(rx) = &self.base
             && let Ok(result) = rx.recv()
@@ -196,6 +239,70 @@ impl EditSession {
             self.base = Base::Loading(rx);
         }
         self.poll();
+        if let Subject::Finding(rx) = &self.subject
+            && let Ok(result) = rx.recv()
+        {
+            let (tx, rx) = channel();
+            let _ = tx.send(result);
+            self.subject = Subject::Finding(rx);
+        }
+        self.poll();
+    }
+
+    /// Starts looking for the subject in the original, once (REQ-022-02).
+    fn find_subject(&mut self) {
+        let (Subject::Unknown, Base::Loaded(loaded)) = (&self.subject, &self.base) else {
+            return;
+        };
+        let (tx, rx) = channel();
+        let small = loaded.small.clone();
+        let job = move || {
+            let _ = tx.send(find(&small));
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        std::thread::Builder::new()
+            .name("find subject".into())
+            .spawn(job)
+            .expect("can't start a thread");
+        #[cfg(target_arch = "wasm32")]
+        job();
+        self.subject = Subject::Finding(rx);
+    }
+
+    /// The part the panel changes.
+    pub fn part(&self) -> Part {
+        self.part
+    }
+
+    /// Chooses the part the panel changes, and looks for the subject the first time it is needed (REQ-022-01).
+    pub fn choose_part(&mut self, part: Part) {
+        if part != self.part {
+            self.show_selection = false;
+        }
+        self.part = part;
+        if part != Part::Photo {
+            self.find_subject();
+        }
+    }
+
+    /// The subject, once found.
+    pub fn subject(&self) -> Option<&Mask> {
+        match &self.subject {
+            Subject::Found(mask, _) => Some(mask),
+            _ => None,
+        }
+    }
+
+    /// Whether looking for the subject failed.
+    pub fn subject_failed(&self) -> Option<&str> {
+        match &self.subject {
+            Subject::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    pub fn set_show_selection(&mut self, show: bool) {
+        self.show_selection = show && self.part != Part::Photo;
     }
 
     pub fn is_loaded(&self) -> bool {
@@ -255,7 +362,8 @@ impl EditSession {
     }
 
     /// Sets the recipe and records it for undo.
-    pub fn commit(&mut self, recipe: Recipe) {
+    pub fn commit(&mut self, mut recipe: Recipe) {
+        recipe.tidy();
         self.draft = recipe.clone();
         self.history.push(recipe);
     }
@@ -281,6 +389,10 @@ impl EditSession {
             source: self.source.clone()?,
             recipe: self.draft.clone(),
             copy,
+            subject: match &self.subject {
+                Subject::Found(mask, _) if self.draft.has_parts() => Some(mask.clone()),
+                _ => None,
+            },
         })
     }
 
@@ -352,6 +464,18 @@ impl EditSession {
             return false;
         };
         let ctx = ui.ctx();
+        let (mask, mask_view) = match &self.subject {
+            Subject::Found(mask, view) => (Some(mask.as_ref()), view.clone()),
+            _ => (None, None),
+        };
+        // Parts by the mask (4); the selection tinted (8), the background's (16) (REQ-022-03, REQ-022-04).
+        let mut flags = u32::from(compare);
+        if mask.is_some() {
+            flags |= 4;
+            if self.show_selection {
+                flags |= 8 | if self.part == Part::Background { 16 } else { 0 };
+            }
+        }
         if let (Some(view), Some(render_state)) = (&loaded.view, &self.render_state)
             && render_state
                 .renderer
@@ -362,14 +486,14 @@ impl EditSession {
             let ppp = ctx.pixels_per_point();
             let shown = rect.intersect(clip);
             if shown.is_positive() {
-                let flags = f32::from(u8::from(compare)) + if render_state.target_format.is_srgb() { 2.0 } else { 0.0 };
+                let flags = flags | if render_state.target_format.is_srgb() { 2 } else { 0 };
                 let uniform = uniform(
                     &Params::new(&self.draft),
                     [rect.min.x * ppp, rect.min.y * ppp, rect.max.x * ppp, rect.max.y * ppp],
                     [uv.min.x, uv.min.y, uv.max.x, uv.max.y],
                     self.target.full_size.map(|side| side as f32),
                     opacity,
-                    flags,
+                    flags as f32,
                 );
                 ui.painter()
                     .with_clip_rect(clip)
@@ -377,6 +501,7 @@ impl EditSession {
                         shown,
                         PreviewCallback {
                             view: view.clone(),
+                            mask: mask_view,
                             uniform,
                             group: std::sync::OnceLock::new(),
                         },
@@ -386,20 +511,25 @@ impl EditSession {
         }
         // Without a wgpu renderer: the small copy, rendered on the CPU when the recipe changed.
         let recipe = if compare { Recipe::default() } else { self.draft.clone() };
-        if loaded.cpu.as_ref().is_none_or(|(shown, _)| *shown != recipe) {
-            let image = cpu_preview(&loaded.small, &recipe, self.target.full_size);
+        if loaded
+            .cpu
+            .as_ref()
+            .is_none_or(|(shown, shown_flags, _)| *shown != recipe || *shown_flags != flags)
+        {
+            let image = cpu_preview(&loaded.small, &recipe, self.target.full_size, mask, flags);
             match &mut loaded.cpu {
-                Some((shown, handle)) => {
+                Some((shown, shown_flags, handle)) => {
                     handle.set(image, egui::TextureOptions::LINEAR);
                     *shown = recipe;
+                    *shown_flags = flags;
                 }
                 None => {
                     let handle = ctx.load_texture("edit preview", image, egui::TextureOptions::LINEAR);
-                    loaded.cpu = Some((recipe, handle));
+                    loaded.cpu = Some((recipe, flags, handle));
                 }
             }
         }
-        if let Some((_, handle)) = &loaded.cpu {
+        if let Some((_, _, handle)) = &loaded.cpu {
             ui.painter()
                 .with_clip_rect(clip)
                 .image(handle.id(), rect, uv, Color32::WHITE.gamma_multiply(opacity));
@@ -512,7 +642,14 @@ impl EditSession {
 
     fn sections(&mut self, ui: &mut egui::Ui) {
         ui.spacing_mut().item_spacing.y = 4.0;
+        if !self.parts(ui) {
+            return;
+        }
         for (i, section) in Section::ALL.into_iter().enumerate() {
+            // The subject and the background have light and color only (REQ-022-01).
+            if self.part != Part::Photo && matches!(section, Section::Curves | Section::Effects) {
+                continue;
+            }
             let open = &mut self.open[i];
             let icon = if *open { Icon::ChevronDown } else { Icon::ChevronRight };
             let header = ui.add(
@@ -535,7 +672,7 @@ impl EditSession {
             if section == Section::Curves {
                 self.curves(ui);
             } else {
-                if section == Section::Color {
+                if section == Section::Color && self.part == Part::Photo {
                     let picking = self.picking;
                     let button =
                         egui::Button::image_and_text(Icon::Pipette.small(), "Pick a neutral spot").selected(picking);
@@ -554,12 +691,60 @@ impl EditSession {
         }
     }
 
+    /// The switch between the photo, its subject and its background, and the state of finding the subject
+    /// (REQ-022-01, REQ-022-02, REQ-022-04). False while the chosen part's sliders can't be shown yet.
+    fn parts(&mut self, ui: &mut egui::Ui) -> bool {
+        ui.horizontal(|ui| {
+            for part in Part::ALL {
+                let response = ui.add(egui::Button::selectable(self.part == part, part.label()));
+                if response.clicked() {
+                    self.choose_part(part);
+                }
+            }
+        });
+        ui.add_space(4.0);
+        if self.part == Part::Photo {
+            ui.add_space(4.0);
+            return true;
+        }
+        let ready = match &self.subject {
+            Subject::Unknown | Subject::Finding(_) => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Finding the subject…");
+                });
+                false
+            }
+            Subject::Failed(_) => {
+                ui.add(egui::Label::new("No subject found in this photo. You can still edit the whole photo.").wrap());
+                false
+            }
+            Subject::Found(..) => {
+                let shown = self.show_selection;
+                let button = egui::Button::new("Show selection").selected(shown);
+                let response = ui.add(button).on_hover_text("Tint the part these adjustments change");
+                let label = "Show selection";
+                response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, shown, label));
+                if response.clicked() {
+                    self.set_show_selection(!shown);
+                }
+                true
+            }
+        };
+        ui.add_space(8.0);
+        ready
+    }
+
     /// One adjustment: its name and value, and a slider. A double-click resets it (REQ-021-07).
     fn slider(&mut self, ui: &mut egui::Ui, adjustment: Adjustment) {
         // Clear of the scroll bar, which floats over the content.
         let width = ui.available_width() - SCROLL_BAR_ROOM;
         let (row, _) = ui.allocate_exact_size(vec2(width, ROW_HEIGHT + SLIDER_HEIGHT), egui::Sense::hover());
-        let value = adjustment.get(&self.draft);
+        let part = self.part;
+        let value = self
+            .draft
+            .part(part)
+            .map_or(adjustment.neutral(), |recipe| adjustment.get(recipe));
         let text = if adjustment == Adjustment::Exposure {
             format!("{value:+.2}")
         } else if value == 0.0 || !matches!(adjustment.range().0, x if x < 0.0) {
@@ -598,12 +783,12 @@ impl EditSession {
         );
         if response.double_clicked() {
             let mut recipe = self.draft.clone();
-            adjustment.set(&mut recipe, adjustment.neutral());
+            adjustment.set(recipe.part_mut(part), adjustment.neutral());
             self.commit(recipe);
             return;
         }
         if response.changed() {
-            adjustment.set(&mut self.draft, current as f32);
+            adjustment.set(self.draft.part_mut(part), current as f32);
         }
         // One undo step per finished drag, click or key press.
         if response.drag_stopped() || response.clicked() || (response.changed() && !response.dragged()) {
@@ -788,8 +973,14 @@ fn load(
     Err("editing isn't available here".into())
 }
 
-/// `small` through `recipe`, on the CPU.
-fn cpu_preview(small: &image::RgbaImage, recipe: &Recipe, full_size: [u32; 2]) -> egui::ColorImage {
+/// `small` through `recipe`, on the CPU, with the shader's `flags` (but 2: the output is encoded).
+fn cpu_preview(
+    small: &image::RgbaImage,
+    recipe: &Recipe,
+    full_size: [u32; 2],
+    mask: Option<&Mask>,
+    flags: u32,
+) -> egui::ColorImage {
     let params = Params::new(recipe);
     let (width, height) = small.dimensions();
     let size = full_size.map(|side| side.max(1) as f32);
@@ -797,24 +988,61 @@ fn cpu_preview(small: &image::RgbaImage, recipe: &Recipe, full_size: [u32; 2]) -
     for (x, y, pixel) in small.enumerate_pixels() {
         let uv = [(x as f32 + 0.5) / width as f32, (y as f32 + 0.5) / height as f32];
         let rgb = [pixel[0], pixel[1], pixel[2]].map(|c| f32::from(c) / 255.0);
-        let out = params.pixel(rgb, uv, size);
+        let subject = mask.map_or(0.0, |mask| mask.sample(uv));
+        let mut out = match mask {
+            _ if flags & 1 != 0 => rgb,
+            Some(_) if flags & 4 != 0 => params.pixel_masked(rgb, uv, size, subject),
+            _ => params.pixel(rgb, uv, size),
+        };
+        if flags & 8 != 0 {
+            let selected = if flags & 16 != 0 { 1.0 - subject } else { subject };
+            out = tint(out, selected);
+        }
         rgba.extend(out.map(|c| (c * 255.0).round() as u8));
         rgba.push(pixel[3]);
     }
     egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &rgba)
 }
 
+/// The selection's tint (REQ-022-04): towards red by how much a pixel is `selected`, as `edit.wgsl` does.
+fn tint(rgb: [f32; 3], selected: f32) -> [f32; 3] {
+    let red = [1.0, 0.25, 0.25];
+    std::array::from_fn(|c| rgb[c] + (red[c] - rgb[c]) * 0.45 * selected)
+}
+
+/// One part's light and color in the shader's order: gains times exposure and `on`, tone, color.
+fn part_floats(params: &Params, on: f32) -> [f32; 12] {
+    let [r, g, b] = params.gains.map(|gain| gain * params.exposure);
+    [
+        r,
+        g,
+        b,
+        on,
+        params.black,
+        params.white,
+        params.shadows,
+        params.highlights,
+        params.contrast,
+        params.saturation,
+        params.vibrance,
+        params.brightness,
+    ]
+}
+
 /// The shader's uniform: `edit.wgsl`'s `Edit`, in its order.
 fn uniform(params: &Params, rect: [f32; 4], uv: [f32; 4], full_size: [f32; 2], opacity: f32, flags: f32) -> Vec<f32> {
-    let mut floats = Vec::with_capacity(28 + CURVE_SAMPLES * 4);
+    let mut floats = Vec::with_capacity(52 + CURVE_SAMPLES * 4);
     floats.extend_from_slice(&rect);
     floats.extend_from_slice(&uv);
     floats.extend_from_slice(&[full_size[0], full_size[1], opacity, flags]);
-    let [r, g, b] = params.gains.map(|gain| gain * params.exposure);
-    floats.extend_from_slice(&[r, g, b, f32::from(u8::from(params.curves.is_some()))]);
-    floats.extend_from_slice(&[params.black, params.white, params.shadows, params.highlights]);
-    floats.extend_from_slice(&[params.contrast, params.saturation, params.vibrance, params.brightness]);
+    floats.extend_from_slice(&part_floats(params, f32::from(u8::from(params.curves.is_some()))));
     floats.extend_from_slice(&[params.vignette, params.vignette_start, params.grain, params.grain_cell]);
+    for part in [&params.subject, &params.background] {
+        match part {
+            Some(part) => floats.extend_from_slice(&part_floats(part, 1.0)),
+            None => floats.extend_from_slice(&[0.0; 12]),
+        }
+    }
     for i in 0..CURVE_SAMPLES {
         let [r, g, b] = params.curves.as_ref().map_or([0.0; 3], |table| table[i]);
         floats.extend_from_slice(&[r, g, b, 0.0]);
@@ -826,6 +1054,8 @@ struct EditResources {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    /// The mask while there is no subject: nothing is.
+    no_subject: wgpu::TextureView,
 }
 
 impl EditResources {
@@ -860,6 +1090,16 @@ impl EditResources {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
                         min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
                     count: None,
                 },
@@ -902,14 +1142,22 @@ impl EditResources {
             mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
+        let no_subject = mask_texture(device, 1, 1).create_view(&wgpu::TextureViewDescriptor::default());
         Self {
             pipeline,
             layout,
             sampler,
+            no_subject,
         }
     }
 
-    fn bind(&self, device: &wgpu::Device, view: &wgpu::TextureView, uniform: &[f32]) -> wgpu::BindGroup {
+    fn bind(
+        &self,
+        device: &wgpu::Device,
+        view: &wgpu::TextureView,
+        mask: Option<&wgpu::TextureView>,
+        uniform: &[f32],
+    ) -> wgpu::BindGroup {
         let buffer = wgpu::util::DeviceExt::create_buffer_init(
             device,
             &wgpu::util::BufferInitDescriptor {
@@ -934,9 +1182,73 @@ impl EditResources {
                     binding: 2,
                     resource: buffer.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(mask.unwrap_or(&self.no_subject)),
+                },
             ],
         })
     }
+}
+
+/// A one-channel texture for a subject's mask, zeroed.
+fn mask_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("subject"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::R8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    })
+}
+
+/// The subject's mask as a texture the preview samples like the photo.
+fn upload_mask(render_state: &egui_wgpu::RenderState, mask: &Mask) -> wgpu::TextureView {
+    let (width, height) = (mask.width(), mask.height());
+    let texture = mask_texture(&render_state.device, width, height);
+    let bytes: Vec<u8> = mask
+        .values()
+        .iter()
+        .map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+        .collect();
+    render_state.queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        &bytes,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(width),
+            rows_per_image: Some(height),
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+/// Looks for the subject of `photo` (REQ-022-02).
+#[cfg(not(target_arch = "wasm32"))]
+fn find(photo: &image::RgbaImage) -> Result<Mask, String> {
+    media::subject::find(photo)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn find(_photo: &image::RgbaImage) -> Result<Mask, String> {
+    Err("not available here".into())
 }
 
 /// Installs the preview's pipeline into the egui renderer. Call once at startup.
@@ -947,6 +1259,8 @@ pub fn install(render_state: &egui_wgpu::RenderState) {
 
 struct PreviewCallback {
     view: wgpu::TextureView,
+    /// The subject's mask, if found.
+    mask: Option<wgpu::TextureView>,
     uniform: Vec<f32>,
     /// Made in `prepare`; dropped with the frame, so the photo's texture isn't kept alive after editing ends.
     group: std::sync::OnceLock<wgpu::BindGroup>,
@@ -962,7 +1276,9 @@ impl CallbackTrait for PreviewCallback {
         resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         if let Some(res) = resources.get::<EditResources>() {
-            let _ = self.group.set(res.bind(device, &self.view, &self.uniform));
+            let _ = self
+                .group
+                .set(res.bind(device, &self.view, self.mask.as_ref(), &self.uniform));
         }
         Vec::new()
     }
@@ -1044,7 +1360,13 @@ mod tests {
     }
 
     /// Renders `image` through `recipe` with the shader, at 1:1, and reads it back.
-    fn render_gpu(render_state: &egui_wgpu::RenderState, image: &image::RgbaImage, recipe: &Recipe) -> Vec<u8> {
+    fn render_gpu(
+        render_state: &egui_wgpu::RenderState,
+        image: &image::RgbaImage,
+        recipe: &Recipe,
+        mask: Option<&Mask>,
+        flags: u32,
+    ) -> Vec<u8> {
         let (device, queue) = (&render_state.device, &render_state.queue);
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let resources = EditResources::new(device, format);
@@ -1059,9 +1381,10 @@ mod tests {
             [0.0, 0.0, 1.0, 1.0],
             [side, side],
             1.0,
-            0.0,
+            flags as f32,
         );
-        let group = resources.bind(device, &view, &uniform);
+        let mask = mask.map(|mask| upload_mask(render_state, mask));
+        let group = resources.bind(device, &view, mask.as_ref(), &uniform);
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("edit test"),
             size: wgpu::Extent3d {
@@ -1140,22 +1463,36 @@ mod tests {
         pixels
     }
 
-    /// REQ-021-02, REQ-021-06: the GPU preview shows what saving renders on the CPU (within two levels), grain and
-    /// vignette included.
+    /// REQ-021-02, REQ-021-06, REQ-022-03, REQ-022-04: the GPU preview shows what saving renders on the CPU (within
+    /// two levels), grain, vignette, the subject's and the background's own adjustments and the selection's tint
+    /// included.
     #[test]
     fn req_021_02_req_021_06_the_gpu_preview_matches_the_cpu_render() {
         let (_gpu, render_state) = render_state();
         let image = pattern();
-        for recipe in recipes() {
-            let gpu = render_gpu(&render_state, &image, &recipe);
-            let cpu = cpu_preview(&image, &recipe, [SIZE, SIZE]);
+        // The subject grows from left to right, in steps the GPU's 8-bit mask holds exactly.
+        let values = (0..SIZE * SIZE).map(|i| ((i % SIZE) * 5) as f32 / 255.0).collect();
+        let mask = Mask::new(SIZE, SIZE, values).unwrap();
+        let mut parts = recipes()[1].clone();
+        Adjustment::Exposure.set(parts.part_mut(Part::Subject), 1.2);
+        Adjustment::Saturation.set(parts.part_mut(Part::Subject), 40.0);
+        Adjustment::Shadows.set(parts.part_mut(Part::Background), -50.0);
+        Adjustment::Temperature.set(parts.part_mut(Part::Background), -60.0);
+        let mut cases: Vec<(Recipe, Option<&Mask>, u32)> =
+            recipes().into_iter().map(|recipe| (recipe, None, 0)).collect();
+        for flags in [4, 4 | 8, 4 | 8 | 16] {
+            cases.push((parts.clone(), Some(&mask), flags));
+        }
+        for (recipe, mask, flags) in cases {
+            let gpu = render_gpu(&render_state, &image, &recipe, mask, flags);
+            let cpu = cpu_preview(&image, &recipe, [SIZE, SIZE], mask, flags);
             let mut worst = 0;
             for (i, (gpu, cpu)) in gpu.chunks_exact(4).zip(cpu.pixels.iter()).enumerate() {
                 for c in 0..3 {
                     let diff = (i32::from(gpu[c]) - i32::from(cpu.to_array()[c])).abs();
                     assert!(
                         diff <= 2,
-                        "pixel {i} channel {c}: GPU {gpu:?}, CPU {cpu:?} with {recipe:?}"
+                        "pixel {i} channel {c}: GPU {gpu:?}, CPU {cpu:?} with {recipe:?}, flags {flags}"
                     );
                     worst = worst.max(diff);
                 }
@@ -1238,6 +1575,7 @@ mod tests {
         }));
         let callback = PreviewCallback {
             view,
+            mask: None,
             uniform: uniform(
                 &Params::new(&Recipe::default()),
                 [0.0, 0.0, SIZE as f32, SIZE as f32],
