@@ -429,6 +429,7 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
         writer: db::writer::IndexWriter::new(writer),
         metadata: exiftool.clone(),
         is_reachable,
+        reconnect_grace: indexer::reachability::RECONNECT_GRACE,
         concurrency,
         notify: Box::new(move || ctx.request_repaint()),
         on_written: Box::new(move || thumbnails.kick()),

@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 /// A scope covering both scans of a library.
 pub fn merge_scopes(a: ScanScope, b: ScanScope) -> ScanScope {
@@ -174,6 +175,9 @@ pub struct IndexerDeps {
     pub writer: IndexWriter,
     pub metadata: Arc<dyn MetadataSource>,
     pub is_reachable: Arc<dyn Fn(&Path) -> bool + Send + Sync>,
+    /// How long a library that wasn't offline gets to answer before it counts as offline
+    /// ([`crate::reachability::RECONNECT_GRACE`]).
+    pub reconnect_grace: Duration,
     /// Parallel file reads.
     pub concurrency: usize,
     pub notify: Box<dyn Fn() + Send + Sync>,
@@ -201,10 +205,11 @@ impl Indexer {
             watchers: Mutex::new(HashMap::new()),
         });
         let worker_shared = shared.clone();
-        let (writer, metadata, is_reachable) = (deps.writer, deps.metadata, deps.is_reachable);
+        let (writer, metadata, is_reachable, grace) =
+            (deps.writer, deps.metadata, deps.is_reachable, deps.reconnect_grace);
         let worker = std::thread::Builder::new()
             .name("indexer".into())
-            .spawn(move || run(&worker_shared, writer, metadata.as_ref(), is_reachable.as_ref()))
+            .spawn(move || run(&worker_shared, writer, metadata.as_ref(), is_reachable.as_ref(), grace))
             .expect("can't start the indexer thread");
         (
             Self {
@@ -320,6 +325,7 @@ fn run(
     mut writer: IndexWriter,
     metadata: &dyn MetadataSource,
     is_reachable: &(dyn Fn(&Path) -> bool + Sync),
+    reconnect_grace: Duration,
 ) {
     loop {
         let (job, cancel) = {
@@ -373,12 +379,9 @@ fn run(
                 metadata,
                 is_reachable,
             };
-            scan_root(
-                deps,
-                job.library,
-                &job.scope,
-                ScanOptions::new(concurrency, &cancel, &mut on_progress),
-            )
+            let mut options = ScanOptions::new(concurrency, &cancel, &mut on_progress);
+            options.reconnect_grace = reconnect_grace;
+            scan_root(deps, job.library, &job.scope, options)
         }));
         let result = match outcome {
             Ok(Ok(ScanOutcome::Completed)) => ScanResult::Completed,
@@ -503,6 +506,7 @@ mod tests {
                 writer: IndexWriter::new(conn),
                 metadata: metadata.clone(),
                 is_reachable,
+                reconnect_grace: Duration::from_millis(100),
                 concurrency: 2,
                 notify: Box::new(|| {}),
                 on_written: Box::new(|| {}),

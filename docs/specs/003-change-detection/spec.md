@@ -74,6 +74,13 @@ Files that are added, changed, renamed or deleted in a library show up in the ga
 - **When** it becomes reachable again
 - **Then** within about a minute it is scanned, becomes `online` and is watched again
 
+### REQ-003-11 · Shares that are still reconnecting
+
+- **Given** a library that isn't `offline`, on a network share that takes a while to answer (it is reconnecting after the computer started or woke up)
+- **When** a scan finds it unreachable
+- **Then** the library stays as it is and is checked again for up to 30 seconds; it only becomes `offline` if it doesn't answer in that time
+- **And** an `offline` library is checked once per retry (REQ-003-10), so retries don't hold up other scans
+
 ## Out of scope
 
 - Detecting in-place edits (same file name, folder contents unchanged) made while the app wasn't running. Quick scans can't see them, so the user runs a manual rescan (REQ-001-06).
@@ -100,3 +107,4 @@ Files that are added, changed, renamed or deleted in a library show up in the ga
 | REQ-003-08 | `crates/indexer/src/scan.rs` › quick_scans_only_relist_folders_whose_entries_changed, falls_back_to_a_full_scan_without_stored_folders | pass |
 | REQ-003-09 | `crates/indexer/src/schedule.rs` › scans_at_startup_and_offline_libraries…, quick_checks_every_interval…; started by `crates/app/src/main.rs` (checked in the running app) | pass |
 | REQ-003-10 | `crates/indexer/src/schedule.rs` › scans_at_startup_and_offline_libraries_again_and_again; `crates/indexer/src/indexer.rs` › stops_watching_an_offline_library_and_watches_it_again_after_a_reconnect | pass |
+| REQ-003-11 | `crates/indexer/src/scan.rs` › req_003_11_waits_for_a_library_that_was_online_to_reconnect, req_003_11_an_offline_library_is_checked_once; `crates/indexer/src/reachability.rs` › req_003_11_probes_until_the_folder_answers_or_the_grace_is_over | pass |

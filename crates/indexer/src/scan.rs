@@ -67,6 +67,8 @@ pub struct ScanOptions<'a> {
     /// Longest time read files wait to be written, so they show up while a slow scan still runs.
     pub flush_interval: Duration,
     pub progress_interval: Duration,
+    /// How long a library that wasn't offline gets to answer before it counts as offline (REQ-003-11).
+    pub reconnect_grace: Duration,
     /// Set when the library is removed: the scan stops and writes nothing more.
     pub cancel: &'a AtomicBool,
     pub on_progress: &'a mut dyn FnMut(ScanProgress),
@@ -79,6 +81,7 @@ impl<'a> ScanOptions<'a> {
             batch_size: 250,
             flush_interval: Duration::from_secs(2),
             progress_interval: Duration::from_millis(250),
+            reconnect_grace: crate::reachability::RECONNECT_GRACE,
             cancel,
             on_progress,
         }
@@ -247,7 +250,22 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
         return Ok(ScanOutcome::Cancelled);
     };
     let root_path = PathBuf::from(&root.path);
-    if !is_reachable(&root_path) {
+    // A share that was online may still be reconnecting (after the computer started or woke up), so it gets a moment
+    // before it counts as offline; an offline one is checked once, so retries don't hold up the queue (REQ-003-11).
+    let reachable = if root.status == LibraryStatus::Offline {
+        is_reachable(&root_path)
+    } else {
+        let cancel = options.cancel;
+        crate::reachability::reachable_within(
+            options.reconnect_grace,
+            || cancel.load(Ordering::Relaxed),
+            || is_reachable(&root_path),
+        )
+    };
+    if options.cancel.load(Ordering::Relaxed) {
+        return Ok(ScanOutcome::Cancelled);
+    }
+    if !reachable {
         writer.set_root_status(root_id, LibraryStatus::Offline, None)?;
         return Ok(ScanOutcome::Offline);
     }
@@ -618,6 +636,8 @@ mod tests {
         root: i64,
         metadata: FakeMetadata,
         reachable: Arc<AtomicBool>,
+        /// Short, so tests of unreachable libraries don't wait out the real grace.
+        reconnect_grace: Duration,
     }
 
     /// 2020-01-01.
@@ -636,6 +656,7 @@ mod tests {
                 root,
                 metadata: FakeMetadata::default(),
                 reachable: Arc::new(AtomicBool::new(true)),
+                reconnect_grace: Duration::from_millis(100),
             }
         }
 
@@ -669,6 +690,7 @@ mod tests {
             let is_reachable = move |_: &Path| reachable.load(Ordering::Relaxed);
             let mut options = ScanOptions::new(concurrency, &cancel, &mut on_progress);
             options.flush_interval = flush;
+            options.reconnect_grace = self.reconnect_grace;
             let deps = ScanDeps {
                 writer: &mut self.writer,
                 metadata: &self.metadata,
@@ -826,6 +848,40 @@ mod tests {
         assert_eq!(f.scan(ScanScope::Full), ScanOutcome::Offline);
         assert_eq!(f.paths(), ["a.jpg"]);
         assert_eq!(f.writer.root(f.root).unwrap().unwrap().status, LibraryStatus::Offline);
+    }
+
+    #[test]
+    fn req_003_11_waits_for_a_library_that_was_online_to_reconnect() {
+        let mut f = Fixture::new();
+        f.touch("a.jpg", "x");
+        f.scan(ScanScope::Full);
+        f.touch("b.jpg", "x");
+        f.reconnect_grace = Duration::from_secs(10);
+        f.reachable.store(false, Ordering::Relaxed);
+        let reachable = f.reachable.clone();
+        let reconnect = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            reachable.store(true, Ordering::Relaxed);
+        });
+
+        let outcome = f.scan(ScanScope::Full);
+        reconnect.join().unwrap();
+
+        assert_eq!(outcome, ScanOutcome::Completed);
+        assert_eq!(f.paths(), ["a.jpg", "b.jpg"]);
+        assert_eq!(f.writer.root(f.root).unwrap().unwrap().status, LibraryStatus::Online);
+    }
+
+    #[test]
+    fn req_003_11_an_offline_library_is_checked_once() {
+        let mut f = Fixture::new();
+        f.reconnect_grace = Duration::from_secs(10);
+        f.reachable.store(false, Ordering::Relaxed);
+        f.writer.set_root_status(f.root, LibraryStatus::Offline, None).unwrap();
+        let start = Instant::now();
+
+        assert_eq!(f.scan(ScanScope::Quick), ScanOutcome::Offline);
+        assert!(start.elapsed() < Duration::from_secs(2), "{:?}", start.elapsed());
     }
 
     #[test]
