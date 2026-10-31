@@ -5,7 +5,9 @@
 
 use crate::icons::Icon;
 use crate::theme;
-use domain::edit::{Adjustment, CURVE_SAMPLES, Channel, History, Params, Recipe, SavedEdit, Section};
+use domain::edit::{
+    Adjustment, CURVE_SAMPLES, Channel, HISTOGRAM_BINS, Histogram, History, Params, Recipe, SavedEdit, Section,
+};
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2, pos2, vec2};
 use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, ScreenDescriptor, wgpu};
 use std::path::PathBuf;
@@ -16,6 +18,8 @@ use std::sync::mpsc::{Receiver, channel};
 const SMALL_SIDE: u32 = 512;
 /// The picker averages this many pixels around the click, in both directions, in the small copy.
 const PICK_RADIUS: i64 = 2;
+/// About this many pixels of the small copy go into the histogram.
+const HISTOGRAM_SAMPLES: u32 = 25_000;
 const ROW_HEIGHT: f32 = 22.0;
 const SLIDER_HEIGHT: f32 = 16.0;
 const SCROLL_BAR_ROOM: f32 = 14.0;
@@ -103,6 +107,8 @@ pub struct EditSession {
     channel: Channel,
     dragging_point: Option<usize>,
     picking: bool,
+    /// The histogram behind the curve and the steps before the curves it was counted with (REQ-021-18).
+    histogram: Option<(Recipe, Histogram)>,
     pub dialog: Option<Dialog>,
     pub saving: bool,
     render_state: Option<egui_wgpu::RenderState>,
@@ -122,6 +128,7 @@ impl EditSession {
             channel: Channel::All,
             dragging_point: None,
             picking: false,
+            histogram: None,
             dialog: None,
             saving: false,
             render_state,
@@ -218,6 +225,29 @@ impl EditSession {
     /// Whether _Save_ would replace an original that has no backup yet, so it asks first (REQ-021-10).
     pub fn replaces_original(&self) -> bool {
         self.source.as_deref() == Some(self.target.rel_path.as_str())
+    }
+
+    /// The histogram behind the curve, once _Curves_ was shown (REQ-021-18).
+    pub fn histogram(&self) -> Option<&Histogram> {
+        self.histogram.as_ref().map(|(_, histogram)| histogram)
+    }
+
+    /// Counts the histogram again when a step before the curves changed.
+    fn update_histogram(&mut self) {
+        let Base::Loaded(loaded) = &self.base else { return };
+        let key = before_curves(&self.draft);
+        if self.histogram.as_ref().is_some_and(|(counted, _)| *counted == key) {
+            return;
+        }
+        let small = &loaded.small;
+        let pixels = u64::from(small.width()) * u64::from(small.height());
+        let step = ((pixels as f64 / f64::from(HISTOGRAM_SAMPLES)).sqrt().ceil() as u32).max(1);
+        let samples = small
+            .enumerate_pixels()
+            .filter(|(x, y, _)| x % step == 0 && y % step == 0)
+            .map(|(_, _, pixel)| [pixel[0], pixel[1], pixel[2]].map(|c| f32::from(c) / 255.0));
+        let histogram = Params::new(&key).histogram(samples);
+        self.histogram = Some((key, histogram));
     }
 
     pub fn is_picking(&self) -> bool {
@@ -585,6 +615,7 @@ impl EditSession {
     /// The tone curve editor (REQ-021-04): channel tabs, a square with the curve; a click adds a point, a drag moves
     /// it, a double-click on a point removes it.
     fn curves(&mut self, ui: &mut egui::Ui) {
+        self.update_histogram();
         ui.horizontal(|ui| {
             for channel in Channel::ALL {
                 let selected = self.channel == channel;
@@ -640,18 +671,21 @@ impl EditSession {
         }
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 4.0, theme::field());
-        for i in 1..4 {
-            let t = i as f32 / 4.0;
-            let stroke = egui::Stroke::new(1.0, theme::rim());
-            painter.vline(rect.left() + t * rect.width(), rect.y_range(), stroke);
-            painter.hline(rect.x_range(), rect.top() + t * rect.height(), stroke);
-        }
         let color = match channel {
             Channel::All => theme::text(),
             Channel::Red => Color32::from_rgb(240, 90, 90),
             Channel::Green => Color32::from_rgb(110, 210, 110),
             Channel::Blue => Color32::from_rgb(110, 150, 245),
         };
+        if let Some(histogram) = self.histogram() {
+            paint_histogram(&painter, rect, &histogram.get(channel), color.gamma_multiply(0.22));
+        }
+        for i in 1..4 {
+            let t = i as f32 / 4.0;
+            let stroke = egui::Stroke::new(1.0, theme::rim());
+            painter.vline(rect.left() + t * rect.width(), rect.y_range(), stroke);
+            painter.hline(rect.x_range(), rect.top() + t * rect.height(), stroke);
+        }
         let curve = self.draft.curves.get(channel);
         let line: Vec<Pos2> = (0..=64)
             .map(|i| {
@@ -664,6 +698,37 @@ impl EditSession {
             painter.circle_filled(to_screen(point), 4.0, color);
         }
     }
+}
+
+/// The recipe's steps before the curves, which alone shape the histogram behind the curve.
+fn before_curves(recipe: &Recipe) -> Recipe {
+    let mut before = Recipe::default();
+    for adjustment in Adjustment::ALL {
+        if matches!(adjustment.section(), Section::Light)
+            || matches!(adjustment, Adjustment::Temperature | Adjustment::Tint)
+        {
+            adjustment.set(&mut before, adjustment.get(recipe));
+        }
+    }
+    before
+}
+
+/// `bins` as bars from the bottom of `rect`, scaled to the tallest bin apart from the two ends, so clipped blacks or
+/// whites don't flatten the rest.
+fn paint_histogram(painter: &egui::Painter, rect: Rect, bins: &[u32; HISTOGRAM_BINS], color: Color32) {
+    let tallest = bins[1..HISTOGRAM_BINS - 1].iter().copied().max().unwrap_or(0).max(1) as f32;
+    let width = rect.width() / HISTOGRAM_BINS as f32;
+    let mut mesh = egui::Mesh::default();
+    for (i, &count) in bins.iter().enumerate() {
+        let height = (count as f32 / tallest).min(1.0) * rect.height();
+        if height <= 0.0 {
+            continue;
+        }
+        let left = rect.left() + i as f32 * width;
+        let bar = Rect::from_min_max(pos2(left, rect.bottom() - height), pos2(left + width, rect.bottom()));
+        mesh.add_colored_rect(bar, color);
+    }
+    painter.add(mesh);
 }
 
 fn icon_button(ui: &mut egui::Ui, icon: Icon, label: &str, tooltip: &str, enabled: bool) -> egui::Response {
@@ -748,7 +813,7 @@ fn uniform(params: &Params, rect: [f32; 4], uv: [f32; 4], full_size: [f32; 2], o
     let [r, g, b] = params.gains.map(|gain| gain * params.exposure);
     floats.extend_from_slice(&[r, g, b, f32::from(u8::from(params.curves.is_some()))]);
     floats.extend_from_slice(&[params.black, params.white, params.shadows, params.highlights]);
-    floats.extend_from_slice(&[params.contrast, params.saturation, params.vibrance, 0.0]);
+    floats.extend_from_slice(&[params.contrast, params.saturation, params.vibrance, params.brightness]);
     floats.extend_from_slice(&[params.vignette, params.vignette_start, params.grain, params.grain_cell]);
     for i in 0..CURVE_SAMPLES {
         let [r, g, b] = params.curves.as_ref().map_or([0.0; 3], |table| table[i]);
@@ -954,6 +1019,7 @@ mod tests {
         let mut all = Recipe::default();
         for (adjustment, value) in [
             (Adjustment::Exposure, 0.7),
+            (Adjustment::Brightness, 35.0),
             (Adjustment::Contrast, 40.0),
             (Adjustment::Highlights, -50.0),
             (Adjustment::Shadows, 60.0),
@@ -973,6 +1039,7 @@ mod tests {
         let mut light = Recipe::default();
         Adjustment::Vignette.set(&mut light, 70.0);
         Adjustment::Contrast.set(&mut light, -50.0);
+        Adjustment::Brightness.set(&mut light, -60.0);
         vec![Recipe::default(), all, light]
     }
 

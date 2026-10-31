@@ -7,7 +7,7 @@ use common::{Fixture, settle};
 use db::libraries::LibraryStatus;
 use db::rusqlite::Connection;
 use db::writer::{IndexWriter, IndexedFile};
-use domain::edit::{Adjustment, Recipe, SavedEdit};
+use domain::edit::{Adjustment, Channel, Recipe, SavedEdit};
 use domain::media::{MediaKind, MediaMetadata};
 use eframe::egui::accesskit::Role;
 use eframe::egui::{self, Key, Modifiers};
@@ -225,6 +225,40 @@ fn req_021_02_req_021_07_previews_compares_undoes_and_resets() {
     harness.get_by_role_and_label(Role::Button, "Reset all").click();
     harness.run_steps(2);
     assert!(session(&harness).unwrap().recipe().is_neutral());
+}
+
+/// REQ-021-18: with _Curves_ open, the curve editor shows the histogram of what the curve receives; exposure moves it,
+/// the curve doesn't.
+#[test]
+fn req_021_18_the_curve_editor_shows_the_histogram() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    assert!(
+        session(&harness).unwrap().histogram().is_none(),
+        "only with Curves open"
+    );
+    harness.get_by_role_and_label(Role::Button, "Curves").click();
+    harness.run_steps(2);
+    let shown = session(&harness).unwrap().histogram().expect("a histogram").clone();
+    assert!(shown.get(Channel::All).iter().sum::<u32>() > 0);
+    // Light folded away, so the curve is in view.
+    harness.get_by_role_and_label(Role::Button, "Light").click();
+    harness.run_steps(2);
+    harness.snapshot(common::snapshot_name("edit_curves"));
+
+    set_recipe(&mut harness, brighter());
+    let brighter = session(&harness).unwrap().histogram().unwrap().clone();
+    assert_ne!(brighter, shown, "exposure moves it");
+    let mut curved = self::brighter();
+    curved.curves.all.add_point(0.3, 0.6);
+    set_recipe(&mut harness, curved);
+    assert_eq!(
+        session(&harness).unwrap().histogram().unwrap(),
+        &brighter,
+        "the curve doesn't"
+    );
 }
 
 /// REQ-021-08: with unsaved changes, `Esc` and stepping ask; _Cancel_ stays, _Discard_ goes on. Without changes,

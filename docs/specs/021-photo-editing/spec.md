@@ -28,12 +28,26 @@ Users who find a photo that is too dark, has a color cast or lacks punch fix it 
 - **Then** exposure scales the light by 2^EV; contrast steepens or flattens the tones around the midtone; highlights and shadows lift or lower only the bright or dark tones; whites and blacks move the white and black points
 - **And** each at 0 leaves the photo unchanged
 
+### REQ-021-17 · Brightness
+
+- **Given** editing
+- **When** the user changes _Brightness_ (−100 to +100)
+- **Then** the midtones get lighter or darker while black stays black and white stays white
+- **And** at 0 it leaves the photo unchanged
+
 ### REQ-021-04 · Curves
 
 - **Given** editing
 - **When** the user adds, drags or removes points on the tone curve, for all channels together or for red, green or blue alone
 - **Then** the tones are mapped through a smooth, monotonic curve through those points
 - **And** a straight curve from black to white leaves the photo unchanged
+
+### REQ-021-18 · Histogram behind the curve
+
+- **Given** editing with _Curves_ open
+- **When** the user changes an adjustment that comes before the curves (light, white balance) or picks a channel
+- **Then** the curve editor shows, behind the curve, the histogram of the tones the curve receives: the red, green and blue values together for _RGB_, one channel for _Red_, _Green_ or _Blue_
+- **And** changing the curve itself doesn't move the histogram
 
 ### REQ-021-05 · Color
 
@@ -136,7 +150,9 @@ Users who find a photo that is too dark, has a color cast or lacks punch fix it 
 | REQ-021-01 | `crates/app/tests/edit.rs` › req_021_01_edit_is_offered_for_jpeg_png_and_webp_photos_in_online_libraries; `crates/domain/src/edit.rs` › req_021_01_jpeg_png_and_webp_are_editable | pass |
 | REQ-021-02 | `crates/app/src/edit.rs` › req_021_02_req_021_06_the_gpu_preview_matches_the_cpu_render; `crates/app/tests/edit.rs` › req_021_02_req_021_07_previews_compares_undoes_and_resets | pass |
 | REQ-021-03 | `crates/domain/src/edit.rs` › req_021_03_* (exposure, contrast, shadows and highlights, whites and blacks, neutral values) | pass |
+| REQ-021-17 | `crates/domain/src/edit.rs` › req_021_17_brightness_lifts_or_lowers_the_midtones_only; `crates/app/src/edit.rs` › req_021_02_req_021_06_the_gpu_preview_matches_the_cpu_render | pass |
 | REQ-021-04 | `crates/domain/src/edit.rs` › req_021_04_a_curve_maps_tones_through_its_points_without_overshooting, req_021_04_curve_points_are_added_moved_and_removed_within_bounds | pass |
+| REQ-021-18 | `crates/domain/src/edit.rs` › req_021_18_the_histogram_shows_the_tones_the_curve_receives; `crates/app/tests/edit.rs` › req_021_18_the_curve_editor_shows_the_histogram | pass |
 | REQ-021-05 | `crates/domain/src/edit.rs` › req_021_05_* (temperature and tint, picker, saturation and vibrance); `crates/app/src/edit.rs` › req_021_05_the_picker_neutralizes_the_picked_spot | pass |
 | REQ-021-06 | `crates/domain/src/edit.rs` › req_021_06_vignette_darkens_or_lightens_the_edges_only, req_021_06_grain_is_the_same_for_the_same_position_and_follows_the_photo_not_the_screen; `crates/app/src/edit.rs` › req_021_02_req_021_06_the_gpu_preview_matches_the_cpu_render | pass |
 | REQ-021-07 | `crates/domain/src/edit.rs` › req_021_07_history_undoes_and_redoes_changes; `crates/app/src/edit.rs` › req_021_07_req_021_08_tracks_changes_undo_and_asks_before_leaving; `crates/app/tests/edit.rs` › req_021_02_req_021_07_previews_compares_undoes_and_resets | pass |
