@@ -413,6 +413,7 @@ impl AppState {
             recipe: request.recipe,
             copy: request.copy,
             mtime: self.settings.mtime_on_save,
+            subject: request.subject,
         };
         let (db, cache) = (self.db.clone(), self.thumbnail_cache());
         let (root_id, copy) = (request.root_id, request.copy);
