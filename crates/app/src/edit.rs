@@ -6,8 +6,8 @@
 use crate::icons::Icon;
 use crate::theme;
 use domain::edit::{
-    Adjustment, CURVE_SAMPLES, Channel, HISTOGRAM_BINS, Histogram, History, Mask, Params, Part, Recipe, SavedEdit,
-    Section,
+    Adjustment, BlurKind, CURVE_SAMPLES, Channel, HISTOGRAM_BINS, Histogram, History, Mask, Params, Part, Pyramid,
+    Recipe, SavedEdit, Section, blur_lod,
 };
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2, pos2, vec2};
 use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, ScreenDescriptor, wgpu};
@@ -121,6 +121,8 @@ pub struct EditSession {
     channel: Channel,
     dragging_point: Option<usize>,
     picking: bool,
+    /// The next click on the photo places the blur's focus (REQ-023-03).
+    placing_focus: bool,
     /// The histogram behind the curve and the steps before the curves it was counted with (REQ-021-18).
     histogram: Option<(Recipe, Histogram)>,
     /// The part the panel's light and color change (REQ-022-01).
@@ -147,6 +149,7 @@ impl EditSession {
             channel: Channel::All,
             dragging_point: None,
             picking: false,
+            placing_focus: false,
             histogram: None,
             part: Part::Photo,
             subject: Subject::Unknown,
@@ -217,8 +220,8 @@ impl EditSession {
                 self.draft = recipe.clone();
                 self.saved = recipe;
                 self.base = Base::Loaded(Box::new(loaded));
-                // Saved with parts: they need the subject again (REQ-022-05).
-                if self.draft.has_parts() {
+                // Saved with parts or a background blur: they need the subject again (REQ-022-05).
+                if self.draft.needs_subject() {
                     self.find_subject();
                 }
             }
@@ -357,8 +360,9 @@ impl EditSession {
         self.histogram = Some((key, histogram));
     }
 
+    /// Whether the next click on the photo picks a neutral spot or places the blur's focus.
     pub fn is_picking(&self) -> bool {
-        self.picking
+        self.picking || self.placing_focus
     }
 
     /// Sets the recipe and records it for undo.
@@ -390,7 +394,7 @@ impl EditSession {
             recipe: self.draft.clone(),
             copy,
             subject: match &self.subject {
-                Subject::Found(mask, _) if self.draft.has_parts() => Some(mask.clone()),
+                Subject::Found(mask, _) if self.draft.needs_subject() => Some(mask.clone()),
                 _ => None,
             },
         })
@@ -424,8 +428,14 @@ impl EditSession {
         }
     }
 
-    /// Picks the white balance at `uv` of the photo (REQ-021-05).
+    /// Picks the white balance at `uv` of the photo (REQ-021-05), or places the blur's focus there (REQ-023-03).
     pub fn pick(&mut self, uv: Pos2) {
+        if std::mem::take(&mut self.placing_focus) {
+            let mut recipe = self.draft.clone();
+            recipe.blur_focus = [uv.x.clamp(0.0, 1.0), uv.y.clamp(0.0, 1.0)];
+            self.commit(recipe);
+            return;
+        }
         self.picking = false;
         let Base::Loaded(loaded) = &self.base else { return };
         let small = &loaded.small;
@@ -684,7 +694,18 @@ impl EditSession {
                     }
                 }
                 for adjustment in Adjustment::ALL.into_iter().filter(|a| a.section() == section) {
-                    self.slider(ui, adjustment);
+                    if adjustment == Adjustment::Blur {
+                        self.blur_kind(ui);
+                    }
+                    let kind = self.draft.blur_kind;
+                    let shown = match adjustment {
+                        Adjustment::Blur => kind != BlurKind::None,
+                        Adjustment::BlurSize | Adjustment::BlurFeather => kind.has_focus(),
+                        _ => true,
+                    };
+                    if shown {
+                        self.slider(ui, adjustment);
+                    }
                 }
             }
             ui.add_space(8.0);
@@ -733,6 +754,54 @@ impl EditSession {
         };
         ui.add_space(8.0);
         ready
+    }
+
+    /// The kind of blur, and placing its focus (REQ-023-01, REQ-023-03). _Background_ looks for the subject.
+    fn blur_kind(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new("Blur").color(theme::muted()));
+        ui.horizontal_wrapped(|ui| {
+            for kind in BlurKind::ALL {
+                let response = ui.add(egui::Button::selectable(self.draft.blur_kind == kind, kind.label()));
+                if response.clicked() && self.draft.blur_kind != kind {
+                    let mut recipe = self.draft.clone();
+                    recipe.blur_kind = kind;
+                    // A kind without a strength would show nothing.
+                    if kind != BlurKind::None && recipe.blur == 0.0 {
+                        recipe.blur = 50.0;
+                    }
+                    self.commit(recipe);
+                    self.placing_focus = false;
+                    if kind == BlurKind::Background {
+                        self.find_subject();
+                    }
+                }
+            }
+        });
+        match (&self.subject, self.draft.blur_kind) {
+            (Subject::Unknown | Subject::Finding(_), BlurKind::Background) => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Finding the subject…");
+                });
+            }
+            (Subject::Failed(_), BlurKind::Background) => {
+                ui.add(egui::Label::new("No subject found in this photo, so nothing is blurred.").wrap());
+            }
+            (_, kind) if kind.has_focus() => {
+                let placing = self.placing_focus;
+                let button = egui::Button::image_and_text(Icon::Crosshair.small(), "Place focus").selected(placing);
+                if ui
+                    .add(button)
+                    .on_hover_text("Click the spot in the photo that should stay sharp")
+                    .clicked()
+                {
+                    self.placing_focus = !placing;
+                    self.picking = false;
+                }
+            }
+            _ => {}
+        }
     }
 
     /// One adjustment: its name and value, and a slider. A double-click resets it (REQ-021-07).
@@ -984,11 +1053,23 @@ fn cpu_preview(
     let params = Params::new(recipe);
     let (width, height) = small.dimensions();
     let size = full_size.map(|side| side.max(1) as f32);
+    // A background blur waits for the subject (REQ-023-02).
+    let blurs = params.blur > 0.0 && flags & 1 == 0 && (params.blur_kind != BlurKind::Background || flags & 4 != 0);
+    let pyramid = blurs.then(|| {
+        let pixels = small.pixels().map(|p| p.0.map(|c| f32::from(c) / 255.0)).collect();
+        Pyramid::new(width, height, pixels)
+    });
     let mut rgba = Vec::with_capacity(small.as_raw().len());
     for (x, y, pixel) in small.enumerate_pixels() {
         let uv = [(x as f32 + 0.5) / width as f32, (y as f32 + 0.5) / height as f32];
-        let rgb = [pixel[0], pixel[1], pixel[2]].map(|c| f32::from(c) / 255.0);
         let subject = mask.map_or(0.0, |mask| mask.sample(uv));
+        let mut rgba_in = pixel.0.map(|c| f32::from(c) / 255.0);
+        if let Some(pyramid) = &pyramid {
+            // σ in pixels of the small copy.
+            let sigma = params.blur_sigma(uv, size, subject) * width as f32 / size[0];
+            rgba_in = pyramid.blurred(rgba_in, uv, blur_lod(sigma, pyramid.levels()));
+        }
+        let rgb = [rgba_in[0], rgba_in[1], rgba_in[2]];
         let mut out = match mask {
             _ if flags & 1 != 0 => rgb,
             Some(_) if flags & 4 != 0 => params.pixel_masked(rgb, uv, size, subject),
@@ -1031,7 +1112,7 @@ fn part_floats(params: &Params, on: f32) -> [f32; 12] {
 
 /// The shader's uniform: `edit.wgsl`'s `Edit`, in its order.
 fn uniform(params: &Params, rect: [f32; 4], uv: [f32; 4], full_size: [f32; 2], opacity: f32, flags: f32) -> Vec<f32> {
-    let mut floats = Vec::with_capacity(52 + CURVE_SAMPLES * 4);
+    let mut floats = Vec::with_capacity(60 + CURVE_SAMPLES * 4);
     floats.extend_from_slice(&rect);
     floats.extend_from_slice(&uv);
     floats.extend_from_slice(&[full_size[0], full_size[1], opacity, flags]);
@@ -1043,6 +1124,12 @@ fn uniform(params: &Params, rect: [f32; 4], uv: [f32; 4], full_size: [f32; 2], o
             None => floats.extend_from_slice(&[0.0; 12]),
         }
     }
+    let kind = BlurKind::ALL
+        .iter()
+        .position(|kind| *kind == params.blur_kind)
+        .unwrap_or(0) as f32;
+    floats.extend_from_slice(&[params.blur, kind, params.blur_size, params.blur_feather]);
+    floats.extend_from_slice(&[params.blur_focus[0], params.blur_focus[1], 0.0, 0.0]);
     for i in 0..CURVE_SAMPLES {
         let [r, g, b] = params.curves.as_ref().map_or([0.0; 3], |table| table[i]);
         floats.extend_from_slice(&[r, g, b, 0.0]);
@@ -1370,16 +1457,17 @@ mod tests {
         let (device, queue) = (&render_state.device, &render_state.queue);
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let resources = EditResources::new(device, format);
-        let size = [SIZE, SIZE];
+        let (width, height) = image.dimensions();
+        let size = [width, height];
         let levels = crate::textures::mip_chain(size, image.as_raw().clone());
         let source = crate::textures::upload(device, queue, size, &levels);
         let view = source.create_view(&wgpu::TextureViewDescriptor::default());
-        let side = SIZE as f32;
+
         let uniform = uniform(
             &Params::new(recipe),
-            [0.0, 0.0, side, side],
+            [0.0, 0.0, width as f32, height as f32],
             [0.0, 0.0, 1.0, 1.0],
-            [side, side],
+            [width as f32, height as f32],
             1.0,
             flags as f32,
         );
@@ -1388,8 +1476,8 @@ mod tests {
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("edit test"),
             size: wgpu::Extent3d {
-                width: SIZE,
-                height: SIZE,
+                width,
+                height,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -1400,10 +1488,10 @@ mod tests {
             view_formats: &[],
         });
         let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        let row = (SIZE * 4).div_ceil(256) * 256;
+        let row = (width * 4).div_ceil(256) * 256;
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("edit test"),
-            size: u64::from(row * SIZE),
+            size: u64::from(row * height),
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
         });
@@ -1441,12 +1529,12 @@ mod tests {
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(row),
-                    rows_per_image: Some(SIZE),
+                    rows_per_image: Some(height),
                 },
             },
             wgpu::Extent3d {
-                width: SIZE,
-                height: SIZE,
+                width,
+                height,
                 depth_or_array_layers: 1,
             },
         );
@@ -1455,8 +1543,8 @@ mod tests {
         slice.map_async(wgpu::MapMode::Read, |result| result.expect("mapped"));
         device.poll(wgpu::PollType::wait_indefinitely()).expect("polled");
         let data = slice.get_mapped_range().expect("mapped");
-        let pixels = (0..SIZE as usize)
-            .flat_map(|y| data[y * row as usize..y * row as usize + SIZE as usize * 4].to_vec())
+        let pixels = (0..height as usize)
+            .flat_map(|y| data[y * row as usize..y * row as usize + width as usize * 4].to_vec())
             .collect();
         drop(data);
         buffer.unmap();
@@ -1498,6 +1586,69 @@ mod tests {
                 }
             }
             eprintln!("worst difference: {worst}");
+        }
+    }
+
+    /// REQ-023-02, REQ-023-03, REQ-023-04: the preview blurs as saving does (within three levels), deep into the
+    /// pyramid, around a focus and behind a subject.
+    #[test]
+    fn req_023_04_the_gpu_blur_matches_the_cpu_blur() {
+        let (_gpu, render_state) = render_state();
+        let (width, height) = (512, 384);
+        // Hard edges: a checker of 16 px with a color ramp.
+        let image = image::RgbaImage::from_fn(width, height, |x, y| {
+            let on = (x / 16 + y / 16) % 2 == 0;
+            let t = (x * 255 / width) as u8;
+            if on {
+                image::Rgba([t, 200, 40, 255])
+            } else {
+                image::Rgba([20, 60, 255 - t, 255])
+            }
+        });
+        let values = (0..width * height)
+            .map(|i| if i % width < width / 2 { 1.0 } else { 0.0 })
+            .collect();
+        // The subject is the left half, in a mask as large as the photo.
+        let mask = Mask::new(width, height, values).unwrap();
+        let blur = |kind: BlurKind, focus: [f32; 2], size: f32| Recipe {
+            blur_kind: kind,
+            blur_focus: focus,
+            blur: 100.0,
+            blur_size: size,
+            ..Recipe::default()
+        };
+        let mut lit = blur(BlurKind::Radial, [0.3, 0.6], 10.0);
+        Adjustment::Exposure.set(&mut lit, 0.5);
+        let cases = [
+            (blur(BlurKind::TiltShift, [0.5, 0.3], 20.0), None, 0),
+            (lit, None, 0),
+            (blur(BlurKind::Background, [0.5, 0.5], 30.0), Some(&mask), 4),
+        ];
+        for (recipe, mask, flags) in cases {
+            let gpu = render_gpu(&render_state, &image, &recipe, mask, flags);
+            let cpu = cpu_preview(&image, &recipe, [width, height], mask, flags);
+            let mut worst = 0;
+            for (i, (gpu, cpu)) in gpu.chunks_exact(4).zip(cpu.pixels.iter()).enumerate() {
+                for c in 0..3 {
+                    let diff = (i32::from(gpu[c]) - i32::from(cpu.to_array()[c])).abs();
+                    assert!(
+                        diff <= 3,
+                        "pixel {i} channel {c}: GPU {gpu:?}, CPU {cpu:?} with {recipe:?}"
+                    );
+                    worst = worst.max(diff);
+                }
+            }
+            eprintln!("worst difference: {worst}");
+            // And it does blur: many pixels of the checker change a lot.
+            let changed = gpu
+                .chunks_exact(4)
+                .zip(image.pixels())
+                .filter(|(gpu, source)| (i32::from(gpu[1]) - i32::from(source[1])).abs() > 40)
+                .count();
+            assert!(
+                changed > (width * height / 10) as usize,
+                "{changed} changed with {recipe:?}"
+            );
         }
     }
 

@@ -27,6 +27,11 @@ struct Edit {
     fx: vec4<f32>,
     subject: Part,
     background: Part,
+    // Blur (spec 023): the strongest as σ in parts of the longer side (x), the kind (y: 0 none, 1 background,
+    // 2 tilt-shift, 3 radial), half the sharp area's size (z) and the transition (w), in parts of the longer side.
+    blur: vec4<f32>,
+    // The focus (xy), 0–1 across the photo.
+    focus: vec4<f32>,
     curves: array<vec4<f32>, 256>,
 }
 
@@ -210,6 +215,69 @@ fn develop(rgb: vec3<f32>, uv: vec2<f32>, subject: f32) -> vec3<f32> {
     return clamp(out, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
+// `domain::edit::Params::blur_sigma`: the blur at `uv` as σ in pixels of the full photo.
+fn blur_sigma(uv: vec2<f32>, subject: f32) -> f32 {
+    let kind = u32(edit.blur.y + 0.5);
+    // A background blur waits for the subject.
+    if edit.blur.x <= 0.0 || kind == 0u || (kind == 1u && (u32(edit.size.w) & 4u) == 0u) {
+        return 0.0;
+    }
+    let size = edit.size.xy;
+    let longer = max(size.x, size.y);
+    let offset = (uv - edit.focus.xy) * size;
+    var weight = 1.0 - clamp(subject, 0.0, 1.0);
+    if kind == 2u {
+        weight = smoothstep(edit.blur.z, edit.blur.z + edit.blur.w, abs(offset.y) / longer);
+    } else if kind == 3u {
+        weight = smoothstep(edit.blur.z, edit.blur.z + edit.blur.w, length(offset) / longer);
+    }
+    return weight * edit.blur.x * longer;
+}
+
+// Mip level `level` at `uv` through a cubic B-spline, from four bilinear samples.
+fn bspline(level: u32, uv: vec2<f32>) -> vec4<f32> {
+    let dims = vec2<f32>(textureDimensions(photo, level));
+    let p = uv * dims - 0.5;
+    let i = floor(p);
+    let f = p - i;
+    let f2 = f * f;
+    let f3 = f2 * f;
+    let w0 = (1.0 - f) * (1.0 - f) * (1.0 - f) / 6.0;
+    let w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+    let w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+    let w3 = f3 / 6.0;
+    let g0 = w0 + w1;
+    let g1 = w2 + w3;
+    let h0 = (i - 0.5 + w1 / g0) / dims;
+    let h1 = (i + 1.5 + w3 / g1) / dims;
+    let l = f32(level);
+    let a = textureSampleLevel(photo, photo_sampler, vec2<f32>(h0.x, h0.y), l);
+    let b = textureSampleLevel(photo, photo_sampler, vec2<f32>(h1.x, h0.y), l);
+    let c = textureSampleLevel(photo, photo_sampler, vec2<f32>(h0.x, h1.y), l);
+    let d = textureSampleLevel(photo, photo_sampler, vec2<f32>(h1.x, h1.y), l);
+    return g0.y * (g0.x * a + g1.x * b) + g1.y * (g0.x * c + g1.x * d);
+}
+
+// `domain::edit::Pyramid::blurred`: `sharp` at lod 0, else between the levels around `lod`.
+fn blurred(sharp: vec4<f32>, uv: vec2<f32>, sigma: f32) -> vec4<f32> {
+    let levels = textureNumLevels(photo);
+    let base = f32(textureDimensions(photo, 0u).x) / edit.size.x;
+    let lod = clamp(log2(sigma * base / 0.65), 0.0, f32(levels - 1u));
+    if lod <= 0.0 {
+        return sharp;
+    }
+    let low = u32(floor(lod));
+    let t = lod - f32(low);
+    var below = sharp;
+    if low > 0u {
+        below = bspline(low, uv);
+    }
+    if t <= 0.0 {
+        return below;
+    }
+    return mix(below, bspline(low + 1u, uv), t);
+}
+
 @fragment
 fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let t = (frag.xy - edit.rect.xy) / (edit.rect.zw - edit.rect.xy);
@@ -223,6 +291,10 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let flags = u32(edit.size.w);
     var rgb = texel.rgb;
     if (flags & 1u) == 0u {
+        let sigma = blur_sigma(uv, subject);
+        if sigma > 0.0 {
+            rgb = blurred(texel, uv, sigma).rgb;
+        }
         rgb = develop(rgb, uv, subject);
     }
     if (flags & 8u) != 0u {

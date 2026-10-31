@@ -84,4 +84,5 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | **Backup of the original** | The unedited original of a photo whose edit was saved over it, kept in `<library>/.good-gallery/originals/` (a housekeeping folder). _Revert to original_ puts it back. |
 | **Edited copy**          | A new file `<name> (edited).<ext>` beside the original, written by _Save as copy_.                                                                                  |
 | **Subject**              | What stands out in a photo, found by the app itself (salient object detection, spec 022). It and the **background** (everything else) can have light and color of their own. (code: `domain::edit::Part`, `Mask`) |
+| **Blur**                 | Blurring all of a photo but what should stay sharp: the subject (_Behind subject_), a horizontal band (_Tilt-shift_) or a round spot (_Radial_) around the **focus**. (code: `domain::edit::BlurKind`) |
 | **Part**                 | What the panel's adjustments change: the whole _Photo_, its _Subject_ or its _Background_.                                                                         |

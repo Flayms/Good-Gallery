@@ -26,6 +26,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [020-light-mode](020-light-mode/spec.md)                 | Light appearance, following the system or chosen in the settings | Implemented |
 | [021-photo-editing](021-photo-editing/spec.md)           | Light, curves, color, effects in the viewer; reversible saves    | Implemented |
 | [022-subject-and-background](022-subject-and-background/spec.md) | Light and color of a photo's subject and background, found automatically | Implemented |
+| [023-blur](023-blur/spec.md)                             | Blur behind the subject, tilt-shift and radial blur              | Implemented |
 
 ## Conventions
 
