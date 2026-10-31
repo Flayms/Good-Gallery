@@ -1,6 +1,46 @@
 # Changelog
 
 All notable changes to Good Gallery. Versions follow [Semantic Versioning](https://semver.org), entries are generated from [Conventional Commits](https://www.conventionalcommits.org).
+## [0.3.0](https://github.com/Flayms/Good-Gallery/releases/tag/v0.3.0) · 2026-10-31
+
+### ✨ Features
+
+- **sidebar:** Hide and show the sidebar ([`1a388d4`](https://github.com/Flayms/Good-Gallery/commit/1a388d4d8e747b8530d0aef845f47010ab023ca3))
+- **release:** Name downloads after the system and architecture ([`247ec27`](https://github.com/Flayms/Good-Gallery/commit/247ec2780b405a6ceb4f5989bd71f7c8cd43f8bf))
+- **gallery:** Autoscroll with the middle mouse button ([`296ae99`](https://github.com/Flayms/Good-Gallery/commit/296ae997bce85408bea42c4a3ace278716153fc1))
+- Light mode ([`455c956`](https://github.com/Flayms/Good-Gallery/commit/455c956aa622d8ecc7e7175f961a7604f47edfe9))
+- **viewer:** Edit photos with light, curves, color and effects (#67) ([`ecd62c5`](https://github.com/Flayms/Good-Gallery/commit/ecd62c5d1cbfccf7f87c14aef6912cbc6eb22a75))
+- Order and hide the sidebar groups in the settings (#66) ([`5d61b1e`](https://github.com/Flayms/Good-Gallery/commit/5d61b1e4f5c521f2467a2220c03d9a55c9f4e9bf))
+- **viewer:** Brightness, histogram, and subject and background editing (#78) ([`3b4797a`](https://github.com/Flayms/Good-Gallery/commit/3b4797aa125d0165bfa1e607dda4d7fa7f4d9f9a))
+- **viewer:** Blur behind the subject, tilt-shift and radial blur (#80) ([`f21c69e`](https://github.com/Flayms/Good-Gallery/commit/f21c69e0ffd8cb008984237a95722fcf36ca7c03))
+
+### 🐛 Bug fixes
+
+- **gallery:** Make autoscroll feel like a browser's ([`402ed89`](https://github.com/Flayms/Good-Gallery/commit/402ed8922b4b41f909dd7479ec3ad7b6d0be4e66))
+- Keep the window controls dark over the viewer in light mode ([`b9c08b8`](https://github.com/Flayms/Good-Gallery/commit/b9c08b811c33253af973af2ad56b166efdd5d1a6))
+- **viewer:** Don't crash when discarding an edit (#73) ([`d120e9d`](https://github.com/Flayms/Good-Gallery/commit/d120e9d303e686a5c0bae93eb05ce58298b2c1bc))
+
+### 📝 Documentation
+
+- **pitfalls:** Worktrees sharing a target dir test each other's code ([`1151b1d`](https://github.com/Flayms/Good-Gallery/commit/1151b1dcf5df08fce52d85a95d411887addb36d7))
+- Update agents.md ([`1d132af`](https://github.com/Flayms/Good-Gallery/commit/1d132af6facbe88e5d539cd35b2f536a7666c641))
+- **readme:** Split the development requirements by platform and list NSIS ([`ab8b429`](https://github.com/Flayms/Good-Gallery/commit/ab8b4296bca21fb2f9f6e795729a26654dcad413))
+- **specs:** Add 020 light mode spec and plan ([`6170645`](https://github.com/Flayms/Good-Gallery/commit/6170645e3d2632e00722b7316c71bc846395ebb1))
+- Update README for clarity and add web version link ([`3857b6a`](https://github.com/Flayms/Good-Gallery/commit/3857b6a107d2c7b72e352800e89e14b988671860))
+- Update AGENTS.md ([`b95ef95`](https://github.com/Flayms/Good-Gallery/commit/b95ef9568e5fbc1859efa7e073d29789f101f966))
+- **readme:** Rewrite it, with editing, shortcuts and a screenshot of the editor (#72) ([`568a26d`](https://github.com/Flayms/Good-Gallery/commit/568a26dab28909ec715ec9805b84251cd6aeb3b5))
+
+### 🔧 Maintenance
+
+- **web:** Update screenshots for the Hide sidebar button ([`f8ca7df`](https://github.com/Flayms/Good-Gallery/commit/f8ca7df74b2d82e3b09fa98f6a093c615805f9af))
+- Upload new snapshot renders with the diffs ([`fca770f`](https://github.com/Flayms/Good-Gallery/commit/fca770f1070a8c9495d4fff3dc527078ef70b900))
+- **web:** Screenshots with the Appearance setting, and in light ([`ae7f847`](https://github.com/Flayms/Good-Gallery/commit/ae7f8472540061aeb8b66a51845c288c8ca47201))
+- Windows snapshots for light mode and the Appearance setting ([`1da615a`](https://github.com/Flayms/Good-Gallery/commit/1da615a95ac2aae9600af31909e9e53493f98444))
+- Add vscode debugging ([`06c1f78`](https://github.com/Flayms/Good-Gallery/commit/06c1f789e992e15d7557316843b64dcdb5b1e138))
+- Improve launch configuration ([`9757560`](https://github.com/Flayms/Good-Gallery/commit/9757560835c23f64189516c74c3803bd3724ac08))
+- Run the tests with nextest and save the Rust cache only on main (#79) ([`38d3596`](https://github.com/Flayms/Good-Gallery/commit/38d3596614fa73d8d095e9f0a820a3c6d7a0f976))
+
+**Full changelog:** [v0.2.1...v0.3.0](https://github.com/Flayms/Good-Gallery/compare/v0.2.1...v0.3.0)
 ## [0.2.1](https://github.com/Flayms/Good-Gallery/releases/tag/v0.2.1) · 2026-10-29
 
 ### 📝 Documentation

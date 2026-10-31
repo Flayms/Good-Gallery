@@ -192,7 +192,7 @@ checksum = "fb5dfbc6d8d2675589ccbe4d0fd61df2419075625f8c1a62325e718e2b0049f9"
 
 [[package]]
 name = "app"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -910,7 +910,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
 name = "db"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "domain",
@@ -1037,7 +1037,7 @@ dependencies = [
 
 [[package]]
 name = "domain"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "serde",
@@ -2110,7 +2110,7 @@ checksum = "edcd27d72f2f071c64249075f42e205ff93c9a4c5f6c6da53e79ed9f9832c285"
 
 [[package]]
 name = "indexer"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "crossbeam-channel",
  "db",
@@ -2543,7 +2543,7 @@ dependencies = [
 
 [[package]]
 name = "media"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "base64",
  "domain",
@@ -2594,7 +2594,7 @@ dependencies = [
 
 [[package]]
 name = "meta"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "domain",
@@ -5655,7 +5655,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "chrono",
