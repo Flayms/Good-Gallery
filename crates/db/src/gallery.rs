@@ -38,12 +38,11 @@ fn order_by(search: &GallerySearch) -> String {
     terms.join(", ")
 }
 
-/// Query shapes by (estimated) matches of an included tag, measured on 500k synthetic media items: up to `DRIVING_MAX`,
-/// the rarest tag drives (its media are looked up by id and sorted); otherwise the sort index is walked and rows are
-/// checked against each tag's materialized media ids; beyond `MATERIALIZE_MAX`, a primary key probe per row is cheaper
-/// than building the list.
-const DRIVING_MAX: u64 = 5_000;
-const MATERIALIZE_MAX: u64 = 100_000;
+/// Query shapes by (estimated) matches of an included tag, measured on 500k synthetic media items (REQ-007-14): up to
+/// `DRIVING_MAX`, the rarest tag drives (its media are looked up by id, in id order, and sorted), which beats walking
+/// the sort index for every sort at any size up to there; only a name sort over most of the index walks faster.
+/// Beyond, the sort index is walked with a primary key probe per row.
+const DRIVING_MAX: u64 = 200_000;
 
 /// A tag with all its descendants, and an upper bound of the media items carrying any of them.
 struct Subtree {
@@ -131,12 +130,7 @@ fn tag_conditions(conn: &Connection, include: &[String], exclude: &[String]) -> 
             }
         } else {
             for subtree in &subtrees_by_size {
-                conditions.push(if subtree.estimate <= MATERIALIZE_MAX {
-                    // `+media.id` rules out id lookups, so SQLite keeps the sort index and builds the id list once.
-                    format!("+media.id IN ({})", tagged_media(&subtree.ids))
-                } else {
-                    format!("EXISTS ({})", links_to(&subtree.ids))
-                });
+                conditions.push(format!("EXISTS ({})", links_to(&subtree.ids)));
             }
         }
     }
@@ -159,8 +153,16 @@ fn filters(conn: &Connection, search: &GallerySearch) -> Result<(String, Vec<rus
         params.push(value);
         format!("?{}", params.len())
     };
+    let name = search.name.as_deref().map(str::trim).filter(|name| !name.is_empty());
     if let Some(library) = search.library {
-        conditions.push(format!("media.root_id = {}", param(library.into())));
+        // With a file name the name's matches drive; the library's sort index would be walked instead. A folder needs
+        // `root_id` for its own index.
+        let pin = if name.is_some() && search.folder_filter().is_none() {
+            "+"
+        } else {
+            ""
+        };
+        conditions.push(format!("{pin}media.root_id = {}", param(library.into())));
     }
     // `dir` ends with `/`, and `0` is the character after `/`: a range scan over the folder and its subfolders.
     if let Some(folder) = search.folder_filter() {
@@ -194,10 +196,12 @@ fn filters(conn: &Connection, search: &GallerySearch) -> Result<(String, Vec<rus
             .collect();
         conditions.push(format!("({})", ratings.join(" OR ")));
     }
-    // `lower()` on both sides: SQLite's ASCII-only folding must match the generated `file_name_lower` column.
-    if let Some(name) = search.name.as_deref().map(str::trim).filter(|name| !name.is_empty()) {
+    // `lower()` on both sides: SQLite's ASCII-only folding must match the generated `file_name_lower` column. The
+    // matches come from the name index, which holds `file_name_lower`: walking the rows computes `lower()` for each
+    // (REQ-007-14).
+    if let Some(name) = name {
         conditions.push(format!(
-            "instr(media.file_name_lower, lower({})) > 0",
+            "media.id IN (SELECT id FROM media INDEXED BY media_name_idx WHERE instr(file_name_lower, lower({})) > 0)",
             param(name.to_string().into())
         ));
     }
@@ -213,8 +217,8 @@ fn filters(conn: &Connection, search: &GallerySearch) -> Result<(String, Vec<rus
     Ok((clause, params))
 }
 
-/// Ids and aspects of every match in sort order, with the day groups of a date sort.
-pub fn layout(conn: &Connection, search: &GallerySearch) -> Result<GalleryLayout> {
+/// The query behind [`layout`] and its parameters.
+fn layout_query(conn: &Connection, search: &GallerySearch) -> Result<(String, Vec<rusqlite::types::Value>)> {
     let date = match search.sort_by {
         SortBy::Taken => "sort_date",
         SortBy::Modified => "mtime",
@@ -225,6 +229,12 @@ pub fn layout(conn: &Connection, search: &GallerySearch) -> Result<GalleryLayout
         "SELECT id, width, height, kind = 'video', {date} FROM media {clause} ORDER BY {}",
         order_by(search)
     );
+    Ok((sql, params))
+}
+
+/// Ids and aspects of every match in sort order, with the day groups of a date sort.
+pub fn layout(conn: &Connection, search: &GallerySearch) -> Result<GalleryLayout> {
+    let (sql, params) = layout_query(conn, search)?;
     // Tag ids are part of the text: such searches are mostly new statements, others come back (sorts, refreshes).
     let (mut cached, mut fresh);
     let stmt: &mut rusqlite::Statement = if search.tags.is_empty() && search.exclude.is_empty() {
@@ -419,6 +429,55 @@ mod tests {
     }
 
     const DAY: i64 = 24 * 3600 * 1000;
+
+    /// The query plan of a search, one step per line.
+    fn plan(conn: &Connection, search: &GallerySearch) -> String {
+        let (sql, params) = layout_query(conn, search).unwrap();
+        let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        stmt.query_map(rusqlite::params_from_iter(params), |row| row.get::<_, String>(3))
+            .unwrap()
+            .map(|step| step.unwrap())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// REQ-007-14: the query shapes that keep searches fast on large indexes. A tag on up to 200k items drives (its
+    /// media are looked up by id, then sorted), beyond the sort index is walked; a file name's matches come from the
+    /// name index, also within a library.
+    #[test]
+    fn req_007_14_broad_tags_and_file_names_drive_the_search() {
+        let conn = index(&[file("a/IMG_1.jpg", (4, 3), None, &[&["Common"], &["Everywhere"]])]);
+        conn.execute("UPDATE tags SET media_count = 94000 WHERE name = 'Common'", [])
+            .unwrap();
+        conn.execute("UPDATE tags SET media_count = 450000 WHERE name = 'Everywhere'", [])
+            .unwrap();
+        let tag = |name: &str| GallerySearch {
+            tags: vec![name.into()],
+            ..Default::default()
+        };
+        let drives = "SEARCH media USING INTEGER PRIMARY KEY (rowid=?)";
+        assert!(
+            plan(&conn, &tag("Common")).contains(drives),
+            "{}",
+            plan(&conn, &tag("Common"))
+        );
+        assert!(
+            !plan(&conn, &tag("Everywhere")).contains(drives),
+            "{}",
+            plan(&conn, &tag("Everywhere"))
+        );
+
+        let library = libraries::list(&conn).unwrap()[0].id;
+        for library in [None, Some(library)] {
+            let name = GallerySearch {
+                name: Some("img_1".into()),
+                library,
+                ..Default::default()
+            };
+            let plan = plan(&conn, &name);
+            assert!(plan.contains(drives) && plan.contains("media_name_idx"), "{plan}");
+        }
+    }
 
     /// REQ-006-08, REQ-016-01: every match in sort order (newest first, ties by id), with clamped aspects and the
     /// day groups.
