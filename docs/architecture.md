@@ -198,6 +198,11 @@ Architectural decisions, newest last. One entry each: what was decided, why (wit
 **Decided:** the subject of a photo (spec 022) is found by U²-Net-p (4.6 MB, Apache-2.0), a salient object detection network, run on the CPU by `tract-onnx` (pure Rust) in `media::subject`. The model is embedded with `include_bytes!`, so there is nothing to download or bundle (REQ-011-11). Its 320 × 320 soft mask (`domain::edit::Mask`) is sampled bilinearly over the photo: on the CPU when saving, as an `R8Unorm` texture in `edit.wgsl`. The recipe gets optional `subject` and `background` recipes with light and color only, applied after the whole photo's and blended by the mask; the mask is never stored, but found again from the unedited original, and handed to saving so the file matches the preview.
 **Rejected:** larger matting networks (ISNet, BiRefNet, RMBG: 170 MB and more, slow on a CPU), person-only models (MODNet, MediaPipe), ONNX Runtime through `ort` (a native library per platform), storing the mask in the file.
 
+### 2026-10-31 · Blur from an image pyramid
+
+**Decided:** blurs (spec 023) sample a pyramid of the photo, halved by 2 × 2 boxes as the GPU texture's mip chain, with a cubic B-spline at the level of each spot's blur (σ ≈ 0.65 · 2^level), mixing two levels in between. The shader uses the texture's own mips (four bilinear taps per level), saving builds the same levels in 32-bit float (`domain::edit::Pyramid`). The blur comes before the other adjustments, as a lens's would.
+**Rejected:** a convolution per pixel with a varying kernel (too slow live on large photos), blurring on the GPU into extra textures per change (a readback or a second pipeline, and a different result when saving).
+
 ### 2026-10-31 · Faster CI
 
 **Decided:** CI runs the tests with cargo-nextest (`.config/nextest.toml`, profile `ci`): the test binaries run in parallel instead of one after another, and every test in its own process, so the `GPU` lock of the UI tests (one wgpu harness per process at a time) still holds. A test that hangs fails after 5 minutes. nextest skips doctests, so `cargo test --workspace --doc` runs them. Only `main` saves the Rust cache (pull requests restore it; a tag's cache can't be restored by any other ref). `cargo test --workspace` stays the local command.

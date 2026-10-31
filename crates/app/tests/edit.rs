@@ -7,7 +7,7 @@ use common::{Fixture, settle};
 use db::libraries::LibraryStatus;
 use db::rusqlite::Connection;
 use db::writer::{IndexWriter, IndexedFile};
-use domain::edit::{Adjustment, Channel, Part, Recipe, SavedEdit};
+use domain::edit::{Adjustment, BlurKind, Channel, Part, Recipe, SavedEdit};
 use domain::media::{MediaKind, MediaMetadata};
 use eframe::egui::accesskit::Role;
 use eframe::egui::{self, Key, Modifiers};
@@ -556,4 +556,47 @@ fn req_022_05_edits_again_with_the_saved_parts() {
     let session = session(&harness).unwrap();
     assert_eq!(session.recipe().part(Part::Background).unwrap().shadows, -40.0);
     assert!(session.subject().is_some(), "found again without choosing a part");
+}
+
+/// REQ-023-01, REQ-023-02, REQ-023-03: _Effects_ offers the blurs; a focus blur has a size, a transition and a focus
+/// to place, _Background_ looks for the subject.
+#[test]
+fn req_023_01_req_023_02_req_023_03_chooses_a_blur_and_places_its_focus() {
+    let fixture = Fixture::new();
+    let (mut harness, dir) = app(&fixture, None, None);
+    disc_photo(&dir);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    // Light and Color folded away, Effects open.
+    for section in ["Light", "Color", "Effects"] {
+        harness.get_by_role_and_label(Role::Button, section).click();
+        harness.run_steps(2);
+    }
+    assert!(harness.query_by_label("Focus size").is_none(), "no blur yet");
+    harness.get_by_role_and_label(Role::Button, "Tilt-shift").click();
+    harness.run_steps(2);
+    let recipe = session(&harness).unwrap().recipe().clone();
+    assert_eq!(recipe.blur_kind, BlurKind::TiltShift);
+    assert!(recipe.blur > 0.0 && !recipe.is_neutral());
+    assert!(harness.query_by_label("Focus size").is_some() && harness.query_by_label("Transition").is_some());
+
+    harness.get_by_role_and_label(Role::Button, "Place focus").click();
+    harness.run_steps(2);
+    assert!(session(&harness).unwrap().is_picking());
+    let viewer = harness.state_mut().viewer.as_mut().unwrap();
+    viewer.editing_mut().unwrap().pick(egui::pos2(0.5, 0.25));
+    harness.run_steps(2);
+    let editing = session(&harness).unwrap();
+    assert_eq!(editing.recipe().blur_focus, [0.5, 0.25]);
+    assert!(!editing.is_picking());
+    harness.snapshot(common::snapshot_name("edit_blur"));
+
+    // Behind the subject: the subject is looked for.
+    assert!(session(&harness).unwrap().subject().is_none());
+    harness.get_by_role_and_label(Role::Button, "Behind subject").click();
+    harness.run_steps(2);
+    settle_all(&mut harness);
+    assert_eq!(session(&harness).unwrap().recipe().blur_kind, BlurKind::Background);
+    assert!(session(&harness).unwrap().subject().is_some());
+    assert!(harness.query_by_label("Place focus").is_none());
 }
