@@ -20,3 +20,5 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 - [x] Test for folders that can't be listed (REQ-002-11; Unix only, a folder without the read permission. On Windows it would need changing ACLs)
 - [ ] Test for files that can't be accessed at all (REQ-002-12)
 - [ ] Show the progress as a sidebar footer row and test the library's spinner (REQ-002-08)
+- [x] Unreadable files: `media.meta_error` (migration 0014, partial index), the writer keeps a known file's metadata on a failed read, scans re-read files with a `meta_error` and quick scans re-list their folders, without touching `meta_version` (REQ-002-12, -15)
+- [x] Toolbar notice with the list and _Read again_ / _Read all again_ through changes scans of the paths (REQ-002-16, -17)

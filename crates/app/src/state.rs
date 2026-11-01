@@ -240,6 +240,8 @@ pub struct AppState {
     pub confirm_revert: Option<RevertTarget>,
     /// A saved copy to show in the viewer once it is indexed: its library and path (REQ-021-09).
     pending_copy: Option<(i64, String)>,
+    /// Files whose metadata couldn't be read, for the toolbar's notice (REQ-002-16).
+    pub unreadable: crate::unreadable::Unreadable,
 }
 
 impl AppState {
@@ -550,6 +552,7 @@ impl AppState {
             edit_tools: None,
             confirm_revert: None,
             pending_copy: None,
+            unreadable: Default::default(),
         }
     }
 
@@ -579,11 +582,13 @@ impl AppState {
                 let count = conn
                     .query_row("SELECT count(*) FROM media", [], |row| row.get(0))
                     .map_err(|e| e.to_string())?;
-                Ok((libraries, count))
+                let unreadable = db::media::unreadable(conn, crate::unreadable::LISTED).map_err(|e| e.to_string())?;
+                Ok((libraries, count, unreadable))
             });
         match result {
-            Ok((libraries, count)) => {
+            Ok((libraries, count, (unreadable, files))) => {
                 (self.libraries, self.media_count) = (libraries, count);
+                self.unreadable.load(unreadable, files, &self.libraries);
                 // New media items while indexing, or a library removed (REQ-006-11).
                 if let Some(gallery) = &mut self.gallery {
                     // A removed library leaves the search, so the gallery doesn't stay empty without a reason.
@@ -682,6 +687,39 @@ impl AppState {
         }
     }
 
+    /// Reads unreadable files again right away: a changes scan of their paths per library (REQ-002-17).
+    pub fn read_again(&mut self, asked: crate::unreadable::ReadAgain) {
+        let files: Vec<db::media::UnreadableFile> = match asked {
+            crate::unreadable::ReadAgain::Files(ids) => self
+                .unreadable
+                .rows
+                .iter()
+                .filter(|row| ids.contains(&row.file.id))
+                .map(|row| row.file.clone())
+                .collect(),
+            // Listed or not.
+            crate::unreadable::ReadAgain::All => {
+                let Some(db) = &self.db else { return };
+                match db::media::unreadable(&lock(db), usize::MAX) {
+                    Ok((_, files)) => files,
+                    Err(error) => return self.toasts.error(error.to_string()),
+                }
+            }
+        };
+        let mut by_library: Vec<(i64, Vec<String>)> = Vec::new();
+        for file in &files {
+            match by_library.iter_mut().find(|(root, _)| *root == file.root_id) {
+                Some((_, paths)) => paths.push(file.rel_path.clone()),
+                None => by_library.push((file.root_id, vec![file.rel_path.clone()])),
+            }
+        }
+        for (library, paths) in by_library {
+            self.scans.request_paths(library, paths);
+        }
+        self.unreadable
+            .start_reading(files.iter().map(|file| (file.id, file.root_id)));
+    }
+
     /// Applies finished background jobs. Called every frame.
     pub fn poll(&mut self) {
         while let Ok(event) = self.events.1.try_recv() {
@@ -709,7 +747,8 @@ impl AppState {
         match event {
             IndexerEvent::Status(status) => self.indexer_status = status,
             IndexerEvent::Written(_) => self.written_since_refresh = true,
-            IndexerEvent::Done(_, result) => {
+            IndexerEvent::Done(library, result) => {
+                self.unreadable.done(library);
                 if let indexer::ScanResult::Failed(error) = result {
                     self.toasts.error(format!("Indexing failed: {error}"));
                 }

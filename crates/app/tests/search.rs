@@ -30,6 +30,7 @@ fn file(rel_path: &str, kind: MediaKind, taken_at: i64, rating: Option<i64>, tag
             tags: tags.iter().map(|p| p.iter().map(|s| s.to_string()).collect()).collect(),
             ..Default::default()
         },
+        read_error: None,
     }
 }
 

@@ -48,6 +48,7 @@ fn app(fixture: &Fixture, fake: Option<&FakePlayback>) -> (App, PathBuf) {
                     taken_at: Some(2_000_000 - i as i64),
                     ..Default::default()
                 },
+                read_error: None,
             }
         })
         .collect();

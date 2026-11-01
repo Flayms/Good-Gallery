@@ -47,6 +47,7 @@ fn library(fixture: &Fixture, count: usize, missing: &[&str]) -> Connection {
                     taken_at: Some(2_000_000 - i as i64),
                     ..Default::default()
                 },
+                read_error: None,
             }
         })
         .collect();
@@ -537,6 +538,7 @@ fn indexed(i: i64, name: &str, kind: MediaKind, tags: &[&[&str]], rating: Option
                 .collect(),
             ..Default::default()
         },
+        read_error: None,
     }
 }
 
@@ -1055,6 +1057,7 @@ fn library_with_faces(fixture: &Fixture, count: usize) -> Connection {
             faces: vec![face("Anna", 0.1, 0.2), face("Ben", 0.6, 0.5)],
             ..Default::default()
         },
+        read_error: None,
     };
     writer.write(root, &[photo]).unwrap();
     writer.into()

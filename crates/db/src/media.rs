@@ -45,6 +45,41 @@ pub struct DetailTag {
     pub category: Option<TagCategory>,
 }
 
+/// A media item whose metadata couldn't be read at its last scan (REQ-002-12).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreadableFile {
+    pub id: i64,
+    pub root_id: i64,
+    /// `/`-separated, relative to the library.
+    pub rel_path: String,
+    pub file_name: String,
+    /// Why the read failed.
+    pub reason: String,
+}
+
+/// How many files of all libraries are unreadable, and the first `limit` of them by library and path (REQ-002-16).
+pub fn unreadable(conn: &Connection, limit: usize) -> Result<(i64, Vec<UnreadableFile>)> {
+    let count = conn
+        .prepare_cached("SELECT count(*) FROM media WHERE meta_error IS NOT NULL")?
+        .query_row([], |row| row.get(0))?;
+    let files = conn
+        .prepare_cached(
+            "SELECT id, root_id, rel_path, file_name, meta_error FROM media WHERE meta_error IS NOT NULL
+             ORDER BY root_id, rel_path LIMIT ?1",
+        )?
+        .query_map([limit as i64], |row| {
+            Ok(UnreadableFile {
+                id: row.get(0)?,
+                root_id: row.get(1)?,
+                rel_path: row.get(2)?,
+                file_name: row.get(3)?,
+                reason: row.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok((count, files))
+}
+
 /// The library folder joined with a relative path stored with `/` separators; `None` for a relative path that would
 /// leave the library (REQ-011-08), so the item is treated as missing.
 pub fn absolute_path(root: &str, rel_path: &str) -> Option<PathBuf> {

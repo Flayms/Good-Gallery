@@ -126,6 +126,19 @@ mod tests {
         );
     }
 
+    /// REQ-002-15: media items an earlier version indexed without dimensions count as unreadable, so scans read them
+    /// again; the others don't.
+    #[test]
+    fn req_002_15_marks_media_indexed_without_dimensions_unreadable() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open(&legacy_copy(&dir)).unwrap();
+
+        let (count, files) = media::unreadable(&conn, 10).unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(files[0].rel_path, "old/scan.png");
+        assert_eq!(files[0].reason, "An earlier version read no metadata from it");
+    }
+
     /// REQ-001-08: opening an earlier index keeps its migration rows; only newer migrations are added after them.
     #[test]
     fn req_001_08_keeps_the_earlier_bookkeeping() {

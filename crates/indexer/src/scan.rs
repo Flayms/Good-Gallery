@@ -180,19 +180,21 @@ fn read_file(job: Job, deps: &WorkerDeps, root_path: &Path) -> JobResult {
         && known.mtime == mtime
         && known.sidecar_mtime == sidecar_mtime
         && known.meta_version == METADATA_VERSION
+        && !known.unreadable
     {
         return JobResult::Seen(job.rel_path, None);
     }
     let sidecar = sidecar_stats.and(job.sidecar.as_deref());
-    let metadata = match deps.metadata.read(&job.abs_path, sidecar) {
-        Ok(metadata) => metadata,
+    let (metadata, read_error) = match deps.metadata.read(&job.abs_path, sidecar) {
+        Ok(metadata) => (metadata, None),
         Err(error) => {
             deps.check_reachable(root_path);
             if deps.aborted() {
                 return JobResult::Skipped;
             }
             tracing::warn!("Indexer: unreadable metadata in {}: {error}", job.abs_path.display());
-            MediaMetadata::default()
+            // Kept as an unreadable file, read again by the next scans (REQ-002-12, REQ-002-15).
+            (MediaMetadata::default(), Some(error.to_string()))
         }
     };
     let file = IndexedFile {
@@ -203,6 +205,7 @@ fn read_file(job: Job, deps: &WorkerDeps, root_path: &Path) -> JobResult {
         mtime,
         sidecar_mtime,
         metadata,
+        read_error,
     };
     JobResult::Seen(job.rel_path, Some(Box::new(file)))
 }
@@ -280,6 +283,12 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
     let scope = if stored.is_empty() { &ScanScope::Full } else { requested };
     let full = *scope == ScanScope::Full;
     let children = child_index(&stored);
+    // Unreadable files are read again by every scan (REQ-002-15): quick scans list their folders though unchanged.
+    let retry = if matches!(scope, ScanScope::Quick) {
+        writer.unreadable_folders(root_id)?
+    } else {
+        HashSet::new()
+    };
     let touched: Option<HashSet<String>> = match scope {
         ScanScope::Changes(paths) => Some(paths.iter().map(|p| p.to_lowercase()).collect()),
         _ => None,
@@ -320,7 +329,8 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
     };
 
     let skip_quick: Skip = &|rel_dir, mtime| {
-        (stored.get(rel_dir) == Some(&mtime)).then(|| children.get(rel_dir).cloned().unwrap_or_default())
+        (stored.get(rel_dir) == Some(&mtime) && !retry.contains(rel_dir))
+            .then(|| children.get(rel_dir).cloned().unwrap_or_default())
     };
     let descend_new: Descend = &|listing: &DirListing| {
         listing
@@ -912,7 +922,7 @@ mod tests {
     }
 
     #[test]
-    fn req_002_12_indexes_files_with_unreadable_metadata_without_it() {
+    fn req_002_12_indexes_new_files_with_unreadable_metadata_without_it_and_with_the_reason() {
         let mut f = Fixture::new();
         f.touch("a.jpg", "x");
         f.metadata.failing.lock().unwrap().insert("a.jpg".into());
@@ -920,6 +930,101 @@ mod tests {
         assert_eq!(f.scan(ScanScope::Full), ScanOutcome::Completed);
         assert_eq!(f.paths(), ["a.jpg"]);
         assert_eq!(f.value::<Option<i64>>("SELECT width FROM media"), None);
+        assert_eq!(
+            f.value::<Option<String>>("SELECT meta_error FROM media"),
+            Some("exiftool: broken".into())
+        );
+    }
+
+    /// REQ-002-12: a file that was read before and is unreadable after it changed keeps its metadata, tags included,
+    /// and takes the new size, so its thumbnail is rendered again.
+    #[test]
+    fn req_002_12_keeps_the_metadata_of_a_known_file_whose_read_fails() {
+        let mut f = Fixture::new();
+        f.touch_past("a.jpg", "x");
+        f.metadata.set(
+            "a.jpg",
+            MediaMetadata {
+                rating: Some(5),
+                tags: vec![vec!["Artistic".into()]],
+                ..with_size(30, 20, 1000)
+            },
+        );
+        f.scan(ScanScope::Full);
+        f.writer
+            .conn()
+            .execute("UPDATE media SET thumb_status = 'ready', thumbhash = 'abc'", [])
+            .unwrap();
+
+        f.touch_past("a.jpg", "xy");
+        f.metadata.failing.lock().unwrap().insert("a.jpg".into());
+        f.scan(ScanScope::Full);
+
+        let row: (i64, i64, i64, i64, String, Option<String>) = f
+            .writer
+            .conn()
+            .query_row(
+                "SELECT size, width, taken_at, rating, thumb_status, meta_error FROM media",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+            )
+            .unwrap();
+        assert_eq!(row, (2, 30, 1000, 5, "pending".into(), Some("exiftool: broken".into())));
+        assert_eq!(f.value::<i64>("SELECT count(*) FROM media_tags"), 1);
+    }
+
+    /// REQ-002-15: an unreadable file is read again by the next quick scan, though neither it nor its folder changed;
+    /// once read, it is no longer unreadable.
+    #[test]
+    fn req_002_15_quick_scans_read_unreadable_files_again() {
+        let mut f = Fixture::new();
+        f.touch_past("trip/a.jpg", "x");
+        f.touch_past("trip/b.jpg", "x");
+        f.touch_past("c.jpg", "x");
+        f.metadata.failing.lock().unwrap().insert("a.jpg".into());
+        f.age(&["trip", ""]);
+        f.scan(ScanScope::Full);
+        f.metadata.take_reads();
+
+        f.metadata.failing.lock().unwrap().clear();
+        f.metadata.set("a.jpg", with_size(30, 20, 1000));
+        assert_eq!(f.scan(ScanScope::Quick), ScanOutcome::Completed);
+
+        assert_eq!(f.metadata.take_reads(), ["a.jpg"]);
+        let row: (i64, Option<String>) = f
+            .writer
+            .conn()
+            .query_row(
+                "SELECT width, meta_error FROM media WHERE rel_path = 'trip/a.jpg'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row, (30, None));
+
+        // Read: the next quick scan leaves it alone.
+        f.scan(ScanScope::Quick);
+        assert!(f.metadata.take_reads().is_empty());
+    }
+
+    /// REQ-002-15, REQ-002-17: a changes scan of an unreadable file reads it again (the toolbar's _Read again_), and
+    /// a failed read keeps the metadata version, so the library's scheduled scans stay quick.
+    #[test]
+    fn req_002_15_req_002_17_changes_scans_read_an_unreadable_file_again() {
+        let mut f = Fixture::new();
+        f.touch("a.jpg", "x");
+        f.metadata.failing.lock().unwrap().insert("a.jpg".into());
+        f.scan(ScanScope::Full);
+        assert_eq!(f.value::<i64>("SELECT meta_version FROM media"), METADATA_VERSION);
+        f.metadata.take_reads();
+
+        f.scan(ScanScope::Changes(vec!["a.jpg".into()]));
+
+        assert_eq!(f.metadata.take_reads(), ["a.jpg"]);
+        assert_eq!(
+            f.value::<Option<String>>("SELECT meta_error FROM media"),
+            Some("exiftool: broken".into())
+        );
     }
 
     #[test]

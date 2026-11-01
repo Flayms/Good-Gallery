@@ -376,6 +376,7 @@ async fn scan(indexer: &WebIndexer, library: i64) -> Result<ScanResult, String> 
                 mtime,
                 sidecar_mtime,
                 metadata: metadata(found, sidecar.map(|(file, _)| file)).await,
+                read_error: None,
             });
         }
         if batch.len() >= BATCH || (!batch.is_empty() && super::now_ms() - flushed_at >= FLUSH_MS) {

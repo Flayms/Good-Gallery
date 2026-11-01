@@ -32,6 +32,7 @@ fn file(name: &str, size: (i64, i64), taken_at: i64, duration: Option<f64>) -> I
             duration,
             ..Default::default()
         },
+        read_error: None,
     }
 }
 
