@@ -274,12 +274,18 @@ fn day_field(ui: &mut egui::Ui, id: &str, day: Option<NaiveDate>, fallback: Naiv
     };
     let mut picked = jiff::civil::date(day.year() as i16, day.month() as i8, day.day() as i8);
     let before = picked;
-    ui.add(
-        egui_extras::DatePickerButton::new(&mut picked)
-            .id_salt(id)
-            .calendar_week(false)
-            .show_icon(false),
-    );
+    // Its popup is the area of its optional id salt under this `ui`, framed by egui_extras: glass goes behind it
+    // (REQ-013-03).
+    let popup = egui::LayerId::new(egui::Order::Foreground, ui.make_persistent_id(Some(id)));
+    let ctx = ui.ctx().clone();
+    crate::glass::behind_area(&ctx, popup, || {
+        ui.add(
+            egui_extras::DatePickerButton::new(&mut picked)
+                .id_salt(id)
+                .calendar_week(false)
+                .show_icon(false),
+        )
+    });
     (picked != before)
         .then(|| NaiveDate::from_ymd_opt(i32::from(picked.year()), picked.month() as u32, picked.day() as u32))
 }
@@ -442,4 +448,66 @@ fn view_menu(ui: &mut egui::Ui, gallery: &mut Gallery) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// REQ-013-03: a date picker's popup is a glass surface like the other menus, not the opaque frame egui_extras
+    /// gives it.
+    #[test]
+    fn req_013_03_date_picker_popups_are_glass() {
+        let ctx = egui::Context::default();
+        crate::glass::pretend_installed(&ctx);
+        let day = NaiveDate::from_ymd_opt(2024, 5, 1).unwrap();
+        let button = std::cell::Cell::new(None);
+        let frame = |events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0))),
+                events,
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input, |ui| {
+                crate::glass::begin_frame(ui.ctx());
+                if button.get().is_none() {
+                    button.set(Some(ui.next_widget_position() + vec2(12.0, 6.0)));
+                }
+                day_field(ui, "from", Some(day), day);
+            });
+            // No renderer takes the font atlas.
+            output.textures_delta.clear();
+            output
+        };
+        frame(Vec::new());
+        let at = button.get().unwrap();
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(vec![egui::Event::PointerMoved(at), press(true), press(false)]);
+        let output = frame(Vec::new());
+
+        let popup_fill = ctx.global_style().visuals.window_fill();
+        let wide = |rect: Rect| rect.width() > 300.0;
+        let glass = output
+            .shapes
+            .iter()
+            .any(|clipped| matches!(&clipped.shape, egui::Shape::Callback(callback) if wide(callback.rect)));
+        fn opaque(shape: &egui::Shape, fill: egui::Color32, wide: &dyn Fn(Rect) -> bool) -> bool {
+            match shape {
+                egui::Shape::Rect(rect) => rect.fill == fill && wide(rect.rect),
+                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| opaque(shape, fill, wide)),
+                _ => false,
+            }
+        }
+        let opaque_frame = output
+            .shapes
+            .iter()
+            .any(|clipped| opaque(&clipped.shape, popup_fill, &wide));
+        assert!(glass, "glass behind the popup");
+        assert!(!opaque_frame, "no opaque frame over it");
+    }
 }

@@ -37,6 +37,8 @@ pub struct Target {
     pub library: PathBuf,
     /// The photo's displayed size at full resolution, which grain is measured in.
     pub full_size: [u32; 2],
+    /// Turns a photo without an orientation of its own (REQ-004-12).
+    pub sidecar_orientation: Option<u8>,
 }
 
 /// What the viewer asks the app to save (REQ-021-09, REQ-021-10).
@@ -51,6 +53,8 @@ pub struct SaveEdit {
     pub copy: bool,
     /// The subject the preview showed, for a recipe with parts (REQ-022-05).
     pub subject: Option<Arc<Mask>>,
+    /// Turns an original without an orientation of its own (REQ-004-12).
+    pub sidecar_orientation: Option<u8>,
 }
 
 /// Where the user wanted to go when editing had unsaved changes (REQ-021-08).
@@ -397,6 +401,7 @@ impl EditSession {
                 Subject::Found(mask, _) if self.draft.needs_subject() => Some(mask.clone()),
                 _ => None,
             },
+            sidecar_orientation: self.target.sidecar_orientation,
         })
     }
 
@@ -1016,7 +1021,8 @@ fn load(
     let max_side = render_state.map_or(SMALL_SIDE, |render_state| {
         render_state.device.limits().max_texture_dimension_2d.min(8192)
     });
-    let image = media::original::load_original(&path, None, max_side).map_err(|error| error.to_string())?;
+    let image = media::original::load_original(&path, None, max_side, target.sidecar_orientation)
+        .map_err(|error| error.to_string())?;
     let small = if image.width().max(image.height()) > SMALL_SIDE {
         let (width, height) = domain::thumbs::fit_inside(image.width(), image.height(), SMALL_SIDE, SMALL_SIDE, false);
         image::imageops::resize(&image, width, height, image::imageops::FilterType::Triangle)
@@ -1661,6 +1667,7 @@ mod tests {
             file_name: "a.jpg".into(),
             library: PathBuf::from("/photos"),
             full_size: [10, 10],
+            sidecar_orientation: None,
         };
         let mut session = EditSession::new(target, None);
         session.base = Base::Loaded(Box::new(Loaded {
@@ -1717,6 +1724,7 @@ mod tests {
             file_name: "a.jpg".into(),
             library: PathBuf::from("/photos"),
             full_size: size,
+            sidecar_orientation: None,
         };
         let mut session = EditSession::new(target, Some(render_state.clone()));
         session.base = Base::Loaded(Box::new(Loaded {
@@ -1801,6 +1809,7 @@ mod tests {
             file_name: "a.jpg".into(),
             library: PathBuf::from("/photos"),
             full_size: [10, 10],
+            sidecar_orientation: None,
         };
         let mut session = EditSession::new(target, None);
         let warm = image::RgbaImage::from_pixel(10, 10, image::Rgba([190, 160, 130, 255]));

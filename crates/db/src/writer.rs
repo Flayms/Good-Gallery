@@ -214,19 +214,22 @@ fn write_file(
     file: &IndexedFile,
 ) -> rusqlite::Result<()> {
     let m = &file.metadata;
-    // Thumbnails only go stale when the file itself changed, not its sidecar.
+    // Thumbnails go stale when the file itself changed, or its sidecar's orientation (REQ-004-12); not for other
+    // changes of the sidecar.
     let id: i64 = tx.prepare_cached(
         "INSERT INTO media (root_id, rel_path, file_name, kind, size, mtime, sidecar_mtime, width, height, duration,
-                            taken_at, rating, meta_version)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                            taken_at, rating, meta_version, sidecar_orientation)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT (root_id, rel_path) DO UPDATE SET
            file_name = excluded.file_name, kind = excluded.kind, size = excluded.size, mtime = excluded.mtime,
            sidecar_mtime = excluded.sidecar_mtime, width = excluded.width, height = excluded.height,
            duration = excluded.duration, taken_at = excluded.taken_at, rating = excluded.rating,
-           meta_version = excluded.meta_version,
-           thumbhash = CASE WHEN media.size <> excluded.size OR media.mtime <> excluded.mtime THEN NULL
+           meta_version = excluded.meta_version, sidecar_orientation = excluded.sidecar_orientation,
+           thumbhash = CASE WHEN media.size <> excluded.size OR media.mtime <> excluded.mtime
+                                 OR media.sidecar_orientation IS NOT excluded.sidecar_orientation THEN NULL
                             ELSE media.thumbhash END,
-           thumb_status = CASE WHEN media.size <> excluded.size OR media.mtime <> excluded.mtime THEN 'pending'
+           thumb_status = CASE WHEN media.size <> excluded.size OR media.mtime <> excluded.mtime
+                                    OR media.sidecar_orientation IS NOT excluded.sidecar_orientation THEN 'pending'
                                ELSE media.thumb_status END
          RETURNING id",
     )?
@@ -244,7 +247,8 @@ fn write_file(
             m.duration,
             m.taken_at,
             m.rating,
-            METADATA_VERSION
+            METADATA_VERSION,
+            m.sidecar_orientation
         ],
         |row| row.get(0),
     )?;
@@ -476,6 +480,41 @@ mod tests {
             .map(|row| row.unwrap())
             .collect();
         assert_eq!(rows, [("pending".into(), None), ("ready".into(), Some("abc".into()))]);
+    }
+
+    /// REQ-004-12: a sidecar that turns the photo (or stops turning it) makes its thumbnail stale; the orientation is
+    /// stored for the renderer.
+    #[test]
+    fn req_004_12_a_changed_sidecar_orientation_resets_the_thumbnail() {
+        let (mut writer, root) = writer();
+        writer.write(root, &[file("a.jpg", &[]), file("b.jpg", &[])]).unwrap();
+        writer
+            .conn()
+            .execute("UPDATE media SET thumb_status = 'ready', thumbhash = 'abc'", [])
+            .unwrap();
+
+        let mut turned = file("a.jpg", &[]);
+        turned.sidecar_mtime = Some(5);
+        turned.metadata.sidecar_orientation = Some(6);
+        writer.write(root, &[turned.clone(), file("b.jpg", &[])]).unwrap();
+        let rows = |writer: &IndexWriter| -> Vec<(String, Option<u8>)> {
+            let mut stmt = writer
+                .conn()
+                .prepare("SELECT thumb_status, sidecar_orientation FROM media ORDER BY rel_path")
+                .unwrap();
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .map(|row| row.unwrap())
+                .collect()
+        };
+        assert_eq!(rows(&writer), [("pending".into(), Some(6)), ("ready".into(), None)]);
+
+        writer
+            .conn()
+            .execute("UPDATE media SET thumb_status = 'ready', thumbhash = 'abc'", [])
+            .unwrap();
+        writer.write(root, &[turned]).unwrap();
+        assert_eq!(rows(&writer)[0], ("ready".into(), Some(6)), "unchanged");
     }
 
     #[test]

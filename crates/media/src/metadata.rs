@@ -38,6 +38,35 @@ mod exiftool_tests {
       <lr:hierarchicalSubject><rdf:Bag><rdf:li>People|Anna</rdf:li></rdf:Bag></lr:hierarchicalSubject>
     </rdf:Description></rdf:RDF></x:xmpmeta>"#;
 
+    /// REQ-004-12: exiftool reads a sidecar's orientation as a number, which turns the dimensions and is kept; the
+    /// file's own embedded XMP orientation is the file's (`Orientation`), not the sidecar's.
+    #[test]
+    fn req_004_12_reads_the_orientation_of_a_sidecar_and_of_embedded_xmp() {
+        let Some(exiftool) = crate::exiftool::tests::exiftool() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.png");
+        let sidecar = dir.path().join("a.xmp");
+        image::GrayImage::new(2, 1).save(&file).unwrap();
+        std::fs::write(&sidecar, crate::thumbnail::tests::xmp_packet(6)).unwrap();
+
+        let metadata = MetadataSource::read(&exiftool, &file, Some(&sidecar)).unwrap();
+        assert_eq!(
+            (metadata.width, metadata.height, metadata.sidecar_orientation),
+            (Some(1), Some(2), Some(6))
+        );
+
+        let embedded = dir.path().join("b.jpg");
+        let plain = crate::thumbnail::tests::jpeg(&crate::thumbnail::tests::solid(4, 2, [0, 0, 0]));
+        std::fs::write(&embedded, crate::thumbnail::tests::with_xmp_orientation(&plain, 8)).unwrap();
+        let metadata = MetadataSource::read(&exiftool, &embedded, None).unwrap();
+        assert_eq!(
+            (metadata.width, metadata.height, metadata.sidecar_orientation),
+            (Some(2), Some(4), None)
+        );
+    }
+
     /// REQ-004-10: dimensions come from the file, tags and the rating from its sidecar.
     #[test]
     fn req_004_10_reads_dimensions_from_the_file_and_tags_from_its_sidecar() {

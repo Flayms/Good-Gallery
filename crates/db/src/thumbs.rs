@@ -14,6 +14,8 @@ pub struct ThumbSource {
     pub kind: MediaKind,
     /// Seconds.
     pub duration: Option<f64>,
+    /// Turns a photo without an orientation of its own (REQ-004-12).
+    pub sidecar_orientation: Option<u8>,
 }
 
 impl ThumbSource {
@@ -27,7 +29,7 @@ impl ThumbSource {
 pub fn thumb_source(conn: &Connection, id: i64) -> Result<Option<ThumbSource>> {
     let source = conn
         .prepare_cached(
-            "SELECT m.id, m.root_id, r.path, m.rel_path, m.kind, m.size, m.mtime, m.duration
+            "SELECT m.id, m.root_id, r.path, m.rel_path, m.kind, m.size, m.mtime, m.duration, m.sidecar_orientation
              FROM media m JOIN library_roots r ON r.id = m.root_id WHERE m.id = ?1",
         )?
         .query_row([id], |row| {
@@ -42,6 +44,7 @@ pub fn thumb_source(conn: &Connection, id: i64) -> Result<Option<ThumbSource>> {
                 root_path: row.get(2)?,
                 kind: MediaKind::parse(&row.get::<_, String>(4)?).unwrap_or(MediaKind::Image),
                 duration: row.get(7)?,
+                sidecar_orientation: row.get(8)?,
             })
         })
         .optional()?;
@@ -130,6 +133,7 @@ mod tests {
                 root_path: ROOT.into(),
                 kind: MediaKind::Video,
                 duration: Some(2.5),
+                sidecar_orientation: None,
             }
         );
         assert_eq!(

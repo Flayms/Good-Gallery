@@ -5,7 +5,7 @@
 
 use crate::thumbnail::{decode_error, limits};
 use domain::edit::{Mask, MtimeOnSave, Params, Pyramid, Recipe, backup_rel_path, blur_lod, copy_name, dither};
-use image::{DynamicImage, ImageDecoder as _, ImageReader, Rgba32FImage};
+use image::{DynamicImage, ImageReader, Rgba32FImage};
 use std::io::{Cursor, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -77,6 +77,8 @@ pub struct SaveRequest {
     pub mtime: MtimeOnSave,
     /// The subject as the preview showed it, for a recipe with parts (REQ-022-05); found again without one.
     pub subject: Option<Arc<Mask>>,
+    /// Turns an original without an orientation of its own (REQ-004-12).
+    pub sidecar_orientation: Option<u8>,
 }
 
 /// exiftool and its configuration for the `gg` namespace.
@@ -110,7 +112,13 @@ pub fn save(tools: &Tools, request: &SaveRequest) -> Result<String, EditError> {
     let temp = folder.join(format!(".{}.gg-edit.{}", file_name(&target_rel), format.extension()));
     let mut made_backup = None;
     let written = (|| {
-        let encoded = render_file(&source, &request.recipe, request.subject.as_deref(), format)?;
+        let encoded = render_file(
+            &source,
+            &request.recipe,
+            request.subject.as_deref(),
+            format,
+            request.sidecar_orientation,
+        )?;
         write_synced(&temp, &encoded)?;
         // Replacing an unedited original: keep it first (REQ-021-10). A file already edited keeps its first backup;
         // a copy saved over has its source elsewhere.
@@ -324,13 +332,11 @@ struct Decoded {
     lossless_webp: bool,
 }
 
-fn decode(data: &[u8]) -> Result<Decoded, EditError> {
+fn decode(data: &[u8], sidecar_orientation: Option<u8>) -> Result<Decoded, EditError> {
     let mut reader = ImageReader::new(Cursor::new(data)).with_guessed_format()?;
     reader.limits(limits());
     let mut decoder = reader.into_decoder().map_err(decode_error)?;
-    let orientation = decoder
-        .orientation()
-        .unwrap_or(image::metadata::Orientation::NoTransforms);
+    let orientation = crate::thumbnail::decoder_orientation(&mut decoder, sidecar_orientation);
     let mut image = DynamicImage::from_decoder(decoder).map_err(decode_error)?;
     if image.width() == 0 || image.height() == 0 {
         return Err(decode_error("empty image").into());
@@ -404,9 +410,15 @@ pub fn render(params: &Params, image: &mut Rgba32FImage, subject: Option<&Mask>)
 }
 
 /// The original at `source` with `recipe` applied, encoded as `format`.
-fn render_file(source: &Path, recipe: &Recipe, subject: Option<&Mask>, format: Format) -> Result<Vec<u8>, EditError> {
+fn render_file(
+    source: &Path,
+    recipe: &Recipe,
+    subject: Option<&Mask>,
+    format: Format,
+    sidecar_orientation: Option<u8>,
+) -> Result<Vec<u8>, EditError> {
     let data = std::fs::read(source)?;
-    let mut decoded = decode(&data)?;
+    let mut decoded = decode(&data, sidecar_orientation)?;
     drop(data);
     let found;
     let subject = match subject {
@@ -562,6 +574,7 @@ fn copy_metadata(
 mod tests {
     use super::*;
     use domain::edit::Adjustment;
+    use image::ImageDecoder as _;
     use serde_json::Value;
 
     struct Library {
@@ -621,6 +634,7 @@ mod tests {
                 copy,
                 mtime: MtimeOnSave::Keep,
                 subject: None,
+                sidecar_orientation: None,
             }
         }
     }
@@ -838,7 +852,7 @@ mod tests {
             }
         });
         disc.save(&path).unwrap();
-        let encoded = render_file(&path, &recipe, None, Format::of(&path).unwrap()).unwrap();
+        let encoded = render_file(&path, &recipe, None, Format::of(&path).unwrap(), None).unwrap();
         let saved = image::load_from_memory(&encoded).unwrap().into_rgb8();
         assert!(
             saved.get_pixel(120, 90)[1] > disc.get_pixel(120, 90)[1] + 20,
@@ -953,7 +967,7 @@ mod tests {
         assert!(is_lossless_webp(&lossless));
         assert!(!is_lossless_webp(&lossy));
         assert!(!is_lossless_webp(b"RIFF"));
-        let decoded = decode(&lossless).unwrap();
+        let decoded = decode(&lossless, None).unwrap();
         let encoded = encode(&decoded, Format::Webp).unwrap();
         assert!(is_lossless_webp(&encoded));
         assert_eq!(image::load_from_memory(&encoded).unwrap().into_rgb8(), rgb);

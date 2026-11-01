@@ -7,6 +7,7 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **MSVC C++ build tools are required** on Windows (`link.exe`); without them even a hello world fails with "`link.exe` returned an unexpected error". Install the "Desktop development with C++" / VC Tools workload, e.g. `winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`. C dependencies (libwebp, dav1d, a video backend) need them too.
 * **`cargo` may be missing from `PATH` in the Bash tool**: rustup lives in `~/.cargo/bin`, which is on the Windows user `PATH` but not always in Git Bash. Use the PowerShell tool or `export PATH="$HOME/.cargo/bin:$PATH"`.
 * **egui / eframe / wgpu APIs change between minor versions.** Pin exact versions and check docs.rs for the pinned one; examples from memory are often for another version.
+* **One `CARGO_TARGET_DIR` for several worktrees builds stale code:** cargo names a workspace crate's artifacts by its path relative to the workspace, so every worktree shares them, and a crate unchanged since another worktree's build counts as fresh. Code from the other branch is linked in, which shows up as missing fields or methods. After switching worktrees run `cargo clean -p domain -p meta -p db -p media -p indexer -p app -p xtask` (dependencies stay built), or give each worktree its own target folder.
 
 ## egui / eframe 0.37
 
@@ -28,6 +29,7 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **wgpu's `TextureView` is `Clone`** (cheap), so textures made on worker threads can hand their view to glass.
 * **Don't `destroy()` a texture a paint callback may still use.** Callbacks queued this frame run `prepare` after the UI code, so ending the edit session mid-frame (the _Discard_ button) and destroying its texture made `create_bind_group` fail fatally (#69). Drop the texture instead, wgpu frees it with its last view and bind group, and keep per-frame bind groups in the callback, not in `CallbackResources`, so they don't keep it alive.
 * **ICU4X formatters aren't `Send`** (yoke'd `Rc` data): cache them in a `thread_local!`, not a `static Mutex`.
+* **Consuming Tab doesn't stop egui's focus move:** `Memory` reads Tab from the raw input in `begin_pass`, before any `consume_key`, and with nothing focused gives focus to the first focusable widget of the frame, under an overlay too. An overlay that should keep focus (the viewer) sets itself as the modal layer (`Memory::set_modal_layer`) every frame; widgets only sensing drags (`Sense::drag()`) are focusable too, use `Sense::DRAG` for invisible handles.
 
 ## Visual checks
 
@@ -127,7 +129,8 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 
 * **Folder mtimes** (quick scans) only change when direct children are added, removed or renamed, not on in-place edits or changes deeper down. Don't use them to skip whole subtrees or file stats outside `quick` scans.
 * **Watching on Windows reports last-access changes** too, so the indexer's own reads cause events; `changes` scans must keep stating only reported files. Expect the same from `notify` (ReadDirectoryChangesW).
-* **SQLite query plans:** the tag filters in `db::gallery` rely on unary `+` (`+media.id`, `+tag_id`) to pin plans; removing them looks harmless but makes common-tag searches 10–100× slower. Keep the SQL as is.
+* **SQLite query plans:** the filters in `db::gallery` rely on unary `+` (`+media.id`, `+tag_id`, `+media.root_id` with a file name) and `INDEXED BY media_name_idx` to pin plans; removing them looks harmless but makes common-tag and file name searches 3–100× slower (`req_007_14_broad_tags_and_file_names_drive_the_search` checks the plans). Keep the SQL as is.
+* **Timing SQLite through an aggregate undercounts:** `SELECT count(*), sum(id) FROM (…)` lets SQLite skip the columns the outer query doesn't use, and with them the row lookups. Time the real query, e.g. with `cargo xtask search-bench`.
 * **`media.meta_version`** (vs `METADATA_VERSION`) is how the indexer tells "unchanged file" apart from "unchanged file, old extractor". Bump the constant whenever metadata extraction changes; a root with rows behind is upgraded to a full scan.
 * **Migrations:** `crates/db/migrations/*.sql` (statements separated by `--> statement-breakpoint`, each chunk prepared as one statement) plus the `__drizzle_migrations` bookkeeping that existing indexes carry. Never edit an applied migration (its hash is recorded); add a new file and journal entry. Expression indexes were avoided in favor of generated columns.
 * **EXIF orientation:** `req_005_03_turns_every_orientation_upright` pins the expected pixels for all 8 orientations. Change the mapping only against that test.

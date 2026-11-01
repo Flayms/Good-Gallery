@@ -27,7 +27,8 @@ pub trait RenderThumbnails: Send + Sync {
 impl RenderThumbnails for Renderer {
     fn render(&self, source: &ThumbSource) -> Result<Thumbnails, String> {
         let file = source.file().ok_or("its indexed path leaves its library")?;
-        Renderer::render(self, &file, source.kind, source.duration).map_err(|error| error.to_string())
+        Renderer::render(self, &file, source.kind, source.duration, source.sidecar_orientation)
+            .map_err(|error| error.to_string())
     }
 }
 
