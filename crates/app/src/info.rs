@@ -1,10 +1,12 @@
 //! A media item's details (REQ-009-08): file, location, library, dates, dimensions, duration, size, rating and its tags
 //! grouped into People, Places and Tags. Shown in the viewer's info panel and in the info sheet beside the gallery.
+//! A field the item has no value for keeps its title and place, with nothing under it.
 
 use crate::format;
 use crate::icons;
 use crate::theme;
 use db::media::MediaDetail;
+use domain::media::MediaKind;
 use domain::tags::TagCategory;
 use eframe::egui;
 
@@ -56,30 +58,37 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail) -> Option<InfoAction> {
     field(ui, "Library", |ui| {
         ui.label(&detail.library_label);
     });
-    if let Some(taken_at) = detail.taken_at {
-        field(ui, "Taken", |ui| {
+    field(ui, "Taken", |ui| match detail.taken_at {
+        Some(taken_at) => {
             ui.label(format::medium_date_time(taken_at));
-        });
-    }
+        }
+        None => empty(ui, "Unknown"),
+    });
     field(ui, "Modified", |ui| {
         ui.label(format::medium_date_time(detail.mtime));
     });
-    if let (Some(width), Some(height)) = (detail.width, detail.height) {
-        field(ui, "Dimensions", |ui| {
+    field(ui, "Dimensions", |ui| match (detail.width, detail.height) {
+        (Some(width), Some(height)) => {
             ui.label(format!("{width} × {height}"));
-        });
-    }
-    if let Some(duration) = detail.duration {
-        field(ui, "Duration", |ui| {
-            ui.label(format::duration(duration));
+        }
+        _ => empty(ui, "Unknown"),
+    });
+    // Only videos have a duration.
+    if detail.kind == MediaKind::Video {
+        field(ui, "Duration", |ui| match detail.duration {
+            Some(duration) => {
+                ui.label(format::duration(duration));
+            }
+            None => empty(ui, "Unknown"),
         });
     }
     field(ui, "Size", |ui| {
         ui.label(format::bytes(detail.size));
     });
-    if let Some(rating) = detail.rating {
-        field(ui, "Rating", |ui| stars(ui, rating));
-    }
+    field(ui, "Rating", |ui| match detail.rating {
+        Some(rating) => stars(ui, rating),
+        None => empty(ui, "Not rated"),
+    });
     if let Some(edit) = &detail.edit {
         let replaced = edit.replaced_original(&detail.rel_path);
         field(ui, "Edited", |ui| {
@@ -107,6 +116,7 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail) -> Option<InfoAction> {
             .map(|tag| tag.name.as_str())
             .collect();
         if names.is_empty() {
+            field(ui, label, |ui| empty(ui, "None"));
             continue;
         }
         caption(ui, label);
@@ -142,6 +152,13 @@ fn field(ui: &mut egui::Ui, label: &str, value: impl FnOnce(&mut egui::Ui)) {
         caption(ui, label);
         value(ui);
     });
+}
+
+/// No value: one empty line, so the field keeps its place; screen readers hear `spoken`.
+fn empty(ui: &mut egui::Ui, spoken: &str) {
+    let height = ui.text_style_height(&egui::TextStyle::Body);
+    let response = ui.allocate_response(egui::vec2(0.0, height), egui::Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, spoken));
 }
 
 /// Five stars, `rating` of them filled and the rest outlined, named for screen readers.
