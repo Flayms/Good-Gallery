@@ -62,7 +62,8 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 
 - **Given** the viewer
 - **When** the user presses `i` or clicks _Info_
-- **Then** a side panel toggles, showing file name, full path (selectable), library, date taken (if known), date modified, dimensions (if known), duration (videos), file size, rating (if rated) and the item's tags, grouped into People, Places and Tags
+- **Then** a side panel toggles, showing file name, full path (selectable), library, date taken, date modified, dimensions, duration (videos), file size, rating, whether it is an edit (edited items only) and the item's tags, grouped into People, Places and Tags
+- **And** a field the item has no value for (no date taken, dimensions, duration, rating, people, places or tags) keeps its title and place with nothing under it, so the fields are always in the same order
 
 ### REQ-009-09 · Filter by a tag from the info panel
 
@@ -152,7 +153,7 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 | REQ-009-05 | `crates/domain/src/viewer.rs` › req_009_05_zooms_around_the_point_under_the_pointer, req_009_05_limits_the_scale_between_fitted_and_8x, req_009_05_keeps_zoomed_content_covering_the_viewport, req_009_05_centers_content_smaller_than_the_viewport; `crates/app/tests/viewer.rs` › req_009_05_zooms_and_pans | pass |
 | REQ-009-06 | `crates/domain/src/video.rs` › req_009_06_keeps_the_volume_between_0_and_100, req_009_06_steps_the_volume_in_5_percent_steps, req_009_06_turns_rotations_into_quarters_and_swaps_sides, req_009_06_renders_at_the_size_on_screen_but_never_larger_than_the_video; `crates/app/tests/video.rs` › req_009_06_plays_all_four_containers_and_seeks, req_009_06_says_why_a_file_cant_play; `crates/app/tests/viewer_video.rs` › req_009_06_req_009_04_plays_the_shown_video_and_stops_it, req_009_06_controls_play_pause_seek_mute_and_volume, req_009_06_play_at_the_end_starts_over, req_009_06_shows_frames_fitted_and_turned_upright, req_009_06_says_when_a_video_cant_play | pass (`video.rs` needs libmpv and ffmpeg, skipped without them unless `GG_REQUIRE_HELPERS` is set; audio and display-synced playback checked in the running app) |
 | ~~REQ-009-07~~ | — | no test (deprecated) |
-| REQ-009-08 | `crates/db/src/media.rs` › req_009_08_returns_the_details_with_tags_by_category; `crates/app/tests/viewer.rs` › req_009_08_req_013_13_toggles_the_info_panel_with_the_details | pass |
+| REQ-009-08 | `crates/db/src/media.rs` › req_009_08_returns_the_details_with_tags_by_category; `crates/app/tests/viewer.rs` › req_009_08_req_013_13_toggles_the_info_panel_with_the_details, req_009_08_shows_the_titles_of_details_the_item_lacks | pass |
 | REQ-009-09 | `crates/app/tests/viewer.rs` › req_009_09_filters_by_a_tag_from_the_info_panel | pass |
 | REQ-009-10 | `crates/app/tests/viewer.rs` › req_009_10_shows_the_file_in_explorer_or_says_it_is_gone, req_009_11_context_menus_show_in_explorer_and_information | pass (Explorer itself checked by hand: `explorer.exe /select` outside the app's job object) |
 | REQ-009-11 | `crates/app/tests/viewer.rs` › req_009_11_context_menus_show_in_explorer_and_information | pass |

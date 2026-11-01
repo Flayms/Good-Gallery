@@ -673,6 +673,62 @@ fn req_009_08_req_013_13_toggles_the_info_panel_with_the_details() {
     assert!(!viewer(&harness).info_open());
 }
 
+/// REQ-009-08: a photo without a date taken, dimensions, rating or tags keeps those fields' titles, with nothing under
+/// them, in their usual order; a photo has no duration.
+#[test]
+fn req_009_08_shows_the_titles_of_details_the_item_lacks() {
+    let fixture = Fixture::new();
+    let dir = fixture.folder("photos");
+    let conn = db::open_in_memory().unwrap();
+    let root = db::libraries::insert(&conn, &dir, "Photos", LibraryStatus::Online)
+        .unwrap()
+        .id;
+    let mut bare = indexed(0, "bare.png", MediaKind::Image, &[], None);
+    bare.metadata = MediaMetadata::default();
+    image::RgbImage::from_pixel(400, 300, image::Rgb([40, 120, 200]))
+        .save(std::path::Path::new(&dir).join("bare.png"))
+        .unwrap();
+    let mut writer = IndexWriter::new(conn);
+    writer.write(root, &[bare]).unwrap();
+    let mut harness = common::harness_with_step(fixture.state(writer.into()), 1.0 / 60.0);
+    harness.set_size(egui::vec2(900.0, 760.0));
+    settle(&mut harness);
+    open(&mut harness, "bare.png");
+
+    harness.key_press(Key::I);
+    settle(&mut harness);
+    // In the panel, at the right: the sidebar names People, Places and tags too.
+    let top = |label: &str| {
+        harness
+            .query_all_by_label(label)
+            .find(|node| node.rect().left() > 500.0)
+            .unwrap_or_else(|| panic!("{label} in the info panel"))
+            .rect()
+            .top()
+    };
+    let fields = [
+        "Taken",
+        "Modified",
+        "Dimensions",
+        "Size",
+        "Rating",
+        "People",
+        "Places",
+        "Tags",
+    ];
+    let tops: Vec<f32> = fields.iter().map(|label| top(label)).collect();
+    assert!(tops.is_sorted_by(|a, b| a < b), "{fields:?} in order: {tops:?}");
+    // Empty to the eye; screen readers hear what's missing.
+    for (spoken, count) in [("Unknown", 2), ("Not rated", 1), ("None", 3)] {
+        assert_eq!(harness.query_all_by_label(spoken).count(), count, "{spoken}");
+    }
+    assert!(harness.query_by_label("Duration").is_none(), "photos have no duration");
+    settle_viewer(&mut harness);
+    harness.run_steps(20);
+    mask_location(&mut harness);
+    harness.snapshot(common::snapshot_name("viewer_info_without_details"));
+}
+
 /// REQ-009-09: a click on a tag in the info panel closes the viewer and filters the gallery by it, keeping the other
 /// filters.
 #[test]
