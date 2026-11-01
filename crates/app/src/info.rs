@@ -20,6 +20,8 @@ pub enum InfoAction {
     FilterByTag(String),
     /// Put the unedited original back (REQ-021-12).
     Revert,
+    /// The user clicked the star for this many stars (REQ-024-02).
+    Rate(i64),
 }
 
 /// The details as loaded: a spinner while loading, "Media not found" or the error; what was clicked as [`show`].
@@ -85,9 +87,16 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail) -> Option<InfoAction> {
     field(ui, "Size", |ui| {
         ui.label(format::bytes(detail.size));
     });
-    field(ui, "Rating", |ui| match detail.rating {
-        Some(rating) => stars(ui, rating),
-        None => empty(ui, "Not rated"),
+    field(ui, "Rating", |ui| {
+        // The browser version doesn't write files (REQ-024-05).
+        if crate::WEB {
+            match detail.rating {
+                Some(rating) => stars(ui, rating),
+                None => empty(ui, "Not rated"),
+            }
+        } else if let Some(stars) = rate_stars(ui, detail.rating) {
+            clicked = Some(InfoAction::Rate(stars));
+        }
     });
     if let Some(edit) = &detail.edit {
         let replaced = edit.replaced_original(&detail.rel_path);
@@ -159,6 +168,44 @@ fn empty(ui: &mut egui::Ui, spoken: &str) {
     let height = ui.text_style_height(&egui::TextStyle::Body);
     let response = ui.allocate_response(egui::vec2(0.0, height), egui::Sense::hover());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, spoken));
+}
+
+/// Five star buttons, `rating` of them filled and the rest outlined; the hovered one and those before it fill in as
+/// a preview. Returns the star clicked (REQ-024-02).
+fn rate_stars(ui: &mut egui::Ui, rating: Option<i64>) -> Option<i64> {
+    let mut clicked = None;
+    let response = ui
+        .horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            let size = egui::Vec2::splat(theme::ICON_SIZE);
+            let responses: Vec<egui::Response> = (1..=domain::rating::MAX)
+                .map(|star| {
+                    let response = ui.allocate_response(size, egui::Sense::click());
+                    let label = if star == 1 {
+                        "Rate 1 star".into()
+                    } else {
+                        format!("Rate {star} stars")
+                    };
+                    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
+                    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+                })
+                .collect();
+            let hovered = (1..).zip(&responses).find(|(_, response)| response.hovered());
+            let shown = hovered.map_or(rating.unwrap_or(0), |(star, _)| star);
+            for (star, response) in (1..).zip(&responses) {
+                icons::rating_star(star <= shown, theme::ICON_SIZE).paint_at(ui, response.rect);
+                if response.clicked() {
+                    clicked = Some(star);
+                }
+            }
+        })
+        .response;
+    let spoken = match rating {
+        Some(rating) => format!("Rated {rating} out of 5"),
+        None => "Not rated".to_owned(),
+    };
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Group, true, &spoken));
+    clicked
 }
 
 /// Five stars, `rating` of them filled and the rest outlined, named for screen readers.

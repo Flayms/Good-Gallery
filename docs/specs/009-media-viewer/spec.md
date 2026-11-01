@@ -63,7 +63,8 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 - **Given** the viewer
 - **When** the user presses `i` or clicks _Info_
 - **Then** a side panel toggles, showing file name, full path (selectable), library, date taken, date modified, dimensions, duration (videos), file size, rating, whether it is an edit (edited items only) and the item's tags, grouped into People, Places and Tags
-- **And** a field the item has no value for (no date taken, dimensions, duration, rating, people, places or tags) keeps its title and place with nothing under it, so the fields are always in the same order
+- **And** a field the item has no value for (no date taken, dimensions, duration, people, places or tags) keeps its title and place with nothing under it, so the fields are always in the same order
+- **And** the rating shows as five stars, outlined when unrated, which change it (REQ-024-02)
 
 ### REQ-009-09 · Filter by a tag from the info panel
 

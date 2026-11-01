@@ -8,7 +8,6 @@ use domain::edit::{Mask, MtimeOnSave, Params, Pyramid, Recipe, backup_rel_path, 
 use image::{DynamicImage, ImageReader, Rgba32FImage};
 use std::io::{Cursor, Write as _};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -241,7 +240,7 @@ fn make_backup(file: &Path, backup: &Path, library: &Path) -> std::io::Result<()
 fn hide(folder: &Path) {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let _ = Command::new("attrib")
+    let _ = std::process::Command::new("attrib")
         .arg("+H")
         .arg(folder)
         .creation_flags(CREATE_NO_WINDOW)
@@ -524,7 +523,7 @@ fn metadata_args(source: &Path, target: &Path, recipe: &Recipe, source_rel: &str
     ]
 }
 
-/// Runs exiftool once, with the arguments on stdin (one per line, never through a shell: REQ-011-09).
+/// Copies the metadata with exiftool, writing the recipe (REQ-011-09).
 fn copy_metadata(
     tools: &Tools,
     source: &Path,
@@ -533,41 +532,9 @@ fn copy_metadata(
     source_rel: &str,
 ) -> Result<(), EditError> {
     let args = metadata_args(source, target, recipe, source_rel);
-    if args.iter().any(|arg| arg.contains(['\n', '\r'])) {
-        return Err(EditError::Metadata("a file name contains a line break".into()));
-    }
-    let mut command = Command::new(&tools.exiftool);
-    // `-config` must come first, before the argument file.
-    command
-        .arg("-config")
-        .arg(&tools.config)
-        .args(["-@", "-"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-    let mut child = crate::helpers::spawn_helper(command).map_err(|error| EditError::Metadata(error.to_string()))?;
-    let mut input = args.join("\n");
-    input.push('\n');
-    child
-        .stdin
-        .take()
-        .expect("piped")
-        .write_all(input.as_bytes())
-        .map_err(|error| EditError::Metadata(error.to_string()))?;
-    let output = child
-        .wait_with_output()
-        .map_err(|error| EditError::Metadata(error.to_string()))?;
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !output.status.success() || stderr.lines().any(|line| line.starts_with("Error")) {
-        return Err(EditError::Metadata(stderr.trim().to_owned()));
-    }
-    Ok(())
+    crate::exiftool::run_once(&tools.exiftool, Some(&tools.config), &args)
+        .map(drop)
+        .map_err(EditError::Metadata)
 }
 
 #[cfg(test)]
@@ -576,6 +543,7 @@ mod tests {
     use domain::edit::Adjustment;
     use image::ImageDecoder as _;
     use serde_json::Value;
+    use std::process::Command;
 
     struct Library {
         dir: tempfile::TempDir,

@@ -14,7 +14,7 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | **Sidecar**              | An `.xmp` file next to a media file (`IMG_1.jpg.xmp` or `IMG_1.xmp`) that holds additional metadata.                                                                               |
 | **Folder**               | A subfolder of a library, addressed by its `/`-separated path relative to the library. A folder filter includes its subfolders.                                                     |
 | **Housekeeping folder**  | A folder created by an OS or NAS that is never indexed: dot folders, `$` folders, `@eaDir`, `#recycle`, `#snapshot`, `.@__thumb`, `System Volume Information`.                      |
-| **Read-only**            | Good Gallery never modifies media files or sidecars on its own. All metadata comes from what other tools wrote into them; only an edit the user saves writes a file (spec 021). |
+| **Read-only**            | Good Gallery never modifies media files or sidecars on its own. All metadata comes from what other tools wrote into them; only an edit the user saves (spec 021) or a rating the user sets (spec 024) writes a file. |
 
 ## Metadata
 
@@ -23,7 +23,7 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | **Metadata**          | The dimensions, date taken, duration, rating and tags of a media item, read from embedded EXIF / IPTC / XMP and its sidecar.                                     |
 | **Date taken**        | The capture date from the metadata. If it is missing, sorting and the date filter use the _date modified_ instead. (code: `taken_at`, fallback `sort_date`)            |
 | **Date modified**     | The file's last modification time. (code: `mtime`)                                                                                                               |
-| **Rating**            | 1–5 stars from the metadata. Media without a rating, or with a _rejected_ (-1) or 0 rating, are **unrated**. Filters use `0` for unrated.                        |
+| **Rating**            | 1–5 stars from the metadata. Media without a rating, or with a _rejected_ (-1) or 0 rating, are **unrated**. Filters use `0` for unrated. Set by hand into the file or its sidecar (spec 024). |
 | **Tag**               | A keyword from the metadata. Tags are compared case-insensitively after Unicode (NFKC) and whitespace normalization. The first spelling seen is displayed.       |
 | **Tag hierarchy**     | Tags nested as `Parent\|Child\|Leaf` (e.g. `Places\|France\|Paris`). A media item is linked to the leaf. Searching for a tag also matches its descendants.        |
 | **Face region**       | A named area of a photo marked as a face by a photo app. Its name becomes the tag `People\|<name>`.                                                               |

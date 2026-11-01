@@ -191,6 +191,15 @@ pub fn mark_rewritten(conn: &Connection, root_id: i64, rel_path: &str) -> Result
         .optional()?)
 }
 
+/// Stores a rating the user set and that is already in the file (REQ-024-03). The file is read again on the next
+/// changes scan (its sidecar may be new), which finds the same rating. False if `media` isn't indexed.
+pub fn set_rating(conn: &Connection, media: i64, rating: Option<i64>) -> Result<bool> {
+    let changed = conn
+        .prepare_cached("UPDATE media SET rating = ?2, meta_version = 0 WHERE id = ?1")?
+        .execute((media, rating))?;
+    Ok(changed > 0)
+}
+
 /// The id of the media item at `rel_path` of a library, if it is indexed.
 pub fn id_of(conn: &Connection, root_id: i64, rel_path: &str) -> Result<Option<i64>> {
     Ok(conn
@@ -238,6 +247,35 @@ mod tests {
             |row| row.get(0),
         )
         .unwrap()
+    }
+
+    /// REQ-024-03: a rating set by hand replaces the indexed one, and the file is read again on the next scan.
+    #[test]
+    fn req_024_03_stores_the_rating_set_by_hand() {
+        let conn = crate::open_in_memory().unwrap();
+        let root = libraries::insert(&conn, ROOT, "Photos", LibraryStatus::Online)
+            .unwrap()
+            .id;
+        let media: i64 = conn
+            .query_row(
+                "INSERT INTO media (root_id, rel_path, file_name, kind, size, mtime, rating, meta_version)
+                 VALUES (?1, 'a.jpg', 'a.jpg', 'image', 1, 1, 2, 3) RETURNING id",
+                [root],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let stored = || {
+            conn.query_row("SELECT rating, meta_version FROM media WHERE id = ?1", [media], |row| {
+                Ok((row.get::<_, Option<i64>>(0)?, row.get::<_, i64>(1)?))
+            })
+            .unwrap()
+        };
+
+        assert!(set_rating(&conn, media, Some(5)).unwrap());
+        assert_eq!(stored(), (Some(5), 0));
+        assert!(set_rating(&conn, media, None).unwrap());
+        assert_eq!(stored(), (None, 0));
+        assert!(!set_rating(&conn, media + 1, Some(1)).unwrap());
     }
 
     #[test]
