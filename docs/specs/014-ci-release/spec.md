@@ -78,6 +78,13 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 - **Then** its notes list the changes of those versions too, in one section per type, say which versions they come from, and the comparison link starts at the last published release
 - **And** `CHANGELOG.md` keeps one section per tagged version
 
+### REQ-014-13 · Rebuilding the downloads
+
+- **Given** downloads from an earlier `cargo xtask dist` that another process still holds open (an antivirus scan, an Explorer window)
+- **When** `cargo xtask dist` runs again
+- **Then** it writes the new downloads under a temporary name and replaces the old ones as soon as they are free
+- **And** if they stay locked, it keeps the new file and says which file is locked and that `--out` writes elsewhere
+
 ## Out of scope
 
 - Code signing (Windows SmartScreen warns about unsigned downloads). Free option for later: SignPath Foundation.
@@ -107,3 +114,4 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 | REQ-014-09 | `xtask/src/dist.rs` › stages_the_helpers_where_the_app_finds_them; `packaging/smoke-test.ps1` (release workflow; run locally: silent install, app run, uninstall keeps the data folder) | pass |
 | REQ-014-10 | `xtask/src/dist.rs` › req_014_10_names_say_the_system_and_the_architecture; `xtask/tests/workflows.rs` › release_publishes_both_downloads_after_the_checks | pass |
 | REQ-014-11 | `xtask/src/release.rs` › req_014_11_finds_the_versions_that_werent_published, req_014_11_release_notes_bring_the_unpublished_changes; `xtask/tests/workflows.rs` › release_publishes_both_downloads_after_the_checks; `cargo xtask release-notes v0.2.1 v0.1.2` on this repository lists 0.2.0's changes | pass |
+| REQ-014-13 | `xtask/src/dist.rs` › req_014_13_replaces_a_locked_download_once_it_is_free, req_014_13_names_a_download_that_stays_locked | pass |
