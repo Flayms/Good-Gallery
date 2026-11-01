@@ -554,3 +554,36 @@ fn req_017_01_req_017_03_shows_the_picked_tag_indicators_once_turned_on() {
         Some(serde_json::json!({"shown": true, "picked": ["rating", "places", "tags"]}))
     );
 }
+
+/// REQ-018-10: with the desktop's caption buttons at the left, they sit at the window's top left, before the sidebar's
+/// header, or before the toolbar while the sidebar is hidden; the right side holds the buttons named there.
+#[cfg(target_os = "linux")]
+#[test]
+fn req_018_10_caption_buttons_at_the_left() {
+    use app::titlebar::{ButtonLayout, CaptionButton};
+    let fixture = Fixture::new();
+    let conn = index(&photos(6));
+    let mut harness = fixture.harness(conn);
+    app::titlebar::set_button_layout(
+        &harness.ctx,
+        ButtonLayout {
+            left: vec![CaptionButton::Close, CaptionButton::Minimize, CaptionButton::Maximize],
+            right: vec![],
+        },
+    );
+    settle(&mut harness);
+    let close = harness.get_by_label("Close window").rect();
+    let maximize = harness.get_by_label("Maximize window").rect();
+    let title = harness.get_by_label("Good Gallery").rect();
+    assert!(
+        close.left() < 20.0 && maximize.right() <= title.left(),
+        "{close:?} {maximize:?} {title:?}"
+    );
+    harness.snapshot("caption_left_linux");
+
+    harness.state_mut().sidebar.set_hidden(true, None);
+    settle(&mut harness);
+    let show = harness.get_by_label("Show sidebar").rect();
+    assert!(harness.get_by_label("Maximize window").rect().right() <= show.left());
+    harness.snapshot("caption_left_sidebar_hidden_linux");
+}

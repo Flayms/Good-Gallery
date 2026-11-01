@@ -76,7 +76,7 @@ Architectural decisions, newest last. One entry each: what was decided, why (wit
 
 ### 2026-10-26 · Icons
 
-**Decided:** lucide icons (ISC, `crates/app/assets/icons/LICENSE.lucide.txt`) as SVG files with `stroke="#fff"` and `stroke-width="1.75"`, embedded with `include_bytes!` (`app::icons::Icon`) and rendered by `egui_extras`' SVG loader (resvg) at the size they are drawn, tinted per use. A new icon is the lucide SVG with those two attributes set.
+**Decided:** lucide icons (ISC, `crates/app/assets/icons/LICENSE.lucide.txt`) as SVG files with `stroke="#fff"` and `stroke-width="1.75"`, embedded with `include_bytes!` (`app::icons::Icon`) and rendered by `egui_extras`' SVG loader (resvg) at the size they are drawn, tinted per use. A new icon is a line in `icons!`; `cargo xtask icons` writes its SVG from a pinned lucide-static release.
 **Rejected:** an icon font (lucide's font drops the stroke-width control), hand-drawn shapes (doesn't scale to ~40 icons).
 
 ### 2026-10-26 · UI state and background jobs
@@ -156,7 +156,7 @@ Architectural decisions, newest last. One entry each: what was decided, why (wit
 **Decided:**
 - *Data folder:* the packaged app (feature `packaged`, set by `cargo xtask dist`) uses `%APPDATA%\good-gallery`, the folder every earlier version used; every other build uses `%APPDATA%\good-gallery-rust`, so `cargo run` (also `--release`) never touches the real index (`app::startup::default_data_dir`).
 - *The packaged app* has no console (`windows_subsystem = "windows"`); a startup failure shows a message box and panics are logged. The app logs which helpers it found.
-- *Icon:* `crates/app/assets/app-icon.svg`, rendered into `app-icon.ico` (16–256 px PNG entries; exe icon and version info through `winresource` in `crates/app/build.rs`, needs `rc.exe` from the Windows SDK) and `app-icon.png` (window icon). Re-render both with any SVG renderer when the SVG changes.
+- *Icon:* `crates/app/assets/app-icon.svg`, rendered into `app-icon.ico` (16–256 px PNG entries; exe icon and version info through `winresource` in `crates/app/build.rs`, needs `rc.exe` from the Windows SDK) and `app-icon.png` (window icon). `cargo xtask icons` renders both again when the SVG changes.
 - *Helpers:* `packaging/fetch-helpers.ps1` downloads pinned versions (exiftool 13.59, ffmpeg-static b6.1.1, libmpv 20261021) and checks their SHA-256. The folder layout is one set of constants (`media::helpers::{EXIFTOOL,FFMPEG,MPV}_BUNDLED`) used by the app's lookup and by `cargo xtask dist`. PowerShell, not xtask, so no HTTP client enters the workspace (REQ-011-11).
 - *Package and releases:* `cargo xtask dist` (NSIS installer, portable zip), `cargo xtask release` (git-cliff with `cliff.toml`, version in `[workspace.package]`), `.github/workflows/release.yml`. Details in spec 014's plan.
 - *README screenshots:* `cargo xtask screenshots` generates a demo library (landscapes drawn with `image`, tags through exiftool, two ffmpeg videos) on a `subst` drive, indexes it and runs the app with `--screenshot` per view.

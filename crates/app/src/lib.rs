@@ -214,7 +214,7 @@ fn filter_by_tag(state: &mut AppState, tag: &str) {
 fn info_sheet(ui: &mut egui::Ui, state: &mut AppState) {
     let Some(id) = state.info_sheet else { return };
     // Below the window controls, which take the top right of the window (REQ-013-02).
-    if titlebar::reserved_width() > 0.0 {
+    if titlebar::reserved_right(ui.ctx()) > 0.0 {
         ui.add_space(titlebar::HEIGHT - 16.0);
     }
     let mut close = false;
