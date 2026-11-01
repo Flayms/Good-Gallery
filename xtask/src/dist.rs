@@ -11,6 +11,7 @@ use anyhow::{Context as _, bail};
 use media::helpers::{Bundled, EXIFTOOL_BUNDLED, FFMPEG_BUNDLED, MPV_BUNDLED};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 const USAGE: &str = "usage: cargo xtask dist [--helpers <dir>] [--out <dir>] [--no-build] [--no-installer]";
 /// The executable's name in the package (Cargo builds `app.exe`).
@@ -20,6 +21,8 @@ const STAGE: &str = "good-gallery";
 /// Helpers in the package: what the app looks for, and the helper folder to copy (exiftool needs all of its
 /// folder: `exiftool_files` holds its Perl).
 const HELPERS: [(Bundled, bool); 3] = [(EXIFTOOL_BUNDLED, true), (FFMPEG_BUNDLED, false), (MPV_BUNDLED, false)];
+/// How long a download from an earlier run may stay locked before `dist` gives up on replacing it.
+const LOCKED_PATIENCE: Duration = Duration::from_secs(60);
 
 /// The installer's and the portable zip's file names.
 pub fn artifact_names(version: &str) -> (String, String) {
@@ -111,9 +114,6 @@ fn zip(stage: &Path, out: &Path) -> anyhow::Result<()> {
         .map(|entry| entry.map(|entry| entry.file_name()))
         .collect::<Result<_, _>>()?;
     entries.sort();
-    if out.exists() {
-        std::fs::remove_file(out)?;
-    }
     crate::process::run_command(
         Command::new(tar)
             .arg("-a")
@@ -124,6 +124,53 @@ fn zip(stage: &Path, out: &Path) -> anyhow::Result<()> {
             .arg(stage)
             .args(entries),
     )
+}
+
+/// Writes `out` through `write` into `<name>.partial.<ext>` next to it, then moves that over `out`. A download from
+/// an earlier run can stay locked for minutes (Defender, an open Explorer window), so the move is retried for
+/// [`LOCKED_PATIENCE`]. The extension stays last because tar picks the archive format by it.
+fn write_replacing(out: &Path, write: impl FnOnce(&Path) -> anyhow::Result<()>) -> anyhow::Result<()> {
+    let partial = partial_path(out);
+    if partial.exists() {
+        std::fs::remove_file(&partial).with_context(|| format!("can't remove {}", partial.display()))?;
+    }
+    write(&partial)?;
+    replace(&partial, out, LOCKED_PATIENCE, |from, to| std::fs::rename(from, to))
+}
+
+fn partial_path(out: &Path) -> PathBuf {
+    let stem = out.file_stem().unwrap_or_default().to_string_lossy();
+    match out.extension() {
+        Some(extension) => out.with_file_name(format!("{stem}.partial.{}", extension.to_string_lossy())),
+        None => out.with_file_name(format!("{stem}.partial")),
+    }
+}
+
+/// Moves `from` over `to` with `rename`, retrying while `to` is locked, at most for `patience`. When it stays locked,
+/// the new file is kept and the error names both files and the way around it.
+fn replace(
+    from: &Path,
+    to: &Path,
+    patience: Duration,
+    rename: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> anyhow::Result<()> {
+    let deadline = Instant::now() + patience;
+    loop {
+        match rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(250)),
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "can't replace {}: another process (an antivirus scan, an Explorer window) still holds it. \
+                         The new file is {}. Close the other program and run again, or pass --out <dir>",
+                        to.display(),
+                        from.display()
+                    )
+                });
+            }
+        }
+    }
 }
 
 /// makensis: `MAKENSIS`, on `PATH`, or where the NSIS installer (and Chocolatey) put it.
@@ -207,23 +254,26 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     println!("staged {}", stage_dir.display());
 
     let (setup_name, zip_name) = artifact_names(version);
-    zip(&stage_dir, &out.join(&zip_name))?;
+    let zip_path = out.join(&zip_name);
+    write_replacing(&zip_path, |partial| zip(&stage_dir, partial))?;
     println!("{}", out.join(&zip_name).display());
 
     if installer {
         let makensis = find_makensis().context("makensis wasn't found: install NSIS or set MAKENSIS")?;
-        crate::process::run_command(
-            Command::new(makensis)
-                .arg("/V2")
-                .arg(format!("/DVERSION={version}"))
-                .arg(format!("/DSOURCE={}", stage_dir.display()))
-                .arg(format!("/DOUTFILE={}", out.join(&setup_name).display()))
-                .arg(format!(
-                    "/DICON={}",
-                    root.join(r"crates\app\assets\app-icon.ico").display()
-                ))
-                .arg(root.join(r"packaging\windows\installer.nsi")),
-        )?;
+        write_replacing(&out.join(&setup_name), |partial| {
+            crate::process::run_command(
+                Command::new(makensis)
+                    .arg("/V2")
+                    .arg(format!("/DVERSION={version}"))
+                    .arg(format!("/DSOURCE={}", stage_dir.display()))
+                    .arg(format!("/DOUTFILE={}", partial.display()))
+                    .arg(format!(
+                        "/DICON={}",
+                        root.join(r"crates\app\assets\app-icon.ico").display()
+                    ))
+                    .arg(root.join(r"packaging\windows\installer.nsi")),
+            )
+        })?;
         println!("{}", out.join(&setup_name).display());
     }
     Ok(())
@@ -236,6 +286,54 @@ mod tests {
     fn touch(path: &Path) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, path.to_string_lossy().as_bytes()).unwrap();
+    }
+
+    /// REQ-014-13: a download from an earlier run that is still locked is replaced once it is free.
+    #[test]
+    fn req_014_13_replaces_a_locked_download_once_it_is_free() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("good-gallery-1.2.3-windows-x64-portable.zip");
+        std::fs::write(&out, "old").unwrap();
+        let locked = std::cell::Cell::new(2);
+
+        write_replacing(&out, |partial| {
+            assert_eq!(
+                partial,
+                dir.path().join("good-gallery-1.2.3-windows-x64-portable.partial.zip")
+            );
+            Ok(std::fs::write(partial, "new")?)
+        })
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), "new");
+
+        let partial = partial_path(&out);
+        std::fs::write(&partial, "newer").unwrap();
+        replace(&partial, &out, Duration::from_secs(10), |from, to| match locked.get() {
+            0 => std::fs::rename(from, to),
+            left => {
+                locked.set(left - 1);
+                Err(std::io::Error::other("used by another process"))
+            }
+        })
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&out).unwrap(), "newer");
+        assert!(!partial.exists());
+    }
+
+    /// REQ-014-13: a download that stays locked fails with the file's name and the way around it.
+    #[test]
+    fn req_014_13_names_a_download_that_stays_locked() {
+        let error = replace(
+            Path::new("dist/a.partial.zip"),
+            Path::new("dist/a.zip"),
+            Duration::ZERO,
+            |_, _| Err(std::io::Error::other("used by another process")),
+        )
+        .unwrap_err();
+        let message = format!("{error:#}");
+        for part in ["dist/a.zip", "dist/a.partial.zip", "--out", "used by another process"] {
+            assert!(message.contains(part), "{message}");
+        }
     }
 
     /// REQ-014-08, REQ-014-09: the package holds the app and every helper where the app looks for it

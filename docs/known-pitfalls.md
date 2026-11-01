@@ -4,7 +4,6 @@ Add every pitfall you hit. A trap in a tool, library, OS or our tests that we ca
 
 ## To fix
 
-* **A zip in `target/dist` can stay locked for minutes** after it was written (Defender or an open Explorer window), so `cargo xtask dist` fails with "used by another process": pass another `--out` (#102).
 * **One `CARGO_TARGET_DIR` for several worktrees builds stale code:** cargo names a workspace crate's artifacts by its path relative to the workspace, so every worktree shares them, and a crate unchanged since another worktree's build counts as fresh. Code from the other branch is linked in, which shows up as missing fields or methods, or as another branch's UI in snapshots. After switching worktrees run `cargo clean -p domain -p meta -p db -p media -p indexer -p app -p xtask` (dependencies stay built), or give each worktree its own target folder (#107).
 * **`rgb0` leaves the fourth byte undefined**, and egui blends with alpha: force it to 255 (≈ 0.7 ms per 1080p frame) or sample with alpha 1 in a shader (#109).
 * **The kittest harness insets the UI by 8 px but not the caption buttons** (they align to the window's edge), so in Linux snapshots the buttons sit 8 px above the toolbar row; in the app they line up (#110).
