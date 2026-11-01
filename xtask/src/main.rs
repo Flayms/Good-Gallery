@@ -1,5 +1,8 @@
 //! Repository tasks, run with `cargo xtask <task>`.
 
+// Rebuilt when another worktree built into the same target folder (`.cargo/config.toml`).
+const _: Option<&str> = option_env!("GOOD_GALLERY_WORKTREE");
+
 mod check_specs;
 mod dist;
 mod gallery_bench;
