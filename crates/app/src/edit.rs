@@ -821,6 +821,12 @@ impl EditSession {
             .map_or(adjustment.neutral(), |recipe| adjustment.get(recipe));
         let text = if adjustment == Adjustment::Exposure {
             format!("{value:+.2}")
+        } else if adjustment == Adjustment::Hue {
+            if value == 0.0 {
+                "0°".to_owned()
+            } else {
+                format!("{value:+.0}°")
+            }
         } else if value == 0.0 || !matches!(adjustment.range().0, x if x < 0.0) {
             format!("{value:.0}")
         } else {
@@ -1098,8 +1104,9 @@ fn tint(rgb: [f32; 3], selected: f32) -> [f32; 3] {
 }
 
 /// One part's light and color in the shader's order: gains times exposure and `on`, tone, color.
-fn part_floats(params: &Params, on: f32) -> [f32; 12] {
+fn part_floats(params: &Params, on: f32) -> [f32; 16] {
     let [r, g, b] = params.gains.map(|gain| gain * params.exposure);
+    let (sin, cos) = params.hue.sin_cos();
     [
         r,
         g,
@@ -1113,12 +1120,16 @@ fn part_floats(params: &Params, on: f32) -> [f32; 12] {
         params.saturation,
         params.vibrance,
         params.brightness,
+        cos,
+        sin,
+        0.0,
+        0.0,
     ]
 }
 
 /// The shader's uniform: `edit.wgsl`'s `Edit`, in its order.
 fn uniform(params: &Params, rect: [f32; 4], uv: [f32; 4], full_size: [f32; 2], opacity: f32, flags: f32) -> Vec<f32> {
-    let mut floats = Vec::with_capacity(60 + CURVE_SAMPLES * 4);
+    let mut floats = Vec::with_capacity(72 + CURVE_SAMPLES * 4);
     floats.extend_from_slice(&rect);
     floats.extend_from_slice(&uv);
     floats.extend_from_slice(&[full_size[0], full_size[1], opacity, flags]);
@@ -1127,7 +1138,7 @@ fn uniform(params: &Params, rect: [f32; 4], uv: [f32; 4], full_size: [f32; 2], o
     for part in [&params.subject, &params.background] {
         match part {
             Some(part) => floats.extend_from_slice(&part_floats(part, 1.0)),
-            None => floats.extend_from_slice(&[0.0; 12]),
+            None => floats.extend_from_slice(&[0.0; 16]),
         }
     }
     let kind = BlurKind::ALL
@@ -1436,6 +1447,7 @@ mod tests {
             (Adjustment::Blacks, -30.0),
             (Adjustment::Temperature, 30.0),
             (Adjustment::Tint, -20.0),
+            (Adjustment::Hue, 40.0),
             (Adjustment::Vibrance, 50.0),
             (Adjustment::Saturation, -20.0),
             (Adjustment::Vignette, -60.0),
@@ -1449,7 +1461,10 @@ mod tests {
         Adjustment::Vignette.set(&mut light, 70.0);
         Adjustment::Contrast.set(&mut light, -50.0);
         Adjustment::Brightness.set(&mut light, -60.0);
-        vec![Recipe::default(), all, light]
+        // The hue alone, half way round (REQ-021-20).
+        let mut hue = Recipe::default();
+        Adjustment::Hue.set(&mut hue, -180.0);
+        vec![Recipe::default(), all, light, hue]
     }
 
     /// Renders `image` through `recipe` with the shader, at 1:1, and reads it back.
@@ -1557,9 +1572,9 @@ mod tests {
         pixels
     }
 
-    /// REQ-021-02, REQ-021-06, REQ-022-03, REQ-022-04: the GPU preview shows what saving renders on the CPU (within
-    /// two levels), grain, vignette, the subject's and the background's own adjustments and the selection's tint
-    /// included.
+    /// REQ-021-02, REQ-021-06, REQ-021-20, REQ-022-03, REQ-022-04: the GPU preview shows what saving renders on the CPU
+    /// (within two levels), grain, vignette, the hue, the subject's and the background's own adjustments and the
+    /// selection's tint included.
     #[test]
     fn req_021_02_req_021_06_the_gpu_preview_matches_the_cpu_render() {
         let (_gpu, render_state) = render_state();
@@ -1572,6 +1587,7 @@ mod tests {
         Adjustment::Saturation.set(parts.part_mut(Part::Subject), 40.0);
         Adjustment::Shadows.set(parts.part_mut(Part::Background), -50.0);
         Adjustment::Temperature.set(parts.part_mut(Part::Background), -60.0);
+        Adjustment::Hue.set(parts.part_mut(Part::Subject), 90.0);
         let mut cases: Vec<(Recipe, Option<&Mask>, u32)> =
             recipes().into_iter().map(|recipe| (recipe, None, 0)).collect();
         for flags in [4, 4 | 8, 4 | 8 | 16] {

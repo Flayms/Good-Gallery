@@ -262,6 +262,30 @@ fn req_021_18_the_curve_editor_shows_the_histogram() {
     );
 }
 
+/// REQ-021-20: _Color_ has _Hue_ after _Tint_; turning it turns the photo's colors in the preview.
+#[test]
+fn req_021_20_the_color_section_has_a_hue_slider() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    // Light folded away, so Color is in view.
+    harness.get_by_role_and_label(Role::Button, "Light").click();
+    harness.run_steps(2);
+    let top = |harness: &App, label: &str| harness.get_by_role_and_label(Role::Slider, label).rect().top();
+    let (tint, hue, vibrance) = (
+        top(&harness, "Tint"),
+        top(&harness, "Hue"),
+        top(&harness, "Vibrance"),
+    );
+    assert!(tint < hue && hue < vibrance, "Tint, Hue, Vibrance");
+    let mut recipe = Recipe::default();
+    Adjustment::Hue.set(&mut recipe, 120.0);
+    set_recipe(&mut harness, recipe);
+    assert_eq!(session(&harness).unwrap().recipe().hue, 120.0);
+    harness.snapshot(common::snapshot_name("edit_hue"));
+}
+
 /// REQ-021-08: with unsaved changes, `Esc` and stepping ask; _Cancel_ stays, _Discard_ goes on. Without changes,
 /// editing just ends.
 #[test]
