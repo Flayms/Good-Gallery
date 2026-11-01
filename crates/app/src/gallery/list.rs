@@ -5,7 +5,7 @@ use super::tiles::{group_header, tile_label};
 use super::{
     Arranged, FrameState, Gallery, OVERSCAN, PADDING, PREFETCH_AHEAD, PREFETCH_BEHIND, TOOLBAR_HEIGHT, one_line,
 };
-use crate::icons::Icon;
+use crate::icons::{self, Icon};
 use crate::{format, theme};
 use db::gallery::GalleryItem;
 use domain::layout::{ListEntry, ListRows, list_entry_at};
@@ -181,7 +181,7 @@ impl Gallery {
         if let Some(stars) = item.rating.filter(|r| *r > 0) {
             for star in 0..stars.min(5) {
                 let at = Rect::from_min_size(pos2(rating.0 + star as f32 * 14.0, y - 6.0), Vec2::splat(12.0));
-                Icon::Star.image(12.0, theme::star()).paint_at(ui, at);
+                icons::rating_star(true, 12.0).paint_at(ui, at);
             }
         }
     }

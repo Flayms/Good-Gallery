@@ -8,7 +8,7 @@
 
 use crate::edit::{self, Dialog, EditSession, Leave, Outcome};
 use crate::gallery::{self, Gallery, MediaAction};
-use crate::icons::Icon;
+use crate::icons::{self, Icon};
 use crate::originals::{OriginalRequest, OriginalState, Originals};
 use crate::video::controls::{self as video_controls, Control};
 use crate::video::{PlaybackState, VideoFrame, Videos};
@@ -1847,7 +1847,7 @@ fn control_bar(
         for _ in 0..text.stars {
             let star = Rect::from_min_size(pos2(x, y - STAR_SIZE / 2.0), Vec2::splat(STAR_SIZE));
             if text_clip.contains_rect(star) {
-                Icon::Star.image(STAR_SIZE, theme::star()).paint_at(ui, star);
+                icons::rating_star(true, STAR_SIZE).paint_at(ui, star);
             }
             x += STAR_SIZE + 2.0;
         }

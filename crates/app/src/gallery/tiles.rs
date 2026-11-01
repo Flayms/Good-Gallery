@@ -3,7 +3,7 @@
 use super::{
     Arranged, FrameState, Gallery, OVERSCAN, PADDING, PREFETCH_AHEAD, PREFETCH_BEHIND, TOOLBAR_HEIGHT, one_line,
 };
-use crate::icons::Icon;
+use crate::icons::{self, Icon};
 use crate::{format, theme};
 use db::gallery::GalleryItem;
 use domain::date_groups::DateGroup;
@@ -228,7 +228,7 @@ fn indicator_badge(ui: &mut egui::Ui, tile: Rect, indicators: &[TagIndicator], v
             TagIndicatorKind::Rating => {
                 for star in 0..indicator.stars {
                     let at = Rect::from_min_size(area.min + vec2(f32::from(star) * ICON, 0.0), Vec2::splat(ICON));
-                    Icon::Star.image(ICON, theme::star()).paint_at(ui, at);
+                    icons::rating_star(true, ICON).paint_at(ui, at);
                 }
             }
             kind => {
