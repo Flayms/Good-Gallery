@@ -68,6 +68,12 @@ The user decides which folders make up the gallery: folders on local disks or ne
 - **Then** it uses `%APPDATA%\good-gallery`, the folder every earlier version used, so an update picks up the index, settings and thumbnail cache as they are
 - **And** builds made for development use a folder of their own (`%APPDATA%\good-gallery-rust`), so they never touch it
 
+### REQ-001-10 · First start
+
+- **Given** an empty data folder, or none yet
+- **When** the app starts with it
+- **Then** it creates the index there and shows the gallery without libraries, not an error
+
 ## Out of scope
 
 - Renaming a library's label in the UI (the label is always derived from the folder name).
@@ -94,3 +100,4 @@ The user decides which folders make up the gallery: folders on local disks or ne
 | REQ-001-07 | `crates/app/tests/libraries.rs` › lists_libraries_with_status_path_and_last_indexed_time, says_when_there_are_no_libraries | pass |
 | REQ-001-08 | `crates/db/src/lib.rs` › req_001_08_opens_an_index_written_by_an_earlier_version, req_001_08_keeps_the_earlier_bookkeeping, req_001_08_migrates_an_earlier_index_to_the_current_schema | pass |
 | REQ-001-09 | `crates/app/src/startup.rs` › packaged_builds_use_good_gallery_and_development_builds_dont; `packaging/smoke-test.ps1` (installed app run on a copy of the real index) | pass |
+| REQ-001-10 | `crates/app/src/desktop.rs` › req_001_10_first_start_creates_the_index | pass |
