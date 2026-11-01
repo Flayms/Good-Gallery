@@ -65,6 +65,13 @@ People with their libraries on a Linux desktop (and developers working on Linux)
 - **Then** it builds a `.tar.gz` with the app, a `.desktop` file, the app icon, the license and the third-party notices, whose app uses the system's exiftool, ffmpeg and libmpv
 - **And** the release workflow attaches it beside the Windows downloads
 
+### REQ-018-11 · Video in step with the display
+
+- **Given** a display that doesn't run at 60 Hz (e.g. 75, 120 or 144 Hz)
+- **When** a video plays on Linux
+- **Then** its frames are timed to the rate the window's frames are presented at, measured while it plays, so it plays without regularly repeated or dropped frames
+- **And** a dropped frame or a pause doesn't change that rate, and a window moved to a display with another rate follows it
+
 ## Out of scope
 
 - macOS (a later spec).
@@ -78,7 +85,7 @@ People with their libraries on a Linux desktop (and developers working on Linux)
 
 - Desktops in scope: GNOME and KDE Plasma on Wayland and X11. Other desktops get the same window, untested.
 - The system packages are a Linux distribution's (tested on Ubuntu 26.04): `libimage-exiftool-perl`, `ffmpeg`, `libmpv2`, a Vulkan driver.
-- Display-synced video assumes 60 Hz on Linux (the app has no portable way to ask the compositor yet); other refresh rates play with occasional repeated or dropped frames.
+- Display-synced video starts timed to 60 Hz on Linux (neither X11 and Wayland nor eframe tell the window's refresh rate in a common way) and follows the measured rate within about half a second of playing (REQ-018-11). Where the app can't keep up with the display, the measured rate is the one it presents at, which is the one to time video to.
 
 ## Verification
 
@@ -93,3 +100,4 @@ People with their libraries on a Linux desktop (and developers working on Linux)
 | REQ-018-07 | `crates/media/src/helpers.rs` › exiftool_ends_with_an_app_that_exits_without_cleaning_up | pass |
 | REQ-018-08 | `crates/media/src/helpers.rs` › req_018_08_lowers_the_calling_threads_priority_only | pass |
 | REQ-018-09 | `xtask/src/dist.rs` › req_018_09_stages_the_linux_package; `xtask/tests/workflows.rs` › req_018_01_req_018_09_ci_and_the_release_cover_linux | pass |
+| REQ-018-11 | `crates/domain/src/video.rs` › req_018_11_measures_the_rate_frames_are_presented_at, req_018_11_dropped_frames_and_pauses_dont_move_the_rate, req_018_11_follows_a_new_rate; `crates/app/src/video/mpv.rs` › req_018_11_the_display_fps_changes_while_mpv_runs | partial (smooth playback on a 120/144 Hz display checked by hand only) |

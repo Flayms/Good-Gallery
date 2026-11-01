@@ -1,4 +1,5 @@
-//! Video playback rules (REQ-009-06): seeking, volume, rotation and the size frames are rendered at.
+//! Video playback rules (REQ-009-06): seeking, volume, rotation and the size frames are rendered at; the rate frames
+//! are presented at (REQ-018-11).
 
 /// ← / → seek this far while the video controls have focus (REQ-009-02).
 pub const SEEK_STEP: f64 = 5.0;
@@ -56,9 +57,109 @@ pub fn render_size(on_screen: [f32; 2], video: [u32; 2]) -> [u32; 2] {
     }
 }
 
+/// The refresh rate frames are presented at, measured from the times of presented frames (REQ-018-11): the median
+/// interval of the latest frames, so a dropped frame or a pause doesn't move it.
+#[derive(Debug, Clone, Default)]
+pub struct PresentRate {
+    last: Option<f64>,
+    intervals: std::collections::VecDeque<f64>,
+}
+
+impl PresentRate {
+    /// Intervals the median is taken of.
+    const WINDOW: usize = 120;
+    /// Intervals needed before there is an answer: half a second at 120 Hz.
+    const ENOUGH: usize = 60;
+    /// Longer intervals are pauses (a seek, the app hidden), not frames: below 20 Hz.
+    const LONGEST: f64 = 0.05;
+    /// Shorter intervals are no new frame (the same frame asked twice): above 1000 Hz.
+    const SHORTEST: f64 = 0.001;
+
+    /// A frame was presented at `seconds`.
+    pub fn frame(&mut self, seconds: f64) {
+        if let Some(last) = self.last.replace(seconds) {
+            let interval = seconds - last;
+            if interval < Self::SHORTEST {
+                self.last = Some(last);
+                return;
+            }
+            if interval <= Self::LONGEST {
+                if self.intervals.len() == Self::WINDOW {
+                    self.intervals.pop_front();
+                }
+                self.intervals.push_back(interval);
+            }
+        }
+    }
+
+    /// Frames per second, once enough frames were presented.
+    pub fn hz(&self) -> Option<f64> {
+        if self.intervals.len() < Self::ENOUGH {
+            return None;
+        }
+        let mut sorted: Vec<f64> = self.intervals.iter().copied().collect();
+        sorted.sort_by(f64::total_cmp);
+        Some(1.0 / sorted[sorted.len() / 2])
+    }
+
+    /// The rate to time video to instead of `current`, if the measured one differs from it by more than 1 %.
+    pub fn changed(&self, current: f64) -> Option<f64> {
+        self.hz().filter(|hz| (hz - current).abs() > current * 0.01)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `count` frames `interval` seconds apart, starting at `start`.
+    fn present(rate: &mut PresentRate, start: f64, interval: f64, count: usize) -> f64 {
+        let mut at = start;
+        for _ in 0..count {
+            rate.frame(at);
+            at += interval;
+        }
+        at
+    }
+
+    #[test]
+    fn req_018_11_measures_the_rate_frames_are_presented_at() {
+        let mut rate = PresentRate::default();
+        let at = present(&mut rate, 10.0, 1.0 / 144.0, 30);
+        assert_eq!(rate.hz(), None, "not enough frames yet");
+        present(&mut rate, at, 1.0 / 144.0, 60);
+        assert!((rate.hz().unwrap() - 144.0).abs() < 0.01);
+        assert_eq!(rate.changed(60.0).map(f64::round), Some(144.0));
+        assert_eq!(rate.changed(143.5), None, "within 1 %");
+    }
+
+    #[test]
+    fn req_018_11_dropped_frames_and_pauses_dont_move_the_rate() {
+        let mut rate = PresentRate::default();
+        let mut at = 0.0;
+        for i in 0..200 {
+            // Every 5th frame dropped, a pause of 2 s now and then, the same frame asked twice.
+            let interval = if i % 50 == 49 {
+                2.0
+            } else if i % 5 == 4 {
+                2.0 / 75.0
+            } else {
+                1.0 / 75.0
+            };
+            rate.frame(at);
+            rate.frame(at);
+            at += interval;
+        }
+        assert!((rate.hz().unwrap() - 75.0).abs() < 0.01, "{:?}", rate.hz());
+    }
+
+    #[test]
+    fn req_018_11_follows_a_new_rate() {
+        let mut rate = PresentRate::default();
+        let at = present(&mut rate, 0.0, 1.0 / 60.0, 200);
+        present(&mut rate, at, 1.0 / 120.0, 120);
+        assert!((rate.hz().unwrap() - 120.0).abs() < 0.01);
+    }
 
     #[test]
     fn req_009_02_seeks_within_the_video() {

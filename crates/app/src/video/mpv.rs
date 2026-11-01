@@ -428,3 +428,32 @@ impl Drop for SwRender {
         unsafe { (self.free)(self.ctx) };
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// REQ-018-11: the refresh rate video is timed to can change while mpv runs. Skipped without libmpv.
+    #[test]
+    #[allow(unsafe_code)]
+    fn req_018_11_the_display_fps_changes_while_mpv_runs() {
+        // SAFETY: libmpv's initializers have no preconditions; the library is dropped again at once.
+        let Some(dll) = media::helpers::find_mpv().filter(|path| unsafe { libloading::Library::new(path) }.is_ok())
+        else {
+            eprintln!("skipped: libmpv not found");
+            return;
+        };
+        let options = [
+            ("vo", "libmpv"),
+            ("ao", "null"),
+            ("idle", "yes"),
+            ("config", "no"),
+            ("video-sync", "display-resample"),
+            ("override-display-fps", "60"),
+        ];
+        let mpv = Mpv::new(&dll, &options).unwrap();
+        assert_eq!(mpv.double("override-display-fps"), Some(60.0));
+        mpv.set_double("override-display-fps", 143.86);
+        assert_eq!(mpv.double("override-display-fps"), Some(143.86));
+    }
+}
