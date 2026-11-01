@@ -91,7 +91,7 @@ Edited photos saved over their original show _Revert to original_ in the info pa
   winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
   ```
 
-  Run `./packaging/fetch-helpers.ps1` once for exiftool, ffmpeg and libmpv (into `target/helpers/`), then point `GOOD_GALLERY_EXIFTOOL`, `GOOD_GALLERY_FFMPEG` and `GOOD_GALLERY_MPV` at them or put them on `PATH`. Tests that need a missing helper skip themselves. The installer needs [NSIS](https://nsis.sourceforge.io) (`winget install NSIS.NSIS`).
+  Run `./packaging/fetch-helpers.ps1` once for exiftool, ffmpeg and libmpv (into `target/helpers/`, where development builds find them; `GOOD_GALLERY_EXIFTOOL`, `GOOD_GALLERY_FFMPEG` and `GOOD_GALLERY_MPV` point elsewhere). Tests that need a missing helper skip themselves. The installer needs [NSIS](https://nsis.sourceforge.io) (`winget install NSIS.NSIS`).
 
 - **Linux (Ubuntu):**
 
