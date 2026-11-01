@@ -214,7 +214,13 @@ fn confirm_many(ctx: &egui::Context, state: &mut AppState) {
         return;
     };
     let (title, button) = change.what.question(&format::count(change.ids.len() as u64));
-    let chosen = widgets::dialog(ctx, "confirm-many", &title, "Their files are changed.", &[button, "Cancel"]);
+    let chosen = widgets::dialog(
+        ctx,
+        "confirm-many",
+        &title,
+        "Their files are changed.",
+        &[button, "Cancel"],
+    );
     if let Some(chosen) = chosen {
         state.confirm_many = None;
         if chosen == 0 {

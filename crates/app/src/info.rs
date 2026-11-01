@@ -281,7 +281,13 @@ pub(crate) enum Adding {
 }
 
 /// The field for a new tag of a group, focused when it has just `opened`, with suggestions below it (REQ-026-01).
-pub(crate) fn add_field(ui: &mut egui::Ui, id: egui::Id, opened: bool, group: &Group<'_>, typed: &mut String) -> Adding {
+pub(crate) fn add_field(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    opened: bool,
+    group: &Group<'_>,
+    typed: &mut String,
+) -> Adding {
     let Group {
         label,
         root,

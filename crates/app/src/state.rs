@@ -662,9 +662,8 @@ impl AppState {
                     let library = std::path::Path::new(&file.root);
                     let written = match &change.what {
                         Many::Rate(rating) => {
-                            media::rating::write(&exiftool, library, &file.rel_path, file.kind, *rating).map(|()| {
-                                db::media::set_rating(&lock(&db), file.id, *rating)
-                            })
+                            media::rating::write(&exiftool, library, &file.rel_path, file.kind, *rating)
+                                .map(|()| db::media::set_rating(&lock(&db), file.id, *rating))
                         }
                         Many::Tag(path) => {
                             let tag = domain::tagging::Change::Add(path.clone());

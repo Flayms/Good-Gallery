@@ -322,7 +322,9 @@ fn req_026_06_tags_the_selection() {
     assert!(reread(&fixture, "a.png") && reread(&fixture, "b.png"));
     let toasts = harness.state().toasts.current();
     assert!(
-        toasts.last().is_some_and(|toast| toast.text == "Tagged 2 items with Anna"),
+        toasts
+            .last()
+            .is_some_and(|toast| toast.text == "Tagged 2 items with Anna"),
         "{toasts:?}"
     );
 }
