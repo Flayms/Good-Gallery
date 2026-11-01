@@ -538,7 +538,8 @@ pub(crate) fn register(render_state: &egui_wgpu::RenderState, texture: &wgpu::Te
         )
 }
 
-/// Creates a texture from its mip chain (level 0 first).
+/// Creates a texture from its mip chain (level 0 first). It can be copied from, so editing reads its small copy from the
+/// viewer's original (REQ-021-19).
 pub(crate) fn upload(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -556,7 +557,7 @@ pub(crate) fn upload(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
     let (mut w, mut h) = (width, height);

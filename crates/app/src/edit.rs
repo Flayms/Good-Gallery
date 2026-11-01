@@ -4,6 +4,7 @@
 //! copy (tests). Saving happens in the app (`AppState::save_edit`), the viewer only asks for it.
 
 use crate::icons::Icon;
+use crate::originals::OriginalState;
 use crate::theme;
 use domain::edit::{
     Adjustment, BlurKind, CURVE_SAMPLES, Channel, HISTOGRAM_BINS, Histogram, History, Mask, Params, Part, Pyramid,
@@ -85,10 +86,12 @@ pub enum Outcome {
 }
 
 struct Loaded {
-    /// The original's texture as loaded (perhaps smaller than the file, within the GPU's limit). Not destroyed when
-    /// editing ends: a frame's queued preview may still draw it (#69); wgpu frees it with its last view.
+    /// The original's texture as loaded (perhaps smaller than the file, within the GPU's limit), or the viewer's
+    /// (REQ-021-19). Not destroyed when editing ends: a frame's queued preview may still draw it (#69); wgpu frees it
+    /// with its last view.
     view: Option<wgpu::TextureView>,
-    small: image::RgbaImage,
+    /// Once read back from the viewer's texture, or decoded with it.
+    small: Option<image::RgbaImage>,
     /// The CPU preview, and the recipe and the flags it shows.
     cpu: Option<(Recipe, u32, egui::TextureHandle)>,
 }
@@ -103,17 +106,23 @@ enum Subject {
     Failed(String),
 }
 
+/// The original's pixels.
 enum Base {
-    /// Waiting for the item's details (its saved edit).
+    /// Not loading yet: the unedited original isn't known yet, or the viewer still loads it.
     Waiting,
-    Loading(Receiver<Result<(String, Recipe, Loaded), String>>),
+    /// Decoding it from its file.
+    Loading(Receiver<Result<Loaded, String>>),
     Loaded(Box<Loaded>),
     Failed(String),
 }
 
 pub struct EditSession {
     pub target: Target,
-    /// The unedited original, once known.
+    /// Whether [`Self::start`] had the item's saved edit.
+    started: bool,
+    /// Finding out whether an earlier edit's source is still there (REQ-021-11).
+    resolving: Option<Receiver<(String, Recipe)>>,
+    /// The unedited original, once known; the panel shows from then on (REQ-021-19).
     source: Option<String>,
     history: History,
     /// The recipe shown: the history's current one, or one being dragged.
@@ -121,6 +130,8 @@ pub struct EditSession {
     /// The recipe the file was saved with: no unsaved changes while the draft equals it.
     saved: Recipe,
     base: Base,
+    /// Reading the small copy back from the viewer's texture.
+    reading: Option<Receiver<Result<image::RgbaImage, String>>>,
     open: [bool; 4],
     channel: Channel,
     dragging_point: Option<usize>,
@@ -132,11 +143,14 @@ pub struct EditSession {
     /// The part the panel's light and color change (REQ-022-01).
     part: Part,
     subject: Subject,
+    /// The subject is looked for once the small copy is there.
+    subject_wanted: bool,
     /// Tint the chosen part in the preview (REQ-022-04).
     show_selection: bool,
     pub dialog: Option<Dialog>,
     pub saving: bool,
     render_state: Option<egui_wgpu::RenderState>,
+    ctx: Option<egui::Context>,
 }
 
 impl EditSession {
@@ -144,11 +158,14 @@ impl EditSession {
     pub fn new(target: Target, render_state: Option<egui_wgpu::RenderState>) -> Self {
         Self {
             target,
+            started: false,
+            resolving: None,
             source: None,
             history: History::new(Recipe::default()),
             draft: Recipe::default(),
             saved: Recipe::default(),
             base: Base::Waiting,
+            reading: None,
             open: [true, false, true, false],
             channel: Channel::All,
             dragging_point: None,
@@ -157,10 +174,12 @@ impl EditSession {
             histogram: None,
             part: Part::Photo,
             subject: Subject::Unknown,
+            subject_wanted: false,
             show_selection: false,
             dialog: None,
             saving: false,
             render_state,
+            ctx: None,
         }
     }
 
@@ -170,33 +189,101 @@ impl EditSession {
 
     /// Whether it still waits for the item's saved edit.
     pub fn is_waiting(&self) -> bool {
-        matches!(self.base, Base::Waiting)
+        !self.started
     }
 
-    /// Loads the unedited original: the source of `edit` while it exists (REQ-021-11), else the file. Its recipe
-    /// becomes the starting point.
+    /// Starts from the item's saved edit: its recipe, from the source of `edit` while it exists (REQ-021-11), else
+    /// from the file. The panel shows once that is known, at once without an earlier edit (REQ-021-19); the pixels come
+    /// through [`Self::use_shown`].
     pub fn start(&mut self, edit: Option<SavedEdit>, ctx: &egui::Context) {
-        if !self.is_waiting() {
+        if self.started {
             return;
         }
-        let (tx, rx) = channel();
-        let (target, render_state, ctx) = (self.target.clone(), self.render_state.clone(), ctx.clone());
-        let job = move || {
-            let result = load(&target, edit, render_state.as_ref());
-            let _ = tx.send(result);
-            ctx.request_repaint();
+        self.started = true;
+        self.ctx = Some(ctx.clone());
+        let Some(edit) = edit else {
+            self.set_source(self.target.rel_path.clone(), Recipe::default());
+            return;
         };
-        #[cfg(not(target_arch = "wasm32"))]
-        std::thread::Builder::new()
-            .name("edit original".into())
-            .spawn(job)
-            .expect("can't start a thread");
-        #[cfg(target_arch = "wasm32")]
-        job();
+        // Whether the source is still there is a look at the library, perhaps over the network.
+        let (tx, rx) = channel();
+        let (target, ctx) = (self.target.clone(), ctx.clone());
+        spawn("edit source", move || {
+            let _ = tx.send(resolve(&target, &edit));
+            ctx.request_repaint();
+        });
+        self.resolving = Some(rx);
+    }
+
+    fn set_source(&mut self, source: String, recipe: Recipe) {
+        self.source = Some(source);
+        self.history = History::new(recipe.clone());
+        self.draft = recipe.clone();
+        self.saved = recipe;
+        // Saved with parts or a background blur: they need the subject again (REQ-022-05).
+        if self.draft.needs_subject() {
+            self.find_subject();
+        }
+    }
+
+    /// Takes the original the viewer shows (`shown`) when it is the unedited one, so the file isn't read again
+    /// (REQ-021-19); waits while the viewer still loads it. Else loads the unedited original from its file. Call once
+    /// per frame.
+    pub fn use_shown(&mut self, shown: &OriginalState, lend: impl FnOnce() -> Option<wgpu::TextureView>) {
+        let (Some(source), Base::Waiting) = (&self.source, &self.base) else {
+            return;
+        };
+        if *source == self.target.rel_path {
+            match shown {
+                OriginalState::Loading => return,
+                OriginalState::Loaded(_) if self.render_state.is_some() => {
+                    if let Some(view) = lend() {
+                        self.read_small(view.clone());
+                        self.base = Base::Loaded(Box::new(Loaded {
+                            view: Some(view),
+                            small: None,
+                            cpu: None,
+                        }));
+                        return;
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.load_file(source.clone());
+    }
+
+    /// Decodes `source` from the library.
+    fn load_file(&mut self, source: String) {
+        let (tx, rx) = channel();
+        let (target, render_state, ctx) = (self.target.clone(), self.render_state.clone(), self.ctx.clone());
+        spawn("edit original", move || {
+            let _ = tx.send(load(&target, &source, render_state.as_ref()));
+            if let Some(ctx) = ctx {
+                ctx.request_repaint();
+            }
+        });
         self.base = Base::Loading(rx);
     }
 
-    /// Applies a finished load or search for the subject. Call once per frame.
+    /// Reads the small copy back from the viewer's texture, on a thread.
+    fn read_small(&mut self, view: wgpu::TextureView) {
+        let Some(render_state) = self.render_state.clone() else {
+            return;
+        };
+        let (tx, rx) = channel();
+        let ctx = self.ctx.clone();
+        spawn("edit small copy", move || {
+            let _ = tx.send(read_small(&render_state, view.texture()));
+            if let Some(ctx) = ctx {
+                ctx.request_repaint();
+            }
+        });
+        self.reading = Some(rx);
+    }
+
+    /// Applies what finished meanwhile: the unedited original, its pixels, its small copy, the subject. Call once per
+    /// frame.
     pub fn poll(&mut self) {
         if let Subject::Finding(rx) = &self.subject
             && let Ok(result) = rx.try_recv()
@@ -215,65 +302,91 @@ impl EditSession {
                 }
             };
         }
-        let Base::Loading(rx) = &self.base else { return };
-        let Ok(result) = rx.try_recv() else { return };
-        match result {
-            Ok((source, recipe, loaded)) => {
-                self.source = Some(source);
-                self.history = History::new(recipe.clone());
-                self.draft = recipe.clone();
-                self.saved = recipe;
-                self.base = Base::Loaded(Box::new(loaded));
-                // Saved with parts or a background blur: they need the subject again (REQ-022-05).
-                if self.draft.needs_subject() {
-                    self.find_subject();
+        if let Some(rx) = &self.resolving
+            && let Ok((source, recipe)) = rx.try_recv()
+        {
+            self.resolving = None;
+            self.set_source(source, recipe);
+        }
+        if let Base::Loading(rx) = &self.base
+            && let Ok(result) = rx.try_recv()
+        {
+            match result {
+                Ok(loaded) => {
+                    self.base = Base::Loaded(Box::new(loaded));
+                    self.small_ready();
+                }
+                Err(error) => {
+                    tracing::warn!("can't load the original to edit: {error}");
+                    self.base = Base::Failed(error);
                 }
             }
-            Err(error) => {
-                tracing::warn!("can't load the original to edit: {error}");
-                self.base = Base::Failed(error);
+        }
+        if let Some(rx) = &self.reading
+            && let Ok(result) = rx.try_recv()
+        {
+            self.reading = None;
+            match (result, &mut self.base) {
+                (Ok(small), Base::Loaded(loaded)) => {
+                    loaded.small = Some(small);
+                    self.small_ready();
+                }
+                (Ok(_), _) => {}
+                (Err(error), _) => {
+                    // Read from the file then.
+                    tracing::warn!("can't read the shown original back: {error}");
+                    if let Some(source) = self.source.clone() {
+                        self.load_file(source);
+                    }
+                }
             }
         }
     }
 
-    /// Waits until the original has loaded or failed, and the subject was found or not if it is looked for (tests).
+    fn small_ready(&mut self) {
+        if std::mem::take(&mut self.subject_wanted) {
+            self.find_subject();
+        }
+    }
+
+    /// Whether something is still on its way.
+    fn pending(&self) -> bool {
+        self.resolving.is_some()
+            || self.reading.is_some()
+            || matches!(self.base, Base::Loading(_))
+            || matches!(self.subject, Subject::Finding(_))
+    }
+
+    /// Waits until what is on its way arrived: the unedited original, its pixels, and the subject if it is looked
+    /// for (tests). Pixels the viewer still loads come with a later [`Self::use_shown`].
     pub fn wait(&mut self) {
-        if let Base::Loading(rx) = &self.base
-            && let Ok(result) = rx.recv()
-        {
-            let (tx, rx) = channel();
-            let _ = tx.send(result);
-            self.base = Base::Loading(rx);
-        }
         self.poll();
-        if let Subject::Finding(rx) = &self.subject
-            && let Ok(result) = rx.recv()
-        {
-            let (tx, rx) = channel();
-            let _ = tx.send(result);
-            self.subject = Subject::Finding(rx);
+        while self.pending() {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            self.poll();
         }
-        self.poll();
     }
 
     /// Starts looking for the subject in the original, once (REQ-022-02).
     fn find_subject(&mut self) {
-        let (Subject::Unknown, Base::Loaded(loaded)) = (&self.subject, &self.base) else {
+        let Subject::Unknown = &self.subject else { return };
+        let Some(small) = self.small().cloned() else {
+            self.subject_wanted = true;
             return;
         };
         let (tx, rx) = channel();
-        let small = loaded.small.clone();
-        let job = move || {
+        spawn("find subject", move || {
             let _ = tx.send(find(&small));
-        };
-        #[cfg(not(target_arch = "wasm32"))]
-        std::thread::Builder::new()
-            .name("find subject".into())
-            .spawn(job)
-            .expect("can't start a thread");
-        #[cfg(target_arch = "wasm32")]
-        job();
+        });
         self.subject = Subject::Finding(rx);
+    }
+
+    /// The small copy, once there.
+    fn small(&self) -> Option<&image::RgbaImage> {
+        match &self.base {
+            Base::Loaded(loaded) => loaded.small.as_ref(),
+            _ => None,
+        }
     }
 
     /// The part the panel changes.
@@ -312,8 +425,14 @@ impl EditSession {
         self.show_selection = show && self.part != Part::Photo;
     }
 
+    /// Whether the original and its small copy are there.
     pub fn is_loaded(&self) -> bool {
-        matches!(self.base, Base::Loaded(_))
+        self.small().is_some()
+    }
+
+    /// Whether the unedited original and the recipe to start from are known, so the panel shows (REQ-021-19).
+    pub fn is_ready(&self) -> bool {
+        self.source.is_some()
     }
 
     pub fn failed(&self) -> Option<&str> {
@@ -348,12 +467,11 @@ impl EditSession {
 
     /// Counts the histogram again when a step before the curves changed.
     fn update_histogram(&mut self) {
-        let Base::Loaded(loaded) = &self.base else { return };
+        let Some(small) = self.small() else { return };
         let key = before_curves(&self.draft);
         if self.histogram.as_ref().is_some_and(|(counted, _)| *counted == key) {
             return;
         }
-        let small = &loaded.small;
         let pixels = u64::from(small.width()) * u64::from(small.height());
         let step = ((pixels as f64 / f64::from(HISTOGRAM_SAMPLES)).sqrt().ceil() as u32).max(1);
         let samples = small
@@ -442,8 +560,7 @@ impl EditSession {
             return;
         }
         self.picking = false;
-        let Base::Loaded(loaded) = &self.base else { return };
-        let small = &loaded.small;
+        let Some(small) = self.small() else { return };
         let (cx, cy) = (
             (uv.x.clamp(0.0, 1.0) * (small.width() - 1) as f32).round() as i64,
             (uv.y.clamp(0.0, 1.0) * (small.height() - 1) as f32).round() as i64,
@@ -525,13 +642,14 @@ impl EditSession {
             return true;
         }
         // Without a wgpu renderer: the small copy, rendered on the CPU when the recipe changed.
+        let Some(small) = &loaded.small else { return false };
         let recipe = if compare { Recipe::default() } else { self.draft.clone() };
         if loaded
             .cpu
             .as_ref()
             .is_none_or(|(shown, shown_flags, _)| *shown != recipe || *shown_flags != flags)
         {
-            let image = cpu_preview(&loaded.small, &recipe, self.target.full_size, mask, flags);
+            let image = cpu_preview(small, &recipe, self.target.full_size, mask, flags);
             match &mut loaded.cpu {
                 Some((shown, shown_flags, handle)) => {
                     handle.set(image, egui::TextureOptions::LINEAR);
@@ -596,14 +714,15 @@ impl EditSession {
                 .layout(egui::Layout::top_down(egui::Align::Min)),
         );
         body_ui.set_clip_rect(body.intersect(ui.clip_rect()));
+        // The sliders show once the recipe is known, while the original may still load (REQ-021-19).
         match &self.base {
-            Base::Waiting | Base::Loading(_) => {
-                body_ui.spinner();
-            }
             Base::Failed(error) => {
                 body_ui.add(egui::Label::new(format!("Can't load the original: {error}")).wrap());
             }
-            Base::Loaded(_) => {
+            _ if !self.is_ready() => {
+                body_ui.spinner();
+            }
+            _ => {
                 egui::ScrollArea::vertical()
                     .id_salt("edit panel")
                     .auto_shrink(false)
@@ -691,8 +810,9 @@ impl EditSession {
                     let picking = self.picking;
                     let button =
                         egui::Button::image_and_text(Icon::Pipette.small(), "Pick a neutral spot").selected(picking);
+                    // It picks from the small copy.
                     let response = ui
-                        .add(button)
+                        .add_enabled(self.small().is_some(), button)
                         .on_hover_text("Click a spot in the photo that should be grey");
                     if response.clicked() {
                         self.picking = !picking;
@@ -1011,47 +1131,142 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, label: &str, tooltip: &str, enable
     response
 }
 
-/// Loads the unedited original of `target` (the edit's source while it exists) as a texture and a small copy.
+/// Runs `job` on a thread of its own (in the browser, at once).
+fn spawn(name: &str, job: impl FnOnce() + Send + 'static) {
+    #[cfg(not(target_arch = "wasm32"))]
+    std::thread::Builder::new()
+        .name(name.into())
+        .spawn(job)
+        .expect("can't start a thread");
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = name;
+        job();
+    }
+}
+
+/// The unedited original of `target` and the recipe to start from: the source of `edit` and its recipe while the
+/// source exists (REQ-021-11), else the file itself, unedited.
+fn resolve(target: &Target, edit: &SavedEdit) -> (String, Recipe) {
+    let exists =
+        db::media::absolute_path(&target.library.to_string_lossy(), &edit.source).is_some_and(|path| path.is_file());
+    if exists {
+        (edit.source.clone(), edit.recipe())
+    } else {
+        (target.rel_path.clone(), Recipe::default())
+    }
+}
+
+/// Loads `source`, the unedited original of `target`, as a texture and a small copy.
 #[cfg(not(target_arch = "wasm32"))]
-fn load(
-    target: &Target,
-    edit: Option<SavedEdit>,
-    render_state: Option<&egui_wgpu::RenderState>,
-) -> Result<(String, Recipe, Loaded), String> {
-    let file = |rel: &str| db::media::absolute_path(&target.library.to_string_lossy(), rel);
-    let (source, recipe) = match edit {
-        Some(edit) if file(&edit.source).is_some_and(|path| path.is_file()) => (edit.source.clone(), edit.recipe()),
-        _ => (target.rel_path.clone(), Recipe::default()),
-    };
-    let path = file(&source).ok_or("the path leaves its library")?;
+fn load(target: &Target, source: &str, render_state: Option<&egui_wgpu::RenderState>) -> Result<Loaded, String> {
+    let path =
+        db::media::absolute_path(&target.library.to_string_lossy(), source).ok_or("the path leaves its library")?;
     let max_side = render_state.map_or(SMALL_SIDE, |render_state| {
         render_state.device.limits().max_texture_dimension_2d.min(8192)
     });
     let image = media::original::load_original(&path, None, max_side, target.sidecar_orientation)
         .map_err(|error| error.to_string())?;
-    let small = if image.width().max(image.height()) > SMALL_SIDE {
-        let (width, height) = domain::thumbs::fit_inside(image.width(), image.height(), SMALL_SIDE, SMALL_SIDE, false);
-        image::imageops::resize(&image, width, height, image::imageops::FilterType::Triangle)
-    } else {
-        image.clone()
-    };
+    let small = fit_small(&image);
     let view = render_state.map(|render_state| {
         let size = [image.width(), image.height()];
         let levels = crate::textures::mip_chain(size, image.into_raw());
         crate::textures::upload(&render_state.device, &render_state.queue, size, &levels)
             .create_view(&wgpu::TextureViewDescriptor::default())
     });
-    Ok((source, recipe, Loaded { view, small, cpu: None }))
+    Ok(Loaded {
+        view,
+        small: Some(small),
+        cpu: None,
+    })
 }
 
 /// The browser version doesn't edit (REQ-021-01).
 #[cfg(target_arch = "wasm32")]
-fn load(
-    _target: &Target,
-    _edit: Option<SavedEdit>,
-    _render_state: Option<&egui_wgpu::RenderState>,
-) -> Result<(String, Recipe, Loaded), String> {
+fn read_small(_render_state: &egui_wgpu::RenderState, _texture: &wgpu::Texture) -> Result<image::RgbaImage, String> {
     Err("editing isn't available here".into())
+}
+
+/// The browser version doesn't edit (REQ-021-01).
+#[cfg(target_arch = "wasm32")]
+fn load(_target: &Target, _source: &str, _render_state: Option<&egui_wgpu::RenderState>) -> Result<Loaded, String> {
+    Err("editing isn't available here".into())
+}
+
+/// `image` fit into the small copy's size.
+#[cfg(not(target_arch = "wasm32"))]
+fn fit_small(image: &image::RgbaImage) -> image::RgbaImage {
+    if image.width().max(image.height()) > SMALL_SIDE {
+        let (width, height) = domain::thumbs::fit_inside(image.width(), image.height(), SMALL_SIDE, SMALL_SIDE, false);
+        image::imageops::resize(image, width, height, image::imageops::FilterType::Triangle)
+    } else {
+        image.clone()
+    }
+}
+
+/// The small copy of `texture`'s photo: its smallest mip level still at least as long as the small copy, read back
+/// and fit into it (REQ-021-19).
+#[cfg(not(target_arch = "wasm32"))]
+fn read_small(render_state: &egui_wgpu::RenderState, texture: &wgpu::Texture) -> Result<image::RgbaImage, String> {
+    let size = texture.size();
+    let (mut level, mut width, mut height) = (0, size.width, size.height);
+    while level + 1 < texture.mip_level_count() && (width / 2).max(height / 2) >= SMALL_SIDE {
+        (level, width, height) = (level + 1, (width / 2).max(1), (height / 2).max(1));
+    }
+    let row = (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let device = &render_state.device;
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("edit small copy"),
+        size: u64::from(row) * u64::from(height),
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: level,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &buffer,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(row),
+                rows_per_image: Some(height),
+            },
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
+    render_state.queue.submit([encoder.finish()]);
+    let slice = buffer.slice(..);
+    let (tx, rx) = channel();
+    slice.map_async(wgpu::MapMode::Read, move |result| {
+        let _ = tx.send(result);
+    });
+    device
+        .poll(wgpu::PollType::wait_indefinitely())
+        .map_err(|error| error.to_string())?;
+    rx.recv()
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())?;
+    let data = slice.get_mapped_range().map_err(|error| error.to_string())?;
+    let pixels = (0..height as usize)
+        .flat_map(|y| {
+            data[y * row as usize..y * row as usize + width as usize * 4]
+                .iter()
+                .copied()
+        })
+        .collect();
+    drop(data);
+    buffer.unmap();
+    let image = image::RgbaImage::from_raw(width, height, pixels).ok_or("the read back copy has the wrong size")?;
+    Ok(fit_small(&image))
 }
 
 /// `small` through `recipe`, on the CPU, with the shader's `flags` (but 2: the output is encoded).
@@ -1688,7 +1903,7 @@ mod tests {
         let mut session = EditSession::new(target, None);
         session.base = Base::Loaded(Box::new(Loaded {
             view: None,
-            small: image::RgbaImage::from_pixel(10, 10, image::Rgba([200, 150, 100, 255])),
+            small: Some(image::RgbaImage::from_pixel(10, 10, image::Rgba([200, 150, 100, 255]))),
             cpu: None,
         }));
         session.source = Some("a.jpg".into());
@@ -1745,7 +1960,7 @@ mod tests {
         let mut session = EditSession::new(target, Some(render_state.clone()));
         session.base = Base::Loaded(Box::new(Loaded {
             view: Some(view.clone()),
-            small: pattern(),
+            small: Some(pattern()),
             cpu: None,
         }));
         let callback = PreviewCallback {
@@ -1831,7 +2046,7 @@ mod tests {
         let warm = image::RgbaImage::from_pixel(10, 10, image::Rgba([190, 160, 130, 255]));
         session.base = Base::Loaded(Box::new(Loaded {
             view: None,
-            small: warm.clone(),
+            small: Some(warm.clone()),
             cpu: None,
         }));
         session.picking = true;
@@ -1843,5 +2058,84 @@ mod tests {
             (out[0] - out[2]).abs() < 0.02 && (out[0] - out[1]).abs() < 0.02,
             "{out:?}"
         );
+    }
+
+    /// A target whose file isn't there, so a test sees when it would be read.
+    fn missing_target(full_size: [u32; 2]) -> Target {
+        Target {
+            media: 1,
+            root_id: 1,
+            rel_path: "missing.jpg".into(),
+            file_name: "missing.jpg".into(),
+            library: std::env::temp_dir().join("good-gallery-no-library"),
+            full_size,
+            sidecar_orientation: None,
+        }
+    }
+
+    /// REQ-021-19: without an earlier edit, the panel shows its sliders as soon as editing starts, before any pixels
+    /// arrived.
+    #[test]
+    fn req_021_19_the_panel_shows_its_sliders_at_once() {
+        use egui_kittest::kittest::Queryable as _;
+        let mut session = EditSession::new(missing_target([120, 80]), None);
+        session.start(None, &egui::Context::default());
+        assert!(session.is_ready());
+        let mut harness = egui_kittest::Harness::builder()
+            .with_size(vec2(320.0, 900.0))
+            .with_context_setup(crate::setup)
+            .build_ui_state(
+                |ui, session: &mut EditSession| {
+                    session.panel(ui, ui.max_rect());
+                },
+                session,
+            );
+        harness.run();
+        assert!(!harness.state().is_loaded(), "no pixels yet");
+        harness.get_by_label("Exposure");
+        harness.get_by_label("Saturation");
+    }
+
+    /// REQ-021-19: editing takes the texture the viewer shows and reads its small copy back from it, without reading
+    /// the file (which isn't there here).
+    #[test]
+    fn req_021_19_uses_the_shown_original_instead_of_reading_the_file() {
+        let (_gpu, render_state) = render_state();
+        let size = [1200, 800];
+        let image = image::RgbaImage::from_fn(size[0], size[1], |x, y| {
+            image::Rgba([(x * 255 / size[0]) as u8, (y * 255 / size[1]) as u8, 120, 255])
+        });
+        let texture = crate::textures::upload(
+            &render_state.device,
+            &render_state.queue,
+            size,
+            &crate::textures::mip_chain(size, image.clone().into_raw()),
+        );
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let shown = OriginalState::Loaded(crate::originals::Loaded {
+            id: egui::TextureId::default(),
+            size,
+            view: Some(view.clone()),
+        });
+
+        let mut session = EditSession::new(missing_target(size), Some(render_state.clone()));
+        session.start(None, &egui::Context::default());
+        // Still loading in the viewer: editing waits for it instead of reading the file itself.
+        session.use_shown(&OriginalState::Loading, || panic!("nothing to lend yet"));
+        session.wait();
+        assert!(session.failed().is_none() && !session.is_loaded());
+
+        session.use_shown(&shown, || Some(view.clone()));
+        session.wait();
+        assert_eq!(session.failed(), None);
+        assert!(session.is_loaded());
+        let small = session.small().unwrap();
+        let expected = fit_small(&image);
+        assert_eq!(small.dimensions(), expected.dimensions());
+        for (got, want) in small.pixels().zip(expected.pixels()) {
+            for c in 0..4 {
+                assert!(got[c].abs_diff(want[c]) <= 3, "{got:?} vs {want:?}");
+            }
+        }
     }
 }

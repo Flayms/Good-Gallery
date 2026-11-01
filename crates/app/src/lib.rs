@@ -1,5 +1,8 @@
 //! Good Gallery's UI. `main.rs` runs it in a window; tests drive the same [`ui`] with `egui_kittest`.
 
+// Rebuilt when another worktree built into the same target folder (`.cargo/config.toml`).
+const _: Option<&str> = option_env!("GOOD_GALLERY_WORKTREE");
+
 pub mod edit;
 pub mod empty_state;
 pub mod format;

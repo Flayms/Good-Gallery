@@ -5,6 +5,9 @@
 //! The web build (spec 019) has no threads, files or helper programs: it uses only the library operations and the
 //! status types, and scans with its own code.
 
+// Rebuilt when another worktree built into the same target folder (`.cargo/config.toml`).
+const _: Option<&str> = option_env!("GOOD_GALLERY_WORKTREE");
+
 #[cfg(not(target_arch = "wasm32"))]
 mod indexer;
 pub mod libraries;

@@ -83,6 +83,8 @@ pub struct Originals {
     loaded: HashMap<i64, (Loaded, Texture)>,
     failed: HashMap<i64, String>,
     wanted: HashSet<i64>,
+    /// Originals whose texture editing uses too (REQ-021-19): freed with its last view instead of destroyed.
+    lent: HashSet<i64>,
     /// A cancelled load came back for a photo that is wanted again: the next [`Originals::set`] queues it anew.
     requeue: bool,
     /// The browser has no threads: loads are tasks on the page's event loop (see [`Self::pump`]).
@@ -105,6 +107,7 @@ impl Originals {
             loaded: HashMap::new(),
             failed: HashMap::new(),
             wanted: HashSet::new(),
+            lent: HashSet::new(),
             requeue: false,
             loads: (done, max_side),
         }
@@ -166,6 +169,7 @@ impl Originals {
             loaded: HashMap::new(),
             failed: HashMap::new(),
             wanted: HashSet::new(),
+            lent: HashSet::new(),
             requeue: false,
         }
     }
@@ -271,8 +275,19 @@ impl Originals {
         // egui frees its own textures with their last handle.
         if let (Texture::Gpu(texture), Some(render_state)) = (texture, &self.render_state) {
             render_state.renderer.write().free_texture(&loaded.id);
-            texture.destroy();
+            // Editing may still draw a lent one (#69).
+            if !self.lent.remove(&media) {
+                texture.destroy();
+            }
         }
+    }
+
+    /// The texture of a loaded original, for editing to draw and read (REQ-021-19). It is no longer destroyed when
+    /// freed, but freed by wgpu once the last view of it is gone.
+    pub fn lend(&mut self, media: i64) -> Option<wgpu::TextureView> {
+        let view = self.loaded.get(&media)?.0.view.clone()?;
+        self.lent.insert(media);
+        Some(view)
     }
 
     /// Drops a loaded or failed original, so it is read again the next time it is wanted (its file was rewritten).

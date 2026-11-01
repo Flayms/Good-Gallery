@@ -15,6 +15,13 @@ Users who find a photo that is too dark, has a color cast or lacks punch fix it 
 - **Then** the viewer switches to editing: the photo stays in view and an adjustments panel replaces the info panel
 - **And** videos, GIFs, AVIF photos and media of offline libraries offer no _Edit_
 
+### REQ-021-19 · Editing opens at once
+
+- **Given** a photo in the viewer
+- **When** the user chooses _Edit_
+- **Then** the adjustments panel shows its sliders in the next frame, without waiting for the photo's pixels, and the photo stays in view as shown
+- **And** when the viewer already shows the unedited original, editing uses it instead of reading the file again; the white balance picker, the histogram and finding the subject follow as soon as their small copy is ready
+
 ### REQ-021-02 · Live preview
 
 - **Given** editing
@@ -155,6 +162,7 @@ Users who find a photo that is too dark, has a color cast or lacks punch fix it 
 | REQ        | Test | Result |
 | ---------- | ---- | ------ |
 | REQ-021-01 | `crates/app/tests/edit.rs` › req_021_01_edit_is_offered_for_jpeg_png_and_webp_photos_in_online_libraries; `crates/domain/src/edit.rs` › req_021_01_jpeg_png_and_webp_are_editable | pass |
+| REQ-021-19 | `crates/app/src/edit.rs` › req_021_19_the_panel_shows_its_sliders_at_once, req_021_19_uses_the_shown_original_instead_of_reading_the_file | pass |
 | REQ-021-02 | `crates/app/src/edit.rs` › req_021_02_req_021_06_the_gpu_preview_matches_the_cpu_render; `crates/app/tests/edit.rs` › req_021_02_req_021_07_previews_compares_undoes_and_resets | pass |
 | REQ-021-03 | `crates/domain/src/edit.rs` › req_021_03_* (exposure, contrast, shadows and highlights, whites and blacks, neutral values) | pass |
 | REQ-021-17 | `crates/domain/src/edit.rs` › req_021_17_brightness_lifts_or_lowers_the_midtones_only; `crates/app/src/edit.rs` › req_021_02_req_021_06_the_gpu_preview_matches_the_cpu_render | pass |

@@ -3,6 +3,9 @@
 //!
 //! The readers do no IO: [`read`] returns [`Missing`] when it needs bytes the caller hasn't read yet.
 
+// Rebuilt when another worktree built into the same target folder (`.cargo/config.toml`).
+const _: Option<&str> = option_env!("GOOD_GALLERY_WORKTREE");
+
 mod bytes;
 mod formats;
 pub mod rules;
