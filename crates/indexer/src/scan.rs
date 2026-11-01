@@ -971,6 +971,46 @@ mod tests {
         assert_eq!(f.metadata.take_reads(), ["a.jpg"]);
     }
 
+    /// Taking the read permission away needs a Unix system and a user other than root, who may list anything.
+    #[cfg(unix)]
+    #[test]
+    fn req_002_11_keeps_the_media_of_folders_that_cant_be_listed_and_retries_them() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut f = Fixture::new();
+        for rel in ["a.jpg", "locked/b.jpg", "locked/sub/c.jpg"] {
+            f.touch_past(rel, "x");
+        }
+        f.age(&["locked/sub", "locked", ""]);
+        f.scan(ScanScope::Full);
+        assert_eq!(f.paths(), ["a.jpg", "locked/b.jpg", "locked/sub/c.jpg"]);
+
+        let locked = f.path("locked");
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        if fs::read_dir(&locked).is_ok() {
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+            eprintln!("skipped: this user can list folders without the read permission");
+            return;
+        }
+        let full = f.scan(ScanScope::Full);
+        let quick = f.scan(ScanScope::Quick);
+        let unlisted: Option<i64> = f.writer.folders(f.root).unwrap().get("locked").copied();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+
+        assert_eq!((full, quick), (ScanOutcome::Completed, ScanOutcome::Completed));
+        assert_eq!(f.paths(), ["a.jpg", "locked/b.jpg", "locked/sub/c.jpg"]);
+        assert_eq!(unlisted, Some(UNLISTED));
+
+        // Readable again, the next quick scan lists the folder and finds what changed in it.
+        f.touch("locked/new.jpg", "x");
+        fs::remove_file(f.path("locked/b.jpg")).unwrap();
+        f.metadata.take_reads();
+        assert_eq!(f.scan(ScanScope::Quick), ScanOutcome::Completed);
+        assert_eq!(f.metadata.take_reads(), ["new.jpg"]);
+        assert_eq!(f.paths(), ["a.jpg", "locked/new.jpg", "locked/sub/c.jpg"]);
+        assert_ne!(f.writer.folders(f.root).unwrap().get("locked"), Some(&UNLISTED));
+    }
+
     #[test]
     fn req_003_08_falls_back_to_a_full_scan_without_stored_folders() {
         let mut f = Fixture::new();
