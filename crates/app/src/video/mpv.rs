@@ -447,7 +447,10 @@ mod tests {
             ("vo", "libmpv"),
             ("ao", "null"),
             ("idle", "yes"),
+            // As the player sets them: no terminal input or signal handlers (without them the test crashed in CI).
+            ("terminal", "no"),
             ("config", "no"),
+            ("input-default-bindings", "no"),
             ("video-sync", "display-resample"),
             ("override-display-fps", "60"),
         ];
