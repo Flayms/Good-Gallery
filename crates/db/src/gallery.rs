@@ -413,6 +413,7 @@ mod tests {
                 tags: tags.iter().map(|p| p.iter().map(|s| s.to_string()).collect()).collect(),
                 ..Default::default()
             },
+            read_error: None,
         }
     }
 

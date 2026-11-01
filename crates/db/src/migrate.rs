@@ -41,6 +41,7 @@ const FILES: &[(&str, &str)] = &[
         "0013_media_kind_idx",
         include_str!("../migrations/0013_media_kind_idx.sql"),
     ),
+    ("0014_meta_error", include_str!("../migrations/0014_meta_error.sql")),
 ];
 const JOURNAL: &str = include_str!("../migrations/meta/_journal.json");
 

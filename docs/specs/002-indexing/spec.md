@@ -86,7 +86,8 @@ Every library is mirrored in a local index, so browsing and searching 50k–500k
 
 - **Given** a file whose metadata can't be read
 - **When** it is scanned
-- **Then** it is still indexed, without metadata
+- **Then** it is still indexed: a new file without metadata, a file indexed before with the metadata it had
+- **And** it counts as unreadable, with the reason the read failed, until a read succeeds
 - **And** a file that can't be accessed at all keeps the state it was last indexed with
 
 ### REQ-002-13 · Indexer failure
@@ -102,12 +103,38 @@ Every library is mirrored in a local index, so browsing and searching 50k–500k
 - **When** a scan completes
 - **Then** those tags are removed and no longer suggested
 
+### REQ-002-15 · Read unreadable files again
+
+- **Given** an unreadable file (REQ-002-12)
+- **When** its library is next scanned, quick scans included
+- **Then** its metadata is read again, even though the file didn't change
+- **And** once a read succeeds, the file is no longer unreadable
+- **And** it doesn't turn the library's scheduled scan into a full scan (unlike REQ-002-05)
+- **And** media items an earlier version indexed without width and height (a read that failed unnoticed) count as unreadable once the index is updated, so they are read again too
+
+### REQ-002-16 · Unreadable files in the toolbar
+
+- **Given** unreadable files in any library
+- **When** the gallery is shown
+- **Then** the toolbar shows how many there are ("1 unreadable") with an alert icon
+- **And** clicking it lists each file with its name, library and folder, and the reason its read failed
+- **And** without unreadable files the toolbar shows nothing
+
+### REQ-002-17 · Read again
+
+- **Given** the list of unreadable files (REQ-002-16)
+- **When** the user clicks _Read again_ on a file, or _Read all again_
+- **Then** those files are read again right away, and their buttons show _Reading…_ until the scan is done
+- **And** files read successfully leave the list, and the toolbar's count goes down
+
 ## Out of scope
 
 - File types beyond those in REQ-002-01: HEIC, RAW, PSD and similar.
 - Following symbolic links or junctions.
 - Pausing or cancelling a scan by hand (only removing the library cancels it).
 - Running scans of several libraries in parallel.
+- Unreadable files in the browser version (spec 019): its readers have no failures to report, a file they can't parse simply has no metadata.
+- Opening an unreadable file from the toolbar's list.
 
 ## Assumptions
 
@@ -129,6 +156,9 @@ Every library is mirrored in a local index, so browsing and searching 50k–500k
 | REQ-002-09 | `crates/indexer/src/scan.rs` › keeps_the_index_of_unreachable_libraries | pass |
 | REQ-002-10 | `crates/indexer/src/scan.rs` › stops_and_keeps_everything_when_the_library_goes_offline_during_a_scan | pass |
 | REQ-002-11 | `crates/indexer/src/scan.rs` › keeps_the_media_of_folders_that_cant_be_listed_and_retries_them (Unix only: a folder without the read permission) | pass |
-| REQ-002-12 | `crates/indexer/src/scan.rs` › indexes_files_with_unreadable_metadata_without_it | partial: files that can't be accessed at all aren't tested |
+| REQ-002-12 | `crates/indexer/src/scan.rs` › indexes_new_files_with_unreadable_metadata_without_it_and_with_the_reason, keeps_the_metadata_of_a_known_file_whose_read_fails | partial: files that can't be accessed at all aren't tested |
 | REQ-002-13 | `crates/indexer/src/indexer.rs` › a_panicking_scan_counts_as_finished…, a_panic_while_reading_one_file_costs_only_that_file | pass |
 | REQ-002-14 | `crates/indexer/src/scan.rs` › rescans_incrementally; `crates/db/src/writer.rs` › prunes_unused_tags_bottom_up | pass |
+| REQ-002-15 | `crates/indexer/src/scan.rs` › quick_scans_read_unreadable_files_again, changes_scans_read_an_unreadable_file_again (the metadata version stays, so `schedule::scan_all` keeps quick scans); `crates/db/src/lib.rs` › marks_media_indexed_without_dimensions_unreadable | pass |
+| REQ-002-16 | `crates/app/tests/indexing.rs` › lists_unreadable_files_with_their_library_folder_and_reason (snapshot `unreadable_files`), shows_nothing_without_unreadable_files; `crates/app/src/unreadable.rs` › names_the_library_and_folder | pass |
+| REQ-002-17 | `crates/app/tests/indexing.rs` › reads_files_again_and_drops_those_read_successfully; `crates/indexer/src/scan.rs` › changes_scans_read_an_unreadable_file_again | pass |

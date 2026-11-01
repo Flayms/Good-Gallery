@@ -42,6 +42,7 @@ fn library(fixture: &Fixture, edit: Option<SavedEdit>) -> (Connection, PathBuf) 
             edit: edit.map(Box::new),
             ..Default::default()
         },
+        read_error: None,
     };
     let files = [
         file(0, "a.jpg", MediaKind::Image, edit),

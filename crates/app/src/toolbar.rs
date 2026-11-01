@@ -4,6 +4,7 @@
 use crate::gallery::{Gallery, TOOLBAR_HEIGHT};
 use crate::icons::{Icon, icon_button};
 use crate::search_bar::{self, SearchBar};
+use crate::unreadable::{ReadAgain, Unreadable};
 use crate::{format, theme};
 use chrono::{Datelike, NaiveDate};
 use domain::media::MediaKind;
@@ -21,15 +22,24 @@ fn view_icon(view: GalleryView) -> Icon {
     }
 }
 
+/// What was asked for in the toolbar.
+#[derive(Debug, Default)]
+pub struct Asked {
+    /// _Show sidebar_ (shown while the sidebar is hidden, REQ-008-08).
+    pub show_sidebar: bool,
+    /// _Read again_ in the list of unreadable files (REQ-002-17).
+    pub read_again: Option<ReadAgain>,
+}
+
 /// Draws the toolbar over the top of `area`; without a gallery (no libraries yet) it stays empty.
-/// Draws the toolbar; whether _Show sidebar_ was clicked (shown while `sidebar_hidden`, REQ-008-08).
 pub fn show(
     ui: &mut egui::Ui,
     area: Rect,
     gallery: Option<&mut Gallery>,
     bar_state: &mut SearchBar,
     sidebar_hidden: bool,
-) -> bool {
+    unreadable: &Unreadable,
+) -> Asked {
     let bar = Rect::from_min_size(area.min, vec2(area.width(), TOOLBAR_HEIGHT));
     // Tiles scrolled under the bar don't react to the pointer; its empty space moves the window.
     let background = ui.interact(bar, ui.make_persistent_id("toolbar"), egui::Sense::click_and_drag());
@@ -50,23 +60,24 @@ pub fn show(
     // menus' open state with them.
     let mut gallery = gallery;
     ui.scope_builder(egui::UiBuilder::new().id_salt("toolbar").max_rect(controls), |ui| {
-        let mut show_sidebar = false;
+        let mut asked = Asked::default();
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if let Some(gallery) = gallery.as_deref_mut() {
                 view_button(ui, gallery);
                 filters_button(ui, gallery);
+                asked.read_again = crate::unreadable::notice(ui, unreadable);
                 ui.add_space(8.0);
             }
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 if sidebar_hidden {
-                    show_sidebar = crate::sidebar::show_button(ui);
+                    asked.show_sidebar = crate::sidebar::show_button(ui);
                 }
                 if let Some(gallery) = gallery {
                     search_bar::show(ui, bar_state, gallery);
                 }
             });
         });
-        show_sidebar
+        asked
     })
     .inner
 }
@@ -110,7 +121,7 @@ fn filters_button(ui: &mut egui::Ui, gallery: &mut Gallery) {
 /// (the date pickers).
 /// The menu's open state lives under the fixed `name`: a button's own id changes with its look (the filter count)
 /// and with the widgets before it (an empty gallery has none), and the menu would close with it.
-fn menu(button: &egui::Response, name: &str, width: f32, add: impl FnOnce(&mut egui::Ui)) {
+pub(crate) fn menu(button: &egui::Response, name: &str, width: f32, add: impl FnOnce(&mut egui::Ui)) {
     let popup = egui::Popup::from_toggle_button_response(button)
         .id(egui::Id::NULL.with(name))
         .close_behavior(egui::PopupCloseBehavior::IgnoreClicks)

@@ -15,6 +15,8 @@ pub struct ExistingEntry {
     pub mtime: i64,
     pub sidecar_mtime: Option<i64>,
     pub meta_version: i64,
+    /// Its last read failed: scans read it again even if it didn't change (REQ-002-15).
+    pub unreadable: bool,
 }
 
 /// A read file, ready to be written.
@@ -29,6 +31,9 @@ pub struct IndexedFile {
     pub mtime: i64,
     pub sidecar_mtime: Option<i64>,
     pub metadata: MediaMetadata,
+    /// Why the metadata couldn't be read (REQ-002-12); `metadata` is then empty, and a known file keeps the metadata
+    /// it had.
+    pub read_error: Option<String>,
 }
 
 const CHUNK: usize = 500;
@@ -86,7 +91,9 @@ impl IndexWriter {
     }
 
     fn query_existing(&self, filter: &str, values: &[&dyn rusqlite::ToSql]) -> Result<HashMap<String, ExistingEntry>> {
-        let sql = format!("SELECT id, rel_path, size, mtime, sidecar_mtime, meta_version FROM media WHERE {filter}");
+        let sql = format!(
+            "SELECT id, rel_path, size, mtime, sidecar_mtime, meta_version, meta_error IS NOT NULL FROM media WHERE {filter}"
+        );
         let mut stmt = self.conn.prepare_cached(&sql)?;
         let rows = stmt.query_map(values, |row| {
             Ok((
@@ -97,8 +104,22 @@ impl IndexWriter {
                     mtime: row.get(3)?,
                     sidecar_mtime: row.get(4)?,
                     meta_version: row.get(5)?,
+                    unreadable: row.get(6)?,
                 },
             ))
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Folders of a library holding unreadable files (`""` for the library itself), which quick scans list again
+    /// (REQ-002-15).
+    pub fn unreadable_folders(&self, root: i64) -> Result<std::collections::HashSet<String>> {
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT DISTINCT dir FROM media WHERE root_id = ?1 AND meta_error IS NOT NULL")?;
+        let rows = stmt.query_map([root], |row| {
+            let dir: String = row.get(0)?;
+            Ok(dir.trim_end_matches('/').to_string())
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
@@ -213,18 +234,21 @@ fn write_file(
     root: i64,
     file: &IndexedFile,
 ) -> rusqlite::Result<()> {
+    if let Some(error) = &file.read_error {
+        return write_unreadable(tx, root, file, error);
+    }
     let m = &file.metadata;
     // Thumbnails go stale when the file itself changed, or its sidecar's orientation (REQ-004-12); not for other
     // changes of the sidecar.
     let id: i64 = tx.prepare_cached(
         "INSERT INTO media (root_id, rel_path, file_name, kind, size, mtime, sidecar_mtime, width, height, duration,
-                            taken_at, rating, meta_version, sidecar_orientation)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                            taken_at, rating, meta_version, sidecar_orientation, meta_error)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, NULL)
          ON CONFLICT (root_id, rel_path) DO UPDATE SET
            file_name = excluded.file_name, kind = excluded.kind, size = excluded.size, mtime = excluded.mtime,
            sidecar_mtime = excluded.sidecar_mtime, width = excluded.width, height = excluded.height,
            duration = excluded.duration, taken_at = excluded.taken_at, rating = excluded.rating,
-           meta_version = excluded.meta_version, sidecar_orientation = excluded.sidecar_orientation,
+           meta_version = excluded.meta_version, sidecar_orientation = excluded.sidecar_orientation, meta_error = NULL,
            thumbhash = CASE WHEN media.size <> excluded.size OR media.mtime <> excluded.mtime
                                  OR media.sidecar_orientation IS NOT excluded.sidecar_orientation THEN NULL
                             ELSE media.thumbhash END,
@@ -279,6 +303,35 @@ fn write_file(
     for tag in linked {
         insert.execute([id, tag])?;
     }
+    Ok(())
+}
+
+/// A file whose metadata couldn't be read (REQ-002-12): a new one is indexed without metadata, a known one keeps the
+/// metadata, tags and metadata version it had and takes the new size and dates. Either way it is unreadable until a
+/// read succeeds; the metadata version stays, so it doesn't make scheduled scans full scans (REQ-002-15).
+fn write_unreadable(tx: &Transaction, root: i64, file: &IndexedFile, error: &str) -> rusqlite::Result<()> {
+    tx.prepare_cached(
+        "INSERT INTO media (root_id, rel_path, file_name, kind, size, mtime, sidecar_mtime, meta_version, meta_error)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT (root_id, rel_path) DO UPDATE SET
+           file_name = excluded.file_name, kind = excluded.kind, size = excluded.size, mtime = excluded.mtime,
+           sidecar_mtime = excluded.sidecar_mtime, meta_error = excluded.meta_error,
+           thumbhash = CASE WHEN media.size <> excluded.size OR media.mtime <> excluded.mtime THEN NULL
+                            ELSE media.thumbhash END,
+           thumb_status = CASE WHEN media.size <> excluded.size OR media.mtime <> excluded.mtime THEN 'pending'
+                               ELSE media.thumb_status END",
+    )?
+    .execute(params![
+        root,
+        file.rel_path,
+        file.file_name,
+        file.kind.as_str(),
+        file.size,
+        file.mtime,
+        file.sidecar_mtime,
+        METADATA_VERSION,
+        error
+    ])?;
     Ok(())
 }
 
@@ -387,6 +440,7 @@ mod tests {
                 tags: tags.iter().map(|p| p.iter().map(|s| s.to_string()).collect()).collect(),
                 ..Default::default()
             },
+            read_error: None,
         }
     }
 

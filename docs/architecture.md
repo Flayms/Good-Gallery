@@ -89,6 +89,7 @@ Architectural decisions, newest last. One entry each: what was decided, why (wit
 **Deviation:** no time zone from the GPS position (it would need a time-zone shape database); such photos get the computer's local zone. See spec 004's plan.
 **Since 2026-10-29** the rules that turn exiftool's tags into `MediaMetadata` live in the crate `meta`, beside the browser's readers (spec 019); `media::metadata` re-exports them.
 **Tests that need exiftool** (or ffmpeg, libmpv, git-cliff) skip themselves when it isn't found, unless `GG_REQUIRE_HELPERS=1` (CI).
+**Since 2026-11-01** a failed read (exiftool's error, a timeout) is stored in `media.meta_error` rather than as empty metadata of the current version, which hid it for good (REQ-002-12, -15). The writer keeps a known file's metadata, tags and `meta_version` then, so a failed read never triggers the full scans of REQ-002-05. Scans read files with a `meta_error` again, and quick scans list their folders though unchanged (a partial index on `meta_error IS NOT NULL` keeps that lookup and the toolbar's count cheap). `NULL` once a read succeeds. Migration 0014 marks rows without width or height, the trace earlier versions left of a failed read, so they are read again once.
 
 ### 2026-10-26 · Pure media and tag rules in `domain`
 

@@ -41,6 +41,7 @@ fn index() -> db::rusqlite::Connection {
                 },
                 ..Default::default()
             },
+            read_error: None,
         })
         .collect();
     let mut writer = IndexWriter::new(conn);

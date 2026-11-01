@@ -19,6 +19,7 @@ pub mod theme;
 pub mod titlebar;
 pub mod toasts;
 pub mod toolbar;
+pub mod unreadable;
 pub mod video;
 pub mod viewer;
 #[cfg(target_arch = "wasm32")]
@@ -293,7 +294,18 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
         state.gallery.as_mut()
     };
     let sidebar_hidden = state.sidebar.is_hidden();
-    if toolbar::show(ui, area, gallery, &mut state.search_bar, sidebar_hidden) {
+    let asked = toolbar::show(
+        ui,
+        area,
+        gallery,
+        &mut state.search_bar,
+        sidebar_hidden,
+        &state.unreadable,
+    );
+    if asked.show_sidebar {
         state.sidebar.set_hidden(false, state.db.as_ref());
+    }
+    if let Some(read_again) = asked.read_again {
+        state.read_again(read_again);
     }
 }
