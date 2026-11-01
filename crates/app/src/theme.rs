@@ -341,13 +341,15 @@ fn os_reduced_transparency() -> bool {
     return media::helpers::reduced_transparency();
 }
 
-/// Windows' _Animation effects_ and _Transparency effects_, read again at most every 2 s while the app draws frames,
-/// so it follows them while it runs (spec 013, Assumptions).
+/// Windows' _Animation effects_ and _Transparency effects_ (and the desktop's caption button layout), read again at
+/// most every 2 s while the app draws frames, so it follows them while it runs (spec 013, Assumptions).
 #[derive(Debug, Default)]
 pub struct OsPreferences {
     checked: Option<web_time::Instant>,
     reduced_motion: Option<bool>,
     reduced_transparency: Option<bool>,
+    #[cfg(not(target_arch = "wasm32"))]
+    button_layout: Option<crate::titlebar::ButtonLayout>,
 }
 
 impl OsPreferences {
@@ -369,6 +371,15 @@ impl OsPreferences {
             self.reduced_transparency = Some(transparency);
             set_reduced_transparency(ctx, transparency);
             ctx.request_repaint();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let layout = media::helpers::button_layout();
+            if self.button_layout.as_ref() != Some(&layout) {
+                self.button_layout = Some(layout.clone());
+                crate::titlebar::set_button_layout(ctx, layout);
+                ctx.request_repaint();
+            }
         }
         // No timer of its own: an idle window shouldn't wake every 2 s. A change shows with the next frame.
     }

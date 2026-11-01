@@ -40,7 +40,10 @@ pub fn show(
         .hline(bar.x_range(), bar.bottom() - 0.5, egui::Stroke::new(1.0, theme::rim()));
     // The window controls' place stays free (REQ-013-02).
     let controls = Rect::from_min_max(
-        pos2(bar.left() + 12.0, bar.top() + 8.0),
+        pos2(
+            bar.left() + 12.0 + crate::titlebar::reserved_left_in(ui.ctx(), bar.left()),
+            bar.top() + 8.0,
+        ),
         pos2(
             bar.right() - 12.0 - crate::titlebar::reserved_in(ui.ctx(), bar.right()),
             bar.bottom() - 8.0,
