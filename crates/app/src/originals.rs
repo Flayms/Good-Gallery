@@ -33,11 +33,13 @@ pub enum OriginalState {
     Failed(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Loaded {
     pub id: TextureId,
     /// Pixels.
     pub size: [u32; 2],
+    /// For glass, which draws the photo under the viewer's chrome itself (REQ-013-03); `None` for egui's textures.
+    pub view: Option<wgpu::TextureView>,
 }
 
 enum Texture {
@@ -231,9 +233,10 @@ impl Originals {
                     }
                     return;
                 }
-                let (id, texture) = match (decoded, &self.render_state) {
+                let (id, view, texture) = match (decoded, &self.render_state) {
                     (Decoded::Gpu(texture), Some(render_state)) => {
-                        (register(render_state, &texture), Texture::Gpu(texture))
+                        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                        (register(render_state, &texture), Some(view), Texture::Gpu(texture))
                     }
                     (Decoded::Gpu(texture), None) => {
                         texture.destroy();
@@ -245,10 +248,10 @@ impl Originals {
                             image,
                             egui::TextureOptions::LINEAR,
                         );
-                        (handle.id(), Texture::Egui(handle))
+                        (handle.id(), None, Texture::Egui(handle))
                     }
                 };
-                let loaded = Loaded { id, size };
+                let loaded = Loaded { id, size, view };
                 self.loaded.insert(done.media, (loaded, texture));
             }
             Outcome::Failed(error) => {
@@ -288,7 +291,7 @@ impl Originals {
 
     pub fn get(&self, media: i64) -> OriginalState {
         if let Some((loaded, _)) = self.loaded.get(&media) {
-            OriginalState::Loaded(*loaded)
+            OriginalState::Loaded(loaded.clone())
         } else if let Some(error) = self.failed.get(&media) {
             OriginalState::Failed(error.clone())
         } else {

@@ -28,7 +28,7 @@ A personal archive of photos and videos, often on a NAS, browsed by one person w
 | Scrim           | `SCRIM`         | `rgb(0 0 0 / 0.5)`, blur 28px, saturate 120 %             | The whole window behind the viewer                           |
 | Raised          | `raised`        | `#2A2A2A`                                                 | Opaque fallback for both glass levels (Darkroom for the Scrim) |
 
-Glass is drawn by the app, not the OS: the tiles under a glass surface are rendered into an offscreen target at half resolution, blurred with a dual-Kawase chain and composited with saturation, tint and rounded corners in a wgpu paint callback (≈ 0.4 ms per surface; see `docs/architecture.md`). What lies under glass is the frame's backdrop: the tiles the gallery drew and the solid surfaces (page, sidebar), without text, which the blur hides anyway. The viewer's chrome reuses the scrim's blur. `app::glass` holds the pass; menus and dialogs get it through `glass::panel` / `glass::behind_menu`.
+Glass is drawn by the app, not the OS: the tiles under a glass surface are rendered into an offscreen target at half resolution, blurred with a dual-Kawase chain and composited with saturation, tint and rounded corners in a wgpu paint callback (≈ 0.4 ms per surface; see `docs/architecture.md`). What lies under glass is the frame's backdrop: the tiles the gallery drew and the solid surfaces (page, sidebar), without text, which the blur hides anyway. The viewer's chrome reuses the scrim's blur, and blurs the photo too while it grows from its tile under the chrome; menus over the viewer blur the darkened window and the photo. `app::glass` holds the pass; menus and dialogs get it through `glass::panel` / `glass::behind_menu`.
 
 Rules:
 
