@@ -5,7 +5,7 @@ use domain::rating::{MAX, Target, sidecar_name};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
-pub enum RatingError {
+pub enum WriteError {
     #[error("{0}")]
     Io(#[from] std::io::Error),
     #[error("the file is read-only")]
@@ -25,10 +25,10 @@ pub fn write(
     rel_path: &str,
     kind: MediaKind,
     rating: Option<i64>,
-) -> Result<(), RatingError> {
-    let file = library_path(library, rel_path).ok_or(RatingError::UnsafePath)?;
+) -> Result<(), WriteError> {
+    let file = library_path(library, rel_path).ok_or(WriteError::UnsafePath)?;
     let name = rel_path.rsplit('/').next().unwrap_or(rel_path);
-    let folder = file.parent().ok_or(RatingError::UnsafePath)?;
+    let folder = file.parent().ok_or(WriteError::UnsafePath)?;
     let sidecar = existing_sidecar(folder, name)?;
     let file_has_rating = kind == MediaKind::Video && has_rating(exiftool, &file)?;
     let mut targets = vec![match Target::of(kind, file_has_rating) {
@@ -44,7 +44,7 @@ pub fn write(
     // Nothing is written unless every target can be: a read-only file isn't replaced behind the user's back.
     for target in &targets {
         if target.exists() && std::fs::metadata(target)?.permissions().readonly() {
-            return Err(RatingError::ReadOnly);
+            return Err(WriteError::ReadOnly);
         }
     }
     if !file.is_file() {
@@ -70,7 +70,7 @@ pub fn write(
             args.push("-o".into());
         }
         args.push(path_arg(&target));
-        crate::exiftool::run_once(exiftool, None, &args).map_err(RatingError::Exiftool)?;
+        crate::exiftool::run_once(exiftool, None, &args).map_err(WriteError::Exiftool)?;
         if let Some(modified) = modified {
             std::fs::File::options()
                 .write(true)
@@ -81,7 +81,7 @@ pub fn write(
     Ok(())
 }
 
-fn library_path(library: &Path, rel_path: &str) -> Option<PathBuf> {
+pub(crate) fn library_path(library: &Path, rel_path: &str) -> Option<PathBuf> {
     domain::media::is_safe_rel_path(rel_path).then(|| {
         let mut path = library.to_path_buf();
         path.extend(rel_path.split('/'));
@@ -90,7 +90,7 @@ fn library_path(library: &Path, rel_path: &str) -> Option<PathBuf> {
 }
 
 /// The sidecar of `name` in `folder`, as indexing finds it (REQ-004-10).
-fn existing_sidecar(folder: &Path, name: &str) -> std::io::Result<Option<PathBuf>> {
+pub(crate) fn existing_sidecar(folder: &Path, name: &str) -> std::io::Result<Option<PathBuf>> {
     let mut sidecars = std::collections::HashMap::<String, Vec<String>>::new();
     for entry in std::fs::read_dir(folder)? {
         let entry = entry?;
@@ -105,16 +105,16 @@ fn existing_sidecar(folder: &Path, name: &str) -> std::io::Result<Option<PathBuf
 }
 
 /// Whether `file` has a `Rating` tag of its own. A file exiftool can't read has none.
-fn has_rating(exiftool: &Path, file: &Path) -> Result<bool, RatingError> {
+fn has_rating(exiftool: &Path, file: &Path) -> Result<bool, WriteError> {
     let args = ["-charset", "filename=utf8", "-j", "-Rating"].map(String::from);
     let output = crate::exiftool::run_once(exiftool, None, &[&args[..], &[path_arg(file)]].concat())
-        .map_err(RatingError::Exiftool)?;
+        .map_err(WriteError::Exiftool)?;
     let read: serde_json::Value = serde_json::from_str(&output).unwrap_or_default();
     Ok(read[0].get("Rating").is_some())
 }
 
 /// A path for exiftool. Library paths are absolute, so they can't be taken for an option (REQ-011-09).
-fn path_arg(path: &Path) -> String {
+pub(crate) fn path_arg(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
@@ -180,7 +180,7 @@ mod tests {
             read[0].take()
         }
 
-        fn write(&self, name: &str, kind: MediaKind, rating: Option<i64>) -> Result<(), RatingError> {
+        fn write(&self, name: &str, kind: MediaKind, rating: Option<i64>) -> Result<(), WriteError> {
             write(&self.exiftool, self.dir.path(), name, kind, rating)
         }
     }
@@ -265,17 +265,17 @@ mod tests {
 
         assert!(matches!(
             lib.write("a.jpg", MediaKind::Image, Some(5)),
-            Err(RatingError::ReadOnly)
+            Err(WriteError::ReadOnly)
         ));
         assert_eq!(lib.ratings(&photo), json!({ "XMP-xmp:Rating": 2 }));
         assert!(matches!(
             lib.write("gone.jpg", MediaKind::Image, Some(5)),
-            Err(RatingError::Io(_))
+            Err(WriteError::Io(_))
         ));
         assert!(!lib.path("gone.jpg").exists());
         assert!(matches!(
             lib.write("../a.jpg", MediaKind::Image, Some(5)),
-            Err(RatingError::UnsafePath)
+            Err(WriteError::UnsafePath)
         ));
     }
 }

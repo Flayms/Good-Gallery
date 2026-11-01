@@ -125,12 +125,37 @@ pub struct SidebarData {
     /// Media items per rating, highest first, `0` = unrated.
     pub ratings: Vec<(u8, u64)>,
     pub popular: Vec<TagCount>,
+    /// Tags outside both categories, most used first: suggestions for the info panel (REQ-026-01).
+    pub other_tags: Vec<TagCount>,
     /// The folder tree of the selected library.
     pub folders: Option<(i64, Vec<FolderNode>)>,
 }
 
 /// Most used tags outside both categories in the sidebar (REQ-008-05).
 const POPULAR_TAGS: usize = 15;
+/// Tags outside both categories suggested when adding one (REQ-026-01).
+const SUGGESTED_TAGS: usize = 5_000;
+
+/// Existing tags by group, as paths, for adding a tag in the info panel (REQ-026-01).
+#[derive(Debug, Clone, Default)]
+pub struct TagPaths {
+    pub people: Vec<Vec<String>>,
+    pub places: Vec<Vec<String>>,
+    pub tags: Vec<Vec<String>>,
+}
+
+impl TagPaths {
+    fn of(sidebar: &SidebarData) -> Self {
+        Self {
+            people: domain::tagging::paths(domain::tags::PEOPLE_TAG_ROOT, &sidebar.people),
+            places: domain::tagging::paths(PLACES_TAG_ROOT, &sidebar.places),
+            tags: sidebar.other_tags.iter().map(|tag| vec![tag.name.clone()]).collect(),
+        }
+    }
+}
+
+/// The root a new place goes under (REQ-026-01).
+pub const PLACES_TAG_ROOT: &str = "Places";
 
 fn load_sidebar(conn: &Connection, library: Option<i64>) -> db::Result<SidebarData> {
     let folders = match library {
@@ -142,6 +167,7 @@ fn load_sidebar(conn: &Connection, library: Option<i64>) -> db::Result<SidebarDa
         places: build_tag_tree(&db::tags::category(conn, TagCategory::Places)?),
         ratings: db::tags::rating_counts(conn)?,
         popular: db::tags::popular(conn, POPULAR_TAGS)?,
+        other_tags: db::tags::popular(conn, SUGGESTED_TAGS)?,
         folders,
     })
 }
@@ -302,6 +328,8 @@ pub struct Gallery {
     /// Width of the List view's rows, for the column header above them.
     list_width: f32,
     sidebar: Option<SidebarData>,
+    /// The sidebar's tags as paths (REQ-026-01).
+    tag_paths: Arc<TagPaths>,
     suggestions: Option<(String, Vec<TagCount>)>,
     /// A new width waiting to settle: a resize lays out the whole result only once it stopped.
     pending_width: Option<(f32, Instant)>,
@@ -375,6 +403,7 @@ impl Gallery {
             list_width: 0.0,
             pending_width: None,
             sidebar: None,
+            tag_paths: Default::default(),
             suggestions: None,
             wheel: 0.0,
             placeholders: HashMap::new(),
@@ -507,6 +536,11 @@ impl Gallery {
     /// The sidebar's lists, once loaded.
     pub fn sidebar(&self) -> Option<&SidebarData> {
         self.sidebar.as_ref()
+    }
+
+    /// Existing tags by group, for adding one (REQ-026-01).
+    pub fn tag_paths(&self) -> Arc<TagPaths> {
+        self.tag_paths.clone()
     }
 
     /// Asks for tag suggestions for `prefix` (REQ-007-04); answered in [`Self::suggestions`].
@@ -736,7 +770,10 @@ impl Gallery {
                 }
             }
             Loaded::Sidebar(result) => match result {
-                Ok(data) => self.sidebar = Some(data),
+                Ok(data) => {
+                    self.tag_paths = Arc::new(TagPaths::of(&data));
+                    self.sidebar = Some(data);
+                }
                 Err(error) => tracing::error!("can't load the sidebar: {error}"),
             },
             Loaded::Detail { id, result } => {

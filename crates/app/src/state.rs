@@ -174,6 +174,28 @@ impl Rate {
     }
 }
 
+/// A tag added to or removed from a media item by hand (spec 026).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TagChange {
+    pub media: i64,
+    pub root_id: i64,
+    pub rel_path: String,
+    pub kind: domain::media::MediaKind,
+    pub change: domain::tagging::Change,
+}
+
+impl TagChange {
+    pub fn of(detail: &db::media::MediaDetail, change: domain::tagging::Change) -> Self {
+        Self {
+            media: detail.id,
+            root_id: detail.root_id,
+            rel_path: detail.rel_path.clone(),
+            kind: detail.kind,
+            change,
+        }
+    }
+}
+
 /// A file the app wrote into a library (spec 021).
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 struct Written {
@@ -206,6 +228,8 @@ enum Event {
     Reverted(Result<Written, String>),
     /// A rating was written into the file and the index (REQ-024-03), or why not (REQ-024-04).
     Rated(Result<(i64, String), String>),
+    /// A tag was written into the file (REQ-026-03), or why not (REQ-026-04).
+    Tagged(Result<(i64, String), String>),
     /// The job panicked; its flags are reset and the user gets an error.
     Failed,
 }
@@ -546,6 +570,41 @@ impl AppState {
     /// The browser version never writes files (REQ-024-05).
     #[cfg(target_arch = "wasm32")]
     pub fn rate(&mut self, _rate: Rate) {}
+
+    /// Writes a tag change into the file in the background; the index reads the file again afterwards
+    /// (REQ-026-03). A file that can't be written keeps its tags, and the user is told why (REQ-026-04).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn tag(&mut self, tag: TagChange) {
+        let (Some(exiftool), Some(library)) = (
+            self.edit_tools.as_ref().map(|tools| tools.exiftool.clone()),
+            self.libraries.iter().find(|library| library.id == tag.root_id),
+        ) else {
+            self.toasts
+                .error("Couldn't save the tag: exiftool, which writes it, wasn't found.");
+            return;
+        };
+        let folder = PathBuf::from(&library.path);
+        let db = self.db.clone();
+        self.spawn(move || {
+            let written =
+                media::tagging::write(&exiftool, &folder, &tag.rel_path, tag.kind, &tag.change).map_err(|error| {
+                    tracing::error!("can't tag {}: {error}", tag.rel_path);
+                    error.to_string()
+                });
+            Event::Tagged(written.map(|()| {
+                if let Some(db) = &db
+                    && let Err(error) = db::media::mark_for_reading(&lock(db), tag.media)
+                {
+                    tracing::error!("can't mark {} for reading: {error}", tag.rel_path);
+                }
+                (tag.root_id, tag.rel_path)
+            }))
+        });
+    }
+
+    /// The browser version never writes files (REQ-026-05).
+    #[cfg(target_arch = "wasm32")]
+    pub fn tag(&mut self, _tag: TagChange) {}
 
     #[cfg(not(target_arch = "wasm32"))]
     fn thumbnail_cache(&self) -> Option<indexer::thumb_cache::ThumbCache> {
@@ -935,6 +994,11 @@ impl AppState {
                     self.refresh();
                 }
                 Err(error) => self.toasts.error(format!("Couldn't save the rating: {error}")),
+            },
+            Event::Tagged(result) => match result {
+                // The index reads the file again, which updates the tags everywhere.
+                Ok((root_id, rel_path)) => self.scans.request_paths(root_id, vec![rel_path]),
+                Err(error) => self.toasts.error(format!("Couldn't save the tag: {error}")),
             },
             Event::Failed => {
                 if let Some(viewer) = &mut self.viewer

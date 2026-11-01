@@ -64,6 +64,8 @@ pub enum Action {
     Revert(crate::state::RevertTarget),
     /// Rate an item (spec 024); the viewer stays.
     Rate(crate::state::Rate),
+    /// Add or remove a tag of an item (spec 026); the viewer stays.
+    Tag(crate::state::TagChange),
 }
 
 /// What the keys and the mouse's back button asked for since the last frame.
@@ -172,6 +174,8 @@ impl Transition {
 }
 
 pub struct Viewer {
+    /// A text field had the keyboard at the end of the last frame (a new tag, REQ-026-01).
+    typing: bool,
     /// The shown item: its gallery position, and its id to find it again after a reload.
     index: usize,
     id: i64,
@@ -242,6 +246,7 @@ impl Viewer {
             last_activity: Instant::now(),
             close_at: None,
             keys: Keys::default(),
+            typing: false,
             info_open: false,
             filmstrip,
             faces: false,
@@ -418,6 +423,9 @@ impl Viewer {
         {
             ctx.memory_mut(|memory| memory.surrender_focus(focused));
         }
+        // Typing into a field (a new tag, REQ-026-01): its keys aren't the viewer's shortcuts, and Escape leaves the field.
+        // Also the last frame's: egui takes the focus away before a frame with Escape starts.
+        let typing = self.typing || ctx.egui_wants_keyboard_input();
         ctx.input_mut(|input| {
             let active = input.pointer.delta() != Vec2::ZERO
                 || input.pointer.any_pressed()
@@ -427,6 +435,9 @@ impl Viewer {
                     .any(|event| matches!(event, egui::Event::Key { pressed: true, .. }));
             if active {
                 self.last_activity = Instant::now();
+            }
+            if typing {
+                return;
             }
             // The mouse's back button and Alt + ← close instead of stepping back (REQ-009-02, REQ-009-03).
             if input.pointer.button_pressed(egui::PointerButton::Extra1)
@@ -761,11 +772,13 @@ impl Viewer {
             ctx.request_repaint_after(at.saturating_duration_since(Instant::now()));
         }
         self.apply_video_control(videos);
+        self.typing = ctx.egui_wants_keyboard_input();
         match action {
             Some(Action::ShowInExplorer(path)) => Some(Action::ShowInExplorer(path)),
             Some(Action::SaveEdit(request)) => Some(Action::SaveEdit(request)),
             Some(Action::Revert(target)) => Some(Action::Revert(target)),
             Some(Action::Rate(rate)) => Some(Action::Rate(rate)),
+            Some(Action::Tag(change)) => Some(Action::Tag(change)),
             // Closing while editing asks about unsaved changes first (REQ-021-08).
             Some(Action::Close) if self.edit.is_some() => {
                 self.leave_edit(Leave::Close, gallery);
@@ -1325,7 +1338,8 @@ impl Viewer {
             .id_salt("info panel")
             .auto_shrink(false)
             .show(&mut panel, |ui| {
-                clicked = info::show_loaded(ui, gallery.detail(self.id))
+                let paths = gallery.tag_paths();
+                clicked = info::show_loaded(ui, gallery.detail(self.id), &paths);
             });
         match clicked? {
             info::InfoAction::FilterByTag(tag) => Some(Action::FilterByTag(tag)),
@@ -1335,6 +1349,15 @@ impl Viewer {
             info::InfoAction::Rate(stars) => gallery
                 .cached_detail(self.id)
                 .map(|detail| Action::Rate(crate::state::Rate::toggle_detail(detail, stars))),
+            info::InfoAction::AddTag(path) => gallery
+                .cached_detail(self.id)
+                .map(|detail| Action::Tag(crate::state::TagChange::of(detail, domain::tagging::Change::Add(path)))),
+            info::InfoAction::RemoveTag(name) => gallery.cached_detail(self.id).map(|detail| {
+                Action::Tag(crate::state::TagChange::of(
+                    detail,
+                    domain::tagging::Change::Remove(name),
+                ))
+            }),
         }
     }
 

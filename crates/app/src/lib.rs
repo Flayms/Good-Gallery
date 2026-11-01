@@ -165,6 +165,7 @@ fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
         Some(viewer::Action::SaveEdit(request)) => state.save_edit(*request),
         Some(viewer::Action::Revert(target)) => state.confirm_revert = Some(target),
         Some(viewer::Action::Rate(rate)) => state.rate(rate),
+        Some(viewer::Action::Tag(change)) => state.tag(change),
         None => {}
     }
     // Details are kept only while an info view or the viewer (editing starts from them, face regions are drawn from
@@ -206,6 +207,14 @@ fn confirm_revert(ctx: &egui::Context, state: &mut AppState) {
     }
 }
 
+/// Adds or removes a tag of the info sheet's item (REQ-026-01, REQ-026-02).
+fn tag(state: &mut AppState, id: i64, change: domain::tagging::Change) {
+    let detail = state.gallery.as_ref().and_then(|gallery| gallery.cached_detail(id));
+    if let Some(tag) = detail.map(|detail| state::TagChange::of(detail, change)) {
+        state.tag(tag);
+    }
+}
+
 /// Adds `tag` to the search as included, keeping the other filters (REQ-009-09).
 fn filter_by_tag(state: &mut AppState, tag: &str) {
     let Some(gallery) = &mut state.gallery else { return };
@@ -238,7 +247,10 @@ fn info_sheet(ui: &mut egui::Ui, state: &mut AppState) {
         egui::ScrollArea::vertical()
             .id_salt("info sheet")
             .auto_shrink(false)
-            .show(ui, |ui| clicked = info::show_loaded(ui, gallery.detail(id)));
+            .show(ui, |ui| {
+                let paths = gallery.tag_paths();
+                clicked = info::show_loaded(ui, gallery.detail(id), &paths);
+            });
     }
     if close {
         state.info_sheet = None;
@@ -255,6 +267,8 @@ fn info_sheet(ui: &mut egui::Ui, state: &mut AppState) {
                 state.rate(rate);
             }
         }
+        Some(info::InfoAction::AddTag(path)) => tag(state, id, domain::tagging::Change::Add(path)),
+        Some(info::InfoAction::RemoveTag(name)) => tag(state, id, domain::tagging::Change::Remove(name)),
         None => {}
     }
 }

@@ -16,6 +16,7 @@ pub mod media;
 pub mod rating;
 pub mod search;
 pub mod sidebar;
+pub mod tagging;
 pub mod tags;
 pub mod thumbs;
 pub mod time_zone;

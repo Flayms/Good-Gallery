@@ -673,8 +673,8 @@ fn req_009_08_req_013_13_toggles_the_info_panel_with_the_details() {
     assert!(!viewer(&harness).info_open());
 }
 
-/// REQ-009-08: a photo without a date taken, dimensions, rating or tags keeps those fields' titles, with nothing under
-/// them, in their usual order; a photo has no duration.
+/// REQ-009-08, REQ-026-01: a photo without a date taken, dimensions, rating or tags keeps those fields' titles (tag groups with _Add_ under
+/// them, the others with nothing), in their usual order; a photo has no duration.
 #[test]
 fn req_009_08_shows_the_titles_of_details_the_item_lacks() {
     let fixture = Fixture::new();
@@ -719,8 +719,12 @@ fn req_009_08_shows_the_titles_of_details_the_item_lacks() {
     let tops: Vec<f32> = fields.iter().map(|label| top(label)).collect();
     assert!(tops.is_sorted_by(|a, b| a < b), "{fields:?} in order: {tops:?}");
     // Empty to the eye; screen readers hear what's missing.
-    for (spoken, count) in [("Unknown", 2), ("Not rated", 1), ("None", 3)] {
+    for (spoken, count) in [("Unknown", 2), ("Not rated", 1)] {
         assert_eq!(harness.query_all_by_label(spoken).count(), count, "{spoken}");
+    }
+    // Groups without tags offer to add one (REQ-026-01).
+    for group in ["People", "Places", "Tags"] {
+        assert!(harness.query_by_label(&format!("Add to {group}")).is_some(), "{group}");
     }
     assert!(harness.query_by_label("Duration").is_none(), "photos have no duration");
     settle_viewer(&mut harness);

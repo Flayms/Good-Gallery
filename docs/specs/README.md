@@ -28,6 +28,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [022-subject-and-background](022-subject-and-background/spec.md) | Light and color of a photo's subject and background, found automatically | Implemented |
 | [023-blur](023-blur/spec.md)                             | Blur behind the subject, tilt-shift and radial blur              | Implemented |
 | [024-rating](024-rating/spec.md)                         | Rate items in the viewer and info views, written into the files  | Implemented |
+| [026-tagging](026-tagging/spec.md)                       | Add and remove tags, People and Places in the info views         | Implemented |
 
 ## Conventions
 
