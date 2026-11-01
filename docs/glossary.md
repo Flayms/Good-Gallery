@@ -14,7 +14,7 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | **Sidecar**              | An `.xmp` file next to a media file (`IMG_1.jpg.xmp` or `IMG_1.xmp`) that holds additional metadata.                                                                               |
 | **Folder**               | A subfolder of a library, addressed by its `/`-separated path relative to the library. A folder filter includes its subfolders.                                                     |
 | **Housekeeping folder**  | A folder created by an OS or NAS that is never indexed: dot folders, `$` folders, `@eaDir`, `#recycle`, `#snapshot`, `.@__thumb`, `System Volume Information`.                      |
-| **Read-only**            | Good Gallery never modifies media files or sidecars on its own. All metadata comes from what other tools wrote into them; only an edit the user saves (spec 021) or a rating the user sets (spec 024) writes a file. |
+| **Read-only**            | Good Gallery never modifies media files or sidecars on its own. All metadata comes from what other tools wrote into them; only an edit the user saves (spec 021), a rating the user sets (spec 024) or a tag the user adds or removes (spec 026) writes a file. |
 
 ## Metadata
 

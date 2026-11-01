@@ -3,11 +3,13 @@
 //! A field the item has no value for keeps its title and place, with nothing under it.
 
 use crate::format;
+use crate::gallery::{PLACES_TAG_ROOT, TagPaths};
 use crate::icons;
+use crate::icons::Icon;
 use crate::theme;
 use db::media::MediaDetail;
 use domain::media::MediaKind;
-use domain::tags::TagCategory;
+use domain::tags::{PEOPLE_TAG_ROOT, TagCategory, normalize_tag};
 use eframe::egui;
 
 /// Width of the info panel and sheet.
@@ -22,12 +24,23 @@ pub enum InfoAction {
     Revert,
     /// The user clicked the star for this many stars (REQ-024-02).
     Rate(i64),
+    /// Add the tag with this path (REQ-026-01).
+    AddTag(Vec<String>),
+    /// Remove the tag with this name (REQ-026-02).
+    RemoveTag(String),
 }
 
+/// Suggestions shown at most while adding a tag (REQ-026-01).
+const SUGGESTIONS: usize = 6;
+
 /// The details as loaded: a spinner while loading, "Media not found" or the error; what was clicked as [`show`].
-pub fn show_loaded(ui: &mut egui::Ui, detail: Option<&crate::gallery::DetailResult>) -> Option<InfoAction> {
+pub fn show_loaded(
+    ui: &mut egui::Ui,
+    detail: Option<&crate::gallery::DetailResult>,
+    paths: &TagPaths,
+) -> Option<InfoAction> {
     match detail {
-        Some(Ok(Some(detail))) => return show(ui, detail),
+        Some(Ok(Some(detail))) => return show(ui, detail, paths),
         Some(Ok(None)) => {
             ui.label("Media not found");
         }
@@ -43,7 +56,7 @@ pub fn show_loaded(ui: &mut egui::Ui, detail: Option<&crate::gallery::DetailResu
 
 /// Shows `detail`; returns a tag the user clicked, to filter the gallery by it (REQ-009-09), or _Revert to original_
 /// (REQ-021-12).
-pub fn show(ui: &mut egui::Ui, detail: &MediaDetail) -> Option<InfoAction> {
+pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths) -> Option<InfoAction> {
     let mut clicked = None;
     ui.spacing_mut().item_spacing.y = 12.0;
     field(ui, "File", |ui| {
@@ -113,10 +126,23 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail) -> Option<InfoAction> {
             }
         });
     }
-    for (label, category) in [
-        ("People", Some(TagCategory::People)),
-        ("Places", Some(TagCategory::Places)),
-        ("Tags", None),
+    // The browser version doesn't write files (REQ-026-05).
+    let editable = !crate::WEB;
+    let face_names: Vec<String> = detail.faces.iter().map(|face| normalize_tag(&face.name)).collect();
+    for (label, category, root, known) in [
+        (
+            "People",
+            Some(TagCategory::People),
+            Some(PEOPLE_TAG_ROOT),
+            &paths.people,
+        ),
+        (
+            "Places",
+            Some(TagCategory::Places),
+            Some(PLACES_TAG_ROOT),
+            &paths.places,
+        ),
+        ("Tags", None, None, &paths.tags),
     ] {
         let names: Vec<&str> = detail
             .tags
@@ -124,26 +150,162 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail) -> Option<InfoAction> {
             .filter(|tag| tag.category == category)
             .map(|tag| tag.name.as_str())
             .collect();
-        if names.is_empty() {
+        let adding_id = ui.scope_id().with(("adding tag", label));
+        let adding = ui.data(|data| data.get_temp::<String>(adding_id));
+        if names.is_empty() && !editable {
             field(ui, label, |ui| empty(ui, "None"));
             continue;
         }
         caption(ui, label);
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-            for name in names {
-                let chip = egui::Button::new(egui::RichText::new(name).size(theme::SIZE_CAPTION))
-                    .fill(theme::selected())
-                    .corner_radius(theme::RADIUS_CONTROL)
-                    .min_size(egui::vec2(0.0, 24.0));
-                let response = ui.add(chip);
-                if response.on_hover_text(format!("Show only {name}")).clicked() {
-                    clicked = Some(InfoAction::FilterByTag(name.to_owned()));
+        // While adding the group's first tag, the field takes the row's place.
+        if !names.is_empty() || adding.is_none() {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                for name in &names {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    let chip = egui::Button::new(egui::RichText::new(*name).size(theme::SIZE_CAPTION))
+                        .fill(theme::selected())
+                        .corner_radius(theme::RADIUS_CONTROL)
+                        .min_size(egui::vec2(0.0, 24.0));
+                    let response = ui.add(chip);
+                    // Only from a face region: other programs drew it, and it would come back (REQ-026-02).
+                    let face_only = category == Some(TagCategory::People) && face_names.contains(&normalize_tag(name));
+                    let response = if face_only && editable {
+                        response.on_hover_text(format!(
+                            "Show only {name}. Named in a face region, so it can't be removed here"
+                        ))
+                    } else {
+                        response.on_hover_text(format!("Show only {name}"))
+                    };
+                    if response.clicked() {
+                        clicked = Some(InfoAction::FilterByTag((*name).to_owned()));
+                    }
+                    if editable && !face_only {
+                        let remove = ui
+                            .add(
+                                egui::Button::image(Icon::X.image(12.0, theme::muted()))
+                                    .frame(false)
+                                    .min_size(egui::vec2(20.0, 24.0)),
+                            )
+                            .on_hover_text(format!("Remove {name}"));
+                        let spoken = format!("Remove {name}");
+                        remove.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &spoken));
+                        if remove.clicked() {
+                            clicked = Some(InfoAction::RemoveTag((*name).to_owned()));
+                        }
+                    }
+                    ui.add_space(6.0);
                 }
+                if editable && adding.is_none() {
+                    let add = ui.add(
+                        egui::Button::image_and_text(
+                            Icon::Plus.image(12.0, theme::muted()),
+                            egui::RichText::new("Add")
+                                .size(theme::SIZE_CAPTION)
+                                .color(theme::muted()),
+                        )
+                        .frame(false)
+                        .min_size(egui::vec2(0.0, 24.0)),
+                    );
+                    let spoken = format!("Add to {label}");
+                    add.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &spoken));
+                    if add.clicked() {
+                        ui.data_mut(|data| data.insert_temp(adding_id, String::new()));
+                        ui.data_mut(|data| data.insert_temp(adding_id.with("opened"), true));
+                    }
+                }
+            });
+        }
+        if let Some(mut typed) = adding {
+            let opened = ui
+                .data_mut(|data| data.remove_temp::<bool>(adding_id.with("opened")))
+                .is_some();
+            let group = Group {
+                label,
+                root,
+                known,
+                has: &names,
+            };
+            match add_field(ui, adding_id.with("field"), opened, &group, &mut typed) {
+                Adding::Open => ui.data_mut(|data| {
+                    data.insert_temp(adding_id, typed);
+                }),
+                Adding::Add(path) => {
+                    clicked = Some(InfoAction::AddTag(path));
+                    ui.data_mut(|data| data.remove::<String>(adding_id));
+                }
+                Adding::Close => ui.data_mut(|data| data.remove::<String>(adding_id)),
             }
-        });
+        }
     }
     clicked
+}
+
+/// A tag group of the info views, as adding a tag to it needs it (REQ-026-01).
+#[derive(Clone, Copy)]
+struct Group<'a> {
+    label: &'a str,
+    /// Where a new tag goes: `People`, `Places`, or nowhere (a tag of its own).
+    root: Option<&'a str>,
+    /// The group's existing tags, as paths.
+    known: &'a [Vec<String>],
+    /// The item's tags in the group, left out of the suggestions.
+    has: &'a [&'a str],
+}
+
+/// What the user did in the field for a new tag (REQ-026-01).
+enum Adding {
+    /// Still typing.
+    Open,
+    /// Enter on a name, or a suggestion picked: the tag's path.
+    Add(Vec<String>),
+    /// Escape, or a click elsewhere.
+    Close,
+}
+
+/// The field for a new tag of a group, focused when it has just `opened`, with suggestions below it (REQ-026-01).
+fn add_field(ui: &mut egui::Ui, id: egui::Id, opened: bool, group: &Group<'_>, typed: &mut String) -> Adding {
+    let Group {
+        label,
+        root,
+        known,
+        has,
+    } = *group;
+    let response = ui.add(
+        egui::TextEdit::singleline(typed)
+            .id(id)
+            .hint_text(format!("Add to {label}"))
+            .desired_width(f32::INFINITY),
+    );
+    let spoken = format!("New tag for {label}");
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, &spoken));
+    if opened {
+        response.request_focus();
+        return Adding::Open;
+    }
+    let has: Vec<String> = has.iter().map(|name| (*name).to_owned()).collect();
+    for path in domain::tagging::suggest(known, typed, &has, SUGGESTIONS) {
+        let shown = path.join(" › ");
+        let button = egui::Button::new(egui::RichText::new(&shown).size(theme::SIZE_CAPTION)).frame(false);
+        if ui.add(button).clicked() {
+            return Adding::Add(path.clone());
+        }
+    }
+    let (enter, escape, pointer_down) = ui.input(|input| {
+        (
+            input.key_pressed(egui::Key::Enter),
+            input.key_pressed(egui::Key::Escape),
+            input.pointer.any_down(),
+        )
+    });
+    if response.lost_focus() && enter && !domain::tags::clean_tag(typed).is_empty() {
+        return Adding::Add(domain::tagging::path_for(known, root, typed));
+    }
+    // Pressing a suggestion takes the focus away first; its click comes with the release.
+    if escape || !response.has_focus() && !pointer_down {
+        return Adding::Close;
+    }
+    Adding::Open
 }
 
 fn caption(ui: &mut egui::Ui, text: &str) {

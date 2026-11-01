@@ -240,6 +240,15 @@ pub fn files_of(conn: &Connection, ids: &[i64]) -> Result<Vec<FileOf>> {
     Ok(files)
 }
 
+/// Marks media item `media` for reading again on the next changes scan, though its size and date may not have changed
+/// (its tags were written, REQ-026-03). False if it isn't indexed.
+pub fn mark_for_reading(conn: &Connection, media: i64) -> Result<bool> {
+    let changed = conn
+        .prepare_cached("UPDATE media SET meta_version = 0 WHERE id = ?1")?
+        .execute([media])?;
+    Ok(changed > 0)
+}
+
 /// The id of the media item at `rel_path` of a library, if it is indexed.
 pub fn id_of(conn: &Connection, root_id: i64, rel_path: &str) -> Result<Option<i64>> {
     Ok(conn
@@ -325,6 +334,31 @@ mod tests {
                 kind: MediaKind::Video,
             }
         );
+    }
+
+    /// REQ-026-03: a file whose tags were written is read again on the next scan.
+    #[test]
+    fn req_026_03_marks_a_retagged_file_for_reading() {
+        let conn = crate::open_in_memory().unwrap();
+        let root = libraries::insert(&conn, ROOT, "Photos", LibraryStatus::Online)
+            .unwrap()
+            .id;
+        let media: i64 = conn
+            .query_row(
+                "INSERT INTO media (root_id, rel_path, file_name, kind, size, mtime, meta_version)
+                 VALUES (?1, 'a.jpg', 'a.jpg', 'image', 1, 1, 3) RETURNING id",
+                [root],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(mark_for_reading(&conn, media).unwrap());
+        let version: i64 = conn
+            .query_row("SELECT meta_version FROM media WHERE id = ?1", [media], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(version, 0);
+        assert!(!mark_for_reading(&conn, media + 1).unwrap());
     }
 
     /// REQ-024-03: a rating set by hand replaces the indexed one, and the file is read again on the next scan.
