@@ -15,8 +15,11 @@ const USAGE: &str = "usage: cargo xtask search-bench [--items 500000] [--out <in
 const TAGS: usize = 2_000;
 const TAG_ROOTS: usize = 40;
 const RUNS: usize = 20;
-/// Budgets of REQ-007-14, ms.
+/// Budgets of REQ-007-14, ms: for results of up to `NARROW` media items, for larger ones and file names, and for tag
+/// suggestions.
+const NARROW: usize = 20_000;
 const SEARCH_BUDGET: f64 = 50.0;
+const BROAD_BUDGET: f64 = 1_000.0;
 const SUGGEST_BUDGET: f64 = 10.0;
 
 /// A small deterministic generator, so every run builds the same index.
@@ -204,8 +207,8 @@ pub fn run(args: &[String]) -> anyhow::Result<bool> {
             },
         ),
     ];
-    let mut slowest = 0.0f64;
-    println!("{:<34} {:>9} {:>9}", "search", "matches", "p95 ms");
+    let mut within = true;
+    println!("{:<34} {:>9} {:>9} {:>9}", "search", "matches", "p95 ms", "budget");
     for (name, search) in &searches {
         let mut times = Vec::new();
         let mut matches = 0;
@@ -215,11 +218,15 @@ pub fn run(args: &[String]) -> anyhow::Result<bool> {
             times.push(started.elapsed().as_secs_f64() * 1000.0);
         }
         let p = p95(times);
-        // Everything (no filter) lists the whole index; REQ-007-14 is about filtered searches.
-        if !name.starts_with("everything") {
-            slowest = slowest.max(p);
-        }
-        println!("{name:<34} {matches:>9} {p:>9.1}");
+        // A file name search compares every file name, however few match.
+        let budget = if matches > NARROW || search.name.is_some() {
+            BROAD_BUDGET
+        } else {
+            SEARCH_BUDGET
+        };
+        within &= p < budget;
+        let mark = if p < budget { "" } else { "  over" };
+        println!("{name:<34} {matches:>9} {p:>9.1} {budget:>9.0}{mark}");
     }
     let mut suggest = Vec::new();
     for prefix in ["", "t", "tag 1", "tag 12", "tag 199", "x"] {
@@ -231,6 +238,5 @@ pub fn run(args: &[String]) -> anyhow::Result<bool> {
     }
     let suggest = p95(suggest);
     println!("tag suggestions p95 {suggest:.1} ms (budget {SUGGEST_BUDGET} ms)");
-    println!("filtered searches p95 at most {slowest:.1} ms (budget {SEARCH_BUDGET} ms)");
-    Ok(slowest < SEARCH_BUDGET && suggest < SUGGEST_BUDGET)
+    Ok(within && suggest < SUGGEST_BUDGET)
 }

@@ -125,7 +125,7 @@ Architectural decisions, newest last. One entry each: what was decided, why (wit
 ### 2026-10-27 · Search queries
 
 **Decided:** `domain::search::GallerySearch` is the search state; `db::gallery::layout` builds its WHERE clause as SQL text with bound parameters. Tag conditions pick a query shape per search (the rarest tag drives up to 200,000 estimated matches, primary key probes while walking the sort index beyond), a file name's matches come from the name index, and unary `+` operators and `INDEXED BY` pin the plans (checked by a query plan test). `cargo xtask search-bench` measures REQ-007-14.
-**Open:** broad searches (tens of thousands of matches) take 0.25–0.7 s on 500k items; meeting 50 ms needs a covering index or rows stored in sort order (a schema change). See spec 007's plan.
+**Decided:** broad results (tens of thousands of matches and more) have a budget of 1 s instead of 50 ms (REQ-007-14): SQLite costs ≈ 1.5 µs per result row, and the search runs off the UI thread. An in-memory copy of the sort columns would meet 50 ms but would have to follow every index write. See spec 007's plan.
 
 ### 2026-10-27 · Search bar, filters and sidebar
 

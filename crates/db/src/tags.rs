@@ -5,6 +5,7 @@ use crate::Result;
 use domain::folders::CategoryTag;
 use domain::tags::{CATEGORY_ROOTS, TagCategory, normalize_tag};
 use rusqlite::Connection;
+use std::collections::{HashMap, HashSet};
 
 /// A tag with the number of media items carrying it or one of its descendants.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,31 +15,67 @@ pub struct TagCount {
     pub count: u64,
 }
 
-/// Ranks the tags selected by `roots` (SQL selecting `id`s) with their descendants' counts, most used first, unused
-/// ones left out (they linger until the indexer prunes them after its next scan).
+/// Ranks the tags selected by `roots` (SQL selecting an `id` per row) with their descendants' counts, most used first,
+/// unused ones left out (they linger until the indexer prunes them after its next scan). The tree is summed here rather
+/// than with a recursive query: reading the whole `tags` table once is cheaper than walking each root's subtree in SQL,
+/// which took longer than the suggestion budget for all 2k tags (REQ-007-14).
 fn ranked(conn: &Connection, roots: &str, params: &[&dyn rusqlite::ToSql], limit: usize) -> Result<Vec<TagCount>> {
-    let sql = format!(
-        "WITH RECURSIVE tree(root, id) AS (
-           {roots}
-           UNION
-           SELECT tree.root, tags.id FROM tags JOIN tree ON tags.parent_id = tree.id
-         )
-         SELECT t.id, t.name, sum(d.media_count) AS count
-         FROM tree JOIN tags AS d ON d.id = tree.id JOIN tags AS t ON t.id = tree.root
-         GROUP BY tree.root
-         HAVING count > 0
-         ORDER BY count DESC, t.name_norm
-         LIMIT {limit}"
-    );
-    let mut stmt = conn.prepare_cached(&sql)?;
-    let rows = stmt.query_map(params, |row| {
-        Ok(TagCount {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            count: row.get::<_, i64>(2)?.max(0) as u64,
-        })
-    })?;
-    Ok(rows.collect::<rusqlite::Result<_>>()?)
+    struct Tag {
+        name: String,
+        name_norm: String,
+        media_count: i64,
+    }
+    let mut tags: HashMap<i64, Tag> = HashMap::new();
+    let mut children: HashMap<i64, Vec<i64>> = HashMap::new();
+    let mut stmt = conn.prepare_cached("SELECT id, name, name_norm, parent_id, media_count FROM tags")?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let id: i64 = row.get(0)?;
+        if let Some(parent) = row.get::<_, Option<i64>>(3)? {
+            children.entry(parent).or_default().push(id);
+        }
+        tags.insert(
+            id,
+            Tag {
+                name: row.get(1)?,
+                name_norm: row.get(2)?,
+                media_count: row.get(4)?,
+            },
+        );
+    }
+    let root_ids: Vec<i64> = conn
+        .prepare_cached(roots)?
+        .query_map(params, |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut ranked: Vec<(&Tag, TagCount)> = Vec::new();
+    let mut seen = HashSet::new();
+    for root in root_ids {
+        let Some(tag) = tags.get(&root) else { continue };
+        // Each tag of the subtree once, so a parent cycle ends.
+        seen.clear();
+        let mut stack = vec![root];
+        let mut count = 0;
+        while let Some(id) = stack.pop() {
+            if seen.insert(id) {
+                count += tags.get(&id).map_or(0, |tag| tag.media_count);
+                stack.extend(children.get(&id).into_iter().flatten());
+            }
+        }
+        if count > 0 {
+            let name = tag.name.clone();
+            ranked.push((
+                tag,
+                TagCount {
+                    id: root,
+                    name,
+                    count: count as u64,
+                },
+            ));
+        }
+    }
+    ranked.sort_by(|(a, x), (b, y)| y.count.cmp(&x.count).then_with(|| a.name_norm.cmp(&b.name_norm)));
+    Ok(ranked.into_iter().take(limit).map(|(_, count)| count).collect())
 }
 
 /// Tags whose normalized name starts with the normalized `prefix`, most used first (REQ-007-04). A range scan on the
@@ -46,12 +83,12 @@ fn ranked(conn: &Connection, roots: &str, params: &[&dyn rusqlite::ToSql], limit
 pub fn autocomplete(conn: &Connection, prefix: &str, limit: usize) -> Result<Vec<TagCount>> {
     let prefix = normalize_tag(prefix);
     if prefix.is_empty() {
-        return ranked(conn, "SELECT id, id FROM tags", &[], limit);
+        return ranked(conn, "SELECT id FROM tags", &[], limit);
     }
     let end = format!("{prefix}\u{10FFFF}");
     ranked(
         conn,
-        "SELECT id, id FROM tags WHERE name_norm >= ?1 AND name_norm < ?2",
+        "SELECT id FROM tags WHERE name_norm >= ?1 AND name_norm < ?2",
         &[&prefix, &end],
         limit,
     )
@@ -119,10 +156,7 @@ pub fn popular(conn: &Connection, limit: usize) -> Result<Vec<TagCount>> {
             )
         })
         .collect();
-    let roots = format!(
-        "SELECT id, id FROM tags WHERE id NOT IN ({})",
-        categorized.join(" UNION ")
-    );
+    let roots = format!("SELECT id FROM tags WHERE id NOT IN ({})", categorized.join(" UNION "));
     ranked(conn, &roots, &[], limit)
 }
 
@@ -229,6 +263,25 @@ mod tests {
             [count(bern, "Bern", 3), count(berlin, "Berlin", 1)]
         );
         assert_eq!(autocomplete(&index.conn, "", 1).unwrap(), [count(bern, "Bern", 3)]);
+    }
+
+    /// REQ-007-04: a parent cycle (which the writer refuses, but an index may hold) counts each tag once and ends.
+    #[test]
+    fn req_007_04_counts_each_tag_of_a_parent_cycle_once() {
+        let index = Index::new();
+        let a = index.tag("A", None);
+        let b = index.tag("B", Some(a));
+        index
+            .conn
+            .execute("UPDATE tags SET parent_id = ?1 WHERE id = ?2", [b, a])
+            .unwrap();
+        let file = index.media("1.jpg", None);
+        index.link(file, a);
+
+        assert_eq!(
+            autocomplete(&index.conn, "", 20).unwrap(),
+            [count(a, "A", 1), count(b, "B", 1)]
+        );
     }
 
     #[test]

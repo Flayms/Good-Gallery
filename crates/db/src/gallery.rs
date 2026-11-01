@@ -482,6 +482,24 @@ mod tests {
         }
     }
 
+    /// REQ-007-14: a kind filter range-scans the kind and date index, also with a date range, instead of checking the
+    /// kind of every row in the date range.
+    #[test]
+    fn req_007_14_kind_filters_scan_the_kind_and_date_index() {
+        let conn = index(&[file("a.mp4", (4, 3), None, &[])]);
+        for to in [None, chrono::NaiveDate::from_ymd_opt(2020, 12, 31)] {
+            let videos = GallerySearch {
+                kind: Some(domain::media::MediaKind::Video),
+                from: to.and(chrono::NaiveDate::from_ymd_opt(2020, 1, 1)),
+                to,
+                ..Default::default()
+            };
+            let plan = plan(&conn, &videos);
+            assert!(plan.contains("media_kind_date_idx"), "{plan}");
+            assert!(!plan.contains("TEMP B-TREE"), "already in date order: {plan}");
+        }
+    }
+
     /// REQ-006-08, REQ-016-01: every match in sort order (newest first, ties by id), with clamped aspects and the
     /// day groups.
     #[test]
