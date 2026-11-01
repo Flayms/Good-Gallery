@@ -220,16 +220,13 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths) -> Option
             let opened = ui
                 .data_mut(|data| data.remove_temp::<bool>(adding_id.with("opened")))
                 .is_some();
-            match add_field(
-                ui,
-                adding_id.with("field"),
-                opened,
+            let group = Group {
                 label,
-                &mut typed,
-                known,
                 root,
-                &names,
-            ) {
+                known,
+                has: &names,
+            };
+            match add_field(ui, adding_id.with("field"), opened, &group, &mut typed) {
                 Adding::Open => ui.data_mut(|data| {
                     data.insert_temp(adding_id, typed);
                 }),
@@ -244,6 +241,18 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths) -> Option
     clicked
 }
 
+/// A tag group of the info views, as adding a tag to it needs it (REQ-026-01).
+#[derive(Clone, Copy)]
+struct Group<'a> {
+    label: &'a str,
+    /// Where a new tag goes: `People`, `Places`, or nowhere (a tag of its own).
+    root: Option<&'a str>,
+    /// The group's existing tags, as paths.
+    known: &'a [Vec<String>],
+    /// The item's tags in the group, left out of the suggestions.
+    has: &'a [&'a str],
+}
+
 /// What the user did in the field for a new tag (REQ-026-01).
 enum Adding {
     /// Still typing.
@@ -255,16 +264,13 @@ enum Adding {
 }
 
 /// The field for a new tag of a group, focused when it has just `opened`, with suggestions below it (REQ-026-01).
-fn add_field(
-    ui: &mut egui::Ui,
-    id: egui::Id,
-    opened: bool,
-    label: &str,
-    typed: &mut String,
-    known: &[Vec<String>],
-    root: Option<&str>,
-    has: &[&str],
-) -> Adding {
+fn add_field(ui: &mut egui::Ui, id: egui::Id, opened: bool, group: &Group<'_>, typed: &mut String) -> Adding {
+    let Group {
+        label,
+        root,
+        known,
+        has,
+    } = *group;
     let response = ui.add(
         egui::TextEdit::singleline(typed)
             .id(id)

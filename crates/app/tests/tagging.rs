@@ -195,7 +195,7 @@ fn req_026_01_req_026_03_adds_suggested_and_new_tags() {
     );
 }
 
-/// REQ-026-01, REQ-026-05: the info sheet beside the gallery adds tags too, with the group's suggestions under the
+/// REQ-026-01: the info sheet beside the gallery adds tags too, with the group's suggestions under the
 /// field.
 #[test]
 fn req_026_01_suggests_in_the_info_sheet() {
