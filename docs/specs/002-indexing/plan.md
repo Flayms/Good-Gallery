@@ -17,6 +17,6 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 - [x] Full and quick scans, batches, removals, offline, unreadable files (REQ-002-03 … -06, -09, -10, -12, -14)
 - [x] Scan queue and indexer thread with `catch_unwind` (REQ-002-07, -13)
 - [x] Progress in the app, counts refreshed (REQ-002-08)
-- [ ] Test for folders that can't be listed (REQ-002-11; hard to set up on Windows without admin rights)
+- [x] Test for folders that can't be listed (REQ-002-11; Unix only, a folder without the read permission. On Windows it would need changing ACLs)
 - [ ] Test for files that can't be accessed at all (REQ-002-12)
 - [ ] Show the progress as a sidebar footer row and test the library's spinner (REQ-002-08)

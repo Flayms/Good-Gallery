@@ -128,7 +128,7 @@ Every library is mirrored in a local index, so browsing and searching 50k–500k
 | REQ-002-08 | `crates/app/tests/indexing.rs` › shows_which_library_is_scanned_with_counts_and_waiting_scans | partial: drawn over the window's bottom-left corner (the sidebar's foot) rather than as a footer row; the library's spinner is drawn but not tested |
 | REQ-002-09 | `crates/indexer/src/scan.rs` › keeps_the_index_of_unreachable_libraries | pass |
 | REQ-002-10 | `crates/indexer/src/scan.rs` › stops_and_keeps_everything_when_the_library_goes_offline_during_a_scan | pass |
-| REQ-002-11 | `crates/indexer/src/scan.rs` (failed folders keep their media and are stored as unlisted) | no test |
+| REQ-002-11 | `crates/indexer/src/scan.rs` › keeps_the_media_of_folders_that_cant_be_listed_and_retries_them (Unix only: a folder without the read permission) | pass |
 | REQ-002-12 | `crates/indexer/src/scan.rs` › indexes_files_with_unreadable_metadata_without_it | partial: files that can't be accessed at all aren't tested |
 | REQ-002-13 | `crates/indexer/src/indexer.rs` › a_panicking_scan_counts_as_finished…, a_panic_while_reading_one_file_costs_only_that_file | pass |
 | REQ-002-14 | `crates/indexer/src/scan.rs` › rescans_incrementally; `crates/db/src/writer.rs` › prunes_unused_tags_bottom_up | pass |
