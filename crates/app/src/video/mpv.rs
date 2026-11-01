@@ -89,7 +89,8 @@ pub enum Event {
 }
 
 struct Api {
-    _lib: Library,
+    /// Never unloaded: see [`Api::load`].
+    _lib: &'static Library,
     create: unsafe extern "C" fn() -> *mut Handle,
     initialize: unsafe extern "C" fn(*mut Handle) -> c_int,
     terminate_destroy: unsafe extern "C" fn(*mut Handle),
@@ -120,6 +121,9 @@ impl Api {
     fn load(path: &std::path::Path) -> Result<Self, String> {
         // SAFETY: loading libmpv runs its initializers, which have no preconditions.
         let lib = unsafe { Library::new(path) }.map_err(|e| format!("{}: {e}", path.display()))?;
+        // Kept loaded for good: threads libmpv started can outlive `mpv_terminate_destroy`, and unloading the
+        // library under them crashed the process (SIGSEGV in CI). Loading it again only counts a reference up.
+        let lib: &'static Library = Box::leak(Box::new(lib));
         Ok(Self {
             create: sym!(lib, "mpv_create"),
             initialize: sym!(lib, "mpv_initialize"),
@@ -437,8 +441,9 @@ mod tests {
     #[test]
     #[allow(unsafe_code)]
     fn req_018_11_the_display_fps_changes_while_mpv_runs() {
-        // SAFETY: libmpv's initializers have no preconditions; the library is dropped again at once.
-        let Some(dll) = media::helpers::find_mpv().filter(|path| unsafe { libloading::Library::new(path) }.is_ok())
+        // SAFETY: libmpv's initializers have no preconditions. Kept loaded, as `Api::load` does.
+        let Some(dll) = media::helpers::find_mpv()
+            .filter(|path| unsafe { libloading::Library::new(path) }.map(std::mem::forget).is_ok())
         else {
             eprintln!("skipped: libmpv not found");
             return;
