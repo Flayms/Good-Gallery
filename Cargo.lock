@@ -5665,6 +5665,8 @@ dependencies = [
  "indexer",
  "media",
  "regex",
+ "resvg",
+ "serde",
  "serde_json",
  "tempfile",
 ]
