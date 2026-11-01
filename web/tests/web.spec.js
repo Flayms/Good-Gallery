@@ -81,8 +81,11 @@ test("REQ-019-01 to REQ-019-13: pick, scan, browse, search, view, reload, pick a
     const chooser = page.waitForEvent("filechooser");
     await click(page, PICK_A_FOLDER);
     await (await chooser).setFiles(LIBRARY);
+    // "Added Holiday, indexing…" shows for 4 s (toasts::SHOWN_FOR); on a fast machine the scan ends sooner.
+    const toastGone = page.waitForTimeout(4500);
     await log.waitFor("scan of library 1 ended: Completed");
     await log.waitFor("thumbnails are up to date", log.mark() - 1);
+    await toastGone;
     await settle();
     // The sidebar has the folder, Anna, Italy, a five-star photo and the Beach tag; the gallery the four media by
     // date, the video with its duration; `@eaDir` is skipped.

@@ -21,8 +21,9 @@ fn helper(name: &str, found: Option<PathBuf>) -> Option<PathBuf> {
 /// libmpv, if it loads: on Linux `find_mpv` names the system's library without knowing whether it is installed.
 #[allow(unsafe_code)]
 fn mpv() -> Option<PathBuf> {
-    // SAFETY: libmpv's initializers have no preconditions; the library is dropped again at once.
-    let found = media::helpers::find_mpv().filter(|path| unsafe { libloading::Library::new(path) }.is_ok());
+    // SAFETY: libmpv's initializers have no preconditions. Kept loaded: unloading libmpv can crash the process.
+    let found = media::helpers::find_mpv()
+        .filter(|path| unsafe { libloading::Library::new(path) }.map(std::mem::forget).is_ok());
     helper("libmpv", found)
 }
 

@@ -200,6 +200,46 @@ pub fn set_rating(conn: &Connection, media: i64, rating: Option<i64>) -> Result<
     Ok(changed > 0)
 }
 
+/// A media item's file, as rating it needs it (REQ-025-07).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FileOf {
+    pub id: i64,
+    pub root_id: i64,
+    /// The library's folder.
+    pub root: String,
+    pub rel_path: String,
+    pub file_name: String,
+    pub kind: MediaKind,
+}
+
+/// The files of media items `ids`, in no particular order; ids that aren't indexed are left out.
+pub fn files_of(conn: &Connection, ids: &[i64]) -> Result<Vec<FileOf>> {
+    let mut files = Vec::with_capacity(ids.len());
+    // SQLite allows 32,766 parameters; chunks keep each statement small.
+    for chunk in ids.chunks(500) {
+        let marks = vec!["?"; chunk.len()].join(",");
+        let mut stmt = conn.prepare(&format!(
+            "SELECT media.id, media.root_id, roots.path, media.rel_path, media.file_name, media.kind
+             FROM media JOIN library_roots AS roots ON roots.id = media.root_id WHERE media.id IN ({marks})"
+        ))?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(chunk), |row| {
+            let kind: String = row.get(5)?;
+            Ok(FileOf {
+                id: row.get(0)?,
+                root_id: row.get(1)?,
+                root: row.get(2)?,
+                rel_path: row.get(3)?,
+                file_name: row.get(4)?,
+                kind: MediaKind::parse(&kind).unwrap_or(MediaKind::Image),
+            })
+        })?;
+        for row in rows {
+            files.push(row?);
+        }
+    }
+    Ok(files)
+}
+
 /// Marks media item `media` for reading again on the next changes scan, though its size and date may not have changed
 /// (its tags were written, REQ-026-03). False if it isn't indexed.
 pub fn mark_for_reading(conn: &Connection, media: i64) -> Result<bool> {
@@ -256,6 +296,44 @@ mod tests {
             |row| row.get(0),
         )
         .unwrap()
+    }
+
+    /// REQ-025-07: the files of the selected items, also of more than one statement's worth; unknown ids are left out.
+    #[test]
+    fn req_025_07_finds_the_files_of_the_selection() {
+        let conn = crate::open_in_memory().unwrap();
+        let root = libraries::insert(&conn, ROOT, "Photos", LibraryStatus::Online)
+            .unwrap()
+            .id;
+        let mut ids = Vec::new();
+        for i in 0..1200 {
+            let kind = if i == 7 { "video" } else { "image" };
+            ids.push(
+                conn.query_row(
+                    "INSERT INTO media (root_id, rel_path, file_name, kind, size, mtime)
+                     VALUES (?1, ?2, ?3, ?4, 1, 1) RETURNING id",
+                    (root, format!("2024/{i}.jpg"), format!("{i}.jpg"), kind),
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            );
+        }
+        let mut wanted = ids.clone();
+        wanted.push(999_999);
+        let files = files_of(&conn, &wanted).unwrap();
+        assert_eq!(files.len(), 1200);
+        let video = files.iter().find(|file| file.id == ids[7]).unwrap();
+        assert_eq!(
+            video,
+            &FileOf {
+                id: ids[7],
+                root_id: root,
+                root: ROOT.into(),
+                rel_path: "2024/7.jpg".into(),
+                file_name: "7.jpg".into(),
+                kind: MediaKind::Video,
+            }
+        );
     }
 
     /// REQ-026-03: a file whose tags were written is read again on the next scan.

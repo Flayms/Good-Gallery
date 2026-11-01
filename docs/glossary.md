@@ -65,6 +65,7 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | **Tile**          | One media item in the Masonry, Justified or Grid view.                                                                                                           |
 | **Tag indicators** | Optional icons in a tile's corner: one star per rating point, and icons when the media item has _Places_, _People_ or other tags. The user picks which are shown. |
 | **Zoom level**    | The tile size of the gallery as a number of columns (2–12). More columns means smaller tiles. (code: `columns`)                                                  |
+| **Selection**     | The items picked in the gallery to act on together (rate them, later tag them). Ctrl-click, Shift-click, Ctrl+A; cleared by Escape or a new search. While there is one, the gallery is in **selection mode**: a click selects instead of opening the viewer. (spec 025) |
 | **Search**        | The filters and sort order of the gallery: tags, file name, library, folder, media kind, date range, rating. Kept while the viewer is open. (code: `GallerySearch`)            |
 | **Included / excluded tag** | A tag that matching media items must have (including descendants), or must not have.                                                             |
 | **Search bar**    | The toolbar input with chips for included / excluded tags and the file name filter, plus tag suggestions.                                                       |

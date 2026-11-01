@@ -15,6 +15,7 @@ pub mod layout;
 pub mod media;
 pub mod rating;
 pub mod search;
+pub mod selection;
 pub mod sidebar;
 pub mod tagging;
 pub mod tags;

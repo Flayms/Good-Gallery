@@ -1,5 +1,6 @@
 //! App state and the background jobs that feed it.
 
+use crate::format;
 use crate::gallery::Gallery;
 use crate::toasts::Toasts;
 use db::libraries::Library;
@@ -174,6 +175,28 @@ impl Rate {
     }
 }
 
+/// A rating for several items at once (REQ-025-07).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RateMany {
+    pub ids: Vec<i64>,
+    /// `None` removes the rating.
+    pub rating: Option<i64>,
+}
+
+/// Rating more items than this asks first (REQ-025-07).
+pub const CONFIRM_RATING_ABOVE: usize = 100;
+
+/// What rating several items did (REQ-025-07).
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+#[derive(Debug)]
+struct RatedMany {
+    /// The files rated, by library: read again on the next changes scan.
+    rated: Vec<(i64, String)>,
+    failed: usize,
+    /// The first file that couldn't be rated, and why.
+    first_failure: Option<(String, String)>,
+}
+
 /// A tag added to or removed from a media item by hand (spec 026).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TagChange {
@@ -230,6 +253,8 @@ enum Event {
     Rated(Result<(i64, String), String>),
     /// A tag was written into the file (REQ-026-03), or why not (REQ-026-04).
     Tagged(Result<(i64, String), String>),
+    /// Several items were rated (REQ-025-07), or why none could be.
+    RatedMany(Result<RatedMany, String>),
     /// The job panicked; its flags are reset and the user gets an error.
     Failed,
 }
@@ -299,6 +324,8 @@ pub struct AppState {
     edit_tools: Option<media::edit::Tools>,
     /// _Revert to original_ waits for confirmation (REQ-021-12).
     pub confirm_revert: Option<RevertTarget>,
+    /// Rating many items, waiting for the user to confirm (REQ-025-07).
+    pub confirm_rate_many: Option<RateMany>,
     /// A saved copy to show in the viewer once it is indexed: its library and path (REQ-021-09).
     pending_copy: Option<(i64, String)>,
     /// Files whose metadata couldn't be read, for the toolbar's notice (REQ-002-16).
@@ -571,6 +598,67 @@ impl AppState {
     #[cfg(target_arch = "wasm32")]
     pub fn rate(&mut self, _rate: Rate) {}
 
+    /// Rates several items, after the user confirmed if there are many (REQ-025-07).
+    pub fn ask_rate_many(&mut self, rate: RateMany) {
+        if rate.ids.len() > CONFIRM_RATING_ABOVE {
+            self.confirm_rate_many = Some(rate);
+        } else {
+            self.rate_many(rate);
+        }
+    }
+
+    /// Writes a rating into the files of several items in the background, one after another, then into the index;
+    /// files that can't be written are counted and the first one named (REQ-025-07, REQ-024-04).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn rate_many(&mut self, rate: RateMany) {
+        let (Some(exiftool), Some(db)) = (
+            self.edit_tools.as_ref().map(|tools| tools.exiftool.clone()),
+            self.db.clone(),
+        ) else {
+            self.toasts
+                .error("Couldn't save the ratings: exiftool, which writes them, wasn't found.");
+            return;
+        };
+        let count = format::count(rate.ids.len() as u64);
+        self.toasts.success(format!("Rating {count} items…"));
+        self.spawn(move || {
+            let files = db::media::files_of(&lock(&db), &rate.ids).map_err(|error| error.to_string());
+            Event::RatedMany(files.map(|files| {
+                let mut done = RatedMany {
+                    rated: Vec::new(),
+                    failed: 0,
+                    first_failure: None,
+                };
+                for file in files {
+                    let written = media::rating::write(
+                        &exiftool,
+                        std::path::Path::new(&file.root),
+                        &file.rel_path,
+                        file.kind,
+                        rate.rating,
+                    );
+                    match written {
+                        Ok(()) => {
+                            if let Err(error) = db::media::set_rating(&lock(&db), file.id, rate.rating) {
+                                tracing::error!("can't store the rating of {}: {error}", file.rel_path);
+                            }
+                            done.rated.push((file.root_id, file.rel_path));
+                        }
+                        Err(error) => {
+                            tracing::error!("can't rate {}: {error}", file.rel_path);
+                            done.failed += 1;
+                            done.first_failure.get_or_insert((file.file_name, error.to_string()));
+                        }
+                    }
+                }
+                done
+            }))
+        });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn rate_many(&mut self, _rate: RateMany) {}
+
     /// Writes a tag change into the file in the background; the index reads the file again afterwards
     /// (REQ-026-03). A file that can't be written keeps its tags, and the user is told why (REQ-026-04).
     #[cfg(not(target_arch = "wasm32"))]
@@ -682,6 +770,7 @@ impl AppState {
             #[cfg(not(target_arch = "wasm32"))]
             edit_tools: None,
             confirm_revert: None,
+            confirm_rate_many: None,
             pending_copy: None,
             unreadable: Default::default(),
         }
@@ -994,6 +1083,28 @@ impl AppState {
                     self.refresh();
                 }
                 Err(error) => self.toasts.error(format!("Couldn't save the rating: {error}")),
+            },
+            Event::RatedMany(result) => match result {
+                Ok(done) => {
+                    let mut by_library: std::collections::BTreeMap<i64, Vec<String>> = Default::default();
+                    for (root_id, rel_path) in &done.rated {
+                        by_library.entry(*root_id).or_default().push(rel_path.clone());
+                    }
+                    for (root_id, paths) in by_library {
+                        self.scans.request_paths(root_id, paths);
+                    }
+                    self.refresh();
+                    let rated = format::count(done.rated.len() as u64);
+                    match done.first_failure {
+                        None => self.toasts.success(format!("Rated {rated} items")),
+                        Some((name, error)) => self.toasts.error(format!(
+                            "Couldn't rate {} of {} items. {name}: {error}",
+                            format::count(done.failed as u64),
+                            format::count((done.failed + done.rated.len()) as u64),
+                        )),
+                    }
+                }
+                Err(error) => self.toasts.error(format!("Couldn't save the ratings: {error}")),
             },
             Event::Tagged(result) => match result {
                 // The index reads the file again, which updates the tags everywhere.

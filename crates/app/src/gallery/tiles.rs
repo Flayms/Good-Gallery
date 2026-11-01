@@ -29,6 +29,8 @@ impl Gallery {
     ) {
         let Some(data) = self.data.clone() else { return };
         let layout = &arranged.tiles;
+        // In selection mode a click selects; hovered tiles show where (REQ-025-03).
+        let selecting = !self.selection.is_empty(&data.ids);
         // Below the toolbar floating over the gallery.
         let mut visible = ui.clip_rect();
         visible.min.y += TOOLBAR_HEIGHT;
@@ -65,9 +67,10 @@ impl Gallery {
             }
             let id = data.ids[index];
             let response = ui.interact(rect, ui.make_persistent_id(("tile", id)), self.tile_sense());
-            // A click, or Enter on the focused tile, opens the viewer (REQ-009-01).
+            // A click, or Enter on the focused tile, opens the viewer (REQ-009-01) or selects (spec 025).
             if response.clicked() {
-                self.opened = Some(index);
+                let (modifiers, space) = ui.input(|input| (input.modifiers, input.key_pressed(egui::Key::Space)));
+                self.clicked(index, modifiers, space && response.has_focus());
             }
             response.context_menu(|ui| {
                 if let Some(action) = super::context_menu(ui) {
@@ -86,8 +89,11 @@ impl Gallery {
                 })
                 .unwrap_or_default();
             if let Some(item) = self.items.get(&id) {
-                response
-                    .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, tile_label(item, &indicators)));
+                let mut label = tile_label(item, &indicators);
+                if self.selection.contains(id) {
+                    label.push_str(", selected");
+                }
+                response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, &label));
             }
             if !ui.is_rect_visible(rect) {
                 continue;
@@ -100,6 +106,11 @@ impl Gallery {
             }
             if !indicators.is_empty() {
                 indicator_badge(ui, rect, &indicators, video);
+            }
+            if self.selection.contains(id) {
+                selected_mark(ui, rect, radius);
+            } else if selecting && response.hovered() {
+                select_hint(ui, rect);
             }
         }
         if frame.fading {
@@ -193,6 +204,63 @@ fn video_badge(ui: &egui::Ui, tile: Rect, duration: Option<f64>) {
         let pos = pos2(icon_rect.max.x + 4.0, rect.center().y - galley.size().y / 2.0);
         ui.painter().galley(pos, galley, Color32::WHITE);
     }
+}
+
+/// A selected tile (REQ-025-01): a ring like the focus ring (Paper inside a dark one, so it shows on any photo) and a
+/// check mark in the top-left corner.
+pub(super) fn selected_mark(ui: &egui::Ui, tile: Rect, radius: u8) {
+    let painter = ui.painter();
+    let inner = tile.shrink(2.0);
+    painter.rect_stroke(
+        tile.shrink(1.0),
+        radius,
+        egui::Stroke::new(2.0, theme::ring_outer()),
+        egui::StrokeKind::Middle,
+    );
+    painter.rect_stroke(
+        inner.shrink(1.0),
+        radius,
+        egui::Stroke::new(2.0, theme::ring()),
+        egui::StrokeKind::Middle,
+    );
+    check_badge(ui, tile, true);
+}
+
+/// A tile under the pointer in selection mode: an empty circle where the check mark goes (REQ-025-03).
+pub(super) fn select_hint(ui: &egui::Ui, tile: Rect) {
+    check_badge(ui, tile, false);
+}
+
+/// The round check badge in a tile's top-left corner: filled with a check mark, or an empty outline.
+pub(super) fn check_badge(ui: &egui::Ui, tile: Rect, checked: bool) {
+    const SIZE: f32 = 20.0;
+    let rect = Rect::from_min_size(tile.min + vec2(6.0, 6.0), Vec2::splat(SIZE));
+    if rect.max.x > tile.max.x || rect.max.y > tile.max.y {
+        return;
+    }
+    let painter = ui.painter();
+    if checked {
+        painter.circle_filled(rect.center(), SIZE / 2.0, theme::ring());
+        Icon::Check
+            .image(14.0, theme::ring_outer().to_opaque())
+            .paint_at(ui, Rect::from_center_size(rect.center(), Vec2::splat(14.0)));
+    } else {
+        painter.circle(
+            rect.center(),
+            SIZE / 2.0 - 1.0,
+            BADGE,
+            egui::Stroke::new(2.0, Color32::WHITE),
+        );
+    }
+}
+
+/// A selected row's check mark, centered on its small thumbnail (REQ-025-01).
+pub(super) fn check_badge_small(ui: &egui::Ui, thumb: Rect) {
+    const SIZE: f32 = 18.0;
+    ui.painter().circle_filled(thumb.center(), SIZE / 2.0, theme::ring());
+    Icon::Check
+        .image(12.0, theme::ring_outer().to_opaque())
+        .paint_at(ui, Rect::from_center_size(thumb.center(), Vec2::splat(12.0)));
 }
 
 /// Stars and tag icons in the tile's bottom-left corner, cut short before the video badge (REQ-017-01), each named

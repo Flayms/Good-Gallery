@@ -121,6 +121,7 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
         show_viewer(&ctx, state);
     }
     confirm_revert(&ctx, state);
+    confirm_rate_many(&ctx, state);
     indexer_progress::show(&ctx, state);
     state.toasts.show(&ctx);
     // Over the viewer they go with its dark look (REQ-020-05).
@@ -207,6 +208,32 @@ fn confirm_revert(ctx: &egui::Context, state: &mut AppState) {
     }
 }
 
+/// Asks before rating many items, since their files change (REQ-025-07).
+fn confirm_rate_many(ctx: &egui::Context, state: &mut AppState) {
+    let Some(rate) = state.confirm_rate_many.clone() else {
+        return;
+    };
+    let count = format::count(rate.ids.len() as u64);
+    let (title, button) = match rate.rating {
+        Some(1) => (format!("Rate {count} items with 1 star?"), "Rate"),
+        Some(stars) => (format!("Rate {count} items with {stars} stars?"), "Rate"),
+        None => (format!("Remove the rating of {count} items?"), "Remove rating"),
+    };
+    let chosen = widgets::dialog(
+        ctx,
+        "confirm-rate-many",
+        &title,
+        "Their files are changed.",
+        &[button, "Cancel"],
+    );
+    if let Some(chosen) = chosen {
+        state.confirm_rate_many = None;
+        if chosen == 0 {
+            state.rate_many(rate);
+        }
+    }
+}
+
 /// Adds or removes a tag of the info sheet's item (REQ-026-01, REQ-026-02).
 fn tag(state: &mut AppState, id: i64, change: domain::tagging::Change) {
     let detail = state.gallery.as_ref().and_then(|gallery| gallery.cached_detail(id));
@@ -275,6 +302,7 @@ fn info_sheet(ui: &mut egui::Ui, state: &mut AppState) {
 
 /// The gallery, or its empty state without libraries.
 fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
+    let mut rate_many = None;
     if state.libraries.is_empty() {
         if empty_state::no_libraries(ui).clicked() {
             // The browser's folder picker needs the click (REQ-019-01, REQ-019-02).
@@ -285,7 +313,17 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
             }
         }
     } else if let Some(gallery) = &mut state.gallery {
+        if state.viewer.is_none() && state.confirm_rate_many.is_none() {
+            gallery.selection_keys(ui.ctx());
+        }
         gallery.show(ui);
+        // _Rate_ or `1`–`5` with a selection (REQ-025-07).
+        if let Some(rating) = gallery.take_rate_selection() {
+            rate_many = Some(state::RateMany {
+                ids: gallery.selected_ids(),
+                rating,
+            });
+        }
         // A click or Enter on a tile or row opens the viewer (REQ-009-01).
         if let Some(index) = gallery.take_opened()
             && state.viewer.is_none()
@@ -309,6 +347,9 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
             Some((index, gallery::MediaAction::Information)) => state.info_sheet = gallery.id_at(index),
             Some((_, gallery::MediaAction::Edit | gallery::MediaAction::Revert)) | None => {}
         }
+    }
+    if let Some(rate) = rate_many {
+        state.ask_rate_many(rate);
     }
     // The toolbar floats over the gallery, which scrolls underneath it (REQ-013-03).
     let area = ui.max_rect();
