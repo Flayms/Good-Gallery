@@ -1,13 +1,22 @@
 # Known Pitfalls
 
-Add every pitfall you hit, either to avoid it in the future or for us to fix later on.
+Add every pitfall you hit. A trap in a tool, library, OS or our tests that we can only work around goes into its topic's section. One we can fix gets an issue and goes under *To fix*, with the workaround, until the fix removes it.
+
+## To fix
+
+* **Snapshot tests embed the temp folder's path** (the info panel's location): a longer `TMPDIR` wraps it to two lines and fails `info_sheet_linux`. Run the native tests with the default `/tmp` (#101).
+* **A zip in `target/dist` can stay locked for minutes** after it was written (Defender or an open Explorer window), so `cargo xtask dist` fails with "used by another process": pass another `--out` (#102).
+* **Tests and `cargo run` find libmpv only through `GOOD_GALLERY_MPV`** (or `target\debug\mpv\libmpv-2.dll`, or `PATH`). Point it at `target/helpers/mpv/libmpv-2.dll` (`packaging/fetch-helpers.ps1`); without it `crates/app/tests/video.rs` skips and videos show their preview (#103).
+* **One `CARGO_TARGET_DIR` for several worktrees builds stale code:** cargo names a workspace crate's artifacts by its path relative to the workspace, so every worktree shares them, and a crate unchanged since another worktree's build counts as fresh. Code from the other branch is linked in, which shows up as missing fields or methods, or as another branch's UI in snapshots. After switching worktrees run `cargo clean -p domain -p meta -p db -p media -p indexer -p app -p xtask` (dependencies stay built), or give each worktree its own target folder (#107).
+* **`db::open_reader` can't create or migrate the index**: open it only after `db::open`. App checks on a data folder made by `cargo xtask libraries` don't catch this; also start once on an empty one (#108).
+* **`rgb0` leaves the fourth byte undefined**, and egui blends with alpha: force it to 255 (≈ 0.7 ms per 1080p frame) or sample with alpha 1 in a shader (#109).
+* **The kittest harness insets the UI by 8 px but not the caption buttons** (they align to the window's edge), so in Linux snapshots the buttons sit 8 px above the toolbar row; in the app they line up (#110).
 
 ## Toolchain
 
 * **MSVC C++ build tools are required** on Windows (`link.exe`); without them even a hello world fails with "`link.exe` returned an unexpected error". Install the "Desktop development with C++" / VC Tools workload, e.g. `winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`. C dependencies (libwebp, dav1d, a video backend) need them too.
 * **`cargo` may be missing from the agent shell's `PATH`**: rustup lives in `~/.cargo/bin`, which is on the Windows user `PATH` but not always in Git Bash. `export PATH="$HOME/.cargo/bin:$PATH"` (Bash) or prepend `$env:USERPROFILE\.cargo\bin` (PowerShell).
 * **egui / eframe / wgpu APIs change between minor versions.** Pin exact versions and check docs.rs for the pinned one; examples from memory are often for another version.
-* **One `CARGO_TARGET_DIR` for several worktrees builds stale code:** cargo names a workspace crate's artifacts by its path relative to the workspace, so every worktree shares them, and a crate unchanged since another worktree's build counts as fresh. Code from the other branch is linked in, which shows up as missing fields or methods, or as another branch's UI in snapshots. After switching worktrees run `cargo clean -p domain -p meta -p db -p media -p indexer -p app -p xtask` (dependencies stay built), or give each worktree its own target folder.
 
 ## egui / eframe 0.37
 
@@ -38,10 +47,8 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 
 * **`libmpv2` (crate) only wraps the OpenGL render API.** The software renderer (`"sw"`) needs raw `mpv_render_param`s (`SW_SIZE`, `SW_FORMAT`, `SW_STRIDE`, `SW_POINTER`); use an own FFI. Its import library is MinGW (`libmpv.dll.a`), so loading the DLL at runtime with `libloading` also avoids link trouble with MSVC.
 * **The render thread must not call client functions** (`mpv_get_property` etc.): render.h forbids it, it can stall the core (timeouts, "mpv_render_context_render() not being called or stuck"). Pass the video size from the UI thread.
-* **`rgb0` leaves the fourth byte undefined**, and egui blends with alpha: force it to 255 (≈ 0.7 ms per 1080p frame) or sample with alpha 1 in a shader.
 * **The software renderer ignores rotation.** `video-params/rotate` is set, but frames and `dwidth` / `dheight` stay unrotated: rotate the quad.
 * **`libmpv-2.dll` hard-imports `vulkan-1.dll`** (shinchiro builds): without the Vulkan loader it doesn't load. Load at runtime and degrade.
-* **Tests and `cargo run` find libmpv only through `GOOD_GALLERY_MPV`** (or `target\debug\mpv\libmpv-2.dll`, or `PATH`). Point it at `target/helpers/mpv/libmpv-2.dll` (`packaging/fetch-helpers.ps1`); without it `crates/app/tests/video.rs` skips and videos show their preview (#103).
 * **A late `FILE_LOADED` belongs to the previous `loadfile`** when the user steps quickly between videos. Count `START_FILE` events against the `loadfile`s sent and accept frames only when they match; a `loadfile` mpv refuses sends no `START_FILE`.
 * **mpv's properties (`dwidth`, `duration`, `eof-reached` …) are the previous file's until the new one's `FILE_LOADED`**; `loadfile` only queues the switch. Read them only after it.
 * **With `keep-open=yes` mpv pauses on the last frame at the end** (`eof-reached`); unpausing does nothing. Seek to 0, then unpause.
@@ -74,7 +81,6 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 
 * **Changing `media::exiftool::read_args` or any metadata extraction changes what existing index rows mean**: they were read with exiftool-vendored v38's default options (`-fast`, `struct=1`, `keepUTCTime`, `-ignoreMinorErrors`, a UTF-8 repair filter). Bump `METADATA_VERSION` if the extracted values change, or unchanged files keep their old values (spec 004's plan).
 * **Killing the Windows `exiftool.exe` leaves its `perl.exe` child running** with the pipes open; `Process::drop` ends the tree with `taskkill /T /F`. That isn't enough when the app exits: each drop takes ≈ 1.1 s (the indexer gets 2 s), and the PAR-packed exiftool 12.83 survived even a finished taskkill. The app's job object (`media::helpers`) is what ends them. Leftover exiftool processes also keep the stdout pipe of whoever started them open, so `cargo run … | Select-Object` seems to hang after the app has exited.
-* **`db::open_reader` can't create or migrate the index**: open it only after `db::open`. App checks on a data folder made by `cargo xtask libraries` don't catch this; also start once on an empty one.
 * **A watcher that can't start must not queue a scan**: it would follow every completed scan, so scans would run forever. Leave the retry to the schedule.
 * **Watcher tests that wait for a quick scan race the folder mtime**: a file written within the folder's stored mtime tick isn't seen by the quick scan. Keep the indexer busy with a gated scan of another library instead of relying on the new file.
 * **Folder mtimes need `FILE_FLAG_BACKUP_SEMANTICS`** to open a folder for `set_modified` on Windows (see the scan tests' `set_mtime`).
@@ -132,7 +138,6 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **makensis locally:** install NSIS (`Program Files (x86)\NSIS` is found) or point `MAKENSIS` at a `makensis.exe`.
 * **GitHub's windows-2025 images don't come with NSIS** (older ones did). The release workflow installs it with `choco install nsis`.
 * **The packaged app (`--features packaged`, as `cargo xtask dist` builds it) has no console**: its output only shows when the caller redirects stdout / stderr, so look at `logs\app.log` in the data folder instead. Never start it without `--data-dir` during development: it opens the real `%APPDATA%\good-gallery`.
-* **A zip in `target/dist` can stay locked for minutes** after it was written (Defender or an open Explorer window), so `cargo xtask dist` fails with "used by another process": pass another `--out` (#102).
 
 ## CI
 
@@ -153,14 +158,12 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **mpv 0.41's software renderer aborts the process on rotated videos** (`mp_image_crop` assertion). The player sets `video-rotate=no` and reads the rotation from `video-dec-params/rotate`, turning the frame itself as before.
 * **egui hands a press's click and its drag out separately**: the topmost widget that senses clicks gets the click, the topmost one that senses drags the drag, even if it lies below. The resize handles check that the press began on their own layer (`Context::layer_id_at`), or a click on a menu item at the window's edge would also start a resize.
 * **Snapshots on Linux** are their own files (`<name>_linux.png`, `common::snapshot_name`): the caption buttons and the narrower room kept for them change the toolbar. lavapipe renders everything else pixel-identical to WARP, so a difference elsewhere is a real change.
-* **The kittest harness insets the UI by 8 px but not the caption buttons** (they align to the window's edge), so in Linux snapshots the buttons sit 8 px above the toolbar row; in the app they line up.
 
 ## Browser version (spec 019)
 
 * **`sqlite-wasm-rs` needs clang** to compile SQLite for wasm (`failed to find tool "clang"`), and its **`wasm-bindgen` feature**: without it the page fails to load with `Failed to resolve module specifier "env"` (SQLite's clock, randomness and local time are unresolved imports).
 * **rusqlite 0.41 has no `DatabaseName`:** use `rusqlite::MAIN_DB` with `serialize` / `deserialize_read_exact` (features `serialize`, `backup`).
 * **`cargo install` builds in `/tmp`**, which is a small RAM disk on some machines (`Disk quota exceeded`, os error 122). Set `CARGO_TARGET_DIR` to a folder on the disk for the install.
-* **Snapshot tests embed the temp folder's path** (the info panel's location): a longer `TMPDIR` wraps it to two lines and fails `info_sheet_linux`. Run the native tests with the default `/tmp` (#101).
 * **Playwright's Chromium needs system libraries** on Linux (`libnspr4.so: cannot open shared object file`): `sudo npx playwright install-deps chromium` (CI: `npx playwright install --with-deps chromium`).
 * **egui misses clicks that arrive with the pointer** (Playwright's `mouse.click` moves, presses and releases at once): the browser test moves first, waits 100 ms, then presses (`click` in `web.spec.js`).
 * **A 1 % screenshot tolerance hides small changes** like a status badge: the browser test allows 50 pixels. Fix the page's clock (`page.clock.setFixedTime`), time zone and locale, since Settings show when a library was last indexed.
