@@ -15,6 +15,8 @@ struct Options {
     screenshot: Option<PathBuf>,
     screenshot_after: std::time::Duration,
     bench_scroll: Option<f32>,
+    /// `--bench-cold`: thumbnails render while the bench scrolls (REQ-006-15), so it skips the warming pass.
+    bench_cold: bool,
     view: Option<usize>,
     info: bool,
     edit: bool,
@@ -36,6 +38,8 @@ enum BenchPhase {
 /// `--bench-scroll`: frame intervals while the gallery scrolls at a constant speed, without vsync.
 struct Bench {
     seconds: f32,
+    /// Measures right away, while the thumbnails render, instead of after a warming pass.
+    cold: bool,
     phase: BenchPhase,
     last_frame: Option<std::time::Instant>,
     intervals: Vec<f32>,
@@ -43,9 +47,10 @@ struct Bench {
 }
 
 impl Bench {
-    fn new(seconds: f32) -> Self {
+    fn new(seconds: f32, cold: bool) -> Self {
         Self {
             seconds,
+            cold,
             phase: BenchPhase::Waiting(None),
             last_frame: None,
             intervals: Vec::new(),
@@ -64,6 +69,7 @@ impl Bench {
         let step = BENCH_SPEED * interval.unwrap_or(0.0).min(0.1);
         match self.phase {
             BenchPhase::Waiting(None) if gallery.count().is_some() => self.phase = BenchPhase::Waiting(Some(now)),
+            BenchPhase::Waiting(Some(since)) if self.cold => self.phase = BenchPhase::Measuring(since),
             BenchPhase::Waiting(Some(since)) if (now - since).as_secs_f32() > 2.0 => {
                 self.phase = BenchPhase::Warming(now);
             }
@@ -239,12 +245,13 @@ fn demo_recipe() -> domain::edit::Recipe {
 
 fn parse_args() -> anyhow::Result<Options> {
     const USAGE: &str = "usage: app [--data-dir <folder>] [--screenshot <file.png> [--screenshot-after <seconds>]] \
-                         [--bench-scroll <seconds>] [--view <position> [--info] [--edit]] [--scroll <points>]";
+                         [--bench-scroll <seconds> [--bench-cold]] [--view <position> [--info] [--edit]] [--scroll <points>]";
     let mut args = std::env::args().skip(1);
     let mut data_dir = None;
     let mut screenshot = None;
     let mut screenshot_after = std::time::Duration::ZERO;
     let mut bench_scroll = None;
+    let mut bench_cold = false;
     let mut view = None;
     let mut info = false;
     let mut edit = false;
@@ -262,6 +269,7 @@ fn parse_args() -> anyhow::Result<Options> {
                 anyhow::ensure!(seconds > 0.0, USAGE);
                 bench_scroll = Some(seconds);
             }
+            "--bench-cold" => bench_cold = true,
             "--view" => view = Some(args.next().context(USAGE)?.parse().context(USAGE)?),
             "--info" => info = true,
             "--edit" => edit = true,
@@ -278,6 +286,7 @@ fn parse_args() -> anyhow::Result<Options> {
         screenshot,
         screenshot_after,
         bench_scroll,
+        bench_cold,
         view,
         info,
         edit,
@@ -608,7 +617,9 @@ fn run(options: Options) -> anyhow::Result<()> {
                 screenshot_at: std::time::Instant::now() + options.screenshot_after,
                 screenshot_taken: false,
                 frames: 0,
-                bench: options.bench_scroll.map(Bench::new),
+                bench: options
+                    .bench_scroll
+                    .map(|seconds| Bench::new(seconds, options.bench_cold)),
                 view: options.view,
                 info: options.info,
                 edit: options.edit,

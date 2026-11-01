@@ -412,6 +412,9 @@ impl Shared {
 }
 
 fn work(shared: &Shared, index: usize) {
+    // Rendering competes with the UI for the CPU while the user scrolls through thumbnails not cached yet (REQ-006-15).
+    // Helpers (ffmpeg) start on their own thread and keep their priority.
+    media::helpers::lower_thread_priority();
     while let Some(work) = shared.next(index) {
         match work {
             Work::Refill(kicks) => shared.refill(kicks),
@@ -441,6 +444,18 @@ mod tests {
         active: AtomicUsize,
         peak: AtomicUsize,
         delay: Mutex<Duration>,
+        /// The nice value of the thread each render ran on.
+        #[cfg(target_os = "linux")]
+        nice: Mutex<Vec<i32>>,
+    }
+
+    /// The calling thread's nice value: field 19 of its stat line, whose fields after the command name (in
+    /// parentheses) start at field 3.
+    #[cfg(target_os = "linux")]
+    fn thread_nice() -> i32 {
+        let stat = std::fs::read_to_string("/proc/thread-self/stat").unwrap();
+        let fields = &stat[stat.rfind(')').unwrap() + 2..];
+        fields.split(' ').nth(16).unwrap().parse().unwrap()
     }
 
     impl RenderThumbnails for FakeRender {
@@ -450,6 +465,8 @@ mod tests {
                 started.send(name.clone()).unwrap();
                 self.gate.lock().unwrap().as_ref().unwrap().recv().unwrap();
             }
+            #[cfg(target_os = "linux")]
+            self.nice.lock().unwrap().push(thread_nice());
             let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
             self.peak.fetch_max(active, Ordering::SeqCst);
             std::thread::sleep(*self.delay.lock().unwrap());
@@ -557,6 +574,24 @@ mod tests {
 
     fn ready(rel_path: &str) -> (String, String, Option<String>) {
         (rel_path.into(), "ready".into(), Some("aGFzaA==".into()))
+    }
+
+    /// REQ-006-15: thumbnails render below the UI thread's priority, on every render thread.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn req_006_15_renders_below_the_ui_threads_priority() {
+        let fixture = Fixture::new(1 << 20);
+        fixture.service.set_workers(2);
+        for i in 0..6 {
+            fixture.insert(&format!("{i}.jpg"), i);
+        }
+        let ui = thread_nice();
+        fixture.service.kick();
+        fixture.service.wait_idle();
+        let nice = fixture.render.nice.lock().unwrap().clone();
+        assert_eq!(nice.len(), 6);
+        assert!(nice.iter().all(|&n| n == (ui + 10).min(19)), "{nice:?} vs {ui}");
+        assert_eq!(thread_nice(), ui, "the calling thread keeps its priority");
     }
 
     #[test]

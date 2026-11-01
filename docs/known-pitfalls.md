@@ -90,7 +90,7 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 
 * **egui turns Ctrl + wheel into a zoom delta**, not a scroll: read `Event::MouseWheel` with `modifiers.ctrl` from `input.raw.events` for zoom steps. winit reports one *line* per notch and may coalesce a fast spin into several lines in one event, unlike the DOM's one event per notch.
 * **Don't clone the tile layout per frame**: at 100k items it is ≈ 3 MB of `Vec<f64>`. Take it out of the struct for the frame and put it back.
-* **Hard links need the same volume**: `cargo xtask gallery-bench` links the cache copy's files, so its data folder must be on that drive.
+* **Hard links need the same volume**: `cargo xtask gallery-bench` links the cache copy's files (or with `--originals` the photos), so its data folder must be on that drive.
 
 ## Viewer
 

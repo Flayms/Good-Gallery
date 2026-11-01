@@ -101,6 +101,13 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 - **And** it stops at the start and the end of the gallery, without scrolling past them
 - **And** releasing the button stops it if the pointer had left those 12 points; otherwise autoscroll stays on until the next click of any button, a key press or a turn of the mouse wheel or touchpad, and that click does nothing else (it doesn't open a media item or a context menu)
 
+### REQ-006-15 · Frame-time budget while thumbnails render
+
+- **Given** a gallery of 100,000 media items at 12 columns whose thumbnails aren't in the thumbnail cache yet
+- **When** the user scrolls continuously while they render
+- **Then** the 95th percentile of frame times stays within REQ-006-12's budget (below 16 ms on an integrated laptop GPU, measured without vsync)
+- **And** rendering thumbnails runs at a lower priority than the UI
+
 ## Out of scope
 
 - Selecting multiple media items, and drag and drop to other apps.
@@ -132,3 +139,4 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 | REQ-006-12 | `cargo xtask gallery-bench` (100,000 items, 12 columns, vsync off, AMD iGPU, mains power, 2026-10-27) | no test (measured: p95 4.4 ms, p99 5.3 ms, max 11.9 ms) |
 | REQ-006-13 | `crates/app/src/textures.rs` › req_006_13_frees_least_recently_shown_textures_down_to_90_percent_of_the_budget, req_006_13_keeps_textures_shown_or_requested_in_this_or_the_last_frame; `cargo xtask gallery-bench` (at most 511 MB of a 512 MB budget) | pass |
 | REQ-006-14 | `crates/domain/src/autoscroll.rs` › req_006_14_scrolls_toward_the_pointer_faster_the_farther_it_is, req_006_14_releasing_after_moving_stops_it, req_006_14_a_click_keeps_it_on_until_the_next_click; `crates/app/tests/gallery.rs` › req_006_14_scrolls_while_the_middle_button_is_held_and_after_a_middle_click, req_006_14_stops_at_the_end_without_scrolling_past_it, req_006_14_the_wheel_or_a_key_stops_it | pass |
+| REQ-006-15 | `crates/indexer/src/thumbnails.rs` › req_006_15_renders_below_the_ui_threads_priority; `cargo xtask gallery-bench --originals` (Linux VM with lavapipe: cold p95 527 → 307 ms with the lowered priority, warm 223 ms) | partial (the 16 ms budget on an integrated laptop GPU not measured yet) |
