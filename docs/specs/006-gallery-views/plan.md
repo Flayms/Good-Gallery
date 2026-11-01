@@ -15,6 +15,7 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 - **Choices** are stored in the `settings` table under `gallery.view`, `gallery.columns`, `gallery.groupByDay`, `gallery.tagIndicators` (`domain::view`).
 - **Live updates and states** (REQ-006-10, -11): the layout reloads after the first written files, every 5 s during a scan and at its end; skeleton tiles while loading, "Couldn't load media" on errors, empty states for no libraries and no media.
 - **Budgets** (REQ-006-12, -13): `cargo xtask gallery-bench` builds a data folder with 100,000 items whose thumbnails are hard links into a cache copy and runs the app with `--bench-scroll` (vsync off, a warming pass, then 20 s at 1,440 pt/s, 12 columns). Result (AMD iGPU, mains power): p50 3.0 ms, p95 4.4 ms, max 11.9 ms; textures peaked at 511 MB.
+- **Scrolling while thumbnails render** (REQ-006-15): `gallery-bench --originals <photos>` links 100,000 originals into a real library with nothing cached and runs `--bench-scroll --bench-cold` (no warming pass), then prints how many thumbnails rendered. The render threads run at below-normal priority, like the texture workers. Measured on the Linux dev VM (2 cores, lavapipe: the UI renders on the CPU, so absolute times are far above the budget and only the comparison counts), 15 s each, two runs: warm cache p95 223 ms; cold at normal priority p95 527 / 535 ms (108 / 118 thumbnails rendered); cold at lowered priority p95 307 / 331 ms (25 / 27 rendered). Lowering the priority takes most of rendering's cost off the frame time; where the CPU is saturated (software rendering) thumbnails then appear more slowly. Not yet measured on an integrated laptop GPU against the 16 ms budget.
 
 ## Spec changes
 
@@ -31,5 +32,6 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 - [x] `cargo xtask gallery-bench` and `--bench-scroll` (REQ-006-12)
 - [x] Toolbar with the _View_ menu, persisted choices (REQ-006-01, -06)
 - [x] List view (REQ-006-05)
-- [ ] Measure scrolling while thumbnails render in the background (rendering runs at normal thread priority; the bench ran with every thumbnail cached)
+- [x] `gallery-bench --originals`: measure scrolling while thumbnails render; render threads at below-normal priority (REQ-006-15)
+- [ ] Measure REQ-006-15 on an integrated laptop GPU
 - [ ] Measure the glass pass's per-frame cost at 12 columns with `gallery-bench` (it rebuilds tile bind groups every frame)
