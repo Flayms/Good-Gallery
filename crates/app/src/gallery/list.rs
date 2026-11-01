@@ -122,10 +122,12 @@ impl Gallery {
 
     fn draw_row(&mut self, ui: &mut egui::Ui, rect: Rect, index: usize, id: i64, frame: &mut FrameState) {
         let response = ui.interact(rect, ui.make_persistent_id(("row", id)), self.tile_sense());
-        // A click, or Enter on the focused row, opens the viewer (REQ-009-01).
+        // A click, or Enter on the focused row, opens the viewer (REQ-009-01) or selects (spec 025).
         if response.clicked() {
-            self.opened = Some(index);
+            let (modifiers, space) = ui.input(|input| (input.modifiers, input.key_pressed(egui::Key::Space)));
+            self.clicked(index, modifiers, space && response.has_focus());
         }
+        let selected = self.selection.contains(id);
         response.context_menu(|ui| {
             if let Some(action) = super::context_menu(ui) {
                 self.menu_action = Some((index, action));
@@ -137,18 +139,27 @@ impl Gallery {
                 .rect_filled(bar, theme::RADIUS_CONTROL, theme::placeholder());
             return;
         };
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Row, true, tile_label(item, &[])));
+        let mut label = tile_label(item, &[]);
+        if selected {
+            label.push_str(", selected");
+        }
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Row, true, &label));
         if !ui.is_rect_visible(rect) {
             return;
         }
-        if response.hovered() {
-            let hover = Rect::from_min_max(rect.min + vec2(4.0, 0.0), rect.max - vec2(4.0, 0.0));
-            ui.painter().rect_filled(hover, theme::RADIUS_CONTROL, theme::hover());
+        let row = Rect::from_min_max(rect.min + vec2(4.0, 0.0), rect.max - vec2(4.0, 0.0));
+        if selected {
+            ui.painter().rect_filled(row, theme::RADIUS_CONTROL, theme::selected());
+        } else if response.hovered() {
+            ui.painter().rect_filled(row, theme::RADIUS_CONTROL, theme::hover());
         }
         let [thumb, name, folder, date, size, dims, rating] = columns(rect.left(), rect.width());
         let y = rect.center().y;
         let thumb_rect = Rect::from_center_size(pos2(thumb.0 + THUMB / 2.0, y), Vec2::splat(THUMB));
         self.paint_thumbnail(ui, thumb_rect, 4, id, frame);
+        if selected {
+            super::tiles::check_badge_small(ui, thumb_rect);
+        }
         let Some(item) = self.items.get(&id) else { return };
         name_cell(ui, name, y, item);
         text_cell(ui, folder, y, folder_of(&item.rel_path), theme::muted(), false);
