@@ -333,40 +333,115 @@ pub fn reduced_motion() -> bool {
 /// answer.
 #[cfg(target_os = "linux")]
 pub fn reduced_motion() -> bool {
+    desktop::follow();
+    desktop::REDUCED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The desktop's caption button layout (REQ-018-10): KDE's or GNOME's; minimize, maximize, close at the right on other
+/// desktops (whose `gsettings` answers GNOME's default, close alone) and where the setting can't be read. Followed as
+/// [`reduced_motion`] is.
+#[cfg(target_os = "linux")]
+pub fn button_layout() -> domain::caption::ButtonLayout {
+    desktop::follow();
+    desktop::LAYOUT
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .clone()
+        .unwrap_or_default()
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn button_layout() -> domain::caption::ButtonLayout {
+    domain::caption::ButtonLayout::default()
+}
+
+/// The desktop's preferences, read by a background thread every 2 s.
+#[cfg(target_os = "linux")]
+mod desktop {
+    use domain::caption::ButtonLayout;
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, Ordering};
-    static REDUCED: AtomicBool = AtomicBool::new(false);
-    static FOLLOW: std::sync::Once = std::sync::Once::new();
-    FOLLOW.call_once(|| {
-        let kde = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktop| desktop.split(':').any(|d| d == "KDE"));
-        // The first answer at once, so the first frames already follow the setting.
-        REDUCED.store(read_reduced_motion(kde), Ordering::Relaxed);
-        let spawned = std::thread::Builder::new()
-            .name("desktop preferences".into())
-            .spawn(move || {
-                loop {
-                    std::thread::sleep(std::time::Duration::from_secs(2));
-                    REDUCED.store(read_reduced_motion(kde), Ordering::Relaxed);
-                }
-            });
-        if let Err(error) = spawned {
-            tracing::warn!("can't follow the desktop's animation setting: {error}");
+
+    pub static REDUCED: AtomicBool = AtomicBool::new(false);
+    pub static LAYOUT: Mutex<Option<ButtonLayout>> = Mutex::new(None);
+
+    #[derive(Clone, Copy)]
+    struct Desktop {
+        kde: bool,
+        gnome: bool,
+    }
+
+    fn read(desktop: Desktop) {
+        REDUCED.store(super::read_reduced_motion(desktop.kde), Ordering::Relaxed);
+        let layout = super::read_button_layout(desktop.kde, desktop.gnome);
+        *LAYOUT.lock().unwrap_or_else(|p| p.into_inner()) = layout;
+    }
+
+    /// Starts following the preferences, once.
+    pub fn follow() {
+        static FOLLOW: std::sync::Once = std::sync::Once::new();
+        FOLLOW.call_once(|| {
+            let names = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+            let named = |name: &str| names.split(':').any(|d| d == name);
+            let desktop = Desktop {
+                kde: named("KDE"),
+                gnome: named("GNOME"),
+            };
+            // The first answer at once, so the first frames already follow the settings.
+            read(desktop);
+            let spawned = std::thread::Builder::new()
+                .name("desktop preferences".into())
+                .spawn(move || {
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(2));
+                        read(desktop);
+                    }
+                });
+            if let Err(error) = spawned {
+                tracing::warn!("can't follow the desktop's preferences: {error}");
+            }
+        });
+    }
+}
+
+/// What `program` printed, if it ran and succeeded.
+#[cfg(target_os = "linux")]
+fn desktop_output(program: &str, args: &[&str]) -> Option<String> {
+    std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// KDE's button layout in `kwinrc`, or GNOME's `button-layout`.
+#[cfg(target_os = "linux")]
+fn read_button_layout(kde: bool, gnome: bool) -> Option<domain::caption::ButtonLayout> {
+    if kde {
+        let side = |key: &str| {
+            let args = ["--file", "kwinrc", "--group", "org.kde.kdecoration2", "--key", key];
+            desktop_output("kreadconfig6", &args).or_else(|| desktop_output("kreadconfig5", &args))
+        };
+        if let (Some(left), Some(right)) = (side("ButtonsOnLeft"), side("ButtonsOnRight")) {
+            return Some(domain::caption::ButtonLayout::from_kde(&left, &right));
         }
-    });
-    REDUCED.load(Ordering::Relaxed)
+    }
+    if !gnome {
+        return None;
+    }
+    desktop_output(
+        "gsettings",
+        &["get", "org.gnome.desktop.wm.preferences", "button-layout"],
+    )
+    .and_then(|value| domain::caption::ButtonLayout::from_gnome(&value))
 }
 
 #[cfg(target_os = "linux")]
 fn read_reduced_motion(kde: bool) -> bool {
-    let output = |program: &str, args: &[&str]| {
-        std::process::Command::new(program)
-            .args(args)
-            .stdin(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .output()
-            .ok()
-            .filter(|output| output.status.success())
-            .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
-    };
+    let output = desktop_output;
     if kde {
         let args = [
             "--file",

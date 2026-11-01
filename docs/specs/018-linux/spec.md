@@ -31,7 +31,7 @@ People with their libraries on a Linux desktop (and developers working on Linux)
 - **Given** the main window on Linux (X11 or Wayland)
 - **When** it is shown
 - **Then** the toolbar with the search takes the place of the title bar, as in REQ-013-02, and there is no second bar above it
-- **And** minimize, maximize and close sit at its right as round icon buttons, as GNOME's header bars draw them
+- **And** minimize, maximize and close sit at its right as round icon buttons, as GNOME's header bars draw them (or as the desktop's layout names them, REQ-018-10)
 - **And** empty toolbar space moves the window when dragged and maximizes or restores it when double-clicked, and the window can be resized from its edges and corners
 
 ### REQ-018-05 · Show in the file manager
@@ -65,6 +65,14 @@ People with their libraries on a Linux desktop (and developers working on Linux)
 - **Then** it builds a `.tar.gz` with the app, a `.desktop` file, the app icon, the license and the third-party notices, whose app uses the system's exiftool, ffmpeg and libmpv
 - **And** the release workflow attaches it beside the Windows downloads
 
+### REQ-018-10 · Caption buttons in the desktop's layout
+
+- **Given** a desktop whose button layout names the window controls' sides and order (GNOME's `org.gnome.desktop.wm.preferences button-layout`, KDE's _Titlebar Buttons_)
+- **When** the window is drawn
+- **Then** the caption buttons appear on the side, in the order and with the buttons the layout names, and buttons it doesn't name are left out
+- **And** the title bar keeps their place free on that side, and follows a changed layout while the app runs
+- **And** on other desktops, or when the layout can't be read, they stay minimize, maximize, close at the right
+
 ### REQ-018-11 · Video in step with the display
 
 - **Given** a display that doesn't run at 60 Hz (e.g. 75, 120 or 144 Hz)
@@ -76,7 +84,7 @@ People with their libraries on a Linux desktop (and developers working on Linux)
 
 - macOS (a later spec).
 - AppImage, Flatpak, `.deb` and distribution repositories; bundling the helpers on Linux.
-- Reading the desktop's button layout (`org.gnome.desktop.wm.preferences button-layout`): the buttons are always minimize, maximize, close at the right.
+- Buttons of the desktop's layout the app doesn't have (the app menu, the window icon, _On all desktops_, spacers).
 - Window shadows and rounded corners of the undecorated window on Wayland compositors that don't add them.
 - Reduced transparency on Linux: no desktop has a common setting for it, so glass stays on (REQ-013-06 applies only where the OS has one).
 - Opening files with Good Gallery from the file manager.
@@ -100,4 +108,5 @@ People with their libraries on a Linux desktop (and developers working on Linux)
 | REQ-018-07 | `crates/media/src/helpers.rs` › exiftool_ends_with_an_app_that_exits_without_cleaning_up | pass |
 | REQ-018-08 | `crates/media/src/helpers.rs` › req_018_08_lowers_the_calling_threads_priority_only | pass |
 | REQ-018-09 | `xtask/src/dist.rs` › req_018_09_stages_the_linux_package; `xtask/tests/workflows.rs` › req_018_01_req_018_09_ci_and_the_release_cover_linux | pass |
+| REQ-018-10 | `crates/domain/src/caption.rs` › req_018_10_reads_gnomes_button_layout, req_018_10_reads_kdes_button_layout, req_018_10_a_button_named_twice_is_shown_once, req_018_10_an_unreadable_gnome_value_is_none; `crates/app/src/titlebar.rs` › req_018_10_places_the_buttons_as_the_layout_names_them, req_018_10_round_caption_buttons_follow_the_layout; `crates/app/tests/gallery.rs` › req_018_10_caption_buttons_at_the_left (`caption_left*_linux.png`) | partial (reading the setting on a real GNOME and KDE desktop checked by hand only) |
 | REQ-018-11 | `crates/domain/src/video.rs` › req_018_11_measures_the_rate_frames_are_presented_at, req_018_11_dropped_frames_and_pauses_dont_move_the_rate, req_018_11_follows_a_new_rate; `crates/app/src/video/mpv.rs` › req_018_11_the_display_fps_changes_while_mpv_runs | partial (smooth playback on a 120/144 Hz display checked by hand only) |
