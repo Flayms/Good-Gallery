@@ -273,11 +273,7 @@ fn req_021_20_the_color_section_has_a_hue_slider() {
     harness.get_by_role_and_label(Role::Button, "Light").click();
     harness.run_steps(2);
     let top = |harness: &App, label: &str| harness.get_by_role_and_label(Role::Slider, label).rect().top();
-    let (tint, hue, vibrance) = (
-        top(&harness, "Tint"),
-        top(&harness, "Hue"),
-        top(&harness, "Vibrance"),
-    );
+    let (tint, hue, vibrance) = (top(&harness, "Tint"), top(&harness, "Hue"), top(&harness, "Vibrance"));
     assert!(tint < hue && hue < vibrance, "Tint, Hue, Vibrance");
     let mut recipe = Recipe::default();
     Adjustment::Hue.set(&mut recipe, 120.0);
