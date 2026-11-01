@@ -321,6 +321,10 @@ pub struct Gallery {
     view_height: f32,
     /// A tile or row clicked this frame: the viewer opens it.
     opened: Option<usize>,
+    /// The selected items (spec 025).
+    selection: domain::selection::Selection,
+    /// A rating asked for the selection this frame (REQ-025-07): stars, or `None` to remove it.
+    rate_selection: Option<Option<i64>>,
     /// The item shown in the viewer: kept in view (REQ-016-06), its thumbnail wanted first (REQ-009-14).
     viewed: Option<(usize, i64)>,
     /// Positions shown in the viewer's filmstrip: their thumbnails are wanted after the viewer's own (REQ-015-05).
@@ -386,6 +390,8 @@ impl Gallery {
             scroll_to: None,
             view_height: 0.0,
             opened: None,
+            selection: Default::default(),
+            rate_selection: None,
             viewed: None,
             strip: 0..0,
             detail: None,
@@ -487,6 +493,8 @@ impl Gallery {
         }
         let library_changed = search.library != self.search.library;
         self.search = search;
+        // No hidden item stays selected (REQ-025-05).
+        self.selection.clear();
         self.anchor = 0;
         self.anchor_id = None;
         self.scroll_to = Some(0.0);
@@ -594,6 +602,89 @@ impl Gallery {
     /// The gallery position a click or Enter asked to open in the viewer this frame (REQ-009-01).
     pub fn take_opened(&mut self) -> Option<usize> {
         self.opened.take()
+    }
+
+    /// The selection (spec 025).
+    pub fn selection(&self) -> &domain::selection::Selection {
+        &self.selection
+    }
+
+    /// How many items are selected (REQ-025-06).
+    pub fn selected_count(&self) -> usize {
+        self.data.as_ref().map_or(0, |data| self.selection.count(&data.ids))
+    }
+
+    /// The selected items, in gallery order.
+    pub fn selected_ids(&self) -> Vec<i64> {
+        self.data
+            .as_ref()
+            .map_or_else(Vec::new, |data| self.selection.ids(&data.ids))
+    }
+
+    /// Selects nothing (REQ-025-04).
+    pub fn clear_selection(&mut self) {
+        self.selection.clear();
+    }
+
+    /// Asks to rate the selection (REQ-025-07): stars, or `None` to remove the rating.
+    pub fn rate_selection(&mut self, rating: Option<i64>) {
+        if self.selected_count() > 0 {
+            self.rate_selection = Some(rating);
+        }
+    }
+
+    /// The rating asked for the selection this frame, if any (REQ-025-07).
+    pub fn take_rate_selection(&mut self) -> Option<Option<i64>> {
+        self.rate_selection.take()
+    }
+
+    /// The gallery's own keys while it is in front (no viewer, no focused text field): Ctrl+A selects all, Escape
+    /// clears (REQ-025-04), and `1`–`5` rate the selection in the desktop app (REQ-025-07).
+    pub fn selection_keys(&mut self, ctx: &egui::Context) {
+        if ctx.egui_wants_keyboard_input() {
+            return;
+        }
+        let empty = self.selected_count() == 0;
+        let menu_open = egui::Popup::is_any_open(ctx);
+        ctx.input_mut(|input| {
+            if input.consume_key(egui::Modifiers::COMMAND, egui::Key::A) {
+                self.selection.select_all();
+            }
+            // Escape closes an open menu first.
+            if !empty && !menu_open && input.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
+                self.selection.clear();
+            }
+            if !empty && !crate::WEB {
+                let stars = [
+                    egui::Key::Num1,
+                    egui::Key::Num2,
+                    egui::Key::Num3,
+                    egui::Key::Num4,
+                    egui::Key::Num5,
+                ];
+                for (rating, key) in (1..).zip(stars) {
+                    if input.consume_key(egui::Modifiers::NONE, key) {
+                        self.rate_selection = Some(Some(rating));
+                    }
+                }
+            }
+        });
+    }
+
+    /// A click on the item at `index` (a tile or a row): Ctrl toggles it, Shift adds the range from the anchor, and a
+    /// plain click toggles it in selection mode or opens it (REQ-025-01 to REQ-025-03, REQ-009-01). Space on the
+    /// focused item toggles it too.
+    fn clicked(&mut self, index: usize, modifiers: egui::Modifiers, space: bool) {
+        let Some(data) = self.data.clone() else { return };
+        let Some(&id) = data.ids.get(index) else { return };
+        if modifiers.shift {
+            self.selection.add_range(&data.ids, id);
+        } else if modifiers.command || space || !self.selection.is_empty(&data.ids) {
+            self.selection.toggle(id);
+        } else {
+            self.selection.set_anchor(id);
+            self.opened = Some(index);
+        }
     }
 
     /// Changes whenever a new result arrived, so positions may have moved.
@@ -719,6 +810,8 @@ impl Gallery {
                 }
                 match result {
                     Ok(data) => {
+                        // Items that left the index leave the selection (REQ-025-05).
+                        self.selection.retain(&data.ids);
                         self.data = Some(Arc::new(data));
                         self.data_version += 1;
                         self.error = None;
