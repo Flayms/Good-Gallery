@@ -138,10 +138,15 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
         egui::Sense::click_and_drag(),
     );
     crate::titlebar::drag_area(ui.ctx(), &drag);
+    // Window controls at the left take the header's start (REQ-018-10).
+    let controls = crate::titlebar::reserved_left_in(ui.ctx(), header.left());
     ui.horizontal(|ui| {
         ui.set_height(48.0);
-        ui.add_space(8.0);
-        ui.add(Icon::Images.image(20.0, theme::text()));
+        ui.add_space(8.0 + controls);
+        // The name alone beside window controls: the header has no room for both.
+        if controls == 0.0 {
+            ui.add(Icon::Images.image(20.0, theme::text()));
+        }
         ui.label(egui::RichText::new("Good Gallery").family(theme::semibold()));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let hide = crate::icons::icon_button(ui, Icon::PanelLeft, "Hide sidebar", "Hide sidebar (Ctrl + B)");
