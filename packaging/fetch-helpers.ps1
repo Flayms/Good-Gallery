@@ -4,9 +4,9 @@
 #
 #   ./packaging/fetch-helpers.ps1 [-Out target/helpers]
 #
-# Then `cargo xtask dist` packages them, and tests or `cargo run` can use them through GOOD_GALLERY_EXIFTOOL,
-# GOOD_GALLERY_FFMPEG and GOOD_GALLERY_MPV. Pinned versions: exiftool 13.59 (the exiftool-vendored.exe build),
-# ffmpeg-static b6.1.1, libmpv 20261021 (shinchiro).
+# Then `cargo xtask dist` packages them, and development builds (tests, `cargo run`) find them in the default
+# target\helpers by themselves; GOOD_GALLERY_EXIFTOOL, GOOD_GALLERY_FFMPEG and GOOD_GALLERY_MPV override that.
+# Pinned versions: exiftool 13.59 (the exiftool-vendored.exe build), ffmpeg-static b6.1.1, libmpv 20261021 (shinchiro).
 param(
     [string]$Out = (Join-Path $PSScriptRoot '..\target\helpers')
 )
