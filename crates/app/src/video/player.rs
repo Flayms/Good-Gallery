@@ -1,8 +1,9 @@
 //! [`MpvPlayer`]: libmpv decodes (hardware decoding with copy-back), plays the audio and keeps A/V in sync. A render
 //! thread renders each frame with mpv's software renderer at the size the video takes on screen and, like thumbnails
 //! and originals, creates and fills the `wgpu::Texture` itself; the UI thread only draws it. Frames are timed to the
-//! display (`video-sync=display-resample`): the UI wakes the render thread once per presented frame. Without a wgpu
-//! render state (tests) frames go through egui's textures and are timed to mpv's clock.
+//! display (`video-sync=display-resample`): the UI wakes the render thread once per presented frame. Where the OS
+//! doesn't tell the display's refresh rate (Linux), it is measured from the presented frames (REQ-018-11). Without a
+//! wgpu render state (tests) frames go through egui's textures and are timed to mpv's clock.
 
 use super::mpv::{Event, FrameBuffer, Mpv, SwRender};
 use super::{Playback, PlaybackState, VideoFrame};
@@ -19,7 +20,7 @@ use web_time::Instant;
 const STATE_INTERVAL: Duration = Duration::from_millis(100);
 /// wgpu wants rows aligned to 256 bytes, mpv to 64.
 const ROW_ALIGN: usize = 256;
-/// Refresh rate assumed when Windows doesn't report one.
+/// Refresh rate assumed until one is known: the OS's, or the measured one (REQ-018-11).
 const DEFAULT_DISPLAY_FPS: f64 = 60.0;
 
 /// Which `loadfile` frames belong to. Loads are counted on both sides: the UI counts what it asked for, the event
@@ -95,6 +96,10 @@ pub struct MpvPlayer {
     state_at: Option<Instant>,
     /// The state was read since the load was accepted (its size is known from then on, if it has video).
     read_since_accept: bool,
+    /// The refresh rate frames are timed to (display sync).
+    display_fps: f64,
+    /// Measures the refresh rate while a video plays, where the OS didn't tell it.
+    present_rate: Option<domain::video::PresentRate>,
 }
 
 impl MpvPlayer {
@@ -107,9 +112,9 @@ impl MpvPlayer {
         audio: bool,
     ) -> Result<Self, String> {
         let display_sync = render_state.is_some();
-        let fps = media::helpers::display_refresh_rate()
-            .unwrap_or(DEFAULT_DISPLAY_FPS)
-            .to_string();
+        let os_fps = media::helpers::display_refresh_rate();
+        let display_fps = os_fps.unwrap_or(DEFAULT_DISPLAY_FPS);
+        let fps = display_fps.to_string();
         let mut options = vec![
             ("vo", "libmpv"),
             ("hwdec", "auto-copy"),
@@ -170,6 +175,8 @@ impl MpvPlayer {
             state: PlaybackState::default(),
             state_at: None,
             read_since_accept: false,
+            display_fps,
+            present_rate: (display_sync && os_fps.is_none()).then(domain::video::PresentRate::default),
         })
     }
 
@@ -340,9 +347,24 @@ impl Playback for MpvPlayer {
             // Every presented frame counts while it plays.
             if !self.state.paused && !self.state.ended {
                 self.shared.ctx.request_repaint();
+                self.measure_display_fps();
             }
         }
         self.shown.as_ref().map(|(frame, _)| *frame)
+    }
+}
+
+impl MpvPlayer {
+    /// Counts this frame and times video to the measured refresh rate once it differs from the one in use
+    /// (REQ-018-11).
+    fn measure_display_fps(&mut self) {
+        let Some(rate) = &mut self.present_rate else { return };
+        rate.frame(self.shared.ctx.input(|input| input.time));
+        if let Some(fps) = rate.changed(self.display_fps) {
+            tracing::info!("video: timed to {fps:.2} Hz, the rate frames are presented at");
+            self.display_fps = fps;
+            self.mpv.set_double("override-display-fps", fps);
+        }
     }
 }
 
