@@ -315,6 +315,8 @@ pub struct Recipe {
     pub curves: Curves,
     pub temperature: f32,
     pub tint: f32,
+    /// Degrees around the color wheel, −180 to +180.
+    pub hue: f32,
     pub vibrance: f32,
     pub saturation: f32,
     /// 0 to 100.
@@ -357,6 +359,7 @@ impl Default for Recipe {
             curves: Curves::default(),
             temperature: 0.0,
             tint: 0.0,
+            hue: 0.0,
             vibrance: 0.0,
             saturation: 0.0,
             grain: 0.0,
@@ -710,6 +713,7 @@ pub enum Adjustment {
     Blacks,
     Temperature,
     Tint,
+    Hue,
     Vibrance,
     Saturation,
     Grain,
@@ -722,7 +726,7 @@ pub enum Adjustment {
 }
 
 impl Adjustment {
-    pub const ALL: [Adjustment; 18] = [
+    pub const ALL: [Adjustment; 19] = [
         Self::Exposure,
         Self::Brightness,
         Self::Contrast,
@@ -732,6 +736,7 @@ impl Adjustment {
         Self::Blacks,
         Self::Temperature,
         Self::Tint,
+        Self::Hue,
         Self::Vibrance,
         Self::Saturation,
         Self::Blur,
@@ -752,7 +757,7 @@ impl Adjustment {
             | Self::Shadows
             | Self::Whites
             | Self::Blacks => Section::Light,
-            Self::Temperature | Self::Tint | Self::Vibrance | Self::Saturation => Section::Color,
+            Self::Temperature | Self::Tint | Self::Hue | Self::Vibrance | Self::Saturation => Section::Color,
             Self::Grain
             | Self::GrainSize
             | Self::Vignette
@@ -774,6 +779,7 @@ impl Adjustment {
             Self::Blacks => "Blacks",
             Self::Temperature => "Temperature",
             Self::Tint => "Tint",
+            Self::Hue => "Hue",
             Self::Vibrance => "Vibrance",
             Self::Saturation => "Saturation",
             Self::Grain => "Grain",
@@ -789,6 +795,7 @@ impl Adjustment {
     pub fn range(self) -> (f32, f32) {
         match self {
             Self::Exposure => (-5.0, 5.0),
+            Self::Hue => (-180.0, 180.0),
             Self::Grain
             | Self::GrainSize
             | Self::VignetteMidpoint
@@ -832,6 +839,7 @@ impl Adjustment {
             Self::Blacks => recipe.blacks,
             Self::Temperature => recipe.temperature,
             Self::Tint => recipe.tint,
+            Self::Hue => recipe.hue,
             Self::Vibrance => recipe.vibrance,
             Self::Saturation => recipe.saturation,
             Self::Grain => recipe.grain,
@@ -857,6 +865,7 @@ impl Adjustment {
             Self::Blacks => &mut recipe.blacks,
             Self::Temperature => &mut recipe.temperature,
             Self::Tint => &mut recipe.tint,
+            Self::Hue => &mut recipe.hue,
             Self::Vibrance => &mut recipe.vibrance,
             Self::Saturation => &mut recipe.saturation,
             Self::Grain => &mut recipe.grain,
@@ -950,6 +959,8 @@ pub struct Params {
     pub contrast: f32,
     pub saturation: f32,
     pub vibrance: f32,
+    /// The turn around the color wheel, in radians.
+    pub hue: f32,
     pub vignette: f32,
     pub vignette_start: f32,
     pub grain: f32,
@@ -991,6 +1002,7 @@ impl Params {
             contrast: recipe.contrast / 100.0,
             saturation: recipe.saturation / 100.0,
             vibrance: recipe.vibrance / 100.0,
+            hue: recipe.hue.to_radians(),
             vignette: recipe.vignette / 100.0,
             vignette_start: recipe.vignette_midpoint / 100.0 * 0.8,
             grain: recipe.grain / 100.0,
@@ -1061,7 +1073,7 @@ impl Params {
                 *c = to_linear(lookup(table, i, to_encoded(c.max(0.0)).min(1.0)));
             }
         }
-        if self.saturation != 0.0 || self.vibrance != 0.0 {
+        if self.saturation != 0.0 || self.vibrance != 0.0 || self.hue != 0.0 {
             lin = self.chroma(lin);
         }
         lin
@@ -1134,7 +1146,8 @@ impl Params {
         }
     }
 
-    /// Saturation and vibrance as chroma scaling in OkLab; vibrance favours muted colors and spares skin tones.
+    /// Saturation and vibrance as chroma scaling in OkLab; vibrance favours muted colors and spares skin tones. Then
+    /// the hue turns the colors around OkLab's lightness axis, keeping lightness and chroma (REQ-021-20).
     fn chroma(&self, lin: [f32; 3]) -> [f32; 3] {
         let [l, a, b] = to_oklab(lin);
         let chroma = (a * a + b * b).sqrt();
@@ -1146,7 +1159,9 @@ impl Params {
             let protect = if self.vibrance > 0.0 { 1.0 - 0.7 * skin } else { 1.0 };
             factor *= 1.0 + self.vibrance * muted * protect;
         }
-        from_oklab([l, a * factor, b * factor])
+        let (a, b) = (a * factor, b * factor);
+        let (sin, cos) = self.hue.sin_cos();
+        from_oklab([l, a * cos - b * sin, a * sin + b * cos])
     }
 }
 
@@ -1688,6 +1703,59 @@ mod tests {
         // Greys stay grey.
         let out = render(&with(Adjustment::Saturation, 100.0), grey(0.5));
         assert!(close(out, grey(0.5)));
+    }
+
+    #[test]
+    fn req_021_20_hue_turns_colors_keeping_lightness_and_chroma() {
+        let lab = |rgb: [f32; 3]| {
+            let [l, a, b] = to_oklab(rgb.map(to_linear));
+            (l, (a * a + b * b).sqrt(), b.atan2(a).to_degrees())
+        };
+        // A muted color, so the turned one stays within sRGB.
+        let color = [0.6, 0.45, 0.4];
+        let (l, chroma, hue) = lab(color);
+        for degrees in [-120.0, 30.0, 90.0] {
+            let (l2, chroma2, hue2) = lab(render(&with(Adjustment::Hue, degrees), color));
+            assert!((l2 - l).abs() < 2e-3, "{degrees}°: lightness {l} → {l2}");
+            assert!(
+                (chroma2 - chroma).abs() < 2e-3,
+                "{degrees}°: chroma {chroma} → {chroma2}"
+            );
+            let turned = (hue2 - hue - degrees).rem_euclid(360.0);
+            assert!(turned.min(360.0 - turned) < 1.0, "{degrees}°: hue {hue} → {hue2}");
+        }
+        // Greys stay grey; ±180° are the same; 0° changes nothing.
+        let out = render(&with(Adjustment::Hue, 75.0), grey(0.5));
+        assert!(close(out, grey(0.5)), "{out:?}");
+        assert!(close(
+            render(&with(Adjustment::Hue, 180.0), color),
+            render(&with(Adjustment::Hue, -180.0), color)
+        ));
+        assert!(with(Adjustment::Hue, 0.0).is_neutral());
+        assert!(!with(Adjustment::Hue, 1.0).is_neutral());
+        assert_eq!(Adjustment::Hue.range(), (-180.0, 180.0));
+        assert_eq!(Adjustment::Hue.section(), Section::Color);
+        // After _Tint_ in the _Color_ section, and the subject and background have it too (REQ-022-01).
+        let color_section: Vec<Adjustment> = Adjustment::ALL
+            .into_iter()
+            .filter(|a| a.section() == Section::Color)
+            .collect();
+        assert_eq!(
+            color_section[..3],
+            [Adjustment::Temperature, Adjustment::Tint, Adjustment::Hue]
+        );
+        assert!(Adjustment::Hue.in_parts());
+    }
+
+    #[test]
+    fn req_021_20_the_hue_is_saved_with_the_recipe_and_older_recipes_have_none() {
+        let mut recipe = with(Adjustment::Hue, -45.0);
+        Adjustment::Hue.set(recipe.part_mut(Part::Subject), 120.0);
+        let again = Recipe::from_json(&recipe.to_json()).unwrap();
+        assert_eq!(again.hue, -45.0);
+        assert_eq!(again.subject.as_ref().unwrap().hue, 120.0);
+        assert_eq!(Recipe::from_json(r#"{"version": 1, "exposure": 1}"#).unwrap().hue, 0.0);
+        assert_eq!(Recipe::from_json(r#"{"hue": 999}"#).unwrap().hue, 180.0);
     }
 
     #[test]

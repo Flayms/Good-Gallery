@@ -63,6 +63,13 @@ Users who find a photo that is too dark, has a color cast or lacks punch fix it 
 - **Then** temperature shifts the colors towards blue or yellow, tint towards green or magenta; saturation scales all colors alike, vibrance mostly the muted ones and spares skin tones; the picker sets temperature and tint so the picked spot turns neutral grey
 - **And** each at 0 leaves the photo unchanged
 
+### REQ-021-20 · Hue
+
+- **Given** editing
+- **When** the user changes _Hue_ (−180° to +180°, in _Color_ after _Tint_), for the whole photo or for its subject or background (REQ-022-01)
+- **Then** every color of that part turns around the color wheel by that angle, keeping its lightness and saturation; greys stay grey
+- **And** at 0° the photo is unchanged, +180° and −180° look the same, and the saved file shows what the preview showed
+
 ### REQ-021-06 · Effects
 
 - **Given** editing
@@ -162,6 +169,7 @@ Users who find a photo that is too dark, has a color cast or lacks punch fix it 
 | REQ-021-04 | `crates/domain/src/edit.rs` › req_021_04_a_curve_maps_tones_through_its_points_without_overshooting, req_021_04_curve_points_are_added_moved_and_removed_within_bounds | pass |
 | REQ-021-18 | `crates/domain/src/edit.rs` › req_021_18_the_histogram_shows_the_tones_the_curve_receives; `crates/app/tests/edit.rs` › req_021_18_the_curve_editor_shows_the_histogram | pass |
 | REQ-021-05 | `crates/domain/src/edit.rs` › req_021_05_* (temperature and tint, picker, saturation and vibrance); `crates/app/src/edit.rs` › req_021_05_the_picker_neutralizes_the_picked_spot | pass |
+| REQ-021-20 | `crates/domain/src/edit.rs` › req_021_20_hue_turns_colors_keeping_lightness_and_chroma, req_021_20_the_hue_is_saved_with_the_recipe_and_older_recipes_have_none; `crates/app/tests/edit.rs` › req_021_20_the_color_section_has_a_hue_slider; `crates/app/src/edit.rs` › req_021_02_req_021_06_the_gpu_preview_matches_the_cpu_render | pass |
 | REQ-021-06 | `crates/domain/src/edit.rs` › req_021_06_vignette_darkens_or_lightens_the_edges_only, req_021_06_grain_is_the_same_for_the_same_position_and_follows_the_photo_not_the_screen; `crates/app/src/edit.rs` › req_021_02_req_021_06_the_gpu_preview_matches_the_cpu_render | pass |
 | REQ-021-07 | `crates/domain/src/edit.rs` › req_021_07_history_undoes_and_redoes_changes; `crates/app/src/edit.rs` › req_021_07_req_021_08_tracks_changes_undo_and_asks_before_leaving; `crates/app/tests/edit.rs` › req_021_02_req_021_07_previews_compares_undoes_and_resets | pass |
 | REQ-021-08 | `crates/app/tests/edit.rs` › req_021_08_asks_before_leaving_with_unsaved_changes; `crates/app/src/edit.rs` › req_021_07_req_021_08_tracks_changes_undo_and_asks_before_leaving, req_021_08_discarding_after_the_preview_was_queued_still_draws_it | pass |

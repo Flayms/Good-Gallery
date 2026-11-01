@@ -7,6 +7,7 @@ struct Part {
     gains: vec4<f32>,
     tone: vec4<f32>,
     color: vec4<f32>,
+    turn: vec4<f32>,
 }
 
 struct Edit {
@@ -23,6 +24,8 @@ struct Edit {
     tone: vec4<f32>,
     // Contrast, saturation, vibrance, brightness (the midtones' gamma).
     color: vec4<f32>,
+    // The hue's turn around the color wheel: its cosine (x) and sine (y).
+    turn: vec4<f32>,
     // Vignette, vignette start, grain, grain cell size.
     fx: vec4<f32>,
     subject: Part,
@@ -135,7 +138,9 @@ fn chroma(c: vec3<f32>, p: Part) -> vec3<f32> {
         }
         factor *= 1.0 + vibrance * muted * protect;
     }
-    return from_oklab(vec3<f32>(lab.x, lab.yz * factor));
+    let ab = lab.yz * factor;
+    let turned = vec2<f32>(ab.x * p.turn.x - ab.y * p.turn.y, ab.x * p.turn.y + ab.y * p.turn.x);
+    return from_oklab(vec3<f32>(lab.x, turned));
 }
 
 fn hash(x: u32, y: u32) -> u32 {
@@ -176,7 +181,7 @@ fn core(linear: vec3<f32>, p: Part, curves: bool) -> vec3<f32> {
             lin[c] = to_linear(lookup(c, min(to_encoded(max(lin[c], 0.0)), 1.0)));
         }
     }
-    if p.color.y != 0.0 || p.color.z != 0.0 {
+    if p.color.y != 0.0 || p.color.z != 0.0 || p.turn.y != 0.0 || p.turn.x != 1.0 {
         lin = chroma(lin, p);
     }
     return lin;
@@ -190,7 +195,7 @@ fn part(lin: vec3<f32>, p: Part) -> vec3<f32> {
 }
 
 fn develop(rgb: vec3<f32>, uv: vec2<f32>, subject: f32) -> vec3<f32> {
-    let photo = Part(edit.gains, edit.tone, edit.color);
+    let photo = Part(edit.gains, edit.tone, edit.color, edit.turn);
     var lin = core(vec3<f32>(to_linear(rgb.r), to_linear(rgb.g), to_linear(rgb.b)), photo, edit.gains.w > 0.5);
     if (u32(edit.size.w) & 4u) != 0u {
         lin = mix(part(lin, edit.background), part(lin, edit.subject), subject);
