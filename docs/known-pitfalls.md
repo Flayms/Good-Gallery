@@ -28,6 +28,7 @@ Add every pitfall you hit, either to avoid it in the future or for us to fix lat
 * **wgpu's `TextureView` is `Clone`** (cheap), so textures made on worker threads can hand their view to glass.
 * **Don't `destroy()` a texture a paint callback may still use.** Callbacks queued this frame run `prepare` after the UI code, so ending the edit session mid-frame (the _Discard_ button) and destroying its texture made `create_bind_group` fail fatally (#69). Drop the texture instead, wgpu frees it with its last view and bind group, and keep per-frame bind groups in the callback, not in `CallbackResources`, so they don't keep it alive.
 * **ICU4X formatters aren't `Send`** (yoke'd `Rc` data): cache them in a `thread_local!`, not a `static Mutex`.
+* **Consuming Tab doesn't stop egui's focus move:** `Memory` reads Tab from the raw input in `begin_pass`, before any `consume_key`, and with nothing focused gives focus to the first focusable widget of the frame, under an overlay too. An overlay that should keep focus (the viewer) sets itself as the modal layer (`Memory::set_modal_layer`) every frame; widgets only sensing drags (`Sense::drag()`) are focusable too, use `Sense::DRAG` for invisible handles.
 
 ## Visual checks
 

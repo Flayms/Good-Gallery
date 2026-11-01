@@ -16,4 +16,4 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 
 - [x] Strip layout, centering, thumbnails in view (REQ-015-01 … -03, -05)
 - [x] Toggle remembered, click and Enter jump, fades with the controls (REQ-015-02, -04, -06, -07)
-- [ ] Keyboard focus into the viewer, so Tab reaches the filmstrip (REQ-015-04 partial)
+- [x] Keyboard focus into the viewer, so Tab reaches the filmstrip (REQ-015-04): the viewer is egui's modal layer while it is open

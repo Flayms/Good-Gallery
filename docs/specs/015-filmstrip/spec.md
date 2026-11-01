@@ -74,7 +74,7 @@ In the viewer, the user sees a single row of thumbnails of the whole gallery bel
 | REQ-015-01 | `crates/app/tests/viewer.rs` › req_015_01_req_015_02_req_015_03_toggles_and_remembers_the_filmstrip | pass |
 | REQ-015-02 | `crates/domain/src/viewer.rs` › req_015_02_shows_the_filmstrip_only_once_the_user_showed_it; `crates/app/tests/viewer.rs` › req_015_01_req_015_02_req_015_03_toggles_and_remembers_the_filmstrip | pass |
 | REQ-015-03 | `crates/domain/src/viewer.rs` › req_015_03_centers_the_shown_thumbnail_as_far_as_the_ends_allow; `crates/app/tests/viewer.rs` › req_015_01_req_015_02_req_015_03_toggles_and_remembers_the_filmstrip | pass (the shown thumbnail is `toggled` for assistive technology; it jumps into place, without smooth scrolling) |
-| REQ-015-04 | `crates/app/tests/viewer.rs` › req_015_04_req_015_05_jumps_to_and_browses_the_filmstrip | partial: by click; keyboard focus doesn't reach the viewer yet (Tab is kept from the window below), Enter works on a thumbnail focused by assistive technology |
+| REQ-015-04 | `crates/app/tests/viewer.rs` › req_015_04_req_015_05_jumps_to_and_browses_the_filmstrip, req_015_04_tab_moves_focus_into_the_viewer_and_the_filmstrip | pass |
 | REQ-015-05 | `crates/domain/src/viewer.rs` › req_015_05_turns_the_vertical_wheel_into_sideways_scrolling_and_keeps_touchpad_swipes, req_015_05_finds_the_thumbnails_in_view; `crates/app/tests/viewer.rs` › req_015_04_req_015_05_jumps_to_and_browses_the_filmstrip | pass (only the thumbnails in view are drawn and loaded) |
 | REQ-015-06 | `crates/app/tests/viewer.rs` › req_015_06_the_filmstrip_steps_aside_with_the_controls | pass |
 | REQ-015-07 | `crates/app/tests/viewer.rs` › req_015_07_marks_videos_in_the_filmstrip | pass |
