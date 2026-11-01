@@ -144,6 +144,53 @@ fn selection_bar(ui: &mut egui::Ui, gallery: &mut Gallery) {
         egui::Popup::close_id(ui.ctx(), egui::Id::NULL.with("rate menu"));
         gallery.rate_selection(rating);
     }
+
+    let button = egui::Button::new((
+        Icon::Plus.small(),
+        "Tag",
+        Icon::ChevronDown.image(theme::ICON_SIZE, theme::muted()),
+    ))
+    .frame(false)
+    .min_size(vec2(0.0, theme::CONTROL_HEIGHT));
+    let response = ui.add(button);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Tag the selection"));
+    let paths = gallery.tag_paths();
+    let mut picked = None;
+    menu(&response, "tag menu", 300.0, |ui| picked = tag_menu(ui, &paths));
+    if let Some(path) = picked {
+        egui::Popup::close_id(ui.ctx(), egui::Id::NULL.with("tag menu"));
+        gallery.tag_selection(path);
+    }
+}
+
+/// _Tag_: People, Places or Tags, and the tag to add to every selected item, with suggestions (REQ-026-06).
+fn tag_menu(ui: &mut egui::Ui, paths: &crate::gallery::TagPaths) -> Option<Vec<String>> {
+    use crate::info::{Adding, Group, add_field};
+    let id = egui::Id::NULL.with("tag menu field");
+    let groups = Group::all(paths);
+    let mut chosen = ui.data(|data| data.get_temp::<usize>(id.with("group"))).unwrap_or(2);
+    ui.horizontal(|ui| {
+        for (index, group) in groups.iter().enumerate() {
+            if ui.selectable_label(chosen == index, group.label).clicked() {
+                chosen = index;
+            }
+        }
+    });
+    ui.data_mut(|data| data.insert_temp(id.with("group"), chosen));
+    let typed = ui.data(|data| data.get_temp::<String>(id));
+    let opened = typed.is_none();
+    let mut typed = typed.unwrap_or_default();
+    match add_field(ui, id.with("text"), opened, &groups[chosen], &mut typed) {
+        Adding::Add(path) => {
+            ui.data_mut(|data| data.remove::<String>(id));
+            Some(path)
+        }
+        // A click on a group takes the focus, but the menu stays; it closes itself.
+        Adding::Open | Adding::Close => {
+            ui.data_mut(|data| data.insert_temp(id, typed));
+            None
+        }
+    }
 }
 
 /// "Any date", one day, a span, or an open start or end (REQ-007-08).

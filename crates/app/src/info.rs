@@ -243,18 +243,35 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths) -> Option
 
 /// A tag group of the info views, as adding a tag to it needs it (REQ-026-01).
 #[derive(Clone, Copy)]
-struct Group<'a> {
-    label: &'a str,
+pub(crate) struct Group<'a> {
+    pub label: &'a str,
     /// Where a new tag goes: `People`, `Places`, or nowhere (a tag of its own).
-    root: Option<&'a str>,
+    pub root: Option<&'a str>,
     /// The group's existing tags, as paths.
-    known: &'a [Vec<String>],
+    pub known: &'a [Vec<String>],
     /// The item's tags in the group, left out of the suggestions.
-    has: &'a [&'a str],
+    pub has: &'a [&'a str],
+}
+
+impl<'a> Group<'a> {
+    /// People, Places and Tags with their existing tags, for adding to the selection (REQ-026-06).
+    pub fn all(paths: &'a TagPaths) -> [Self; 3] {
+        [
+            ("People", Some(PEOPLE_TAG_ROOT), &paths.people),
+            ("Places", Some(PLACES_TAG_ROOT), &paths.places),
+            ("Tags", None, &paths.tags),
+        ]
+        .map(|(label, root, known)| Self {
+            label,
+            root,
+            known,
+            has: &[],
+        })
+    }
 }
 
 /// What the user did in the field for a new tag (REQ-026-01).
-enum Adding {
+pub(crate) enum Adding {
     /// Still typing.
     Open,
     /// Enter on a name, or a suggestion picked: the tag's path.
@@ -264,7 +281,7 @@ enum Adding {
 }
 
 /// The field for a new tag of a group, focused when it has just `opened`, with suggestions below it (REQ-026-01).
-fn add_field(ui: &mut egui::Ui, id: egui::Id, opened: bool, group: &Group<'_>, typed: &mut String) -> Adding {
+pub(crate) fn add_field(ui: &mut egui::Ui, id: egui::Id, opened: bool, group: &Group<'_>, typed: &mut String) -> Adding {
     let Group {
         label,
         root,
