@@ -1,6 +1,7 @@
 //! One media item's details for the viewer's info panel and the info sheet (REQ-009-08).
 
 use crate::Result;
+use domain::faces::FaceRegion;
 use domain::media::MediaKind;
 use domain::tags::{TagCategory, category_of_root};
 use rusqlite::{Connection, OptionalExtension as _};
@@ -32,6 +33,8 @@ pub struct MediaDetail {
     pub rel_path: String,
     /// The edit the file was saved with (spec 021).
     pub edit: Option<domain::edit::SavedEdit>,
+    /// Named face regions on the upright photo (REQ-004-13).
+    pub faces: Vec<FaceRegion>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +99,7 @@ pub fn detail(conn: &Connection, id: i64) -> Result<Option<MediaDetail>> {
                     row.get::<_, Option<String>>(15)?.as_deref(),
                     row.get::<_, Option<String>>(16)?.as_deref(),
                 ),
+                faces: Vec::new(),
             }))
         })
         .optional()?
@@ -117,6 +121,18 @@ pub fn detail(conn: &Connection, id: i64) -> Result<Option<MediaDetail>> {
             name,
         })
         .collect();
+    detail.faces = conn
+        .prepare_cached("SELECT name, x, y, w, h FROM media_faces WHERE media_id = ?1 ORDER BY rowid")?
+        .query_map([id], |row| {
+            Ok(FaceRegion {
+                name: row.get(0)?,
+                x: row.get(1)?,
+                y: row.get(2)?,
+                w: row.get(3)?,
+                h: row.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<_>>()?;
     Ok(Some(detail))
 }
 

@@ -63,6 +63,7 @@ icons! {
     Redo2 => "redo-2",
     RefreshCw => "refresh-cw",
     Rows3 => "rows-3",
+    ScanFace => "scan-face",
     Search => "search",
     Settings => "settings",
     SlidersHorizontal => "sliders-horizontal",

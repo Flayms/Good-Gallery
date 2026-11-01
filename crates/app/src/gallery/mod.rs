@@ -98,7 +98,8 @@ enum Loaded {
     },
     Detail {
         id: i64,
-        result: Result<Option<MediaDetail>, String>,
+        /// Boxed: the details are much larger than the other results.
+        result: Box<DetailResult>,
     },
 }
 
@@ -164,7 +165,7 @@ fn run(conn: &Connection, request: Request) -> Loaded {
         },
         Request::Detail { id } => Loaded::Detail {
             id,
-            result: db::media::detail(conn, id).map_err(|e| e.to_string()),
+            result: Box::new(db::media::detail(conn, id).map_err(|e| e.to_string())),
         },
     }
 }
@@ -742,10 +743,10 @@ impl Gallery {
                 if let Some((asked, loaded)) = &mut self.detail
                     && *asked == id
                 {
-                    if let Err(error) = &result {
+                    if let Err(error) = result.as_ref() {
                         tracing::error!("can't load the details of media item {id}: {error}");
                     }
-                    *loaded = Some(result);
+                    *loaded = Some(*result);
                 }
             }
             Loaded::Suggest { prefix, result } => match result {
