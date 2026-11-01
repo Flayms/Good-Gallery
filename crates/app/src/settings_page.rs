@@ -27,7 +27,10 @@ fn page_header(ui: &mut egui::Ui, rect: Rect, state: &mut AppState) {
     ui.painter()
         .hline(rect.x_range(), rect.bottom() - 0.5, Stroke::new(1.0, theme::rim()));
     let controls = Rect::from_min_max(
-        egui::pos2(rect.left() + 12.0, rect.top() + 8.0),
+        egui::pos2(
+            rect.left() + 12.0 + crate::titlebar::reserved_left_in(ui.ctx(), rect.left()),
+            rect.top() + 8.0,
+        ),
         egui::pos2(
             rect.right() - 12.0 - crate::titlebar::reserved_in(ui.ctx(), rect.right()),
             rect.bottom() - 8.0,

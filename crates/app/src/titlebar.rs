@@ -6,13 +6,14 @@
 //! hands them to Windows as a caption drag.
 //!
 //! On Linux the window is undecorated (winit's Wayland frame or the X11 window manager's caption would sit above the
-//! toolbar, REQ-018-04): the app draws GNOME-style round caption buttons, and thin handles along the window's edges
-//! hand resizing to the compositor.
+//! toolbar, REQ-018-04): the app draws GNOME-style round caption buttons where the desktop's layout puts them
+//! (REQ-018-10), and thin handles along the window's edges hand resizing to the compositor.
 //!
 //! All of the app's window `unsafe` is in this module. Other platforms keep their native caption.
 
 #[cfg(any(windows, target_os = "linux"))]
 use crate::theme;
+pub use domain::caption::{ButtonLayout, CaptionButton};
 #[cfg(any(windows, target_os = "linux"))]
 use eframe::egui::Stroke;
 use eframe::egui::{self, Pos2, Rect, Vec2};
@@ -20,7 +21,7 @@ use eframe::egui::{self, Pos2, Rect, Vec2};
 /// Width of one caption button: Windows' 46 px buttons, or on Linux a slot for a GNOME header bar's 24 px circle with
 /// 6 px between circles.
 pub const BUTTON_WIDTH: f32 = if cfg!(target_os = "linux") { 30.0 } else { 46.0 };
-/// Room between the last caption button and the window's right edge (GNOME keeps one; Windows' buttons touch it).
+/// Room between the outermost caption button and the window's edge (GNOME keeps one; Windows' buttons touch it).
 const BUTTON_MARGIN: f32 = if cfg!(target_os = "linux") { 6.0 } else { 0.0 };
 /// Height of the caption: the toolbar's.
 pub const HEIGHT: f32 = crate::gallery::TOOLBAR_HEIGHT;
@@ -28,37 +29,70 @@ pub const HEIGHT: f32 = crate::gallery::TOOLBAR_HEIGHT;
 #[cfg(windows)]
 const CLOSE_HOVER: egui::Color32 = egui::Color32::from_rgb(0xc4, 0x2b, 0x1c);
 
-/// Room kept free at the right of the caption for the window controls (minimize, maximize, close).
-pub fn reserved_width() -> f32 {
-    if cfg!(any(windows, target_os = "linux")) {
-        3.0 * BUTTON_WIDTH + BUTTON_MARGIN
-    } else {
+fn layout_id() -> egui::Id {
+    egui::Id::unique("caption button layout")
+}
+
+/// Shows the window controls in the desktop's `layout` from now on (REQ-018-10).
+pub fn set_button_layout(ctx: &egui::Context, layout: ButtonLayout) {
+    ctx.data_mut(|data| data.insert_temp(layout_id(), layout));
+}
+
+/// The window controls' layout: the desktop's, or minimize, maximize, close at the right.
+pub fn button_layout(ctx: &egui::Context) -> ButtonLayout {
+    ctx.data(|data| data.get_temp(layout_id())).unwrap_or_default()
+}
+
+/// Room `buttons` window controls take, with the margin to the window's edge.
+fn width_of(buttons: usize) -> f32 {
+    if buttons == 0 || cfg!(not(any(windows, target_os = "linux"))) {
         0.0
+    } else {
+        buttons as f32 * BUTTON_WIDTH + BUTTON_MARGIN
     }
 }
 
-/// Room a caption area ending at `right` keeps free: the window controls' width if it reaches the window's right edge
-/// (an info sheet beside it takes them otherwise). "Reaches" allows for a margin around the content, as the test
-/// harness has.
+/// Room kept free at the right of the caption for the window controls there.
+pub fn reserved_right(ctx: &egui::Context) -> f32 {
+    width_of(button_layout(ctx).right.len())
+}
+
+/// Room a caption area ending at `right` keeps free: the width of the window controls at the right if it reaches the
+/// window's right edge (an info sheet beside it takes them otherwise). "Reaches" allows for a margin around the
+/// content, as the test harness has.
 pub fn reserved_in(ctx: &egui::Context, right: f32) -> f32 {
     if right >= ctx.content_rect().right() - BUTTON_WIDTH {
-        reserved_width()
+        reserved_right(ctx)
     } else {
         0.0
     }
 }
 
-/// Where the window controls are, at the top right of `screen`: minimize, maximize, close.
-pub fn button_rects(screen: Rect) -> [Rect; 3] {
-    std::array::from_fn(|i| {
-        Rect::from_min_size(
-            Pos2::new(
-                screen.right() - BUTTON_MARGIN - BUTTON_WIDTH * (3 - i) as f32,
-                screen.top(),
-            ),
-            Vec2::new(BUTTON_WIDTH, HEIGHT),
-        )
-    })
+/// Room a caption area starting at `left` keeps free: the width of the window controls at the left if it starts at the
+/// window's left edge (the sidebar's header takes them otherwise).
+pub fn reserved_left_in(ctx: &egui::Context, left: f32) -> f32 {
+    if left <= ctx.content_rect().left() + BUTTON_WIDTH {
+        width_of(button_layout(ctx).left.len())
+    } else {
+        0.0
+    }
+}
+
+/// Where the window controls of `layout` are, at the top left and top right of `screen`, from left to right.
+pub fn button_rects(screen: Rect, layout: &ButtonLayout) -> Vec<(CaptionButton, Rect)> {
+    let rect = |x: f32| Rect::from_min_size(Pos2::new(x, screen.top()), Vec2::new(BUTTON_WIDTH, HEIGHT));
+    let left = layout
+        .left
+        .iter()
+        .enumerate()
+        .map(|(i, &button)| (button, rect(screen.left() + BUTTON_MARGIN + BUTTON_WIDTH * i as f32)));
+    let right_start = screen.right() - BUTTON_MARGIN - BUTTON_WIDTH * layout.right.len() as f32;
+    let right = layout
+        .right
+        .iter()
+        .enumerate()
+        .map(|(i, &button)| (button, rect(right_start + BUTTON_WIDTH * i as f32)));
+    left.chain(right).collect()
 }
 
 /// Makes `response` (the background of an empty caption area) move the window when dragged and maximize or restore
@@ -89,7 +123,9 @@ pub fn caption_buttons(ctx: &egui::Context) {
             return;
         }
         let screen = ctx.content_rect();
-        let rects = button_rects(screen);
+        // Windows has no layout setting: minimize, maximize, close at the right.
+        let rects = button_rects(screen, &ButtonLayout::default());
+        let rects: [Rect; 3] = std::array::from_fn(|i| rects[i].1);
         windows::set_buttons(rects, ctx.pixels_per_point());
         let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
         let (hovered, pressed) = windows::button_state();
@@ -190,20 +226,24 @@ fn resize_handles(ctx: &egui::Context) {
 }
 
 /// GNOME-style caption buttons: minimize, maximize or restore, close, each a faint circle that brightens on hover and
-/// press (REQ-018-04).
+/// press (REQ-018-04), where the desktop's layout puts them (REQ-018-10).
 #[cfg(target_os = "linux")]
 fn round_buttons(ctx: &egui::Context) {
     let maximized = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
-    for (i, rect) in button_rects(ctx.content_rect()).into_iter().enumerate() {
+    for (button, rect) in button_rects(ctx.content_rect(), &button_layout(ctx)) {
         let response = on_top(
             ctx,
-            egui::Id::unique(("caption button", i)),
+            egui::Id::unique(("caption button", button as u8)),
             rect,
             egui::Order::Foreground,
             egui::Sense::click(),
         );
-        let label = ["Minimize window", "Maximize window", "Close window"][i];
-        let label = if i == 1 && maximized { "Restore window" } else { label };
+        let label = match button {
+            CaptionButton::Minimize => "Minimize window",
+            CaptionButton::Maximize if maximized => "Restore window",
+            CaptionButton::Maximize => "Maximize window",
+            CaptionButton::Close => "Close window",
+        };
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
         let alpha = if response.is_pointer_button_down_on() {
             0.3
@@ -216,11 +256,11 @@ fn round_buttons(ctx: &egui::Context) {
         let c = rect.center();
         painter.circle_filled(c, 12.0, theme::text().gamma_multiply(alpha));
         let stroke = Stroke::new(1.5, theme::text());
-        match i {
-            0 => {
+        match button {
+            CaptionButton::Minimize => {
                 painter.hline((c.x - 4.0)..=(c.x + 4.0), c.y + 3.5, stroke);
             }
-            1 if maximized => {
+            CaptionButton::Maximize if maximized => {
                 painter.rect_stroke(
                     Rect::from_center_size(c + Vec2::new(-1.0, 1.0), Vec2::splat(6.0)),
                     1.0,
@@ -230,7 +270,7 @@ fn round_buttons(ctx: &egui::Context) {
                 painter.line_segment([c + Vec2::new(-1.0, -4.0), c + Vec2::new(4.0, -4.0)], stroke);
                 painter.line_segment([c + Vec2::new(4.0, -4.0), c + Vec2::new(4.0, 1.0)], stroke);
             }
-            1 => {
+            CaptionButton::Maximize => {
                 painter.rect_stroke(
                     Rect::from_center_size(c, Vec2::splat(8.0)),
                     1.0,
@@ -238,16 +278,16 @@ fn round_buttons(ctx: &egui::Context) {
                     egui::StrokeKind::Middle,
                 );
             }
-            _ => {
+            CaptionButton::Close => {
                 painter.line_segment([c + Vec2::splat(-4.0), c + Vec2::splat(4.0)], stroke);
                 painter.line_segment([c + Vec2::new(-4.0, 4.0), c + Vec2::new(4.0, -4.0)], stroke);
             }
         }
         if response.clicked() {
-            ctx.send_viewport_cmd(match i {
-                0 => egui::ViewportCommand::Minimized(true),
-                1 => egui::ViewportCommand::Maximized(!maximized),
-                _ => egui::ViewportCommand::Close,
+            ctx.send_viewport_cmd(match button {
+                CaptionButton::Minimize => egui::ViewportCommand::Minimized(true),
+                CaptionButton::Maximize => egui::ViewportCommand::Maximized(!maximized),
+                CaptionButton::Close => egui::ViewportCommand::Close,
             });
         }
     }
@@ -538,7 +578,14 @@ mod tests {
     /// top; the commands sent and whether the content got the click.
     #[cfg(target_os = "linux")]
     fn click_linux_chrome(at: Pos2, maximized: bool) -> (Vec<egui::ViewportCommand>, bool) {
+        click_linux_chrome_in(at, maximized, ButtonLayout::default())
+    }
+
+    /// [`click_linux_chrome`] with the window controls in `layout`.
+    #[cfg(target_os = "linux")]
+    fn click_linux_chrome_in(at: Pos2, maximized: bool, layout: ButtonLayout) -> (Vec<egui::ViewportCommand>, bool) {
         let ctx = egui::Context::default();
+        set_button_layout(&ctx, layout);
         let mut content_clicked = false;
         let mut commands = Vec::new();
         // A first frame lays the window chrome out (a new area is invisible for a frame).
@@ -593,12 +640,83 @@ mod tests {
         assert!(double.contains(&egui::ViewportCommand::Maximized(true)), "{double:?}");
     }
 
+    /// The window controls' places in the default layout: minimize, maximize, close.
+    fn default_rects(screen: Rect) -> [Rect; 3] {
+        let rects = button_rects(screen, &ButtonLayout::default());
+        std::array::from_fn(|i| rects[i].1)
+    }
+
+    /// REQ-018-10: the window controls sit on the sides and in the order the desktop's layout names, and the caption
+    /// areas at those sides keep their place free.
+    #[test]
+    fn req_018_10_places_the_buttons_as_the_layout_names_them() {
+        use CaptionButton::{Close, Maximize, Minimize};
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        let layout = ButtonLayout {
+            left: vec![Close, Minimize],
+            right: vec![Maximize],
+        };
+        let rects = button_rects(screen, &layout);
+        let buttons: Vec<CaptionButton> = rects.iter().map(|(button, _)| *button).collect();
+        assert_eq!(buttons, [Close, Minimize, Maximize]);
+        let [(_, close), (_, minimize), (_, maximize)] = rects[..] else {
+            unreachable!()
+        };
+        assert_eq!(close.left(), BUTTON_MARGIN);
+        assert_eq!(minimize.left(), close.right());
+        assert_eq!(maximize.right(), 800.0 - BUTTON_MARGIN);
+
+        let ctx = egui::Context::default();
+        run(&ctx, 0.0, vec![], false, |_| {});
+        set_button_layout(&ctx, layout);
+        if cfg!(any(windows, target_os = "linux")) {
+            assert_eq!(reserved_left_in(&ctx, 0.0), minimize.right());
+            assert_eq!(reserved_in(&ctx, 800.0), 800.0 - maximize.left());
+        }
+        // An area away from the window's edges keeps nothing free.
+        assert_eq!(reserved_left_in(&ctx, 256.0), 0.0);
+        assert_eq!(reserved_in(&ctx, 500.0), 0.0);
+        // A layout without buttons on a side keeps nothing free there.
+        set_button_layout(
+            &ctx,
+            ButtonLayout {
+                left: vec![],
+                right: vec![Close],
+            },
+        );
+        assert_eq!(reserved_left_in(&ctx, 0.0), 0.0);
+    }
+
+    /// REQ-018-10: the round caption buttons work where the layout puts them, and where the default layout had them is
+    /// toolbar space.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn req_018_10_round_caption_buttons_follow_the_layout() {
+        use CaptionButton::{Close, Maximize};
+        use egui::ViewportCommand as C;
+        let layout = ButtonLayout {
+            left: vec![Close, Maximize],
+            right: vec![],
+        };
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        let rects = button_rects(screen, &layout);
+        for ((_, rect), command) in rects.iter().zip([C::Close, C::Maximized(true)]) {
+            let (commands, content) = click_linux_chrome_in(rect.center(), false, layout.clone());
+            assert_eq!(commands, [command], "{rect:?}");
+            assert!(!content);
+        }
+        let [_, _, close] = default_rects(screen);
+        let (commands, content) = click_linux_chrome_in(close.center(), false, layout);
+        assert!(commands.is_empty() && content, "{commands:?}");
+    }
+
     #[test]
     fn req_013_02_keeps_the_window_controls_place_free() {
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
-        let [minimize, maximize, close] = button_rects(screen);
+        let [minimize, maximize, close] = default_rects(screen);
         assert_eq!(close.right(), 800.0 - BUTTON_MARGIN);
-        assert_eq!(minimize.left(), 800.0 - reserved_width());
+        let ctx = egui::Context::default();
+        assert_eq!(minimize.left(), 800.0 - reserved_right(&ctx));
         assert!(minimize.right() <= maximize.left() && maximize.right() <= close.left());
         assert_eq!(close.height(), HEIGHT);
     }
@@ -609,7 +727,7 @@ mod tests {
     #[test]
     fn req_018_04_round_caption_buttons_control_the_window() {
         use egui::ViewportCommand as C;
-        let [minimize, maximize, close] = button_rects(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)));
+        let [minimize, maximize, close] = default_rects(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)));
         for (rect, maximized, command) in [
             (minimize, false, C::Minimized(true)),
             (maximize, false, C::Maximized(true)),

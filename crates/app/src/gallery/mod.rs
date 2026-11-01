@@ -1367,7 +1367,7 @@ mod tests {
         let rows = scroll_bar_rect(area, true);
         assert_eq!(rows.top(), TOOLBAR_HEIGHT + list::COLUMN_HEADER_HEIGHT);
         // Below the window controls, whatever the window's width.
-        for button in crate::titlebar::button_rects(area) {
+        for (_, button) in crate::titlebar::button_rects(area, &crate::titlebar::ButtonLayout::default()) {
             assert!(button.bottom() <= tiles.top());
         }
     }
