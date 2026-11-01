@@ -89,6 +89,13 @@ Search and sorting rely on the tags, ratings and dates that photo tools (Lightro
 - **And** EXIF wins over embedded XMP, which wins over the sidecar
 - **And** a sidecar whose orientation changes makes the thumbnail be rendered again
 
+### REQ-004-13 · Face region positions
+
+- **Given** a photo with face regions in the MWG struct (`RegionInfo`, regions of type `Face`) or the Microsoft Photo struct (`RegionInfoMP`), in the file or its sidecar
+- **When** it is indexed
+- **Then** each named region is kept with the person's name and its rectangle, relative to the upright photo (turned by the photo's orientation, REQ-004-12)
+- **And** regions without a name, with an area outside the photo or in units other than normalized ones are left out
+
 ## Out of scope
 
 - Editing, adding or removing tags or ratings, and writing anything back to files.
@@ -118,3 +125,4 @@ Search and sorting rely on the tags, ratings and dates that photo tools (Lightro
 | REQ-004-10 | `crates/domain/src/media.rs` › prefers_the_full_name_sidecar…; `crates/media/src/metadata.rs` › reads_dimensions_from_the_file_and_tags_from_its_sidecar; `crates/indexer/src/scan.rs` › rescans_incrementally; `tests/end_to_end.rs` | pass |
 | REQ-004-11 | `crates/domain/src/tags.rs` › trims_collapses…, applies_nfkc…; `crates/db/src/writer.rs` › one_tag_per_normalized_name_with_the_first_spelling | pass |
 | REQ-004-12 | `crates/meta/src/rules.rs` › req_004_12_takes_the_orientation_from_the_sidecar_when_the_file_has_none; `crates/media/src/metadata.rs` › req_004_12_reads_the_orientation_of_a_sidecar_and_of_embedded_xmp (exiftool); `crates/media/src/thumbnail.rs` › req_004_12_req_005_03_turns_photos_upright_by_an_orientation_only_in_xmp; `crates/media/src/original.rs` › req_004_12_req_009_04_turns_photos_oriented_only_in_xmp_upright; `crates/db/src/writer.rs` › req_004_12_a_changed_sidecar_orientation_resets_the_thumbnail | pass (thumbnails rendered before metadata version 2 for photos turned only in their embedded XMP are rendered again only when the file changes or the thumbnail cache is cleared) |
+| REQ-004-13 | `crates/domain/src/faces.rs` › req_004_13_turns_regions_upright_for_every_orientation, req_004_13_reads_mwg_centers_and_leaves_out_broken_regions; `crates/meta/src/rules.rs` › req_004_13_keeps_named_face_regions_with_their_place_on_the_upright_photo; `crates/meta/src/xmp.rs` › req_004_13_reads_the_places_of_face_regions; `crates/media/src/metadata.rs` › req_019_04_meta_reads_the_same_metadata_as_exiftool (exiftool); `crates/db/src/writer.rs` › req_004_13_stores_face_regions_and_replaces_them_when_the_file_changes | pass (orientations 2–8 checked against the transform, not against photos from other apps) |

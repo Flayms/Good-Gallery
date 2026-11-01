@@ -12,6 +12,7 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 - **Zoom and pan** (REQ-009-05, -16): wheel around the pointer (`exp(-delta · 0.002)`), `+` / `-` by 1.25×, `0` fits, click on the photo toggles fitted ↔ actual pixels, drag pans, 1×–8×, clamped.
 - **Video** (REQ-009-06): the viewer talks to a `video::Playback`; the app's is `MpvPlayer` (libmpv), UI tests use `FakePlayback`. The frame is drawn fitted and rotated by `video-params/rotate`, with the preview until the first frame. Glass controls along the video's bottom: play / pause, time, seek slider (keyframe seeks while dragging, an exact one on release), mute, volume. Space plays / pauses, a click on the video too; ← / → seek 5 s and ↑ / ↓ change the volume while the last click was on the video or its controls, else they step. Play at the end starts over. Stepping and closing stop playback. Without libmpv, videos show their preview and say why.
 - **Info panel and sheet** (REQ-009-08, -09, -11): `db::media::detail` (fields, absolute path, tags with their category) loaded on the gallery's loader thread; a 320 px panel in the viewer (`i`) and a sheet beside the gallery (context menu _Information_). A click on a tag closes the viewer and filters by it.
+- **Face regions** (REQ-009-17): the viewer keeps the shown photo's details loaded (`Gallery::detail`, kept while the viewer is open) and draws its regions over the photo rect, so they follow zoom and pan: a white box with a dark outline and the name in a dark pill below (above at the media area's bottom), the same in both appearances like tile badges. `p` and _Faces_ (only for photos with regions) toggle them; the choice is the setting `viewer.faces`. Hidden while the photo grows or shrinks and while editing.
 - **Show in Explorer** (REQ-009-10): `explorer.exe /select,"<path>"` on a job thread, started outside the app's job object (`CREATE_BREAKAWAY_FROM_JOB`, retried without it when a parent job forbids breakaway); a missing file gets an error toast.
 
 ## Known limits
@@ -27,5 +28,6 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 - [x] Viewer: open, step, close, preview, missing items (REQ-009-01 … -03, -12, -14)
 - [x] Info panel, sheet, filter by tag, Show in Explorer, context menus (REQ-009-08 … -11)
 - [x] Video playback and controls (REQ-009-06)
+- [x] Face regions over the photo (REQ-009-17)
 - [ ] Automated test for the thumbnail preview (REQ-009-14; needs the GPU texture streamer)
 - [ ] Pass exiftool's orientation to the original's decode, for photos oriented only in XMP

@@ -114,6 +114,13 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 - **Then** its scrollbar, including the thumb, starts below the toolbar, so it never lies under the native window controls
 - **And** the scrollbar looks the same on every platform (REQ-013-01)
 
+### REQ-013-16 · Filled rating stars
+
+- **Given** a media item with a rating
+- **When** its rating is shown as stars (gallery tiles, List view, sidebar, viewer, info panel)
+- **Then** each given star is a filled star in the Star color
+- **And** where all five stars are shown (the info panel), the ones not given are outlined in Muted
+
 ## Out of scope
 
 - A light theme or following the OS light / dark setting (the app stays dark).
@@ -148,3 +155,4 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 | REQ-013-13 | `crates/app/src/format.rs` › req_013_13_formats_medium_dates_in_the_locale_without_seconds; `crates/app/tests/viewer.rs` › req_009_08_req_013_13_toggles_the_info_panel_with_the_details | pass |
 | REQ-013-14 | `crates/app/tests/viewer.rs` › req_009_01_req_009_04_opens_the_clicked_item_with_its_original (snapshot `viewer`, opaque); `crates/app/src/glass.rs` › req_013_06_req_013_14_surfaces_are_opaque_without_glass | pass (blurred scrim checked in the running app) |
 | REQ-013-15 | `crates/app/src/gallery/mod.rs` › req_013_15_the_scrollbar_starts_below_the_toolbar | pass (Settings starts its bar below its header the same way) |
+| REQ-013-16 | `crates/app/src/icons.rs` › req_013_16_given_stars_are_filled_and_missing_ones_outlined | pass |

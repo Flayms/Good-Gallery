@@ -104,7 +104,8 @@ mod exiftool_tests {
         "-XPKeywords=Windows;Tagged",
         "-XMP-iptcExt:PersonInImage=Anna",
         "-XMP-mwg-rs:RegionInfo={AppliedToDimensions={W=64,H=48,Unit=pixel},\
-         RegionList=[{Area={X=0.5,Y=0.5,W=0.2,H=0.2,Unit=normalized},Name=Bob,Type=Face}]}",
+         RegionList=[{Area={X=0.3,Y=0.4,W=0.2,H=0.4,Unit=normalized},Name=Bob,Type=Face}]}",
+        "-XMP-MP:RegionInfoMP={Regions=[{PersonDisplayName=Ben,Rectangle=0.1|, 0.2|, 0.3|, 0.4}]}",
     ];
 
     /// Runs exiftool's command line on `file`.
@@ -125,7 +126,7 @@ mod exiftool_tests {
         meta::read(name, &meta::Bytes::whole(std::fs::read(file).unwrap())).unwrap()
     }
 
-    /// REQ-019-04: `meta`'s readers, which the browser version uses, give the same metadata as exiftool.
+    /// REQ-019-04, REQ-004-13: `meta`'s readers, which the browser version uses, give the same metadata as exiftool.
     #[test]
     fn req_019_04_meta_reads_the_same_metadata_as_exiftool() {
         let Some(exiftool) = crate::exiftool::tests::exiftool() else {
@@ -158,5 +159,17 @@ mod exiftool_tests {
         let photo = MetadataSource::read(&exiftool, &jpeg, None).unwrap();
         assert_eq!((photo.width, photo.height, photo.rating), (Some(48), Some(64), Some(4)));
         assert!(photo.tags.len() >= 6, "{:?}", photo.tags);
+        // REQ-004-13: both region structs, turned upright by orientation 6.
+        let faces: Vec<(&str, [f32; 4])> = photo
+            .faces
+            .iter()
+            .map(|f| {
+                (
+                    f.name.as_str(),
+                    [f.x, f.y, f.w, f.h].map(|n| (n * 100.0).round() / 100.0),
+                )
+            })
+            .collect();
+        assert_eq!(faces, [("Bob", [0.4, 0.2, 0.4, 0.2]), ("Ben", [0.4, 0.1, 0.4, 0.3])]);
     }
 }

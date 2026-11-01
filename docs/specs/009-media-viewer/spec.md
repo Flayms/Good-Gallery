@@ -120,8 +120,16 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 - **Then** a fitted photo zooms to actual pixels (at least 2×) around the pointer, and a zoomed photo fits again
 - **And** a double-click on the photo switches only once, like a single click
 
+### REQ-009-17 · Face regions
+
+- **Given** a photo with face regions (REQ-004-13) in the viewer
+- **When** the user turns face regions on (`P` or the control bar's _Faces_ button, shown only for photos with face regions)
+- **Then** each region is drawn as a box with the person's name, on the person, upright and at any zoom and pan
+- **And** the choice is remembered across items and restarts, and turning it off hides the boxes
+
 ## Out of scope
 
+- Adding, editing or removing face regions, finding faces (#36), and face regions in videos.
 - Slideshows, rotating, cropping, editing, deleting, copying or sharing files.
 - Opening a file in another app (other than revealing it in Explorer).
 - Fullscreen mode and comparing items side by side. The filmstrip is specified in [015](../015-filmstrip/spec.md).
@@ -153,3 +161,4 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 | REQ-009-14 | `crates/app/tests/viewer.rs` › req_009_13_req_009_14_preloads_two_places_around | partial: a preloaded original shows without a fade; the thumbnail preview needs the GPU streamer, checked in the running app |
 | REQ-009-15 | `crates/media/src/original.rs` › req_009_15_fails_for_missing_and_broken_files_and_avif_without_ffmpeg; `crates/app/src/originals.rs` › req_009_15_remembers_failures_until_wanted_anew; `crates/app/tests/viewer.rs` › req_009_15_says_when_the_original_fails | pass |
 | REQ-009-16 | `crates/domain/src/viewer.rs` › req_009_16_toggles_between_fitted_and_actual_pixels_at_least_2x; `crates/app/tests/viewer.rs` › req_009_16_click_toggles_between_fitted_and_actual_pixels, req_009_03_req_009_16_clicks_on_the_photo_and_double_clicks_dont_close | pass |
+| REQ-009-17 | `crates/domain/src/faces.rs` › req_009_17_face_regions_are_hidden_until_shown; `crates/app/tests/viewer.rs` › req_009_17_shows_face_regions_and_remembers_the_choice (snapshot `viewer_faces`) | pass |

@@ -8,7 +8,7 @@
 
 use crate::edit::{self, Dialog, EditSession, Leave, Outcome};
 use crate::gallery::{self, Gallery, MediaAction};
-use crate::icons::Icon;
+use crate::icons::{self, Icon};
 use crate::originals::{OriginalRequest, OriginalState, Originals};
 use crate::video::controls::{self as video_controls, Control};
 use crate::video::{PlaybackState, VideoFrame, Videos};
@@ -18,6 +18,7 @@ use db::gallery::GalleryItem;
 use db::libraries::Library;
 use db::media::file_in;
 use domain::ambient::{self, Rgb};
+use domain::faces;
 use domain::media::MediaKind;
 use domain::viewer::{self as zoom, FILMSTRIP_KEY, FILMSTRIP_THUMB, FIT, Size, Strip, ZoomView};
 use eframe::egui::{self, Color32, CursorIcon, Key, Modifiers, Pos2, Rect, Vec2, pos2, vec2};
@@ -72,6 +73,8 @@ struct Keys {
     fit: bool,
     info: bool,
     filmstrip: bool,
+    /// `p`: show or hide face regions (REQ-009-17).
+    faces: bool,
     /// Space: play / pause the video.
     space: bool,
     /// ↑ / ↓: volume steps.
@@ -184,6 +187,8 @@ pub struct Viewer {
     keys: Keys,
     info_open: bool,
     filmstrip: bool,
+    /// Face regions are drawn over photos that have them (REQ-009-17).
+    faces: bool,
     /// The filmstrip's scroll offset, and the position it was last centered on (REQ-015-03).
     strip_offset: f32,
     strip_centered: Option<usize>,
@@ -194,6 +199,8 @@ pub struct Viewer {
     closing: Option<(Transition, Action)>,
     /// Where the photo was drawn in the last frame.
     photo: Option<Rect>,
+    /// The face regions drawn in the last frame, by name.
+    faces_drawn: Vec<(String, Rect)>,
     chrome: Chrome,
     /// The media item the chrome was tinted for.
     chrome_for: Option<i64>,
@@ -233,12 +240,14 @@ impl Viewer {
             keys: Keys::default(),
             info_open: false,
             filmstrip,
+            faces: false,
             strip_offset: 0.0,
             strip_centered: None,
             strip_width: 0.0,
             opening: Transition { start: None, tile },
             closing: None,
             photo: None,
+            faces_drawn: Vec::new(),
             chrome: Chrome::new(None),
             chrome_blur: None,
             chrome_for: None,
@@ -257,13 +266,9 @@ impl Viewer {
     pub fn open(gallery: &Gallery, index: usize) -> Option<Self> {
         let id = gallery.id_at(index)?;
         let filmstrip = zoom::is_filmstrip_shown(gallery.setting(FILMSTRIP_KEY).as_deref());
-        Some(Self::new(
-            index,
-            id,
-            gallery.data_version(),
-            gallery.tile_rect(index),
-            filmstrip,
-        ))
+        let mut viewer = Self::new(index, id, gallery.data_version(), gallery.tile_rect(index), filmstrip);
+        viewer.faces = faces::are_faces_shown(gallery.setting(faces::FACES_KEY).as_deref());
+        Some(viewer)
     }
 
     pub fn index(&self) -> usize {
@@ -289,6 +294,15 @@ impl Viewer {
 
     pub fn filmstrip_shown(&self) -> bool {
         self.filmstrip
+    }
+
+    pub fn faces_shown(&self) -> bool {
+        self.faces
+    }
+
+    /// The face regions drawn in the last frame (REQ-009-17), by name, on screen.
+    pub fn faces_drawn(&self) -> &[(String, Rect)] {
+        &self.faces_drawn
     }
 
     /// The chrome's colors in the last frame (REQ-013-11).
@@ -473,6 +487,9 @@ impl Viewer {
             if input.consume_key(Modifiers::NONE, Key::F) {
                 self.keys.filmstrip ^= true;
             }
+            if input.consume_key(Modifiers::NONE, Key::P) {
+                self.keys.faces ^= true;
+            }
         });
     }
 
@@ -526,6 +543,11 @@ impl Viewer {
         self.filmstrip = !self.filmstrip;
         self.strip_centered = None;
         gallery.store_setting(FILMSTRIP_KEY, if self.filmstrip { "shown" } else { "hidden" });
+    }
+
+    fn toggle_faces(&mut self, gallery: &Gallery) {
+        self.faces = !self.faces;
+        gallery.store_setting(faces::FACES_KEY, if self.faces { "shown" } else { "hidden" });
     }
 
     /// Draws the viewer over the window. Returns what the app should do: [`Action::Close`] and
@@ -588,6 +610,9 @@ impl Viewer {
             if keys.filmstrip {
                 self.toggle_filmstrip(gallery);
             }
+            if keys.faces {
+                self.toggle_faces(gallery);
+            }
         }
         // How far the viewer is open: grows in, shrinks back out.
         let (progress, tile) = match &mut self.closing {
@@ -619,6 +644,10 @@ impl Viewer {
 
         if let Some(item) = &item {
             self.sync_edit(ctx, item, libraries, originals, gallery, keys.edit);
+            // Whether the photo has face regions, and where (REQ-009-17).
+            if item.kind == MediaKind::Image {
+                gallery.detail(item.id);
+            }
         }
 
         let screen = ctx.content_rect();
@@ -648,12 +677,17 @@ impl Viewer {
                     .to_owned();
                 backdrop.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Dialog, true, &label));
                 let closing = self.closing.is_some();
+                self.faces_drawn.clear();
                 match &item {
                     Some(item) => {
                         let keys = if closing { Keys::default() } else { keys };
                         let transition = tile.filter(|_| progress < 1.0).map(|tile| (tile, progress));
                         let drawn = self.media(ui, &backdrop, &layout, item, gallery, &original, keys, transition);
                         self.photo = Some(drawn);
+                        if self.faces && transition.is_none() && !closing && self.edit.is_none() {
+                            let faces = gallery.cached_detail(item.id).map_or(&[][..], |detail| &detail.faces);
+                            self.faces_drawn = draw_faces(ui, layout.media, drawn, faces);
+                        }
                     }
                     None if self.missing => {
                         message(ui, layout.media.center(), "Media not found");
@@ -1126,7 +1160,13 @@ impl Viewer {
     ) -> Option<Action> {
         let ctx = ui.ctx().clone();
         let screen = layout.screen;
-        let text = bar_text(ui, screen, item, libraries);
+        let has_faces = item.is_some_and(|item| {
+            item.kind == MediaKind::Image
+                && gallery
+                    .cached_detail(item.id)
+                    .is_some_and(|detail| !detail.faces.is_empty())
+        });
+        let text = bar_text(ui, screen, item, libraries, has_faces);
         let bar = control_bar_rect(layout, &text);
         let previous = (self.index > 0).then(|| {
             Rect::from_center_size(
@@ -1209,7 +1249,13 @@ impl Viewer {
                 step = Some(index);
             }
             let editing = self.edit.is_some();
-            match control_bar(ui, bar, text, bar_backing, self.info_open, self.filmstrip, editing) {
+            let toggles = Toggles {
+                info: self.info_open,
+                filmstrip: self.filmstrip,
+                faces: self.faces,
+                editing,
+            };
+            match control_bar(ui, bar, text, bar_backing, toggles) {
                 Some(BarButton::Edit) => self.toggle_edit = true,
                 Some(BarButton::ShowInExplorer) => {
                     if let Some(item) = item {
@@ -1218,6 +1264,7 @@ impl Viewer {
                 }
                 Some(BarButton::Info) => self.info_open = !self.info_open,
                 Some(BarButton::Filmstrip) => self.toggle_filmstrip(gallery),
+                Some(BarButton::Faces) => self.toggle_faces(gallery),
                 Some(BarButton::Close) => action = Some(Action::Close),
                 None => {}
             }
@@ -1710,6 +1757,8 @@ struct BarText {
     date: Option<std::sync::Arc<egui::Galley>>,
     stars: usize,
     editable: bool,
+    /// The photo has face regions (REQ-009-17).
+    faces: bool,
 }
 
 /// Whether the item is a photo that can be edited here: JPEG, PNG or WebP in an online library, not in the browser
@@ -1723,7 +1772,7 @@ fn editable(item: &GalleryItem, libraries: &[Library]) -> bool {
             .any(|library| library.id == item.root_id && library.status != db::libraries::LibraryStatus::Offline)
 }
 
-fn bar_text(ui: &egui::Ui, screen: Rect, item: Option<&GalleryItem>, libraries: &[Library]) -> BarText {
+fn bar_text(ui: &egui::Ui, screen: Rect, item: Option<&GalleryItem>, libraries: &[Library], faces: bool) -> BarText {
     let name = item.map_or("", |item| item.file_name.as_str());
     let mut job = egui::text::LayoutJob::simple_singleline(
         name.to_owned(),
@@ -1748,6 +1797,7 @@ fn bar_text(ui: &egui::Ui, screen: Rect, item: Option<&GalleryItem>, libraries: 
         date,
         stars: item.and_then(|item| item.rating).unwrap_or(0).clamp(0, 5) as usize,
         editable: item.is_some_and(|item| editable(item, libraries)),
+        faces,
     }
 }
 
@@ -1761,10 +1811,11 @@ enum BarButton {
     ShowInExplorer,
     Info,
     Filmstrip,
+    Faces,
     Close,
 }
 
-const BAR_BUTTONS: [(BarButton, Icon, &str, &str); 5] = [
+const BAR_BUTTONS: [(BarButton, Icon, &str, &str); 6] = [
     (BarButton::Edit, Icon::SlidersHorizontal, "Edit", "Edit (e)"),
     (
         BarButton::ShowInExplorer,
@@ -1779,16 +1830,18 @@ const BAR_BUTTONS: [(BarButton, Icon, &str, &str); 5] = [
         "Filmstrip",
         "Filmstrip (f)",
     ),
+    (BarButton::Faces, Icon::ScanFace, "Faces", "Faces (p)"),
     (BarButton::Close, Icon::X, "Close", "Close (Esc)"),
 ];
 
 /// The bar's buttons on this platform and for this item: the browser can't open a file manager (REQ-019-13), only
-/// photos that can be edited have _Edit_ (REQ-021-01).
-fn bar_buttons(editable: bool) -> Vec<(BarButton, Icon, &'static str, &'static str)> {
+/// photos that can be edited have _Edit_ (REQ-021-01), only photos with face regions _Faces_ (REQ-009-17).
+fn bar_buttons(editable: bool, faces: bool) -> Vec<(BarButton, Icon, &'static str, &'static str)> {
     BAR_BUTTONS
         .into_iter()
         .filter(|(button, ..)| match button {
             BarButton::Edit => editable,
+            BarButton::Faces => faces,
             BarButton::ShowInExplorer => !crate::WEB,
             _ => true,
         })
@@ -1804,7 +1857,7 @@ fn control_bar_rect(layout: &Layout, text: &BarText) -> Rect {
         width += text.stars as f32 * (STAR_SIZE + 2.0) + BAR_GAP;
     }
     // Separator, the buttons and the right padding.
-    width += 1.0 + BAR_GAP + bar_buttons(text.editable).len() as f32 * theme::CONTROL_HEIGHT + 6.0;
+    width += 1.0 + BAR_GAP + bar_buttons(text.editable, text.faces).len() as f32 * theme::CONTROL_HEIGHT + 6.0;
     let room = layout.right - layout.screen.left();
     let width = width.min(room - 32.0);
     Rect::from_center_size(
@@ -1816,17 +1869,68 @@ fn control_bar_rect(layout: &Layout, text: &BarText) -> Rect {
     )
 }
 
+/// Room for a name label under its face region.
+const FACE_LABEL_HEIGHT: f32 = 20.0;
+
+/// A box around each face region of the photo drawn at `photo`, with the person's name below it (above it at the
+/// bottom of `area`), clipped to the media area (REQ-009-17). On photos, not glass: like badges on tiles, they keep a
+/// fixed light-on-dark look in both appearances.
+fn draw_faces(ui: &egui::Ui, area: Rect, photo: Rect, faces: &[faces::FaceRegion]) -> Vec<(String, Rect)> {
+    let painter = ui.painter().with_clip_rect(area);
+    let shadow = egui::Stroke::new(3.0, Color32::from_black_alpha(110));
+    let line = egui::Stroke::new(1.5, Color32::WHITE);
+    let font = egui::FontId::new(theme::SIZE_CAPTION, theme::semibold());
+    let mut drawn = Vec::new();
+    for face in faces {
+        let rect = Rect::from_min_size(
+            pos2(
+                photo.left() + face.x * photo.width(),
+                photo.top() + face.y * photo.height(),
+            ),
+            vec2(face.w * photo.width(), face.h * photo.height()),
+        );
+        painter.rect_stroke(rect, 4.0, shadow, egui::StrokeKind::Middle);
+        painter.rect_stroke(rect, 4.0, line, egui::StrokeKind::Middle);
+        let galley = painter.layout_no_wrap(face.name.clone(), font.clone(), Color32::WHITE);
+        let size = vec2(galley.size().x + 12.0, FACE_LABEL_HEIGHT);
+        let below = rect.bottom() + 4.0 + size.y <= area.bottom();
+        let top = if below {
+            rect.bottom() + 4.0
+        } else {
+            rect.top() - 4.0 - size.y
+        };
+        let label = Rect::from_min_size(pos2(rect.center().x - size.x / 2.0, top), size);
+        painter.rect_filled(label, size.y / 2.0, Color32::from_black_alpha(153));
+        painter.galley(label.center() - galley.size() / 2.0, galley, Color32::WHITE);
+        drawn.push((face.name.clone(), rect));
+    }
+    drawn
+}
+
+/// Which of the bar's toggles are on.
+#[derive(Clone, Copy)]
+struct Toggles {
+    info: bool,
+    filmstrip: bool,
+    faces: bool,
+    editing: bool,
+}
+
 /// File name, date, rating and the buttons in a pill at the bottom (REQ-009-01); the button clicked, if any.
 fn control_bar(
     ui: &mut egui::Ui,
     rect: Rect,
     text: BarText,
     backing: crate::glass::Backing,
-    info_open: bool,
-    filmstrip: bool,
-    editing: bool,
+    toggles: Toggles,
 ) -> Option<BarButton> {
-    let buttons = bar_buttons(text.editable || editing);
+    let Toggles {
+        info: info_open,
+        filmstrip,
+        faces,
+        editing,
+    } = toggles;
+    let buttons = bar_buttons(text.editable || editing, text.faces && !editing);
     backing.paint(ui.painter(), rect, rect.height() / 2.0);
     // Clicks on the bar's background don't reach the scrim behind it.
     ui.interact(rect, ui.make_persistent_id("control bar"), egui::Sense::click());
@@ -1847,7 +1951,7 @@ fn control_bar(
         for _ in 0..text.stars {
             let star = Rect::from_min_size(pos2(x, y - STAR_SIZE / 2.0), Vec2::splat(STAR_SIZE));
             if text_clip.contains_rect(star) {
-                Icon::Star.image(STAR_SIZE, theme::star()).paint_at(ui, star);
+                icons::rating_star(true, STAR_SIZE).paint_at(ui, star);
             }
             x += STAR_SIZE + 2.0;
         }
@@ -1868,6 +1972,7 @@ fn control_bar(
             BarButton::Edit => Some(editing),
             BarButton::Info => Some(info_open && !editing),
             BarButton::Filmstrip => Some(filmstrip),
+            BarButton::Faces => Some(faces),
             _ => None,
         };
         let mut widget = egui::Button::image(icon.small())

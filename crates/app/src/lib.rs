@@ -162,13 +162,9 @@ fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
         Some(viewer::Action::Revert(target)) => state.confirm_revert = Some(target),
         None => {}
     }
-    // Details are kept only while an info view (or editing, which starts from them) shows them, else every reload
-    // would ask for them again.
-    let info_shown = state.info_sheet.is_some()
-        || state
-            .viewer
-            .as_ref()
-            .is_some_and(|viewer| viewer.info_open() || viewer.editing().is_some());
+    // Details are kept only while an info view or the viewer (editing starts from them, face regions are drawn from
+    // them) shows them, else every reload would ask for them again.
+    let info_shown = state.info_sheet.is_some() || state.viewer.is_some();
     if !info_shown && let Some(gallery) = &mut state.gallery {
         gallery.forget_detail();
     }

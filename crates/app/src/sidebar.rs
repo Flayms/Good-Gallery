@@ -2,7 +2,7 @@
 //! used tags, each one click away from filtering the gallery; Settings at the bottom.
 
 use crate::gallery::{Gallery, SidebarData};
-use crate::icons::Icon;
+use crate::icons::{self, Icon};
 use crate::state::Page;
 use crate::{format, theme};
 use db::libraries::{Library, LibraryStatus};
@@ -566,7 +566,7 @@ fn ratings(
                     ),
                     Vec2::splat(14.0),
                 );
-                Icon::Star.image(14.0, theme::star()).paint_at(ui, at);
+                icons::rating_star(true, 14.0).paint_at(ui, at);
             }
         }
         if response.clicked() {

@@ -2,11 +2,11 @@
 //! grouped into People, Places and Tags. Shown in the viewer's info panel and in the info sheet beside the gallery.
 
 use crate::format;
-use crate::icons::Icon;
+use crate::icons;
 use crate::theme;
 use db::media::MediaDetail;
 use domain::tags::TagCategory;
-use eframe::egui::{self, Vec2};
+use eframe::egui;
 
 /// Width of the info panel and sheet.
 pub const WIDTH: f32 = 320.0;
@@ -144,18 +144,13 @@ fn field(ui: &mut egui::Ui, label: &str, value: impl FnOnce(&mut egui::Ui)) {
     });
 }
 
-/// Five stars, `rating` of them filled, named for screen readers.
+/// Five stars, `rating` of them filled and the rest outlined, named for screen readers.
 fn stars(ui: &mut egui::Ui, rating: i64) {
     let response = ui
         .horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             for star in 1..=5 {
-                let color = if star <= rating { theme::star() } else { theme::muted() };
-                ui.add(
-                    Icon::Star
-                        .image(theme::ICON_SIZE, color)
-                        .fit_to_exact_size(Vec2::splat(theme::ICON_SIZE)),
-                );
+                ui.add(icons::rating_star(star <= rating, theme::ICON_SIZE));
             }
         })
         .response;

@@ -118,7 +118,7 @@ Why: the app is full of file names and numbers like `IMG_0011` or `DSC_1107`, an
 
 ## Icons
 
-lucide, 16px, stroke 1.75 (in lucide's 24-unit grid, so it scales with the icon). An icon earns its place when it helps scanning or replaces a word. Don't repeat the same icon on every row of a list (e.g. a tag icon on every tag).
+lucide, 16px, stroke 1.75 (in lucide's 24-unit grid, so it scales with the icon). Icons are outlines, except a given rating star, which is filled (an outlined star reads as not given). An icon earns its place when it helps scanning or replaces a word. Don't repeat the same icon on every row of a list (e.g. a tag icon on every tag).
 
 ## Motion
 

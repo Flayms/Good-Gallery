@@ -3,6 +3,7 @@
 //! (spec 019) from this crate's readers.
 
 use chrono::{FixedOffset, Local, NaiveDate, NaiveDateTime, TimeZone};
+use domain::faces::FaceRegion;
 use domain::media::MediaMetadata;
 use domain::tags::{PEOPLE_TAG_ROOT, clean_tag, normalize_tag};
 use regex::Regex;
@@ -128,6 +129,52 @@ fn face_regions(tags: &Tags) -> Vec<String> {
     names
 }
 
+/// Named face regions with their places on the upright photo (REQ-004-13): `Face` regions of the MWG struct with a
+/// normalized `Area` (center and size), and Microsoft Photo regions with a `Rectangle` ("x, y, w, h" from the
+/// top-left). Both are relative to the photo as stored.
+fn face_positions(tags: &Tags, orientation: u8) -> Vec<FaceRegion> {
+    let list = |value: Option<&Value>| match value {
+        Some(Value::Array(items)) => items.clone(),
+        Some(item @ Value::Object(_)) => vec![item.clone()],
+        _ => Vec::new(),
+    };
+    let number = |value: Option<&Value>| {
+        match value {
+            Some(Value::Number(n)) => n.as_f64(),
+            Some(Value::String(text)) => text.trim().parse().ok(),
+            _ => None,
+        }
+        .map(|n| n as f32)
+    };
+    let name = |region: &Value, field: &str| text_values(region.get(field)).into_iter().next();
+    let mut faces = Vec::new();
+    let mwg = tags.get("RegionInfo").and_then(|info| info.get("RegionList"));
+    for region in list(mwg) {
+        let area = region.get("Area");
+        let field = |key: &str| number(area.and_then(|area| area.get(key)));
+        let normalized = area.and_then(|area| area.get("Unit")).and_then(Value::as_str) == Some("normalized");
+        if region.get("Type").and_then(Value::as_str) == Some("Face")
+            && normalized
+            && let (Some(name), Some(x), Some(y), Some(w), Some(h)) =
+                (name(&region, "Name"), field("X"), field("Y"), field("W"), field("H"))
+        {
+            faces.extend(FaceRegion::from_center(&name, x, y, w, h, orientation));
+        }
+    }
+    let microsoft = tags.get("RegionInfoMP").and_then(|info| info.get("Regions"));
+    for region in list(microsoft) {
+        let rectangle: Vec<f32> = region
+            .get("Rectangle")
+            .and_then(Value::as_str)
+            .map(|text| text.split(',').filter_map(|n| n.trim().parse().ok()).collect())
+            .unwrap_or_default();
+        if let (Some(name), [x, y, w, h]) = (name(&region, "PersonDisplayName"), rectangle.as_slice()) {
+            faces.extend(FaceRegion::new(&name, *x, *y, *w, *h, orientation));
+        }
+    }
+    faces
+}
+
 /// First valid rating; -1 (rejected) and 0 (unrated) both mean "no rating".
 fn extract_rating(sources: &[&Tags]) -> Option<i64> {
     sources
@@ -141,11 +188,11 @@ pub fn extract_metadata(tags: &Tags, sidecar: Option<&Tags>) -> MediaMetadata {
     let mut sources = vec![tags];
     sources.extend(sidecar);
     let sidecar_orientation = sidecar.and_then(orientation);
+    // The file's orientation, EXIF before XMP, else the sidecar's (REQ-004-12).
+    let orientation = orientation(tags).or(sidecar_orientation).unwrap_or(1);
     let (mut width, mut height) = (None, None);
     if let (Some(w), Some(h)) = (positive(tags.get("ImageWidth")), positive(tags.get("ImageHeight"))) {
-        // Orientations 5–8 (the file's, EXIF before XMP, else the sidecar's: REQ-004-12) and 90° / 270° video
-        // rotations swap the displayed axes.
-        let orientation = orientation(tags).or(sidecar_orientation).unwrap_or(1);
+        // Orientations 5–8 and 90° / 270° video rotations swap the displayed axes.
         let rotation = tags.get("Rotation").and_then(Value::as_f64);
         let swapped = orientation >= 5 || rotation == Some(90.0) || rotation == Some(270.0);
         let (w, h) = if swapped { (h, w) } else { (w, h) };
@@ -169,6 +216,11 @@ pub fn extract_metadata(tags: &Tags, sidecar: Option<&Tags>) -> MediaMetadata {
             tags.get("EditSource").and_then(Value::as_str),
         )
         .map(Box::new),
+        faces: sources
+            .iter()
+            .map(|source| face_positions(source, orientation))
+            .find(|faces| !faces.is_empty())
+            .unwrap_or_default(),
     }
 }
 
@@ -469,6 +521,47 @@ mod tests {
         }));
 
         assert_eq!(extract_tags(&[&t]), strings(&[&["People", "Anna"], &["People", "Ben"]]));
+    }
+
+    fn rect(face: &FaceRegion) -> (&str, [f32; 4]) {
+        let round = |n: f32| (n * 100.0).round() / 100.0;
+        (face.name.as_str(), [face.x, face.y, face.w, face.h].map(round))
+    }
+
+    /// REQ-004-13: the region structs as exiftool returns them with `-n -api struct=1`.
+    #[test]
+    fn req_004_13_keeps_named_face_regions_with_their_place_on_the_upright_photo() {
+        let area = |x: f64, y: f64, unit: &str| json!({ "X": x, "Y": y, "W": 0.2, "H": 0.4, "Unit": unit });
+        let file = tags(json!({
+            "Orientation": 6,
+            "RegionInfo": { "RegionList": [
+                { "Name": "Anna", "Type": "Face", "Area": area(0.3, 0.4, "normalized") },
+                { "Name": "Rex", "Type": "Pet", "Area": area(0.5, 0.5, "normalized") },
+                { "Name": "Pixels", "Type": "Face", "Area": area(30.0, 40.0, "pixel") },
+                { "Type": "Face", "Area": area(0.5, 0.5, "normalized") },
+            ] },
+            "RegionInfoMP": { "Regions": [
+                { "PersonDisplayName": "Ben", "Rectangle": "0.1, 0.2, 0.3, 0.4" },
+                { "PersonDisplayName": "Broken", "Rectangle": "0.1, 0.2" },
+            ] },
+        }));
+
+        let faces = extract_metadata(&file, None).faces;
+        // Turned 90° clockwise: the stored photo's left edge is the upright photo's top.
+        assert_eq!(
+            faces.iter().map(rect).collect::<Vec<_>>(),
+            [("Anna", [0.4, 0.2, 0.4, 0.2]), ("Ben", [0.4, 0.1, 0.4, 0.3])]
+        );
+
+        // From the sidecar when the file has none.
+        let sidecar = tags(
+            json!({ "RegionInfoMP": { "Regions": { "PersonDisplayName": "Cleo", "Rectangle": "0, 0, 0.5, 0.5" } } }),
+        );
+        let faces = extract_metadata(&tags(json!({})), Some(&sidecar)).faces;
+        assert_eq!(
+            faces.iter().map(rect).collect::<Vec<_>>(),
+            [("Cleo", [0.0, 0.0, 0.5, 0.5])]
+        );
     }
 
     #[test]

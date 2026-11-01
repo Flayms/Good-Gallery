@@ -14,7 +14,7 @@ Written in Rust (egui on wgpu).
 - **Libraries anywhere:** add local folders or network shares (`\\server\share`). Thumbnails are cached on your computer, so an offline share stays browsable.
 - **Always up to date:** changes on disk are picked up as they happen, with periodic checks for anything missed.
 - **Search by what's in your files:** tags from EXIF, IPTC, XMP and `.xmp` sidecars (Lightroom, digiKam, darktable and others), including hierarchies like `Places|Italy|Rome` and face regions as _People_. Filter by file name, folder, date, rating and type, and sort by date, name, path or size.
-- **Viewer:** step through the gallery, zoom and pan, play videos, see a photo's details and a filmstrip of the gallery.
+- **Viewer:** step through the gallery, zoom and pan, play videos, see a photo's details, who is where in it (from its face regions) and a filmstrip of the gallery.
 - **Editing:** exposure, brightness, contrast, highlights, shadows, whites and blacks; tone curves over a histogram; white balance, vibrance and saturation; grain, vignette and blur (behind the subject, tilt-shift or radial). The subject and the background, found automatically, can each get their own light and color. Save as a copy, or over the original, which is kept so you can revert. Edits stay editable, and metadata and color profiles are kept.
 - **Light or dark,** following your system.
 
@@ -70,6 +70,7 @@ Open **Settings**, add a folder as a library and wait for the first indexing to 
 | Viewer  | ← / →                         | Previous / next                     |
 | Viewer  | + / − / 0, mouse wheel, click | Zoom in, out, fit                   |
 | Viewer  | I / F                         | Info panel / filmstrip              |
+| Viewer  | P                             | Face regions                        |
 | Viewer  | Space, ↑ / ↓                  | Play or pause a video, volume       |
 | Viewer  | E                             | Edit the photo                      |
 | Viewer  | Esc                           | Close (while editing: stop editing) |

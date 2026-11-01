@@ -5,6 +5,7 @@ pub mod appearance;
 pub mod autoscroll;
 pub mod date_groups;
 pub mod edit;
+pub mod faces;
 pub mod folders;
 pub mod layout;
 pub mod media;
