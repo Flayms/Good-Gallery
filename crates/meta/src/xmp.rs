@@ -18,6 +18,7 @@ const MWG_RS: &str = "http://www.metadataworkinggroup.com/schemas/regions/";
 const MP: &str = "http://ns.microsoft.com/photo/1.2/";
 const MPRI: &str = "http://ns.microsoft.com/photo/1.2/t/RegionInfo#";
 const MPREG: &str = "http://ns.microsoft.com/photo/1.2/t/Region#";
+const ST_AREA: &str = "http://ns.adobe.com/xmp/sType/Area#";
 
 /// Nesting deeper than this is hostile (REQ-011-10); such a packet is read up to there.
 const MAX_DEPTH: usize = 64;
@@ -334,6 +335,17 @@ pub fn read(packet: &[u8], tags: &mut Tags) {
                         if let Some(kind) = li.field_text(MWG_RS, "Type") {
                             region.insert("Type".into(), Value::from(kind));
                         }
+                        if let Some(area) = li.find_field(MWG_RS, "Area") {
+                            let fields = [("X", "x"), ("Y", "y"), ("W", "w"), ("H", "h"), ("Unit", "unit")];
+                            let area: Map<String, Value> = fields
+                                .iter()
+                                .filter_map(|(key, field)| {
+                                    let text = area.field_text(ST_AREA, field)?;
+                                    Some((key.to_string(), number_or_text(&text)))
+                                })
+                                .collect();
+                            region.insert("Area".into(), Value::Object(area));
+                        }
                         Value::Object(region)
                     })
                     .collect();
@@ -345,8 +357,13 @@ pub fn read(packet: &[u8], tags: &mut Tags) {
                 let regions: Vec<Value> = node
                     .list_items(MPRI, "Regions")
                     .into_iter()
-                    .filter_map(|li| li.field_text(MPREG, "PersonDisplayName"))
-                    .map(|name| json!({ "PersonDisplayName": name }))
+                    .filter_map(|li| {
+                        let name = li.field_text(MPREG, "PersonDisplayName")?;
+                        Some(match li.field_text(MPREG, "Rectangle") {
+                            Some(rectangle) => json!({ "PersonDisplayName": name, "Rectangle": rectangle }),
+                            None => json!({ "PersonDisplayName": name }),
+                        })
+                    })
                     .collect();
                 if !regions.is_empty() {
                     put("RegionInfoMP", json!({ "Regions": regions }));
@@ -426,6 +443,42 @@ mod tests {
             json!({ "Regions": [{ "PersonDisplayName": "Ben" }] })
         );
         assert_eq!(tags["PersonInImage"], json!("Cleo"));
+    }
+
+    /// REQ-004-13: region places, in attribute and element form, as exiftool returns them.
+    #[test]
+    fn req_004_13_reads_the_places_of_face_regions() {
+        let tags = tags(
+            r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+ <rdf:Description xmlns:mwg-rs="http://www.metadataworkinggroup.com/schemas/regions/"
+   xmlns:stArea="http://ns.adobe.com/xmp/sType/Area#" xmlns:MP="http://ns.microsoft.com/photo/1.2/"
+   xmlns:MPRI="http://ns.microsoft.com/photo/1.2/t/RegionInfo#" xmlns:MPReg="http://ns.microsoft.com/photo/1.2/t/Region#">
+  <mwg-rs:Regions rdf:parseType="Resource"><mwg-rs:RegionList><rdf:Bag>
+   <rdf:li><rdf:Description mwg-rs:Name="Anna" mwg-rs:Type="Face">
+    <mwg-rs:Area stArea:x="0.5" stArea:y="0.25" stArea:w="0.2" stArea:h="0.3" stArea:unit="normalized"/>
+   </rdf:Description></rdf:li>
+   <rdf:li rdf:parseType="Resource"><mwg-rs:Name>Rex</mwg-rs:Name><mwg-rs:Type>Pet</mwg-rs:Type>
+    <mwg-rs:Area rdf:parseType="Resource"><stArea:x>0.1</stArea:x><stArea:y>0.2</stArea:y><stArea:w>0.1</stArea:w>
+     <stArea:h>0.1</stArea:h><stArea:unit>normalized</stArea:unit></mwg-rs:Area>
+   </rdf:li>
+  </rdf:Bag></mwg-rs:RegionList></mwg-rs:Regions>
+  <MP:RegionInfo rdf:parseType="Resource"><MPRI:Regions><rdf:Bag>
+   <rdf:li MPReg:PersonDisplayName="Ben" MPReg:Rectangle="0.1, 0.2, 0.3, 0.4"/>
+  </rdf:Bag></MPRI:Regions></MP:RegionInfo>
+ </rdf:Description></rdf:RDF></x:xmpmeta>"#,
+        );
+        let area = |x: f64, y: f64, w: f64, h: f64| json!({ "X": x, "Y": y, "W": w, "H": h, "Unit": "normalized" });
+        assert_eq!(
+            tags["RegionInfo"],
+            json!({ "RegionList": [
+                { "Name": "Anna", "Type": "Face", "Area": area(0.5, 0.25, 0.2, 0.3) },
+                { "Name": "Rex", "Type": "Pet", "Area": area(0.1, 0.2, 0.1, 0.1) },
+            ] })
+        );
+        assert_eq!(
+            tags["RegionInfoMP"],
+            json!({ "Regions": [{ "PersonDisplayName": "Ben", "Rectangle": "0.1, 0.2, 0.3, 0.4" }] })
+        );
     }
 
     /// REQ-011-10: broken, deep and huge packets don't panic.

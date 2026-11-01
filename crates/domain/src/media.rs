@@ -43,11 +43,13 @@ pub struct MediaMetadata {
     /// The edit the file was saved with (spec 021), from the file itself.
     /// Boxed: most files have none, and scans move many of these around.
     pub edit: Option<Box<crate::edit::SavedEdit>>,
+    /// Named face regions on the upright photo (REQ-004-13).
+    pub faces: Vec<crate::faces::FaceRegion>,
 }
 
 /// Bump when metadata extraction changes, so the indexer re-reads files already marked unchanged. Existing indexes were
-/// written at version 1; version 2 reads orientations from sidecars (REQ-004-12).
-pub const METADATA_VERSION: i64 = 2;
+/// written at version 1; version 2 reads orientations from sidecars (REQ-004-12), version 3 face regions (REQ-004-13).
+pub const METADATA_VERSION: i64 = 3;
 
 fn extension(file_name: &str) -> Option<String> {
     let dot = file_name.rfind('.')?;

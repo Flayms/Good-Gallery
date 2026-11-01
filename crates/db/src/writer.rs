@@ -261,6 +261,12 @@ fn write_file(
         tx.prepare_cached("INSERT INTO media_edits (media_id, recipe, source) VALUES (?1, ?2, ?3)")?
             .execute(params![id, edit.recipe, edit.source])?;
     }
+    tx.prepare_cached("DELETE FROM media_faces WHERE media_id = ?1")?
+        .execute([id])?;
+    for face in &m.faces {
+        tx.prepare_cached("INSERT INTO media_faces (media_id, name, x, y, w, h) VALUES (?1, ?2, ?3, ?4, ?5, ?6)")?
+            .execute(params![id, face.name, face.x, face.y, face.w, face.h])?;
+    }
     let mut linked = Vec::new();
     for path in &m.tags {
         if let Some(tag) = tag_path_id(tx, tag_ids, parents, path)?
@@ -542,6 +548,39 @@ mod tests {
         let rows: i64 = writer
             .conn()
             .query_row("SELECT count(*) FROM media_edits", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 0);
+    }
+
+    #[test]
+    fn req_004_13_stores_face_regions_and_replaces_them_when_the_file_changes() {
+        let (mut writer, root) = writer();
+        let face = |name: &str, x: f32| domain::faces::FaceRegion {
+            name: name.into(),
+            x,
+            y: 0.25,
+            w: 0.125,
+            h: 0.5,
+        };
+        let mut photo = file("a.jpg", &[]);
+        photo.metadata.faces = vec![face("Anna", 0.5), face("Ben", 0.0)];
+        writer.write(root, &[photo]).unwrap();
+        let id: i64 = writer
+            .conn()
+            .query_row("SELECT id FROM media", [], |r| r.get(0))
+            .unwrap();
+        let faces = |writer: &IndexWriter| crate::media::detail(writer.conn(), id).unwrap().unwrap().faces;
+        assert_eq!(faces(&writer), [face("Anna", 0.5), face("Ben", 0.0)]);
+
+        let mut photo = file("a.jpg", &[]);
+        photo.metadata.faces = vec![face("Cleo", 0.25)];
+        writer.write(root, &[photo]).unwrap();
+        assert_eq!(faces(&writer), [face("Cleo", 0.25)]);
+
+        writer.remove(&[id]).unwrap();
+        let rows: i64 = writer
+            .conn()
+            .query_row("SELECT count(*) FROM media_faces", [], |r| r.get(0))
             .unwrap();
         assert_eq!(rows, 0);
     }

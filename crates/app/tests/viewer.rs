@@ -1026,3 +1026,124 @@ fn req_020_05_the_viewer_stays_dark_in_the_light_appearance() {
     }
     harness.snapshot(common::snapshot_name("viewer_light"));
 }
+
+/// A library of `count` photos as [`library`] makes, where `1.png` has face regions of Anna and Ben.
+fn library_with_faces(fixture: &Fixture, count: usize) -> Connection {
+    let conn = library(fixture, count, &[]);
+    let root: i64 = conn
+        .query_row("SELECT id FROM library_roots", [], |row| row.get(0))
+        .unwrap();
+    let face = |name: &str, x: f32, y: f32| domain::faces::FaceRegion {
+        name: name.into(),
+        x,
+        y,
+        w: 0.2,
+        h: 0.3,
+    };
+    let mut writer = IndexWriter::new(conn);
+    let photo = IndexedFile {
+        rel_path: "1.png".into(),
+        file_name: "1.png".into(),
+        kind: MediaKind::Image,
+        size: 1,
+        mtime: 1_000,
+        sidecar_mtime: None,
+        metadata: MediaMetadata {
+            width: Some(400),
+            height: Some(300),
+            taken_at: Some(2_000_000 - 1),
+            faces: vec![face("Anna", 0.1, 0.2), face("Ben", 0.6, 0.5)],
+            ..Default::default()
+        },
+    };
+    writer.write(root, &[photo]).unwrap();
+    writer.into()
+}
+
+/// Where the shown photo's face regions should be: at their fractions of the photo on screen.
+fn expected_faces(harness: &App) -> Vec<(String, egui::Rect)> {
+    let photo = viewer(harness).photo_rect().unwrap();
+    let at = |x: f32, y: f32| {
+        egui::Rect::from_min_size(
+            pos2(photo.left() + x * photo.width(), photo.top() + y * photo.height()),
+            egui::vec2(0.2 * photo.width(), 0.3 * photo.height()),
+        )
+    };
+    vec![("Anna".into(), at(0.1, 0.2)), ("Ben".into(), at(0.6, 0.5))]
+}
+
+fn assert_faces_on_the_photo(harness: &App) {
+    let drawn = viewer(harness).faces_drawn();
+    let expected = expected_faces(harness);
+    assert_eq!(drawn.len(), expected.len(), "{drawn:?}");
+    for ((name, rect), (want_name, want)) in drawn.iter().zip(&expected) {
+        assert_eq!(name, want_name);
+        assert!(
+            (rect.min - want.min).length() < 0.5 && (rect.max - want.max).length() < 0.5,
+            "{rect:?} ≠ {want:?}"
+        );
+    }
+}
+
+/// REQ-009-17: `p` and _Faces_ show the face regions of a photo that has them as boxes with names, on the person at
+/// any zoom; the choice is remembered across items and viewers; photos without regions have no _Faces_ button.
+#[test]
+fn req_009_17_shows_face_regions_and_remembers_the_choice() {
+    let fixture = Fixture::new();
+    let mut harness = common::harness_with_step(fixture.state(library_with_faces(&fixture, 4)), 1.0 / 60.0);
+    settle(&mut harness);
+    open(&mut harness, "1.png");
+    assert!(harness.query_by_role_and_label(Role::Button, "Faces").is_some());
+    assert!(
+        viewer(&harness).faces_drawn().is_empty(),
+        "hidden until the user shows them"
+    );
+
+    harness.key_press(Key::P);
+    settle_viewer(&mut harness);
+    harness.run_steps(20);
+    assert_faces_on_the_photo(&harness);
+    assert_eq!(
+        harness
+            .get_by_role_and_label(Role::Button, "Faces")
+            .accesskit_node()
+            .toggled(),
+        Some(Toggled::True)
+    );
+    harness.snapshot(common::snapshot_name("viewer_faces"));
+
+    // Zoomed in, the boxes stay on the people.
+    harness.key_press(Key::Plus);
+    harness.key_press(Key::Plus);
+    settle(&mut harness);
+    assert!(viewer(&harness).view().scale > 1.0);
+    assert_faces_on_the_photo(&harness);
+
+    // A photo without face regions has neither boxes nor the button; the choice stays for the next one that has.
+    harness.key_press(Key::ArrowRight);
+    settle_viewer(&mut harness);
+    assert_eq!(shown(&harness).as_deref(), Some("2.png"));
+    assert!(viewer(&harness).faces_drawn().is_empty());
+    assert!(harness.query_by_role_and_label(Role::Button, "Faces").is_none());
+    harness.key_press(Key::ArrowLeft);
+    settle_viewer(&mut harness);
+    harness.run_steps(20);
+    assert_faces_on_the_photo(&harness);
+
+    // Remembered for the next viewer; _Faces_ turns them off again.
+    harness.key_press(Key::Escape);
+    settle(&mut harness);
+    open(&mut harness, "1.png");
+    harness.run_steps(20);
+    assert!(viewer(&harness).faces_shown());
+    assert_faces_on_the_photo(&harness);
+    harness.get_by_role_and_label(Role::Button, "Faces").click();
+    settle(&mut harness);
+    assert!(viewer(&harness).faces_drawn().is_empty());
+    let stored = {
+        let db = harness.state().db().unwrap();
+        let conn = db.lock().unwrap();
+        db::settings::value(&conn, domain::faces::FACES_KEY).unwrap()
+    };
+    assert_eq!(stored, Some(serde_json::json!("hidden")));
+}
