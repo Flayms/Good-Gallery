@@ -1324,7 +1324,7 @@ impl Viewer {
         ctx: &egui::Context,
         item: &GalleryItem,
         libraries: &[Library],
-        originals: &Originals,
+        originals: &mut Originals,
         gallery: &mut Gallery,
         key: bool,
     ) {
@@ -1359,6 +1359,10 @@ impl Viewer {
                 Some(_) => session.start(None, ctx),
                 None => {}
             }
+        }
+        // The original the viewer already shows, instead of reading the file again (REQ-021-19).
+        if let Some(session) = &mut self.edit {
+            session.use_shown(&originals.get(item.id), || originals.lend(item.id));
         }
     }
 
