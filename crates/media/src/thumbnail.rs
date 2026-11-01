@@ -7,7 +7,7 @@ use domain::media::MediaKind;
 pub(crate) use domain::thumbs::fit_inside;
 use domain::thumbs::{MAX_THUMB_HEIGHT, MAX_THUMB_WIDTH, THUMB_WIDTHS, THUMBHASH_SIZE, VIDEO_FRAME_POSITION};
 use image::metadata::Orientation;
-use image::{DynamicImage, ImageDecoder as _, ImageReader};
+use image::{DynamicImage, ImageReader};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -76,8 +76,15 @@ impl Renderer {
         Self { previews, ffmpeg }
     }
 
-    /// All thumbnails of `file` (absolute). `duration` in seconds, for videos.
-    pub fn render(&self, file: &Path, kind: MediaKind, duration: Option<f64>) -> Result<Thumbnails, RenderError> {
+    /// All thumbnails of `file` (absolute). `duration` in seconds, for videos; `sidecar_orientation` turns a photo
+    /// without an orientation of its own (REQ-004-12).
+    pub fn render(
+        &self,
+        file: &Path,
+        kind: MediaKind,
+        duration: Option<f64>,
+        sidecar_orientation: Option<u8>,
+    ) -> Result<Thumbnails, RenderError> {
         let image = match kind {
             MediaKind::Video => {
                 let position = duration
@@ -85,7 +92,7 @@ impl Renderer {
                     .map_or(0.0, |d| d * VIDEO_FRAME_POSITION);
                 self.frame(file, position)?
             }
-            MediaKind::Image => self.load_image(file)?,
+            MediaKind::Image => self.load_image(file, sidecar_orientation)?,
         };
         render_thumbnails(image)
     }
@@ -96,34 +103,39 @@ impl Renderer {
         image::load_from_memory_with_format(&png, image::ImageFormat::Png).map_err(decode_error)
     }
 
-    fn load_image(&self, file: &Path) -> Result<DynamicImage, RenderError> {
+    fn load_image(&self, file: &Path, sidecar_orientation: Option<u8>) -> Result<DynamicImage, RenderError> {
         let extension = file
             .extension()
             .map(|ext| ext.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
         match extension.as_str() {
             "jpg" | "jpeg" => {
-                if let Some(preview) = self.load_preview(file) {
+                if let Some(preview) = self.load_preview(file, sidecar_orientation) {
                     return Ok(preview);
                 }
                 let data = std::fs::read(file)?;
                 // A file named .jpg may hold another format.
-                decode_jpeg(&data, None).or_else(|error| decode_any(Cursor::new(&data)).map_err(|_| error))
+                decode_jpeg(&data, None, sidecar_orientation)
+                    .or_else(|error| decode_any(Cursor::new(&data), sidecar_orientation).map_err(|_| error))
             }
             // The `image` crate decodes AVIF only through dav1d (a C library); ffmpeg has it.
             "avif" => self.frame(file, 0.0),
-            _ => decode_any(std::io::BufReader::new(std::fs::File::open(file)?)),
+            _ => decode_any(std::io::BufReader::new(std::fs::File::open(file)?), sidecar_orientation),
         }
     }
 
     /// Camera JPEGs often embed a large preview; decoding it avoids reading the whole file over the network
     /// (REQ-005-04). Used only if it is as wide as the largest thumbnail (or the original, if that is smaller) and has
     /// the original's shape.
-    fn load_preview(&self, file: &Path) -> Option<DynamicImage> {
+    fn load_preview(&self, file: &Path, sidecar_orientation: Option<u8>) -> Option<DynamicImage> {
         let buffer = self.previews.extract_preview(file)?;
-        let original = jpeg_header(&mut std::io::BufReader::new(std::fs::File::open(file).ok()?)).ok()?;
+        let original = jpeg_header(
+            &mut std::io::BufReader::new(std::fs::File::open(file).ok()?),
+            sidecar_orientation,
+        )
+        .ok()?;
         // Some cameras (e.g. DJI) point PreviewImage at data that isn't an image.
-        let preview = jpeg_header(&mut Cursor::new(&buffer)).ok()?;
+        let preview = jpeg_header(&mut Cursor::new(&buffer), None).ok()?;
         let upright = |header: &JpegHeader| {
             if swaps_sides(original.orientation) {
                 header.height
@@ -137,7 +149,7 @@ impl Renderer {
         if !large_enough || (aspect - 1.0).abs() > PREVIEW_ASPECT_TOLERANCE {
             return None;
         }
-        decode_jpeg(&buffer, Some(original.orientation)).ok()
+        decode_jpeg(&buffer, Some(original.orientation), None).ok()
     }
 }
 
@@ -162,8 +174,8 @@ struct JpegHeader {
     orientation: Orientation,
 }
 
-/// Size and orientation from the JPEG's header, without decoding it.
-fn jpeg_header(reader: &mut impl std::io::Read) -> Result<JpegHeader, RenderError> {
+/// Size and orientation (REQ-004-12) from the JPEG's header, without decoding it.
+fn jpeg_header(reader: &mut impl std::io::Read, sidecar_orientation: Option<u8>) -> Result<JpegHeader, RenderError> {
     let mut decoder = jpeg_decoder::Decoder::new(reader);
     decoder.read_info().map_err(decode_error)?;
     let info = decoder.info().ok_or_else(|| decode_error("no frame"))?;
@@ -173,23 +185,72 @@ fn jpeg_header(reader: &mut impl std::io::Read) -> Result<JpegHeader, RenderErro
     Ok(JpegHeader {
         width: u32::from(info.width),
         height: u32::from(info.height),
-        orientation: exif_orientation(decoder.exif_data()),
+        orientation: shown_orientation(
+            decoder.exif_data().and_then(Orientation::from_exif_chunk),
+            decoder.xmp_data(),
+            sidecar_orientation,
+        ),
     })
 }
 
-fn exif_orientation(exif: Option<&[u8]>) -> Orientation {
-    exif.and_then(Orientation::from_exif_chunk)
+/// The orientation a photo is shown with (REQ-004-12): its EXIF one (`exif`), else the one in its embedded XMP
+/// packet, else its sidecar's.
+pub(crate) fn shown_orientation(
+    exif: Option<Orientation>,
+    xmp: Option<&[u8]>,
+    sidecar_orientation: Option<u8>,
+) -> Orientation {
+    exif.or_else(|| xmp.and_then(xmp_orientation))
+        .or_else(|| sidecar_orientation.and_then(Orientation::from_exif))
         .unwrap_or(Orientation::NoTransforms)
 }
 
+fn xmp_orientation(packet: &[u8]) -> Option<Orientation> {
+    let value = meta::read_sidecar(packet).get("Orientation")?.as_f64()?;
+    (1.0..=8.0)
+        .contains(&value)
+        .then(|| Orientation::from_exif(value as u8))?
+}
+
+/// The orientation `decoder` reads from the file (REQ-004-12): EXIF, a TIFF's own tag, else embedded XMP, else the
+/// sidecar's.
+pub(crate) fn decoder_orientation(
+    decoder: &mut impl image::ImageDecoder,
+    sidecar_orientation: Option<u8>,
+) -> Orientation {
+    let exif = decoder
+        .exif_metadata()
+        .ok()
+        .flatten()
+        .and_then(|chunk| Orientation::from_exif_chunk(&chunk))
+        .or_else(|| {
+            decoder
+                .orientation()
+                .ok()
+                .filter(|orientation| *orientation != Orientation::NoTransforms)
+        });
+    let xmp = decoder.xmp_metadata().ok().flatten();
+    shown_orientation(exif, xmp.as_deref(), sidecar_orientation)
+}
+
 /// Decodes a JPEG shrunk by the DCT scale (½, ¼, ⅛) that keeps it at least as large as the thumbnail box, and turns
-/// it upright: with `orientation`, or the file's own. A truncated file decodes partially (the missing part stays
-/// decoder fill).
-fn decode_jpeg(data: &[u8], orientation: Option<Orientation>) -> Result<DynamicImage, RenderError> {
+/// it upright: with `orientation`, or the file's own (REQ-004-12). A truncated file decodes partially (the missing
+/// part stays decoder fill).
+fn decode_jpeg(
+    data: &[u8],
+    orientation: Option<Orientation>,
+    sidecar_orientation: Option<u8>,
+) -> Result<DynamicImage, RenderError> {
     let mut decoder = jpeg_decoder::Decoder::new(Cursor::new(data));
     decoder.read_info().map_err(decode_error)?;
     let info = decoder.info().ok_or_else(|| decode_error("no frame"))?;
-    let orientation = orientation.unwrap_or_else(|| exif_orientation(decoder.exif_data()));
+    let orientation = orientation.unwrap_or_else(|| {
+        shown_orientation(
+            decoder.exif_data().and_then(Orientation::from_exif_chunk),
+            decoder.xmp_data(),
+            sidecar_orientation,
+        )
+    });
     let mut image = if info.pixel_format == jpeg_decoder::PixelFormat::CMYK32 {
         // The `image` crate converts CMYK (including Adobe's inverted variant) to RGB.
         let mut reader = ImageReader::with_format(Cursor::new(data), image::ImageFormat::Jpeg);
@@ -227,12 +288,15 @@ fn decode_jpeg(data: &[u8], orientation: Option<Orientation>) -> Result<DynamicI
     Ok(image)
 }
 
-/// Any other format the `image` crate knows (PNG, GIF's first frame, WebP), by content, upright.
-pub(crate) fn decode_any(reader: impl std::io::BufRead + std::io::Seek) -> Result<DynamicImage, RenderError> {
+/// Any other format the `image` crate knows (PNG, GIF's first frame, WebP), by content, upright (REQ-004-12).
+pub(crate) fn decode_any(
+    reader: impl std::io::BufRead + std::io::Seek,
+    sidecar_orientation: Option<u8>,
+) -> Result<DynamicImage, RenderError> {
     let mut reader = ImageReader::new(reader).with_guessed_format()?;
     reader.limits(limits());
     let mut decoder = reader.into_decoder().map_err(decode_error)?;
-    let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
+    let orientation = decoder_orientation(&mut decoder, sidecar_orientation);
     let mut image = DynamicImage::from_decoder(decoder).map_err(decode_error)?;
     image.apply_orientation(orientation);
     Ok(image)
@@ -336,6 +400,27 @@ pub(crate) mod tests {
         out
     }
 
+    /// An XMP packet with only `tiff:Orientation`.
+    pub(crate) fn xmp_packet(orientation: u8) -> String {
+        format!(
+            r#"<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+            <rdf:Description xmlns:tiff="http://ns.adobe.com/tiff/1.0/" tiff:Orientation="{orientation}"/>
+            </rdf:RDF></x:xmpmeta>"#
+        )
+    }
+
+    /// The JPEG with an XMP segment that holds only `orientation`.
+    pub(crate) fn with_xmp_orientation(jpeg: &[u8], orientation: u8) -> Vec<u8> {
+        let mut segment = b"http://ns.adobe.com/xap/1.0/\0".to_vec();
+        segment.extend(xmp_packet(orientation).into_bytes());
+        let mut out = jpeg[..2].to_vec();
+        out.extend([0xff, 0xe1]);
+        out.extend(((segment.len() + 2) as u16).to_be_bytes());
+        out.extend(segment);
+        out.extend(&jpeg[2..]);
+        out
+    }
+
     struct Previews(Option<Vec<u8>>);
 
     impl PreviewSource for Previews {
@@ -349,7 +434,7 @@ pub(crate) mod tests {
     }
 
     fn render_image(file: &Path, renderer: &Renderer) -> Thumbnails {
-        renderer.render(file, MediaKind::Image, None).unwrap()
+        renderer.render(file, MediaKind::Image, None, None).unwrap()
     }
 
     /// `(width, decoded size)` of each thumbnail; fails unless they are WebP.
@@ -417,6 +502,39 @@ pub(crate) mod tests {
         assert_eq!(sizes(&thumbnails), [(400, (400, 800)), (800, (500, 1000))]);
     }
 
+    /// REQ-004-12, REQ-005-03: a photo oriented only in its embedded XMP, or only in its sidecar, is turned upright;
+    /// an EXIF orientation wins over both.
+    #[test]
+    fn req_004_12_req_005_03_turns_photos_upright_by_an_orientation_only_in_xmp() {
+        let dir = tempfile::tempdir().unwrap();
+        let plain = jpeg(&solid(1000, 500, [255, 0, 0]));
+        let upright = [(400, (400, 800)), (800, (500, 1000))];
+        let sideways = [(400, (400, 200)), (800, (800, 400))];
+
+        let embedded = dir.path().join("embedded.jpg");
+        std::fs::write(&embedded, with_xmp_orientation(&plain, 6)).unwrap();
+        assert_eq!(
+            sizes(&render_image(&embedded, &renderer(None))),
+            upright,
+            "embedded XMP"
+        );
+
+        let bare = dir.path().join("bare.jpg");
+        std::fs::write(&bare, &plain).unwrap();
+        let sidecar = renderer(None).render(&bare, MediaKind::Image, None, Some(6)).unwrap();
+        assert_eq!(sizes(&sidecar), upright, "sidecar");
+
+        let png = dir.path().join("bare.png");
+        solid(1000, 500, [255, 0, 0]).save(&png).unwrap();
+        let sidecar_png = renderer(None).render(&png, MediaKind::Image, None, Some(6)).unwrap();
+        assert_eq!(sizes(&sidecar_png), upright, "sidecar of a PNG");
+
+        let both = dir.path().join("both.jpg");
+        std::fs::write(&both, with_orientation(&with_xmp_orientation(&plain, 6), 1)).unwrap();
+        let exif_wins = renderer(None).render(&both, MediaKind::Image, None, Some(6)).unwrap();
+        assert_eq!(sizes(&exif_wins), sideways, "EXIF first");
+    }
+
     #[test]
     fn req_005_01_renders_every_width_as_webp_without_upscaling_plus_a_thumbhash() {
         let dir = tempfile::tempdir().unwrap();
@@ -465,7 +583,7 @@ pub(crate) mod tests {
     #[test]
     fn req_005_04_shrinks_large_jpegs_while_decoding() {
         let data = jpeg(&solid(4000, 3000, [255, 0, 0]));
-        let decoded = decode_jpeg(&data, None).unwrap();
+        let decoded = decode_jpeg(&data, None, None).unwrap();
         assert_eq!(decoded.dimensions(), (1000, 750));
         let thumbnails = render_thumbnails(decoded).unwrap();
         assert_eq!(sizes(&thumbnails)[1], (800, (800, 600)));
@@ -521,7 +639,7 @@ pub(crate) mod tests {
             let file = dir.path().join(name);
             std::fs::write(&file, b"not an image").unwrap();
             assert!(matches!(
-                renderer(None).render(&file, MediaKind::Image, None),
+                renderer(None).render(&file, MediaKind::Image, None, None),
                 Err(RenderError::Decode(_))
             ));
         }

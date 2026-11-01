@@ -286,6 +286,8 @@ pub struct GalleryItem {
     pub thumbhash: Option<String>,
     pub thumb_status: ThumbStatus,
     pub tagged: Tagged,
+    /// Turns a photo without an orientation of its own (REQ-004-12).
+    pub sidecar_orientation: Option<u8>,
 }
 
 /// Tile data of the given media items, in no particular order; ids that don't exist are left out.
@@ -293,7 +295,7 @@ pub fn items(conn: &Connection, ids: &[i64]) -> Result<Vec<GalleryItem>> {
     let ids_json = serde_json::to_string(ids).expect("ids serialize");
     let mut stmt = conn.prepare_cached(
         "SELECT id, root_id, rel_path, file_name, kind, size, mtime, taken_at, width, height, rating, duration,
-                thumbhash, thumb_status
+                thumbhash, thumb_status, sidecar_orientation
          FROM media WHERE id IN (SELECT value FROM json_each(?1))",
     )?;
     let mut items: Vec<GalleryItem> = stmt
@@ -318,6 +320,7 @@ pub fn items(conn: &Connection, ids: &[i64]) -> Result<Vec<GalleryItem>> {
                     _ => ThumbStatus::Pending,
                 },
                 tagged: Tagged::default(),
+                sidecar_orientation: row.get(14)?,
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
