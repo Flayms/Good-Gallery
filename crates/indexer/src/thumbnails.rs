@@ -444,7 +444,8 @@ mod tests {
         active: AtomicUsize,
         peak: AtomicUsize,
         delay: Mutex<Duration>,
-        /// The nice value of the thread each render ran on (Linux).
+        /// The nice value of the thread each render ran on.
+        #[cfg(target_os = "linux")]
         nice: Mutex<Vec<i32>>,
     }
 
