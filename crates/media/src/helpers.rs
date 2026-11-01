@@ -267,7 +267,8 @@ pub const EXIFTOOL_BUNDLED: Bundled = ("exiftool", if cfg!(windows) { "exiftool.
 pub const FFMPEG_BUNDLED: Bundled = ("ffmpeg", if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" });
 pub const MPV_BUNDLED: Bundled = ("mpv", if cfg!(windows) { "libmpv-2.dll" } else { "libmpv.so.2" });
 
-/// libmpv for video playback: `GOOD_GALLERY_MPV`, `mpv/libmpv-2.dll` next to the app, or on `PATH`. On Linux the
+/// libmpv for video playback: `GOOD_GALLERY_MPV`, `mpv/libmpv-2.dll` next to the app (or in `target/helpers` in
+/// development builds), or on `PATH`. On Linux the
 /// system's library: the bare name, which the dynamic loader looks up in its own paths (REQ-018-03).
 pub fn find_mpv() -> Option<std::path::PathBuf> {
     let (folder, name) = MPV_BUNDLED;
@@ -287,7 +288,8 @@ pub fn find_helper(env: &str, folder: &str, name: &str) -> Option<std::path::Pat
     })
 }
 
-/// The path in the environment variable `env`, else `<folder>/<name>` next to the app if it is there.
+/// The path in the environment variable `env`, else `<folder>/<name>` next to the app if it is there, else (in
+/// development builds) where `packaging/fetch-helpers.ps1` put it.
 fn find_bundled(env: &str, folder: &str, name: &str) -> Option<std::path::PathBuf> {
     if let Some(path) = std::env::var_os(env) {
         return Some(path.into());
@@ -296,6 +298,18 @@ fn find_bundled(env: &str, folder: &str, name: &str) -> Option<std::path::PathBu
         .ok()
         .and_then(|exe| Some(exe.parent()?.join(folder).join(name)))
         .filter(|path| path.is_file())
+        .or_else(|| fetched_helper(folder, name).filter(|path| path.is_file()))
+}
+
+/// `target/helpers/<folder>/<name>` in the workspace, where `packaging/fetch-helpers.ps1` puts the helpers, so
+/// `cargo run` and the tests find them without `GOOD_GALLERY_*` (REQ-014-12). Only development builds: the packaged
+/// app finds its helpers next to itself.
+fn fetched_helper(folder: &str, name: &str) -> Option<std::path::PathBuf> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    let workspace = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent()?.parent()?;
+    Some(workspace.join("target").join("helpers").join(folder).join(name))
 }
 
 /// The refresh rate of the primary display in Hz, if Windows reports one: video frames are timed to it.
@@ -520,6 +534,23 @@ mod tests {
     use std::time::{Duration, Instant};
 
     const CHILD: &str = "GG_HELPERS_TEST_CHILD";
+
+    /// REQ-014-12: development builds look for helpers where `packaging/fetch-helpers.ps1` puts them.
+    #[test]
+    fn req_014_12_development_builds_find_the_fetched_helpers() {
+        let media = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let workspace = media.parent().unwrap().parent().unwrap();
+        assert_eq!(
+            fetched_helper("mpv", "libmpv-2.dll"),
+            Some(
+                workspace
+                    .join("target")
+                    .join("helpers")
+                    .join("mpv")
+                    .join("libmpv-2.dll")
+            )
+        );
+    }
 
     /// Runs only as the child of `exiftool_ends_with_an_app_that_exits_without_cleaning_up`.
     #[test]

@@ -53,13 +53,23 @@ pub struct Fixture {
     _gpu: MutexGuard<'static, ()>,
 }
 
+/// Where fixtures put their folders. Snapshots show a media item's location, and a long `TMPDIR` would wrap it to
+/// two lines, so on Unix it is always `/tmp`; temp folder names have a fixed length.
+fn temp_root() -> PathBuf {
+    if cfg!(unix) {
+        PathBuf::from("/tmp")
+    } else {
+        std::env::temp_dir()
+    }
+}
+
 impl Fixture {
     pub fn new() -> Self {
         pin_dates();
         Self {
             scans: Arc::default(),
             picker: Arc::default(),
-            dir: tempfile::tempdir().unwrap(),
+            dir: tempfile::tempdir_in(temp_root()).unwrap(),
             // A failed test poisons the lock; the next one may still run.
             _gpu: GPU.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
         }

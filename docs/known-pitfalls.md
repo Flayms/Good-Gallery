@@ -4,10 +4,7 @@ Add every pitfall you hit. A trap in a tool, library, OS or our tests that we ca
 
 ## To fix
 
-* **Snapshot tests embed the temp folder's path** (the info panel's location): a longer `TMPDIR` wraps it to two lines and fails `info_sheet_linux`. Run the native tests with the default `/tmp` (#101).
-* **Tests and `cargo run` find libmpv only through `GOOD_GALLERY_MPV`** (or `target\debug\mpv\libmpv-2.dll`, or `PATH`). Point it at `target/helpers/mpv/libmpv-2.dll` (`packaging/fetch-helpers.ps1`); without it `crates/app/tests/video.rs` skips and videos show their preview (#103).
 * **One `CARGO_TARGET_DIR` for several worktrees builds stale code:** cargo names a workspace crate's artifacts by its path relative to the workspace, so every worktree shares them, and a crate unchanged since another worktree's build counts as fresh. Code from the other branch is linked in, which shows up as missing fields or methods, or as another branch's UI in snapshots. After switching worktrees run `cargo clean -p domain -p meta -p db -p media -p indexer -p app -p xtask` (dependencies stay built), or give each worktree its own target folder (#107).
-* **`db::open_reader` can't create or migrate the index**: open it only after `db::open`. App checks on a data folder made by `cargo xtask libraries` don't catch this; also start once on an empty one (#108).
 * **`rgb0` leaves the fourth byte undefined**, and egui blends with alpha: force it to 255 (≈ 0.7 ms per 1080p frame) or sample with alpha 1 in a shader (#109).
 * **The kittest harness insets the UI by 8 px but not the caption buttons** (they align to the window's edge), so in Linux snapshots the buttons sit 8 px above the toolbar row; in the app they line up (#110).
 

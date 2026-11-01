@@ -635,3 +635,21 @@ fn run(options: Options) -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// REQ-001-10: an empty data folder gets a new index, and the app starts without an error.
+    #[test]
+    fn req_001_10_first_start_creates_the_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_dir = dir.path().join("good-gallery");
+
+        let state = open_state(&data_dir, &egui::Context::default(), None);
+
+        assert_eq!(state.error, None);
+        assert!(data_dir.join("gallery.db").is_file());
+        assert!(state.libraries.is_empty());
+    }
+}
