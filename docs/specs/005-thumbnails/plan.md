@@ -5,7 +5,7 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 ## Approach
 
 - **Widths** (`domain::thumbs`): `THUMB_WIDTHS = [400, 800]`; `pick_thumb_width(points, pixels_per_point)` picks the smallest that covers the tile's physical width (REQ-005-02).
-- **Rendering** (`media::thumbnail::Renderer`): one decode per file, then every width and the placeholder from it.
+- **Rendering** (`media::thumbnail::Renderer`): one decode per file, then every width and the placeholder from it. `req_005_03_turns_every_orientation_upright` pins the expected pixels for all 8 EXIF orientations; change the mapping only against it.
   - JPEGs decode through `jpeg-decoder` with DCT scaling (shrink-on-load: the smallest scale still covering the 800 × 2400 box), truncated JPEGs partially. PNG, GIF (first frame) and WebP through `image`, with a decode limit of 268 402 689 pixels. Orientation from EXIF (REQ-005-03).
   - AVIF and video frames come from ffmpeg (`-ss <10 % of the duration> … -frames:v 1 -vf scale='min(800,iw)':-2 -f image2pipe -c:v png pipe:1`), which applies rotation itself; `image` would need dav1d (a C library with a meson build) for AVIF. 60 s timeout. Found like exiftool: `GOOD_GALLERY_FFMPEG`, `ffmpeg\ffmpeg.exe` next to the app, `PATH`.
   - Embedded previews (REQ-005-04): for `.jpg` / `.jpeg`, exiftool's `PreviewImage` replaces the full decode when it decodes, is at least `min(800, upright width)` wide and its aspect ratio is within 2 % of the original's.
