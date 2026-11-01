@@ -1,5 +1,8 @@
 //! Pure types and logic: media, tags, search model, gallery layout, date groups. No IO.
 
+// Rebuilt when another worktree built into the same target folder (`.cargo/config.toml`).
+const _: Option<&str> = option_env!("GOOD_GALLERY_WORKTREE");
+
 pub mod ambient;
 pub mod appearance;
 pub mod autoscroll;

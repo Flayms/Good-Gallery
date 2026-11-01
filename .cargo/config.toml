@@ -1,2 +1,9 @@
 [alias]
 xtask = "run --package xtask --"
+
+# The worktree's path, which every workspace crate reads (`option_env!`), so cargo rebuilds a crate when another
+# worktree built into the same CARGO_TARGET_DIR (#107). Cargo names a workspace crate's artifacts by its path relative
+# to the workspace, so without this a crate unchanged since another worktree's build counts as fresh, and that
+# worktree's code is linked in.
+[env]
+GOOD_GALLERY_WORKTREE = { value = "", relative = true, force = true }
