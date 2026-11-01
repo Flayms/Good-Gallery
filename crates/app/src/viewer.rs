@@ -62,6 +62,8 @@ pub enum Action {
     SaveEdit(Box<edit::SaveEdit>),
     /// Ask to put the unedited original of this item back (REQ-021-12).
     Revert(crate::state::RevertTarget),
+    /// Rate an item (spec 024); the viewer stays.
+    Rate(crate::state::Rate),
 }
 
 /// What the keys and the mouse's back button asked for since the last frame.
@@ -83,6 +85,8 @@ struct Keys {
     edit: bool,
     undo: bool,
     redo: bool,
+    /// `1`–`5`: rate the item with that many stars (REQ-024-01).
+    rate: Option<i64>,
 }
 
 /// The video the viewer plays (REQ-009-06).
@@ -490,6 +494,16 @@ impl Viewer {
             if input.consume_key(Modifiers::NONE, Key::P) {
                 self.keys.faces ^= true;
             }
+            // Not while editing, whose number fields take digits; never in the browser, which doesn't write files
+            // (REQ-024-05).
+            if self.edit.is_none() && !crate::WEB {
+                let stars = [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5];
+                for (rating, key) in (1..).zip(stars) {
+                    if input.consume_key(Modifiers::NONE, key) {
+                        self.keys.rate = Some(rating);
+                    }
+                }
+            }
         });
     }
 
@@ -642,6 +656,10 @@ impl Viewer {
             self.chrome_for = Some(self.id);
         }
 
+        let mut action = None;
+        if let (Some(item), Some(stars), None) = (&item, keys.rate, &self.closing) {
+            action = Some(Action::Rate(crate::state::Rate::toggle(item, stars)));
+        }
         if let Some(item) = &item {
             self.sync_edit(ctx, item, libraries, originals, gallery, keys.edit);
             // Whether the photo has face regions, and where (REQ-009-17).
@@ -652,7 +670,6 @@ impl Viewer {
 
         let screen = ctx.content_rect();
         let layout = Layout::new(screen, self.info_open || self.edit.is_some(), self.filmstrip);
-        let mut action = None;
         egui::Area::new(Self::layer().id)
             .order(Self::layer().order)
             .fixed_pos(screen.min)
@@ -748,6 +765,7 @@ impl Viewer {
             Some(Action::ShowInExplorer(path)) => Some(Action::ShowInExplorer(path)),
             Some(Action::SaveEdit(request)) => Some(Action::SaveEdit(request)),
             Some(Action::Revert(target)) => Some(Action::Revert(target)),
+            Some(Action::Rate(rate)) => Some(Action::Rate(rate)),
             // Closing while editing asks about unsaved changes first (REQ-021-08).
             Some(Action::Close) if self.edit.is_some() => {
                 self.leave_edit(Leave::Close, gallery);
@@ -1314,6 +1332,9 @@ impl Viewer {
             info::InfoAction::Revert => gallery
                 .cached_detail(self.id)
                 .map(|detail| Action::Revert(crate::state::RevertTarget::of(detail))),
+            info::InfoAction::Rate(stars) => gallery
+                .cached_detail(self.id)
+                .map(|detail| Action::Rate(crate::state::Rate::toggle_detail(detail, stars))),
         }
     }
 

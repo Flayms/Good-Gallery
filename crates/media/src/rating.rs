@@ -1,0 +1,281 @@
+//! Writes a rating set by hand into a file or its sidecar with exiftool (spec 024).
+
+use domain::media::MediaKind;
+use domain::rating::{MAX, Target, sidecar_name};
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, thiserror::Error)]
+pub enum RatingError {
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
+    #[error("the file is read-only")]
+    ReadOnly,
+    #[error("the path leaves its library")]
+    UnsafePath,
+    #[error("exiftool: {0}")]
+    Exiftool(String),
+}
+
+/// Writes `rating` (`None` removes it) for the media item `rel_path` of the library in `library`: into the file or
+/// its sidecar, and into an existing sidecar that has a rating too (REQ-024-03). The date modified stays. A file that
+/// can't be written stays as it was (REQ-024-04).
+pub fn write(
+    exiftool: &Path,
+    library: &Path,
+    rel_path: &str,
+    kind: MediaKind,
+    rating: Option<i64>,
+) -> Result<(), RatingError> {
+    let file = library_path(library, rel_path).ok_or(RatingError::UnsafePath)?;
+    let name = rel_path.rsplit('/').next().unwrap_or(rel_path);
+    let folder = file.parent().ok_or(RatingError::UnsafePath)?;
+    let sidecar = existing_sidecar(folder, name)?;
+    let file_has_rating = kind == MediaKind::Video && has_rating(exiftool, &file)?;
+    let mut targets = vec![match Target::of(kind, file_has_rating) {
+        Target::File => file.clone(),
+        Target::Sidecar => sidecar.clone().unwrap_or_else(|| folder.join(sidecar_name(name))),
+    }];
+    if let Some(sidecar) = sidecar
+        && !targets.contains(&sidecar)
+        && has_rating(exiftool, &sidecar)?
+    {
+        targets.push(sidecar);
+    }
+    // Nothing is written unless every target can be: a read-only file isn't replaced behind the user's back.
+    for target in &targets {
+        if target.exists() && std::fs::metadata(target)?.permissions().readonly() {
+            return Err(RatingError::ReadOnly);
+        }
+    }
+    if !file.is_file() {
+        return Err(std::io::Error::from(std::io::ErrorKind::NotFound).into());
+    }
+    let value = rating.unwrap_or(0).clamp(0, MAX);
+    for target in targets {
+        // exiftool's `-P` keeps whole seconds only; the index compares the exact time.
+        let modified = target
+            .exists()
+            .then(|| std::fs::metadata(&target)?.modified())
+            .transpose()?;
+        let mut args = vec![
+            "-charset".into(),
+            "filename=utf8".into(),
+            format!("-XMP-xmp:Rating={value}"),
+        ];
+        if target.exists() {
+            // Every rating the file already has, so none of them disagrees.
+            args.extend([format!("-Rating={value}"), "-P".into(), "-overwrite_original".into()]);
+        } else {
+            // A new sidecar.
+            args.push("-o".into());
+        }
+        args.push(path_arg(&target));
+        crate::exiftool::run_once(exiftool, None, &args).map_err(RatingError::Exiftool)?;
+        if let Some(modified) = modified {
+            std::fs::File::options()
+                .write(true)
+                .open(&target)?
+                .set_modified(modified)?;
+        }
+    }
+    Ok(())
+}
+
+fn library_path(library: &Path, rel_path: &str) -> Option<PathBuf> {
+    domain::media::is_safe_rel_path(rel_path).then(|| {
+        let mut path = library.to_path_buf();
+        path.extend(rel_path.split('/'));
+        path
+    })
+}
+
+/// The sidecar of `name` in `folder`, as indexing finds it (REQ-004-10).
+fn existing_sidecar(folder: &Path, name: &str) -> std::io::Result<Option<PathBuf>> {
+    let mut sidecars = std::collections::HashMap::<String, Vec<String>>::new();
+    for entry in std::fs::read_dir(folder)? {
+        let entry = entry?;
+        let Some(sidecar) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if domain::media::is_sidecar(&sidecar) {
+            sidecars.entry(sidecar.to_lowercase()).or_default().push(sidecar);
+        }
+    }
+    Ok(domain::media::find_sidecar(&sidecars, name).map(|sidecar| folder.join(sidecar)))
+}
+
+/// Whether `file` has a `Rating` tag of its own. A file exiftool can't read has none.
+fn has_rating(exiftool: &Path, file: &Path) -> Result<bool, RatingError> {
+    let args = ["-charset", "filename=utf8", "-j", "-Rating"].map(String::from);
+    let output = crate::exiftool::run_once(exiftool, None, &[&args[..], &[path_arg(file)]].concat())
+        .map_err(RatingError::Exiftool)?;
+    let read: serde_json::Value = serde_json::from_str(&output).unwrap_or_default();
+    Ok(read[0].get("Rating").is_some())
+}
+
+/// A path for exiftool. Library paths are absolute, so they can't be taken for an option (REQ-011-09).
+fn path_arg(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{Value, json};
+    use std::process::Command;
+    use std::time::SystemTime;
+
+    struct Library {
+        dir: tempfile::TempDir,
+        exiftool: PathBuf,
+    }
+
+    fn library() -> Option<Library> {
+        drop(crate::exiftool::tests::exiftool()?);
+        Some(Library {
+            dir: tempfile::tempdir().unwrap(),
+            exiftool: crate::exiftool::find_exiftool().unwrap(),
+        })
+    }
+
+    impl Library {
+        fn path(&self, rel: &str) -> PathBuf {
+            self.dir.path().join(rel)
+        }
+
+        fn photo(&self, name: &str) -> PathBuf {
+            let path = self.path(name);
+            image::RgbImage::from_pixel(8, 8, image::Rgb([200, 90, 40]))
+                .save(&path)
+                .unwrap();
+            path
+        }
+
+        fn video(&self, name: &str) -> PathBuf {
+            let path = self.path(name);
+            let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/tests/fixtures/Holiday/walk.mp4");
+            std::fs::copy(fixture, &path).unwrap();
+            path
+        }
+
+        fn tag(&self, path: &Path, args: &[&str]) {
+            let status = Command::new(&self.exiftool)
+                .args(args)
+                .args(["-overwrite_original", "-q"])
+                .arg(path)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+
+        /// Every `Rating` tag in `path`, by group.
+        fn ratings(&self, path: &Path) -> Value {
+            let output = Command::new(&self.exiftool)
+                .args(["-j", "-n", "-G1", "-a", "-Rating"])
+                .arg(path)
+                .output()
+                .unwrap();
+            let mut read: Value = serde_json::from_slice(&output.stdout).unwrap();
+            read[0].as_object_mut().unwrap().remove("SourceFile");
+            read[0].take()
+        }
+
+        fn write(&self, name: &str, kind: MediaKind, rating: Option<i64>) -> Result<(), RatingError> {
+            write(&self.exiftool, self.dir.path(), name, kind, rating)
+        }
+    }
+
+    fn mtime(path: &Path) -> SystemTime {
+        std::fs::metadata(path).unwrap().modified().unwrap()
+    }
+
+    /// REQ-024-03: a photo gets the rating in every `Rating` it has and in XMP; its date modified stays.
+    #[test]
+    fn req_024_03_writes_a_photos_rating_into_the_photo() {
+        let Some(lib) = library() else { return };
+        let photo = lib.photo("a.jpg");
+        lib.tag(&photo, &["-IFD0:Rating=1"]);
+        let before = mtime(&photo);
+
+        lib.write("a.jpg", MediaKind::Image, Some(4)).unwrap();
+        assert_eq!(lib.ratings(&photo), json!({ "IFD0:Rating": 4, "XMP-xmp:Rating": 4 }));
+        assert_eq!(mtime(&photo), before);
+        assert!(!lib.path("a.jpg.xmp").exists(), "no sidecar for a photo");
+
+        let png = lib.photo("b.png");
+        lib.write("b.png", MediaKind::Image, Some(2)).unwrap();
+        assert_eq!(lib.ratings(&png), json!({ "XMP-xmp:Rating": 2 }));
+    }
+
+    /// REQ-024-03: a removed rating is written as 0, and a sidecar's rating follows the file's.
+    #[test]
+    fn req_024_03_removes_the_rating_also_from_the_sidecar() {
+        let Some(lib) = library() else { return };
+        let photo = lib.photo("a.jpg");
+        lib.tag(&photo, &["-XMP-xmp:Rating=5"]);
+        let sidecar = lib.path("a.xmp");
+        lib.tag(&photo, &["-o", sidecar.to_str().unwrap()]);
+        assert_eq!(lib.ratings(&sidecar), json!({ "XMP-xmp:Rating": 5 }));
+
+        lib.write("a.jpg", MediaKind::Image, None).unwrap();
+        assert_eq!(lib.ratings(&photo), json!({ "XMP-xmp:Rating": 0 }));
+        assert_eq!(lib.ratings(&sidecar), json!({ "XMP-xmp:Rating": 0 }));
+    }
+
+    /// REQ-024-03: a video's rating goes into a new `<file name>.xmp`, or the sidecar it has; the video stays as it was.
+    #[test]
+    fn req_024_03_writes_a_videos_rating_into_its_sidecar() {
+        let Some(lib) = library() else { return };
+        let video = lib.video("walk.mp4");
+        let bytes = std::fs::read(&video).unwrap();
+
+        lib.write("walk.mp4", MediaKind::Video, Some(3)).unwrap();
+        assert_eq!(lib.ratings(&lib.path("walk.mp4.xmp")), json!({ "XMP-xmp:Rating": 3 }));
+        assert_eq!(std::fs::read(&video).unwrap(), bytes);
+
+        let other = lib.video("clip.mov");
+        lib.tag(&lib.path("clip.xmp"), &["-XMP-dc:Title=Clip"]);
+        lib.write("clip.mov", MediaKind::Video, Some(2)).unwrap();
+        assert_eq!(lib.ratings(&lib.path("clip.xmp")), json!({ "XMP-xmp:Rating": 2 }));
+        assert!(!lib.path("clip.mov.xmp").exists());
+        assert_eq!(lib.ratings(&other), json!({}));
+    }
+
+    /// REQ-024-03: a video that carries a rating itself is changed in place, since its own rating is read first.
+    #[test]
+    fn req_024_03_writes_a_videos_own_rating_in_place() {
+        let Some(lib) = library() else { return };
+        let video = lib.video("walk.mp4");
+        lib.tag(&video, &["-XMP-xmp:Rating=1"]);
+
+        lib.write("walk.mp4", MediaKind::Video, Some(5)).unwrap();
+        assert_eq!(lib.ratings(&video), json!({ "XMP-xmp:Rating": 5 }));
+        assert!(!lib.path("walk.mp4.xmp").exists());
+    }
+
+    /// REQ-024-04: a read-only file, a missing one and a path outside the library are left alone, with the reason.
+    #[test]
+    fn req_024_04_leaves_files_it_cant_write_as_they_were() {
+        let Some(lib) = library() else { return };
+        let photo = lib.photo("a.jpg");
+        lib.tag(&photo, &["-XMP-xmp:Rating=2"]);
+        let mut permissions = std::fs::metadata(&photo).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&photo, permissions).unwrap();
+
+        assert!(matches!(
+            lib.write("a.jpg", MediaKind::Image, Some(5)),
+            Err(RatingError::ReadOnly)
+        ));
+        assert_eq!(lib.ratings(&photo), json!({ "XMP-xmp:Rating": 2 }));
+        assert!(matches!(
+            lib.write("gone.jpg", MediaKind::Image, Some(5)),
+            Err(RatingError::Io(_))
+        ));
+        assert!(!lib.path("gone.jpg").exists());
+        assert!(matches!(
+            lib.write("../a.jpg", MediaKind::Image, Some(5)),
+            Err(RatingError::UnsafePath)
+        ));
+    }
+}

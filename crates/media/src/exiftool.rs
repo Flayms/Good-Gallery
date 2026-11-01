@@ -65,6 +65,44 @@ const INVALID_UTF8_MARKER: &str = "__etvInvalidUtf8V1";
 /// The arguments of one read, without the trailing `-execute`, as exiftool-vendored v38's `ReadTask` with its default
 /// options builds them: `-fast`, the UTF-8 filter, `struct=1`, MWG composite tags, `keepUTCTime`, numeric tags before
 /// `-all` (the first mention of a tag wins), then `-ignoreMinorErrors`.
+/// Runs exiftool once with `args` on stdin (one per line, never through a shell: REQ-011-09) and returns what it
+/// printed, or its errors. `config` must come first, before the arguments.
+pub fn run_once(exiftool: &Path, config: Option<&Path>, args: &[String]) -> Result<String, String> {
+    if args.iter().any(|arg| arg.contains(['\n', '\r'])) {
+        return Err("a file name contains a line break".into());
+    }
+    let mut command = Command::new(exiftool);
+    if let Some(config) = config {
+        command.arg("-config").arg(config);
+    }
+    command
+        .args(["-@", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = crate::helpers::spawn_helper(command).map_err(|error| error.to_string())?;
+    let mut input = args.join("\n");
+    input.push('\n');
+    child
+        .stdin
+        .take()
+        .expect("piped")
+        .write_all(input.as_bytes())
+        .map_err(|error| error.to_string())?;
+    let output = child.wait_with_output().map_err(|error| error.to_string())?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() || stderr.lines().any(|line| line.starts_with("Error")) {
+        return Err(stderr.trim().to_owned());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
 fn read_args(file: &Path) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "-charset".into(),

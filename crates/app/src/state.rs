@@ -139,6 +139,41 @@ impl RevertTarget {
     }
 }
 
+/// A rating the user set on a media item (spec 024).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rate {
+    pub media: i64,
+    pub root_id: i64,
+    pub rel_path: String,
+    pub kind: domain::media::MediaKind,
+    /// `None` removes the rating.
+    pub rating: Option<i64>,
+}
+
+impl Rate {
+    /// What pressing `stars` (a key or a star) does to `item`'s rating (REQ-024-01, REQ-024-02).
+    pub fn toggle(item: &db::gallery::GalleryItem, stars: i64) -> Self {
+        Self {
+            media: item.id,
+            root_id: item.root_id,
+            rel_path: item.rel_path.clone(),
+            kind: item.kind,
+            rating: domain::rating::toggled(item.rating, stars),
+        }
+    }
+
+    /// As [`Self::toggle`], for the item of an info view.
+    pub fn toggle_detail(detail: &db::media::MediaDetail, stars: i64) -> Self {
+        Self {
+            media: detail.id,
+            root_id: detail.root_id,
+            rel_path: detail.rel_path.clone(),
+            kind: detail.kind,
+            rating: domain::rating::toggled(detail.rating, stars),
+        }
+    }
+}
+
 /// A file the app wrote into a library (spec 021).
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 struct Written {
@@ -169,6 +204,8 @@ enum Event {
     EditSaved(i64, Result<Written, String>),
     /// An original was put back (REQ-021-12), or why not.
     Reverted(Result<Written, String>),
+    /// A rating was written into the file and the index (REQ-024-03), or why not (REQ-024-04).
+    Rated(Result<(i64, String), String>),
     /// The job panicked; its flags are reset and the user gets an error.
     Failed,
 }
@@ -474,6 +511,41 @@ impl AppState {
 
     #[cfg(target_arch = "wasm32")]
     pub fn revert_edit(&mut self, _target: RevertTarget) {}
+
+    /// Writes a rating into the file in the background, then into the index (REQ-024-03); a file that can't be
+    /// written keeps its rating, and the user is told why (REQ-024-04).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn rate(&mut self, rate: Rate) {
+        let (Some(exiftool), Some(library)) = (
+            self.edit_tools.as_ref().map(|tools| tools.exiftool.clone()),
+            self.libraries.iter().find(|library| library.id == rate.root_id),
+        ) else {
+            self.toasts
+                .error("Couldn't save the rating: exiftool, which writes it, wasn't found.");
+            return;
+        };
+        let folder = PathBuf::from(&library.path);
+        let db = self.db.clone();
+        self.spawn(move || {
+            let written =
+                media::rating::write(&exiftool, &folder, &rate.rel_path, rate.kind, rate.rating).map_err(|error| {
+                    tracing::error!("can't rate {}: {error}", rate.rel_path);
+                    error.to_string()
+                });
+            Event::Rated(written.map(|()| {
+                if let Some(db) = &db
+                    && let Err(error) = db::media::set_rating(&lock(db), rate.media, rate.rating)
+                {
+                    tracing::error!("can't store the rating of {}: {error}", rate.rel_path);
+                }
+                (rate.root_id, rate.rel_path)
+            }))
+        });
+    }
+
+    /// The browser version never writes files (REQ-024-05).
+    #[cfg(target_arch = "wasm32")]
+    pub fn rate(&mut self, _rate: Rate) {}
 
     #[cfg(not(target_arch = "wasm32"))]
     fn thumbnail_cache(&self) -> Option<indexer::thumb_cache::ThumbCache> {
@@ -855,6 +927,14 @@ impl AppState {
                     self.written(&written);
                 }
                 Err(error) => self.toasts.error(format!("Couldn't revert: {error}")),
+            },
+            Event::Rated(result) => match result {
+                Ok((root_id, rel_path)) => {
+                    // A new sidecar is noted on the next read; the rating read then is the same.
+                    self.scans.request_paths(root_id, vec![rel_path]);
+                    self.refresh();
+                }
+                Err(error) => self.toasts.error(format!("Couldn't save the rating: {error}")),
             },
             Event::Failed => {
                 if let Some(viewer) = &mut self.viewer

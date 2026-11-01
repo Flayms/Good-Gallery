@@ -164,6 +164,7 @@ fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
         Some(viewer::Action::ShowInExplorer(file)) => state.show_in_explorer(file),
         Some(viewer::Action::SaveEdit(request)) => state.save_edit(*request),
         Some(viewer::Action::Revert(target)) => state.confirm_revert = Some(target),
+        Some(viewer::Action::Rate(rate)) => state.rate(rate),
         None => {}
     }
     // Details are kept only while an info view or the viewer (editing starts from them, face regions are drawn from
@@ -247,6 +248,12 @@ fn info_sheet(ui: &mut egui::Ui, state: &mut AppState) {
         Some(info::InfoAction::Revert) => {
             let detail = state.gallery.as_ref().and_then(|gallery| gallery.cached_detail(id));
             state.confirm_revert = detail.map(state::RevertTarget::of);
+        }
+        Some(info::InfoAction::Rate(stars)) => {
+            let detail = state.gallery.as_ref().and_then(|gallery| gallery.cached_detail(id));
+            if let Some(rate) = detail.map(|detail| state::Rate::toggle_detail(detail, stars)) {
+                state.rate(rate);
+            }
         }
         None => {}
     }
