@@ -117,6 +117,7 @@ Development builds keep their data in `%APPDATA%\good-gallery-rust` (Linux: `~/.
 | `cargo xtask check-specs`                               | Check that specs and tests reference each other                                        |
 | `cargo xtask screenshots`                               | Render the screenshots above from a generated demo library (needs exiftool and ffmpeg) |
 | `cargo xtask dist`                                      | Build the installer and portable zip, or on Linux the `.tar.gz`, into `target/dist/`   |
+| `cargo xtask icons`                                     | Write the lucide icons named in `app::icons` and render the app icon from its SVG      |
 | `cargo xtask web`                                       | Build the browser version into `target/web/`                                           |
 | `cargo xtask web-test`                                  | Build the browser version and run its tests in Chromium                                |
 | `cargo xtask release`                                   | Cut a release (see below)                                                              |

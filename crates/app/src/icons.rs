@@ -1,6 +1,6 @@
 //! lucide icons (ISC, `assets/icons/LICENSE.lucide.txt`), embedded as SVG and rendered by egui_extras' SVG loader.
-//! The SVGs are white, so [`Icon::image`] tints them to any color. Add one: list it in `assets/icons/make-icons.mjs`,
-//! run the script, add a line to `icons!` below. `star-filled` is lucide's `star` with `fill="#fff"`.
+//! The SVGs are white, so [`Icon::image`] tints them to any color. Add one: add a line to `icons!` below and run
+//! `cargo xtask icons`, which writes the SVG. `star-filled` is lucide's `star` with `fill="#fff"`.
 
 use crate::theme;
 use eframe::egui::{self, Color32, Image, Vec2};
