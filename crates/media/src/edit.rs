@@ -1161,10 +1161,11 @@ mod tests {
             std::fs::read(lib.path(".good-gallery/originals/a.jpg")).unwrap(),
             original
         );
-        let names: Vec<_> = std::fs::read_dir(lib.root())
+        let mut names: Vec<_> = std::fs::read_dir(lib.root())
             .unwrap()
             .map(|e| e.unwrap().file_name())
             .collect();
+        names.sort();
         assert_eq!(names, [".good-gallery", "a.jpg"], "no temporary file");
     }
 

@@ -265,6 +265,7 @@ mod tests {
         let photo = lib.photo("a.jpg");
         let modified = SystemTime::UNIX_EPOCH + std::time::Duration::new(1_700_000_000, 123_456_700);
         let file = std::fs::File::options().write(true).open(&photo).unwrap();
+        #[cfg_attr(not(windows), allow(unused_mut))]
         let mut times = std::fs::FileTimes::new().set_modified(modified);
         #[cfg(windows)]
         {
