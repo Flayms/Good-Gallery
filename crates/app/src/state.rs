@@ -41,6 +41,8 @@ impl FolderPicker for NativeFolderPicker {
 pub trait FileManager: Send + Sync {
     /// Opens the folder of `file` with the file selected.
     fn show_in_folder(&self, file: &std::path::Path) -> std::io::Result<()>;
+    /// Opens `url` in the default browser (REQ-010-07).
+    fn open_in_browser(&self, url: &str) -> std::io::Result<()>;
 }
 
 /// The command that shows a file in the system's file manager (REQ-009-10, REQ-018-05).
@@ -58,9 +60,20 @@ impl FileManager for Explorer {
         media::helpers::show_in_explorer(file)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn open_in_browser(&self, url: &str) -> std::io::Result<()> {
+        media::helpers::open_in_browser(url)
+    }
+
     /// The browser has no file manager to open (REQ-019-13).
     #[cfg(target_arch = "wasm32")]
     fn show_in_folder(&self, _file: &std::path::Path) -> std::io::Result<()> {
+        Err(std::io::ErrorKind::Unsupported.into())
+    }
+
+    /// The browser version opens links through egui (`settings_page::about`).
+    #[cfg(target_arch = "wasm32")]
+    fn open_in_browser(&self, _url: &str) -> std::io::Result<()> {
         Err(std::io::ErrorKind::Unsupported.into())
     }
 }
@@ -503,6 +516,17 @@ impl AppState {
                 tracing::error!("can't show {} in the file manager: {error}", file.display());
                 let program = if cfg!(windows) { "Explorer" } else { "the file manager" };
                 format!("Couldn't open {program}: {error}")
+            }))
+        });
+    }
+
+    /// Opens `url` in the default browser, or says why it can't (REQ-010-07).
+    pub fn open_in_browser(&mut self, url: &'static str) {
+        let file_manager = self.file_manager.clone();
+        self.spawn(move || {
+            Event::ExplorerFailed(file_manager.open_in_browser(url).err().map(|error| {
+                tracing::error!("can't open {url}: {error}");
+                format!("Couldn't open the browser: {error}")
             }))
         });
     }

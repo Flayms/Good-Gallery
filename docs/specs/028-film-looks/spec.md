@@ -11,7 +11,7 @@ Users who edit a photo (spec 021) give it the color response and grain of a well
 ### REQ-028-01 · Pick a look
 
 - **Given** editing a photo, with _Photo_ chosen (not its subject or background)
-- **When** the user opens _Look_ and picks one of _Polaroid 600_, _Polaroid B&W_, _Portra 400_, _Velvia 50_, _Gold 200_ or _HP5_
+- **When** the user opens _Look_ and picks one of _Polaroid 600_, _Polaroid B&W_, _Portra 400_, _Velvia 50_, _Gold 200_, _Superia 200_ or _HP5_
 - **Then** the photo takes on that look's colors, contrast, grain and vignette at full strength, and _Strength_ and _Grain_ appear under the looks
 - **And** _None_ takes the look away again; each pick is one undo step (REQ-021-07)
 
@@ -40,10 +40,18 @@ Users who edit a photo (spec 021) give it the color response and grain of a well
 - **When** the photo is saved (REQ-021-09, REQ-021-10)
 - **Then** the saved file shows what the preview showed (within two levels, as REQ-021-13)
 
+### REQ-028-06 · Grain like film's
+
+- **Given** a look with grain
+- **When** it is applied
+- **Then** the grain shows most in the midtones and less towards black and white
+- **And** a color film's grain differs between the color channels; a black and white film's doesn't
+- **And** _Grain_ among the _Effects_, without a look, stays as it is (REQ-021-06)
+
 ## Out of scope
 
 - Previews of each look on the photo itself (the looks are named buttons).
-- Looks the user saves (presets), importing LUTs (`.cube`), more looks than these six.
+- Looks the user saves (presets), importing LUTs (`.cube`), more looks than these seven.
 - Instant frames (the white Polaroid border), light leaks, dust and scratches, halation.
 - Looks for the subject or background alone, for videos, in the browser version, or for many photos at once.
 
@@ -56,8 +64,9 @@ Users who edit a photo (spec 021) give it the color response and grain of a well
 
 | REQ        | Test | Result  |
 | ---------- | ---- | ------- |
-| REQ-028-01 | `crates/domain/src/look.rs` › req_028_01_every_look_changes_the_photo_and_black_and_white_ones_drop_color; `crates/app/tests/edit.rs` › req_028_01_req_028_02_req_028_03_picks_a_look_and_sets_its_strength_and_grain | pass |
+| REQ-028-01 | `crates/domain/src/look.rs` › req_028_01_every_look_changes_the_photo_and_black_and_white_ones_drop_color, req_028_01_superia_is_cooler_and_greener_than_gold; `crates/app/tests/edit.rs` › req_028_01_req_028_02_req_028_03_picks_a_look_and_sets_its_strength_and_grain | pass |
 | REQ-028-02 | `crates/domain/src/look.rs` › req_028_02_strength_moves_between_none_and_the_full_look; `crates/app/tests/edit.rs` › req_028_01_req_028_02_req_028_03_… | pass |
 | REQ-028-03 | `crates/domain/src/look.rs` › req_028_03_grain_changes_only_the_grain; `crates/app/tests/edit.rs` › req_028_01_req_028_02_req_028_03_… | pass |
 | REQ-028-04 | `crates/domain/src/look.rs` › req_028_04_adjustments_add_to_the_look_and_curves_bend_its_result, req_028_04_the_look_is_saved_with_the_edit | pass |
 | REQ-028-05 | `crates/app/src/edit.rs` › req_028_05_the_gpu_preview_of_a_look_matches_the_cpu_render | pass |
+| REQ-028-06 | `crates/domain/src/look.rs` › req_028_06_grain_is_strongest_in_the_midtones, req_028_06_color_film_has_grain_per_channel; `crates/app/src/edit.rs` › req_028_05_the_gpu_preview_of_a_look_matches_the_cpu_render | pass |

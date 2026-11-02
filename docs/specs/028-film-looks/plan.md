@@ -18,6 +18,11 @@ A look is a recipe of the editor's own adjustments and curves (`domain::look`), 
 
 ## Decisions
 
+### 2026-11-02 · Grain like film's, only for looks
+
+**Decided:** a look's grain follows the brightness (`0.35 + 0.65 · 4v(1−v)`) and, for color films, mixes in a noise per channel. `Params` carries both, and the shader gets them in `film`. _Grain_ without a look stays as it was, so edits without a look render as before.
+**Rejected:** changing all grain (it would change saved edits that use no look, for a slider that REQ-021-06 calls plain noise).
+
 ### 2026-11-02 · Looks from the editor's own adjustments
 
 **Decided:** a look is a `Recipe` of the existing adjustments and curves, blended in by `Params::new`. The shader, the CPU formulas and saving stay as they are, so the preview and the saved file can't drift apart, and REQ-021-13's test covers looks too.

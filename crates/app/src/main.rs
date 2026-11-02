@@ -6,7 +6,7 @@
 //! after a few frames and exits), `--screenshot-after <seconds>` (waits that long before the screenshot, e.g. for scans
 //! or thumbnails), `--bench-scroll <seconds>` (vsync off; scrolls the gallery once to warm the files, then again while
 //! measuring frame times, prints them and exits; REQ-006-12; with `--bench-cold` it measures at once, while thumbnails
-//! render, REQ-006-15), `--view <position>` (opens the viewer at that gallery
+//! render, REQ-006-15; with `--bench-no-glass` without the glass pass), `--view <position>` (opens the viewer at that gallery
 //! position once the gallery has loaded, e.g. for a screenshot; with `--info` its info panel too), `--scroll <points>`
 //! (scrolls the gallery that far once it has loaded, e.g. to show the glass toolbar over tiles).
 //!
