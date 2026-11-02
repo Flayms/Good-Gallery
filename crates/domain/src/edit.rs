@@ -680,9 +680,20 @@ pub const MAX_MASKS: usize = 8;
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum MaskShape {
     /// Full at `from`, fading to nothing at `to`.
-    Linear { from: [f32; 2], to: [f32; 2] },
-    Luminance { low: f32, high: f32, feather: f32 },
-    Color { hue: f32, range: f32, feather: f32 },
+    Linear {
+        from: [f32; 2],
+        to: [f32; 2],
+    },
+    Luminance {
+        low: f32,
+        high: f32,
+        feather: f32,
+    },
+    Color {
+        hue: f32,
+        range: f32,
+        feather: f32,
+    },
 }
 
 impl MaskShape {
@@ -709,6 +720,32 @@ impl MaskShape {
             Self::Linear { .. } => "Gradient",
             Self::Luminance { .. } => "Luminance",
             Self::Color { .. } => "Color",
+        }
+    }
+
+    /// The panel's sliders of this shape: name, value, range, unit (REQ-030-04, REQ-030-05). A gradient has handles.
+    pub fn sliders(self) -> Vec<(&'static str, f32, (f32, f32), &'static str)> {
+        match self {
+            Self::Linear { .. } => Vec::new(),
+            Self::Luminance { low, high, feather } => vec![
+                ("From", low, (0.0, 100.0), " %"),
+                ("To", high, (0.0, 100.0), " %"),
+                ("Softness", feather, (0.0, 50.0), " %"),
+            ],
+            Self::Color { hue, range, feather } => vec![
+                ("Mask hue", hue, (0.0, 360.0), "°"),
+                ("Range", range, (0.0, 180.0), "°"),
+                ("Softness", feather, (0.0, 90.0), "°"),
+            ],
+        }
+    }
+
+    /// Sets slider `i` of [`Self::sliders`].
+    pub fn set_slider(&mut self, i: usize, value: f32) {
+        match self {
+            Self::Linear { .. } => {}
+            Self::Luminance { low, high, feather } => *[low, high, feather][i] = value,
+            Self::Color { hue, range, feather } => *[hue, range, feather][i] = value,
         }
     }
 
@@ -2358,11 +2395,23 @@ mod tests {
         let mut recipe = masked(MaskShape::COLOR, Adjustment::Exposure, 1.0);
         let green = [0.2, 0.6, 0.2];
         let plain = Params::new(&Recipe::default());
-        assert_ne!(Params::new(&recipe).pixel(green, MID, SIZE), plain.pixel(green, MID, SIZE));
-        assert_eq!(Params::new(&recipe).pixel(GREY, MID, SIZE), plain.pixel(GREY, MID, SIZE));
+        assert_ne!(
+            Params::new(&recipe).pixel(green, MID, SIZE),
+            plain.pixel(green, MID, SIZE)
+        );
+        assert_eq!(
+            Params::new(&recipe).pixel(GREY, MID, SIZE),
+            plain.pixel(GREY, MID, SIZE)
+        );
         recipe.masks[0].invert = true;
-        assert_eq!(Params::new(&recipe).pixel(green, MID, SIZE), plain.pixel(green, MID, SIZE));
-        assert_ne!(Params::new(&recipe).pixel(GREY, MID, SIZE), plain.pixel(GREY, MID, SIZE));
+        assert_eq!(
+            Params::new(&recipe).pixel(green, MID, SIZE),
+            plain.pixel(green, MID, SIZE)
+        );
+        assert_ne!(
+            Params::new(&recipe).pixel(GREY, MID, SIZE),
+            plain.pixel(GREY, MID, SIZE)
+        );
     }
 
     /// REQ-030-08: masks survive saving; values from a file stay in range; an unknown kind is left out, not the recipe.

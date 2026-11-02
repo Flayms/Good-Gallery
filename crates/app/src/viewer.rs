@@ -1005,8 +1005,10 @@ impl Viewer {
         let photo = item.kind == MediaKind::Image;
         let picking = editing && self.edit.as_ref().is_some_and(EditSession::is_picking);
         let cropping = editing && !compare && self.edit.as_ref().is_some_and(EditSession::is_cropping);
+        // The handles need the whole photo (REQ-030-03).
+        let gradient = editing && !compare && !cropping && self.edit.as_ref().is_some_and(EditSession::is_on_gradient);
         // The frame goes over the whole photo.
-        if cropping {
+        if cropping || gradient {
             self.view = FIT;
         }
 
@@ -1032,6 +1034,16 @@ impl Viewer {
                 // A drag goes on over the chrome.
                 if !over_chrome || session.is_dragging_crop() {
                     session.crop_input(ui, backdrop, target);
+                }
+            }
+            self.close_at = None;
+        } else if gradient {
+            let target = photo_rect(area, fitted, FIT);
+            if let Some(session) = &mut self.edit {
+                session.set_gradient_area(target);
+                // A drag goes on over the chrome.
+                if !over_chrome || session.is_dragging_gradient() {
+                    session.gradient_input(ui, backdrop, target);
                 }
             }
             self.close_at = None;
@@ -1122,6 +1134,8 @@ impl Viewer {
         if edited {
             if cropping && let Some(session) = &self.edit {
                 session.paint_crop(&painter, target);
+            }
+            if gradient && let Some(session) = &self.edit {
                 session.paint_gradient(&painter, target);
             }
         } else if let Some(loaded) = &loaded {

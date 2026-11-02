@@ -11,7 +11,7 @@ Users who edit a photo (spec 021) sometimes need to change a part that isn't its
 ### REQ-030-01 · Add and remove masks
 
 - **Given** editing a photo
-- **When** the user picks _Add gradient_, _Add luminance_ or _Add color_
+- **When** the user picks _Add gradient_, _Add luminance_ or _Add color_ in _Masks_
 - **Then** a mask of that kind is added to the photo's list, up to 8, and is chosen, so the panel shows its controls with _Light_ and _Color_
 - **When** the user picks _Remove mask_
 - **Then** it is gone and the panel shows the photo again

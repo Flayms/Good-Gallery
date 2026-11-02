@@ -5,7 +5,7 @@
 - **`domain::edit`:** `Recipe::masks: Vec<LocalMask>` (a `MaskShape`, `invert`, and a recipe of light and color, as a part's). `Part::Mask(i)` lets the panel, undo and sliders treat a mask as they treat the subject. `Params::masks` holds each mask's numbers; `Params::pixel_glowing` blends them after the parts.
 - **Shape parameters** are numbers in the recipe, so they cost no texture and don't depend on the photo's size. The gradient is in the original's coordinates, as the crop is (spec 029).
 - **`edit.wgsl`:** the same formulas over a fixed `array<LocalMask, 8>`, with a count. `flags >> 8` names the mask to tint (index + 1), for the shader and `cpu_preview`.
-- **`app::edit`:** _Masks_ below the part switch, with one button per kind and per mask; a chosen mask's controls above _Light_ and _Color_. A chosen gradient shows the whole photo, with its two handles (`gradient_input`, `paint_gradient`), as the crop does.
+- **`app::edit`:** a _Masks_ section last in the panel, with one button per kind; below the part switch one button per mask, once there are any; a chosen mask's controls above _Light_ and _Color_. A chosen gradient shows the whole photo, with its two handles (`gradient_input`, `paint_gradient`), as the crop does.
 
 ## Tasks
 
@@ -30,5 +30,5 @@
 
 ### 2026-11-02 · Buttons, not a menu, for adding masks
 
-**Decided:** three buttons in the panel: visible, and one click each.
-**Rejected:** one _Add mask_ menu (hides the choice behind a click, for three items).
+**Decided:** three buttons in a _Masks_ section at the panel's end, closed at first, so the panel stays as it was for those who don't use masks.
+**Rejected:** the buttons at the panel's top (they push every section down), one _Add mask_ menu (hides the choice behind one more click, for three items).

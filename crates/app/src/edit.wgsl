@@ -236,7 +236,7 @@ fn mask_weight(i: u32, rgb: vec3<f32>, uv: vec2<f32>) -> f32 {
     var weight = 0.0;
     switch u32(mask.kind.x) {
         case 0u: {
-            let along = (shape.zw - vec2<f32>(mask.kind.z, mask.kind.w)) * edit.size.xy;
+            let along = (shape.xy - vec2<f32>(mask.kind.z, mask.kind.w)) * edit.size.xy;
             let length_squared = dot(along, along);
             if length_squared > 0.0 {
                 let at = (uv - vec2<f32>(mask.kind.z, mask.kind.w)) * edit.size.xy;
@@ -246,7 +246,7 @@ fn mask_weight(i: u32, rgb: vec3<f32>, uv: vec2<f32>) -> f32 {
         case 1u: {
             let lin = vec3<f32>(to_linear(rgb.r), to_linear(rgb.g), to_linear(rgb.b));
             let value = to_encoded(max(luminance(lin), 0.0));
-            let feather = max(shape.y, 0.005);
+            let feather = max(shape.x, 0.005);
             weight = smoothstep(mask.kind.z - feather, mask.kind.z, value)
                 * (1.0 - smoothstep(mask.kind.w, mask.kind.w + feather, value));
         }
