@@ -418,6 +418,144 @@ fn req_009_12_shows_media_not_found_for_a_removed_item() {
     assert!(harness.query_by_label_contains("Media not found").is_some());
 }
 
+/// A library of `count` photos, all rated 3, with the gallery searching for that rating.
+fn rated_search(fixture: &Fixture, count: usize) -> App {
+    let mut harness = app(fixture, count, &[]);
+    set_rating(&harness, None, Some(3));
+    let mut search = harness.state().gallery.as_ref().unwrap().search().clone();
+    search.ratings = vec![3];
+    harness.state_mut().gallery.as_mut().unwrap().set_search(search);
+    settle(&mut harness);
+    harness
+}
+
+/// Rates item `id`, or all items, in the index as a rating or a scan would.
+fn set_rating(harness: &App, id: Option<i64>, rating: Option<i64>) {
+    let db = harness.state().db().unwrap();
+    db.lock()
+        .unwrap()
+        .execute(
+            "UPDATE media SET rating = ?1 WHERE ?2 IS NULL OR id = ?2",
+            db::rusqlite::params![rating, id],
+        )
+        .unwrap();
+}
+
+fn reload(harness: &mut App) {
+    harness.state_mut().gallery.as_mut().unwrap().reload();
+    settle_viewer(harness);
+}
+
+fn shows(harness: &App, name: &str) -> bool {
+    harness.query_by_role_and_label(Role::Dialog, name).is_some()
+        && harness.query_by_label_contains("Media not found").is_none()
+}
+
+/// REQ-009-18: an item that no longer matches the search stays shown, and stepping goes to the neighbours of its place.
+#[test]
+fn req_009_18_keeps_an_item_that_left_the_search() {
+    let fixture = Fixture::new();
+    let mut harness = rated_search(&fixture, 4);
+    open(&mut harness, "1.png");
+    let gallery = harness.state().gallery.as_ref().unwrap();
+    let [first, id, third] = [0, 1, 2].map(|at| gallery.id_at(at).unwrap());
+
+    set_rating(&harness, Some(id), None);
+    reload(&mut harness);
+    assert_eq!(harness.state().gallery.as_ref().unwrap().count(), Some(3));
+    assert!(shows(&harness, "1.png"), "kept");
+    assert_eq!(harness.state().viewer.as_ref().unwrap().id(), id);
+
+    // The next item moved into its place: stepping forward doesn't skip it.
+    harness.key_press(Key::ArrowRight);
+    settle_viewer(&mut harness);
+    assert_eq!(harness.state().viewer.as_ref().unwrap().id(), third);
+    assert!(shows(&harness, "2.png"));
+
+    // It can't be stepped back to.
+    harness.key_press(Key::ArrowLeft);
+    settle_viewer(&mut harness);
+    assert_eq!(harness.state().viewer.as_ref().unwrap().id(), first);
+    assert!(shows(&harness, "0.png"));
+}
+
+/// REQ-009-18: stepping back from an item that left the search goes to the one before its place.
+#[test]
+fn req_009_18_steps_back_from_an_item_that_left_the_search() {
+    let fixture = Fixture::new();
+    let mut harness = rated_search(&fixture, 3);
+    open(&mut harness, "1.png");
+    let gallery = harness.state().gallery.as_ref().unwrap();
+    let [first, id] = [0, 1].map(|at| gallery.id_at(at).unwrap());
+
+    set_rating(&harness, Some(id), None);
+    reload(&mut harness);
+    harness.key_press(Key::ArrowLeft);
+    settle_viewer(&mut harness);
+    assert_eq!(harness.state().viewer.as_ref().unwrap().id(), first);
+}
+
+/// REQ-009-18: the last item of a result stays shown, and closing leaves the empty result.
+#[test]
+fn req_009_18_closes_with_an_empty_result() {
+    let fixture = Fixture::new();
+    let mut harness = rated_search(&fixture, 1);
+    open(&mut harness, "0.png");
+    set_rating(&harness, None, None);
+    reload(&mut harness);
+    assert_eq!(harness.state().gallery.as_ref().unwrap().count(), Some(0));
+    assert!(shows(&harness, "0.png"), "kept");
+    harness.key_press(Key::ArrowRight);
+    settle_viewer(&mut harness);
+    assert!(shows(&harness, "0.png"), "nowhere to step");
+
+    harness.key_press(Key::Escape);
+    settle_viewer(&mut harness);
+    assert!(harness.state().viewer.is_none());
+    assert_eq!(harness.state().gallery.as_ref().unwrap().count(), Some(0));
+}
+
+/// REQ-009-18: an item that matches the search again is followed to its position.
+#[test]
+fn req_009_18_follows_the_item_back_into_the_search() {
+    let fixture = Fixture::new();
+    let mut harness = rated_search(&fixture, 3);
+    open(&mut harness, "1.png");
+    let id = harness.state().gallery.as_ref().unwrap().id_at(1).unwrap();
+    set_rating(&harness, Some(id), None);
+    reload(&mut harness);
+    set_rating(&harness, Some(id), Some(3));
+    reload(&mut harness);
+    assert!(shows(&harness, "1.png"));
+    assert_eq!(harness.state().viewer.as_ref().unwrap().index(), 1);
+
+    // Back in the result, stepping is as usual: the next item is one further.
+    harness.key_press(Key::ArrowRight);
+    settle_viewer(&mut harness);
+    assert_eq!(harness.state().viewer.as_ref().unwrap().index(), 2);
+}
+
+/// REQ-009-12, REQ-009-18: an item kept after leaving the search shows "Media not found" once it leaves the index too.
+#[test]
+fn req_009_18_says_when_a_kept_item_is_gone() {
+    let fixture = Fixture::new();
+    let mut harness = rated_search(&fixture, 3);
+    open(&mut harness, "1.png");
+    let id = harness.state().gallery.as_ref().unwrap().id_at(1).unwrap();
+    set_rating(&harness, Some(id), None);
+    reload(&mut harness);
+    assert!(shows(&harness, "1.png"));
+    {
+        let db = harness.state().db().unwrap();
+        db.lock()
+            .unwrap()
+            .execute("DELETE FROM media WHERE id = ?1", [id])
+            .unwrap();
+    }
+    reload(&mut harness);
+    assert!(harness.query_by_label_contains("Media not found").is_some());
+}
+
 /// REQ-013-10: the controls step aside after 2.5 s without pointer movement and come back when it moves.
 #[test]
 fn req_013_10_controls_step_aside_while_idle() {

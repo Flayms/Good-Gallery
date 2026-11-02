@@ -79,6 +79,9 @@ enum Request {
     Detail {
         id: i64,
     },
+    Item {
+        id: i64,
+    },
 }
 
 enum Loaded {
@@ -100,6 +103,10 @@ enum Loaded {
         id: i64,
         /// Boxed: the details are much larger than the other results.
         result: Box<DetailResult>,
+    },
+    Item {
+        id: i64,
+        result: Result<Option<GalleryItem>, String>,
     },
 }
 
@@ -192,6 +199,12 @@ fn run(conn: &Connection, request: Request) -> Loaded {
         Request::Detail { id } => Loaded::Detail {
             id,
             result: Box::new(db::media::detail(conn, id).map_err(|e| e.to_string())),
+        },
+        Request::Item { id } => Loaded::Item {
+            id,
+            result: db::gallery::items(conn, &[id])
+                .map(|mut items| items.pop())
+                .map_err(|e| e.to_string()),
         },
     }
 }
@@ -355,6 +368,8 @@ pub struct Gallery {
     selection_change: Option<crate::state::Many>,
     /// The item shown in the viewer: kept in view (REQ-016-06), its thumbnail wanted first (REQ-009-14).
     viewed: Option<(usize, i64)>,
+    /// The item the viewer shows outside the result, and what the index says of it once known (REQ-009-18).
+    outside: Option<(i64, Option<Option<GalleryItem>>)>,
     /// Positions shown in the viewer's filmstrip: their thumbnails are wanted after the viewer's own (REQ-015-05).
     strip: std::ops::Range<usize>,
     /// The media item whose details were asked for last, and what came back.
@@ -422,6 +437,7 @@ impl Gallery {
             selection: Default::default(),
             selection_change: None,
             viewed: None,
+            outside: None,
             strip: 0..0,
             detail: None,
             menu_action: None,
@@ -770,6 +786,28 @@ impl Gallery {
         self.detail.as_ref()?.1.as_ref()
     }
 
+    /// The tile data of an item outside the result, as remembered until the index has answered (REQ-009-18).
+    pub fn item_outside(&mut self, id: i64) -> Option<&GalleryItem> {
+        if self.outside.as_ref().is_none_or(|(asked, _)| *asked != id) {
+            self.outside = Some((id, None));
+            self.loader.send(Request::Item { id });
+        }
+        match &self.outside {
+            Some((_, Some(item))) => item.as_ref(),
+            _ => self.items.get(&id),
+        }
+    }
+
+    /// Whether the index said that the item asked for with [`Self::item_outside`] isn't in it.
+    pub fn is_outside_gone(&self, id: i64) -> bool {
+        matches!(&self.outside, Some((asked, Some(None))) if *asked == id)
+    }
+
+    /// The viewer no longer shows an item outside the result.
+    pub fn forget_outside(&mut self) {
+        self.outside = None;
+    }
+
     /// The details of `id` if they are loaded, without asking for them.
     pub fn cached_detail(&self, id: i64) -> Option<&MediaDetail> {
         match &self.detail {
@@ -865,6 +903,9 @@ impl Gallery {
                         if let Some((id, _)) = self.detail {
                             self.loader.send(Request::Detail { id });
                         }
+                        if let Some((id, _)) = self.outside {
+                            self.loader.send(Request::Item { id });
+                        }
                     }
                     Err(error) => self.error = Some(error),
                 }
@@ -875,6 +916,16 @@ impl Gallery {
                     self.sidebar = Some(data);
                 }
                 Err(error) => tracing::error!("can't load the sidebar: {error}"),
+            },
+            Loaded::Item { id, result } => match result {
+                Ok(item) => {
+                    if let Some((asked, loaded)) = &mut self.outside
+                        && *asked == id
+                    {
+                        *loaded = Some(item);
+                    }
+                }
+                Err(error) => tracing::error!("can't load an item: {error}"),
             },
             Loaded::Detail { id, result } => {
                 if let Some((asked, loaded)) = &mut self.detail
