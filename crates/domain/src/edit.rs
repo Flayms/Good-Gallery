@@ -1262,6 +1262,9 @@ impl Params {
         if self.saturation != 0.0 || self.vibrance != 0.0 || self.hue != 0.0 {
             lin = self.chroma(lin);
         }
+        if let Some(nodes) = &self.hue_nodes {
+            lin = turn_hues(nodes, lin);
+        }
         lin
     }
 
@@ -1446,6 +1449,20 @@ fn luminance([r, g, b]: [f32; 3]) -> f32 {
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// A film look's change per hue (REQ-028-07), blended between the two nearest nodes. Greys have no hue, so the lightness
+/// only applies as a color gets some chroma.
+fn turn_hues(nodes: &[[f32; 3]; crate::look::HUE_NODES], lin: [f32; 3]) -> [f32; 3] {
+    let [l, a, b] = to_oklab(lin);
+    let at = (b.atan2(a) / std::f32::consts::TAU).rem_euclid(1.0) * crate::look::HUE_NODES as f32;
+    let (i, f) = (at.floor() as usize % crate::look::HUE_NODES, at.fract());
+    let (low, high) = (nodes[i], nodes[(i + 1) % crate::look::HUE_NODES]);
+    let [turn, chroma, light] = std::array::from_fn(|k| low[k] + (high[k] - low[k]) * f);
+    let colorful = ((a * a + b * b).sqrt() / 0.1).min(1.0);
+    let (sin, cos) = turn.sin_cos();
+    let (a, b) = (a * chroma, b * chroma);
+    from_oklab([l + light * colorful, a * cos - b * sin, a * sin + b * cos])
 }
 
 fn to_oklab([r, g, b]: [f32; 3]) -> [f32; 3] {
