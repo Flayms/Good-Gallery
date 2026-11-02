@@ -1,4 +1,5 @@
-//! `cargo xtask web [--debug]`: the browser version's page (spec 019) in `target/web`, ready for any static host.
+//! `cargo xtask web [--debug]`: the browser version's page (spec 019) in `target/web`, ready for any static host, and
+//! unless `--debug` as `good-gallery-<version>-web.zip` in `target/dist` for a release to attach (REQ-019-16).
 //! Builds it with Trunk (`web/Trunk.toml`), then moves Trunk's inline start script into a file of its own, so the
 //! page's content security policy needs no `'unsafe-inline'` for scripts (REQ-019-12).
 //!
@@ -37,6 +38,12 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     std::fs::write(dist.join(&script_name), script)?;
     std::fs::write(&index, html)?;
     println!("the page is in {}", dist.display());
+    if release {
+        // xtask shares the workspace version with the app.
+        let zip = root.join("target/dist").join(zip_name(env!("CARGO_PKG_VERSION")));
+        zip_page(&dist, &zip)?;
+        println!("its zip is {}", zip.display());
+    }
     Ok(())
 }
 
@@ -80,6 +87,43 @@ pub fn test(args: &[String]) -> anyhow::Result<()> {
     if !status.success() {
         bail!("the browser tests failed");
     }
+    Ok(())
+}
+
+/// The release's zip of the page.
+fn zip_name(version: &str) -> String {
+    format!("good-gallery-{version}-web.zip")
+}
+
+/// Zips `page`'s files into `out`, with `/` as the separator on every system.
+fn zip_page(page: &Path, out: &Path) -> anyhow::Result<()> {
+    fn add(writer: &mut zip::ZipWriter<std::fs::File>, folder: &Path, prefix: &str) -> anyhow::Result<()> {
+        let mut entries = std::fs::read_dir(folder)?.collect::<Result<Vec<_>, _>>()?;
+        // The same page gives the same order of files.
+        entries.sort_by_key(std::fs::DirEntry::file_name);
+        for entry in entries {
+            let name = format!("{prefix}{}", entry.file_name().to_string_lossy());
+            // Trunk leaves its `.trunk-lock` behind.
+            if entry.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
+            if entry.file_type()?.is_dir() {
+                add(writer, &entry.path(), &format!("{name}/"))?;
+            } else {
+                let options =
+                    zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+                writer.start_file(name.as_str(), options)?;
+                std::io::copy(&mut std::fs::File::open(entry.path())?, writer)?;
+            }
+        }
+        Ok(())
+    }
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut writer = zip::ZipWriter::new(std::fs::File::create(out)?);
+    add(&mut writer, page, "")?;
+    writer.finish()?;
     Ok(())
 }
 
@@ -144,5 +188,33 @@ mod tests {
     #[test]
     fn a_page_without_a_start_script_is_an_error() {
         assert!(move_start_script("<head></head>").is_err());
+    }
+
+    #[test]
+    fn req_019_16_the_zip_says_the_app_the_version_and_web() {
+        assert_eq!(zip_name("1.2.3"), "good-gallery-1.2.3-web.zip");
+    }
+
+    /// REQ-019-16: every file of the page, below the top of the zip rather than in a folder of its own.
+    #[test]
+    fn req_019_16_zips_the_page_with_its_index_on_top() {
+        let dir = tempfile::tempdir().unwrap();
+        let page = dir.path().join("page");
+        std::fs::create_dir_all(page.join("assets/fonts")).unwrap();
+        std::fs::write(page.join("index.html"), "<html>").unwrap();
+        std::fs::write(page.join(".trunk-lock"), "").unwrap();
+        std::fs::write(page.join("assets/fonts/a.bin"), [0u8, 159, 146, 150]).unwrap();
+        // The folder for the zip doesn't exist yet.
+        let out = dir.path().join("dist/page.zip");
+
+        zip_page(&page, &out).unwrap();
+
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
+        let mut names: Vec<String> = archive.file_names().map(|name| name.unwrap().into_owned()).collect();
+        names.sort();
+        assert_eq!(names, ["assets/fonts/a.bin", "index.html"]);
+        let mut binary = Vec::new();
+        std::io::Read::read_to_end(&mut archive.by_name("assets/fonts/a.bin").unwrap(), &mut binary).unwrap();
+        assert_eq!(binary, [0u8, 159, 146, 150]);
     }
 }
