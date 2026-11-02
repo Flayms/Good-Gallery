@@ -1,6 +1,6 @@
 # 015 · Filmstrip · Plan
 
-Records the approach that was taken. Decisions that outlive this spec are in `docs/architecture.md`.
+Records the approach that was taken. Project-wide decisions are in `docs/decisions.md`.
 
 ## Approach
 

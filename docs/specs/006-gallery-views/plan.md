@@ -1,6 +1,6 @@
 # 006 · Gallery views · Plan
 
-Records the approach that was taken. Decisions that outlive this spec are in `docs/architecture.md`.
+Records the approach that was taken. Lasting decisions are under _Decisions_ at the end.
 
 ## Approach
 
@@ -35,3 +35,15 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 - [x] `gallery-bench --originals`: measure scrolling while thumbnails render; render threads at below-normal priority (REQ-006-15)
 - [ ] Measure REQ-006-15 on an integrated laptop GPU
 - [ ] Measure the glass pass's per-frame cost at 12 columns with `gallery-bench` (it rebuilds tile bind groups every frame)
+
+## Decisions
+
+### 2026-10-26 · Thumbnail textures
+
+**Decided:** thumbnails are our own `wgpu::Texture`s (`Rgba8Unorm`, CPU-built mip chain), decoded with libwebp and created and written on worker threads; the UI thread only registers them with the egui renderer, within 3 ms per frame. 4 decode workers at below-normal thread priority. LRU cache with a byte budget (512 MB); textures in the prefetch band count as used. Requests are a priority list replaced every frame (visible, then 1.5 screens ahead, 0.5 behind), so stale work drops out.
+**Why:** uploading on the UI thread cost 2.7 ms per texture; egui-managed textures have no mipmaps (aliasing at high zoom); more decode threads starved the UI thread and the iGPU; libwebp decodes 3× faster than the `image` crate.
+**Rejected:** `ctx.load_texture` (p95 12.9 vs 7.2 ms, no mips), `image` crate WebP decoding.
+
+### 2026-10-27 · Gallery: layout up front, data and textures on demand
+
+**Decided:** `db::gallery::layout` returns every match's id and clamped aspect in sort order (and the day groups of a date sort); `domain::layout::tile_layout` positions all tiles at once (f64), so the scroll length is exact and the visible range is a binary search. A loader thread with its own read connection runs the gallery's queries (and the suggestions and sidebar lists); tile data loads in chunks of 200 for the visible range ± 600 pt. Only tiles near the viewport are drawn. Measured with `cargo xtask gallery-bench` (100,000 items, 12 columns, vsync off, AMD iGPU): p95 4.4 ms, max 11.9 ms. View choices are stored in the `settings` table (`gallery.view`, `gallery.columns`, `gallery.groupByDay`, `gallery.tagIndicators`); the List view's row positions are arithmetic over the group starts.

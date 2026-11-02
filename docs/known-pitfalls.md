@@ -121,7 +121,7 @@ Add every pitfall you hit. A trap in a tool, library, OS or our tests that we ca
 * **Folder mtimes** (quick scans) only change when direct children are added, removed or renamed, not on in-place edits or changes deeper down. Don't use them to skip whole subtrees or file stats outside `quick` scans.
 * **Watching on Windows reports last-access changes** too, so the indexer's own reads cause events; `changes` scans must keep stating only reported files. Expect the same from `notify` (ReadDirectoryChangesW).
 * **Timing SQLite through an aggregate undercounts:** `SELECT count(*), sum(id) FROM (…)` lets SQLite skip the columns the outer query doesn't use, and with them the row lookups. Time the real query, e.g. with `cargo xtask search-bench`.
-* **Never edit an applied migration** (`crates/db/migrations/*.sql`): its hash is recorded in existing indexes. Add a new file and journal entry (`docs/architecture.md`). Statements are separated by `--> statement-breakpoint`; each chunk is prepared as one statement.
+* **Never edit an applied migration** (`crates/db/migrations/*.sql`): its hash is recorded in existing indexes. Add a new file and journal entry (spec 001's plan). Statements are separated by `--> statement-breakpoint`; each chunk is prepared as one statement.
 * **The user's real data** (`%APPDATA%\good-gallery\gallery.db`, `thumbs\`) must never be opened in place: an open with WAL writes `-shm` / `-wal` files and migrations would change the schema. Copy first.
 
 ## Packaging and releases

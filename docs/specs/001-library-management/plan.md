@@ -1,6 +1,6 @@
 # 001 · Library management · Plan
 
-Records the approach that was taken. Decisions that outlive this spec are in `docs/architecture.md`.
+Records the approach that was taken. Lasting decisions are under _Decisions_ at the end.
 
 ## Approach
 
@@ -21,3 +21,10 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 - [x] `cargo xtask libraries` CLI; checked with a copy of the real index
 - [x] Settings page _Libraries_ section (REQ-001-01 … -07)
 - [x] Data folder per build (REQ-001-09)
+
+## Decisions
+
+### 2026-10-26 · Index compatibility and migrations
+
+**Decided:** existing indexes must keep opening without re-indexing (REQ-001-08). `crates/db/migrations/` holds the SQL files and `meta/_journal.json` byte for byte (`.gitattributes`: `-text`), and `db::open` migrates with drizzle-orm's SQLite bookkeeping, which existing indexes carry: `__drizzle_migrations` created with drizzle's exact DDL text, newest `created_at` read, newer journal entries run chunk by chunk in one transaction, `(sha256 of the file, journal when)` inserted. Tests open `crates/db/tests/fixtures/legacy-index.db`, an index from an earlier version, and check that a new index gets the same schema and bookkeeping. A schema change is a new migration file with a journal entry whose `when` is larger than the last.
+**Connections:** one write connection (WAL, `synchronous = NORMAL`, foreign keys, `busy_timeout = 5000`), read-only connections for readers (memory-mapped reads of 512 MB and a 64 MB page cache, see spec 007's plan).

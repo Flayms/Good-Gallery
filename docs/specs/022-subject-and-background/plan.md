@@ -31,3 +31,10 @@ The issue left these open; decided as follows (to review in the PR):
 - [x] 5. Shader: mask texture, parts, selection tint; GPU / CPU parity with a mask (REQ-022-03, REQ-022-04)
 - [x] 6. Panel: part switch, finding, Show selection, panel states; snapshots (REQ-022-01, REQ-022-02, REQ-022-04)
 - [x] 7. Glossary, architecture decision, README, third-party license
+
+## Decisions
+
+### 2026-10-31 · Subject and background: a network in the executable
+
+**Decided:** the subject of a photo (spec 022) is found by U²-Net-p (4.6 MB, Apache-2.0), a salient object detection network, run on the CPU by `tract-onnx` (pure Rust) in `media::subject`. The model is embedded with `include_bytes!`, so there is nothing to download or bundle (REQ-011-11). Its 320 × 320 soft mask (`domain::edit::Mask`) is sampled bilinearly over the photo: on the CPU when saving, as an `R8Unorm` texture in `edit.wgsl`. The recipe gets optional `subject` and `background` recipes with light and color only, applied after the whole photo's and blended by the mask; the mask is never stored, but found again from the unedited original, and handed to saving so the file matches the preview.
+**Rejected:** larger matting networks (ISNet, BiRefNet, RMBG: 170 MB and more, slow on a CPU), person-only models (MODNet, MediaPipe), ONNX Runtime through `ort` (a native library per platform), storing the mask in the file.

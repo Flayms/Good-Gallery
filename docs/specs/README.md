@@ -1,6 +1,6 @@
 # Specs
 
-One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and `plan.md` (how: approach, deviations, tasks; open tasks are unchecked). Workflow and tiers: see [AGENTS.md](../../AGENTS.md). Terms: see [glossary](../glossary.md). Open work across specs is tracked in [GitHub issues](https://github.com/Flayms/Good-Gallery/issues).
+One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and `plan.md` (how: approach, deviations, tasks, and the decisions behind it; open tasks are unchecked). Workflow and tiers: see [AGENTS.md](../../AGENTS.md). Terms: see [glossary](../glossary.md). Open work across specs is tracked in [GitHub issues](https://github.com/Flayms/Good-Gallery/issues).
 
 | Spec                                                     | Area                                                             | Status      |
 | -------------------------------------------------------- | ---------------------------------------------------------------- | ----------- |
@@ -66,4 +66,23 @@ One paragraph: who benefits and why.
 | REQ        | Test                         | Result |
 | ---------- | ---------------------------- | ------ |
 | REQ-NNN-01 | `crates/x/src/y.rs` › test   | pass   |
+```
+
+`plan.md`:
+
+```markdown
+# NNN · Title · Plan
+
+## Approach
+
+## Tasks
+
+- [ ] … (REQ-NNN-01)
+
+## Decisions
+
+### YYYY-MM-DD · Short name
+
+**Decided:** what, and why (with measurements where there are any).
+**Rejected:** the alternatives, and why not.
 ```

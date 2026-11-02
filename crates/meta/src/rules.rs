@@ -321,7 +321,7 @@ fn is_video(tags: &Tags) -> bool {
 
 /// The zone (UTC offset in minutes) dates without their own offset are in. `None` means the computer's local zone.
 /// Order as in exiftool-vendored: zone tags, offsets of other capture dates, UTC for videos, the difference to a
-/// GPS / UTC timestamp. Its GPS position lookup (geo-tz) is not ported, see `docs/architecture.md`.
+/// GPS / UTC timestamp. Its GPS position lookup (geo-tz) is not ported, see spec 004's plan.
 fn file_zone(tags: &Tags) -> Option<i32> {
     if is_video(tags) {
         // Videos store zoneless dates in UTC (`defaultVideosToUTC`), which also overrides any inferred zone.

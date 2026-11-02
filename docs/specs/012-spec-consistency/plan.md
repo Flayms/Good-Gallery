@@ -1,6 +1,6 @@
 # 012 · Spec consistency · Plan
 
-Records the approach that was taken. Decisions that outlive this spec are in `docs/architecture.md`.
+Records the approach that was taken. Lasting decisions are under _Decisions_ at the end.
 
 ## Approach
 
@@ -12,3 +12,9 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 
 - [x] Parser and checks (REQ-012-01 … -06, -08)
 - [x] `run` over the repository with the test-part rule, exit status, `--summary` (REQ-012-07, -08)
+
+## Decisions
+
+### 2026-10-26 · REQ references in Rust tests
+
+**Decided:** a test references a REQ at the start of its name (`fn req_012_01_reports_unknown_reqs()`, several chained: `fn req_002_01_req_002_02_…()`) or in a doc comment directly above it (`/// REQ-012-01: …`). `cargo xtask check-specs` reads `.rs` files below `crates/` and `xtask/` and counts only their test part: from the first `#[cfg(test)]` on, or the whole file below `tests/` or `benches/`. REQs mentioned in production code don't count as coverage. Spec: 012.

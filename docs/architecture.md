@@ -1,231 +1,111 @@
 # Architecture
 
-Good Gallery is one Rust binary (eframe / egui on wgpu) plus three helper programs: exiftool (metadata), ffmpeg (video frames, AVIF) and libmpv (video playback). Windows bundles them; Linux uses the system's. The same UI also runs in the browser as a static page without helpers (spec 019). Keep this file describing the current state; how a feature was built is in its spec's `plan.md`.
+How Good Gallery is built today. It describes the current state, not its history: why something was built a certain way is under _Decisions_ in the `plan.md` of its spec, and project-wide decisions are in `docs/decisions.md`. Terms are defined in `docs/glossary.md`, the visual design in `docs/design.md`.
+
+## Overview
+
+Good Gallery is one Rust binary (eframe / egui on wgpu) plus three helper programs it starts as separate processes: exiftool (metadata, writing ratings and tags), ffmpeg (video frames, AVIF) and libmpv (video playback, loaded as a library). Windows bundles the helpers; Linux uses the distribution's. The same UI also builds for `wasm32` and runs as a static page in the browser, without helpers (spec 019).
+
+```
+            ┌────────────────────────── app (eframe, UI thread) ──────────────────────────┐
+            │ AppState · gallery · sidebar · viewer · editor · settings · glass · theme  │
+            └──────┬─────────────────┬──────────────────┬──────────────────┬─────────────┘
+       commands /  │ events   reads  │          requests│ textures         │ frames
+                   ▼                 ▼                  ▼                  ▼
+   indexer (threads): scans,    db (SQLite WAL):   textures / originals   video (libmpv:
+   watcher, schedule,           index, settings    (decode workers)       render + event
+   thumbnail service                 ▲                  ▲                 threads)
+        │      │                     │                  │
+        │      └── writes ───────────┘          thumbnail cache (WebP files)
+        ▼
+   media: exiftool pool, ffmpeg, thumbnail rendering, editing, writing ratings and tags
+```
+
+## Crates
 
 ```
 crates/
-  domain    pure types and logic: media, tags, search model, gallery layout, date groups, zoom and viewer math. No IO.
+  domain    pure types and logic: media, tags, search model, gallery layout, date groups, zoom and viewer math,
+            edit recipes, selection. No IO.
+  meta      metadata rules (exiftool-named tags → MediaMetadata) and pure-Rust EXIF / XMP / IPTC / container readers.
+            No IO.
   db        rusqlite: migrations, connections, index writer, gallery and tag queries, settings
-  meta      metadata rules (exiftool-named tags → MediaMetadata) and pure-Rust EXIF / XMP / IPTC / container readers. No IO.
-  media     exiftool process pool, metadata extraction, thumbnail rendering, originals, ffmpeg, helper lookup (desktop)
+  media     exiftool process pool, metadata extraction, thumbnail rendering, originals, ffmpeg, editing, subject
+            detection, writing ratings and tags, helper lookup (desktop only)
   indexer   scan queue, walk, scans, watcher, schedule, reachability, thumbnail cache and service, library operations
-  app       eframe binary: UI, texture streaming, glass, viewer, video, settings; `app::web` for the browser
+  app       eframe binary: UI, texture streaming, glass, viewer, video, editor, settings; `app::web` for the browser
 xtask/      check-specs, libraries CLI, benchmarks, screenshots, dist, release, web, web-test
 web/        the browser page: index.html (content security policy), browser check, Trunk config; Playwright tests
 packaging/  helper downloads, NSIS installer, smoke test (windows/); .desktop file, install script (linux/)
 ```
 
-## Decisions
-
-Architectural decisions, newest last. One entry each: what was decided, why (with measurements where there are any), what was rejected.
-
-### 2026-10-26 · UI stack: eframe / egui 0.37 on wgpu
-
-**Decided:** `eframe` / `egui` / `egui-wgpu` pinned to `=0.37.0`. A prototype scrolled 100,000 (and 250,000) items at 12 columns with a p95 frame interval of 7.2 ms on an integrated AMD GPU (budget 16 ms). egui's own painter is enough; no custom tile pipeline is needed.
-
-### 2026-10-26 · Thumbnail textures
-
-**Decided:** thumbnails are our own `wgpu::Texture`s (`Rgba8Unorm`, CPU-built mip chain), decoded with libwebp and created and written on worker threads; the UI thread only registers them with the egui renderer, within 3 ms per frame. 4 decode workers at below-normal thread priority. LRU cache with a byte budget (512 MB); textures in the prefetch band count as used. Requests are a priority list replaced every frame (visible, then 1.5 screens ahead, 0.5 behind), so stale work drops out.
-**Why:** uploading on the UI thread cost 2.7 ms per texture; egui-managed textures have no mipmaps (aliasing at high zoom); more decode threads starved the UI thread and the iGPU; libwebp decodes 3× faster than the `image` crate.
-**Rejected:** `ctx.load_texture` (p95 12.9 vs 7.2 ms, no mips), `image` crate WebP decoding.
-
-### 2026-10-26 · Glass
-
-**Decided:** glass surfaces render what lies below them into an offscreen target at half resolution, blur it with a dual-Kawase chain (4 passes) and composite saturate + tint + rounded corners in an `egui_wgpu` paint callback. ≈ 0.4 ms per surface. Raised is the fallback. Details in spec 013's plan.
-
-### 2026-10-26 · Font and title bar
-
-**Decided:** Atkinson Hyperlegible Next as the variable TTF from google/fonts (OFL), weights via `FontTweak::coords`; a second copy with `tnum` baked in (`pyftfeatfreeze`) for numbers, since egui can't request OpenType features. Title bar: content runs into the caption, own caption buttons, and a window subclass answers `WM_NCHITTEST` with the native codes (`HTMAXBUTTON` etc.), so shadow, resize, Aero snap and snap layouts stay native.
-**Rejected:** native caption (a second bar above the toolbar), undecorated window (no snap layouts, no top-edge resize).
-
-### 2026-10-26 · Video playback: libmpv, software render API, display-synced
-
-**Decided:** video plays through libmpv (`libmpv-2.dll`, loaded at runtime with `libloading` through a small own FFI; `hwdec=auto-copy`). A render thread renders each frame with mpv's software render API (`rgb0`) at the size the video occupies on screen and writes it into a `wgpu::Texture`; the UI draws the texture as a quad, rotated by `video-params/rotate` (the software renderer ignores rotation). Timing is display-synced: `video-sync=display-resample` with the monitor's refresh rate; the UI wakes the render thread once per presented frame, which calls `report_swap` and skips frames mpv marks as repeats. The render thread never calls non-render libmpv functions. MP4 H.264, MOV HEVC (incl. 4K and rotation), MKV and WebM VP9 + Opus play with 0–4 dropped frames per 600; 4K costs ≈ 2 cores and 5.7 ms render per frame. Ships as one 121 MB GPL DLL that hard-imports `vulkan-1.dll`.
-**Why:** mpv brings decoding, audio output, A/V sync, seeking and every container; the software render API works with wgpu as is. Display-synced timing removes the judder that audio-clock timing causes against our vsync (45–265 of 600 frames).
-**Rejected:** `libmpv2` crate (only the OpenGL render API), audio-clock timing (judder), rendering at the video's own size (4K: ≈ 19 ms CPU per frame), GL interop (would need a WGL context beside wgpu), `ffmpeg-next` + `cpal`, GStreamer.
-
-### 2026-10-26 · Workspace and crate layout
-
-**Decided:** one Cargo workspace (`resolver = "3"`, edition 2024) with the crates above; shared versions and lints in `[workspace.dependencies]` / `[workspace.lints]`. `app` is a library (`app::ui`, `AppState`, `theme`) plus a thin `main.rs`, so `egui_kittest` tests drive the same UI code as the window. `cargo xtask <task>` is a Cargo alias. Dependencies are optimized in dev builds (`[profile.dev.package."*"] opt-level = 3`): decoding and layout are too slow unoptimized to judge anything.
-
-### 2026-10-26 · Indexer runs as a thread
-
-**Decided:** the indexer runs on threads inside the app process, not as a child process. Its API is message-based (commands in, events out over `crossbeam-channel`), and every job runs under `catch_unwind`, so a panic fails that job instead of the app.
-**Why:** exiftool and ffmpeg already run as separate processes; the in-process decoders (libwebp, the `image` crate) are mature. A child process would need an IPC layer, a second process to supervise and a second copy of the decoders in memory.
-**Revisit if** a C decoder crashes in practice: because the API is message-based, it can move behind a pipe to `app --indexer` without changing callers.
-
-### 2026-10-26 · No async runtime, errors, logging
-
-**Decided:**
-- *Concurrency:* OS threads and `crossbeam-channel`, small worker pools where needed. No tokio: the work is CPU- or disk-bound, with few concurrent tasks and no network protocol.
-- *Errors:* `thiserror` enums in library crates (`domain`, `db`, `media`, `indexer`), `anyhow` in `app` and `xtask`.
-- *Logging:* `tracing` everywhere; `app` installs `tracing-subscriber` with `RUST_LOG`-style filtering (default `info`) on stderr and `logs\app.log` in the data folder (the previous run's kept as `app.old.log`).
-
-### 2026-10-26 · REQ references in Rust tests
-
-**Decided:** a test references a REQ at the start of its name (`fn req_012_01_reports_unknown_reqs()`, several chained: `fn req_002_01_req_002_02_…()`) or in a doc comment directly above it (`/// REQ-012-01: …`). `cargo xtask check-specs` reads `.rs` files below `crates/` and `xtask/` and counts only their test part: from the first `#[cfg(test)]` on, or the whole file below `tests/` or `benches/`. REQs mentioned in production code don't count as coverage. Spec: 012.
-
-### 2026-10-26 · Visual checks
-
-**Decided:** UI changes are checked two ways: `egui_kittest` snapshot tests (wgpu renderer, PNGs in `crates/app/tests/snapshots/`, `UPDATE_SNAPSHOTS=1` rewrites them) and `cargo run -p app -- --screenshot <file.png>`, which renders a few frames, saves the window and exits, so a session can look at the real app without anyone at the screen. `--view`, `--info`, `--scroll` and `--screenshot-after` set up the shot.
-
-### 2026-10-26 · Index compatibility and migrations
-
-**Decided:** existing indexes must keep opening without re-indexing (REQ-001-08). `crates/db/migrations/` holds the SQL files and `meta/_journal.json` byte for byte (`.gitattributes`: `-text`), and `db::open` migrates with drizzle-orm's SQLite bookkeeping, which existing indexes carry: `__drizzle_migrations` created with drizzle's exact DDL text, newest `created_at` read, newer journal entries run chunk by chunk in one transaction, `(sha256 of the file, journal when)` inserted. Tests open `crates/db/tests/fixtures/legacy-index.db`, an index from an earlier version, and check that a new index gets the same schema and bookkeeping. A schema change is a new migration file with a journal entry whose `when` is larger than the last.
-**Connections:** one write connection (WAL, `synchronous = NORMAL`, foreign keys, `busy_timeout = 5000`), read-only connections for readers (memory-mapped reads of 512 MB and a 64 MB page cache, see spec 007's plan).
-
-### 2026-10-26 · Icons
-
-**Decided:** lucide icons (ISC, `crates/app/assets/icons/LICENSE.lucide.txt`) as SVG files with `stroke="#fff"` and `stroke-width="1.75"`, embedded with `include_bytes!` (`app::icons::Icon`) and rendered by `egui_extras`' SVG loader (resvg) at the size they are drawn, tinted per use. A new icon is a line in `icons!`; `cargo xtask icons` writes its SVG from a pinned lucide-static release.
-**Rejected:** an icon font (lucide's font drops the stroke-width control), hand-drawn shapes (doesn't scale to ~40 icons).
-
-### 2026-10-26 · UI state and background jobs
-
-**Decided:** `app::AppState` holds what the UI shows; slow work (reachability, folder dialog, Explorer, cache clearing) runs on threads and sends an event back over a channel, applied at the start of the next frame (`AppState::poll`). Tests call `AppState::wait_for_jobs` before stepping the harness, so they never race the jobs. OS dialogs sit behind a trait (`FolderPicker`) so tests use a fake.
-
-### 2026-10-26 · Metadata through exiftool
-
-**Decided:** `media::exiftool` keeps a pool of `exiftool -stay_open True -@ -` processes (size = parallel file reads) and reads each file with the argument set of exiftool-vendored v38's defaults (`-charset filename=utf8 -json -fast`, its UTF-8 repair filter, `-api struct=1 -use MWG -api keepUTCTime`, numeric durations, GPS and orientation, `-all <file> -ignoreMinorErrors`), which existing indexes were read with, so their rows stay valid. Arguments go over stdin, one per line, no shell; paths are always absolute. A read over 60 s replaces its process. `METADATA_VERSION` is 1; bump it when the extraction rules change.
-**Deviation:** no time zone from the GPS position (it would need a time-zone shape database); such photos get the computer's local zone. See spec 004's plan.
-**Since 2026-10-29** the rules that turn exiftool's tags into `MediaMetadata` live in the crate `meta`, beside the browser's readers (spec 019); `media::metadata` re-exports them.
-**Tests that need exiftool** (or ffmpeg, libmpv, git-cliff) skip themselves when it isn't found, unless `GG_REQUIRE_HELPERS=1` (CI).
-**Since 2026-11-01** a failed read (exiftool's error, a timeout) is stored in `media.meta_error` rather than as empty metadata of the current version, which hid it for good (REQ-002-12, -15). The writer keeps a known file's metadata, tags and `meta_version` then, so a failed read never triggers the full scans of REQ-002-05. Scans read files with a `meta_error` again, and quick scans list their folders though unchanged (a partial index on `meta_error IS NOT NULL` keeps that lookup and the toolbar's count cheap). `NULL` once a read succeeds. Migration 0014 marks rows without width or height, the trace earlier versions left of a failed read, so they are read again once.
-
-### 2026-10-26 · Pure media and tag rules in `domain`
-
-**Decided:** file kinds, housekeeping folders, sidecar lookup, tag normalization, `MediaMetadata` and `METADATA_VERSION` live in `domain`; `db` depends on `domain` for the writer, `media` for extraction. `db::writer::IndexWriter` owns the write connection (on the indexer thread).
-
-### 2026-10-26 · Scans on threads
-
-**Decided:** `indexer::scan::scan_root` walks on the calling thread, which owns all index access (lookups, batched writes, removals at the end); `io_concurrency` scoped worker threads stat files and read metadata, connected by a bounded channel (backpressure) and a result channel. Cancelling (library removed) and "offline" are atomic flags. A panic while reading one file costs that file; a panic anywhere else ends the scan as `Failed`, and the next scan runs (REQ-002-13).
-**Indexer:** `indexer::Indexer` holds the scan queue behind a mutex (commands are method calls from any thread, merged per library) and one thread with the write connection that runs the scans; it reports `IndexerEvent`s over a channel and wakes the UI through a callback. It implements `ScanRequests`, so library operations queue real scans. The app keeps its own connection for library rows; SQLite's busy timeout serializes the writers.
-
-### 2026-10-27 · Change detection and schedule
-
-**Decided:** the indexer owns the watchers (`notify` recursive, 2 s debounce, 10 s at most). A completed scan starts one for its library, an offline result or a removed library stops it. `indexer::schedule::Scheduler` is its own thread with a read connection: quick scans at startup and every quick check interval, offline libraries every minute. Details in spec 003's plan.
-
-### 2026-10-27 · Helper processes end with the app
-
-**Decided:** at startup the app puts itself into a Windows job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (`media::helpers::end_helpers_with_app`). Every process it starts (exiftool's launcher and its child, ffmpeg) joins the job and ends with the app, however it exits. Without it, exiftool's PAR-packed launcher outlived the app. The job allows breakaway: programs opened for the user (Explorer) are started with `CREATE_BREAKAWAY_FROM_JOB`, or closing the app would close them too.
-
-### 2026-10-27 · Thumbnail cache layout
-
-**Decided:** one WebP file per thumbnail and width, `<data>/thumbs/<h0h1>/<h2h3>/<sha1>.webp` with `sha1` of `[rootId, relPath, size, mtime, width]` serialized as `JSON.stringify` does (`serde_json` matches it for integers and strings; a test pins hashes computed with Node). This is the layout existing caches use, so they keep working (REQ-005-15). Writes are atomic (temp file + rename), `*.tmp` leftovers are removed at startup, eviction is LRU by file mtime down to 90 % of the limit, reading bumps the mtime at most once an hour.
-**Rejected (for now):** a pack file. Cold reads would be ≈ 100× faster under Defender's first-read scan (≈ 13 ms per file), but it needs a new format and a migration of existing caches, and the cost only shows while scrolling fast through thumbnails not read for minutes.
-
-### 2026-10-27 · Thumbnail rendering
-
-**Decided:** `media::thumbnail::Renderer`: one decode per file, upright by its EXIF orientation, fit into 800 × 2400 without enlarging (Lanczos3, `fast_image_resize`), each width from that, WebP quality 80 through libwebp, ThumbHash at ≤ 100 px. JPEGs decode through `jpeg-decoder` with DCT scaling (shrink-on-load); other formats through `image`. Embedded previews (exiftool `PreviewImage`) replace large camera JPEGs when they are large enough and have the same shape. Video frames and **AVIF** come from ffmpeg (`media::ffmpeg`), since `image` decodes AVIF only through dav1d, a C library with a meson build.
-**Deviation:** ICC profiles are ignored, so wide-gamut photos may come out slightly less saturated.
-**Service:** `indexer::thumbnails::ThumbnailService`: `io_concurrency` render threads, one priority queue (requests newest first above background jobs), background batches of 100 pending items, its own write connection. Requests are answered through a callback, which the texture streamer uses. Each render runs under `catch_unwind`.
-
-### 2026-10-27 · Gallery: layout up front, data and textures on demand
-
-**Decided:** `db::gallery::layout` returns every match's id and clamped aspect in sort order (and the day groups of a date sort); `domain::layout::tile_layout` positions all tiles at once (f64), so the scroll length is exact and the visible range is a binary search. A loader thread with its own read connection runs the gallery's queries (and the suggestions and sidebar lists); tile data loads in chunks of 200 for the visible range ± 600 pt. Only tiles near the viewport are drawn. Measured with `cargo xtask gallery-bench` (100,000 items, 12 columns, vsync off, AMD iGPU): p95 4.4 ms, max 11.9 ms. View choices are stored in the `settings` table (`gallery.view`, `gallery.columns`, `gallery.groupByDay`, `gallery.tagIndicators`); the List view's row positions are arithmetic over the group starts.
-
-### 2026-10-27 · Search queries
-
-**Decided:** `domain::search::GallerySearch` is the search state; `db::gallery::layout` builds its WHERE clause as SQL text with bound parameters. Tag conditions pick a query shape per search (the rarest tag drives up to 200,000 estimated matches, primary key probes while walking the sort index beyond), a file name's matches come from the name index, and unary `+` operators and `INDEXED BY` pin the plans (checked by a query plan test). `cargo xtask search-bench` measures REQ-007-14.
-**Decided:** broad results (tens of thousands of matches and more) have a budget of 1 s instead of 50 ms (REQ-007-14): SQLite costs ≈ 1.5 µs per result row, and the search runs off the UI thread. An in-memory copy of the sort columns would meet 50 ms but would have to follow every index write. See spec 007's plan.
-
-### 2026-10-27 · Search bar, filters and sidebar
-
-**Decided:** the gallery owns the search (`Gallery::set_search` reloads from the top). _Filters_ and _View_ are `egui::Popup`s under fixed ids: a button's automatic id changes with its look and with the widgets drawn before it, which closed the menus. The sidebar is a fixed 256 px left panel; collapsed groups are stored as `sidebar.group.<id>` in `settings`. The groups' order and which of them show (`domain::sidebar::SidebarLayout`) are stored once for the app as `sidebar.groups`, a list of `{group, shown}`; reading it repairs what an older or newer version left behind instead of rejecting it.
-
-### 2026-10-27 · Viewer
-
-**Decided:** the viewer (`app::viewer`) is `AppState::viewer`, drawn in an area over the window while the gallery keeps drawing below; it takes its keys at the start of the frame. Originals come from `app::originals`: two worker threads decode the wanted set (shown item, then neighbours nearest first) and create mipped `wgpu::Texture`s themselves; a request that leaves the set before it starts never runs. Zoom math, preloading order and control timing are pure functions in `domain::viewer`. The info panel and the gallery's info sheet share `app::info`; the viewer reports what it needs as `viewer::Action` (close, filter by tag, show in Explorer). `theme::motion` is off when Windows' animation effects are off.
-
-### 2026-10-27 · Video playback in the viewer
-
-**Decided:** the viewer talks to a `video::Playback`; the app's is `video::MpvPlayer`, UI tests use `video::FakePlayback`. `AppState::videos` makes the player when the first video shows, or holds why it can't (libmpv not found). All of the app's video `unsafe` is in `video::mpv`. Frames belong to a load: the UI counts the `loadfile`s it sent, the event thread counts mpv's `START_FILE`s, and frames show only after the `FILE_LOADED` of the latest load, so a video stepped away from never flashes. The UI reads mpv properties at most every 100 ms.
-**Rejected:** egui's `Slider` for seek and volume (its rail doesn't show with our widget visuals), loading libmpv at startup.
-
-### 2026-10-28 · Settings applied at once
-
-**Decided:** the Settings page stores through `db::settings::save` (validated; an invalid value is an error toast and nothing changes) and hands what changed to an `app::SettingsTargets` (the app's running parts in `main.rs`; UI tests record calls with a fake). Dates are formatted with ICU4X (`icu_datetime`, compiled data) in the locale `sys-locale` reports; tests pin `en-GB`. Relative paths from the index are checked by `domain::media::is_safe_rel_path` wherever a file is opened. `xtask/tests/no_network.rs` keeps network crates and socket code out of the app.
-
-### 2026-10-28 · Glass, title bar, focus and OS preferences
-
-**Decided:** `app::glass` draws each surface's **backdrop** (tiles with their thumbnail texture views, placeholders and the page / sidebar as solids, recorded while drawing) into an offscreen chain at half resolution and blurs and composites it in a paint callback. Surfaces record nothing for each other, except that the viewer's scrim also sees the toolbar; the viewer records the scrim's darkening and the photo (its texture view, as far as it is drawn) over them, which menus over the viewer blur. Its chrome composites from the scrim's blur; only while the photo grows from its tile, the one time it lies under the chrome, it composites from one shared blur of the window, the darkening and the photo (one extra pass during that animation). Without the pass (no wgpu render state, as in kittest) or with Windows' transparency effects off, surfaces are opaque; snapshots show that fallback, the pass is checked with screenshots of the running app. A paint callback ignores the painter's opacity, so surfaces pass it themselves.
-**Title bar:** `app::titlebar` (the module with the window `unsafe`): `WM_NCCALCSIZE` drops the caption, `WM_NCHITTEST` answers the top edge and the three caption buttons natively. Empty caption areas take the drag in egui and send `ViewportCommand::StartDrag` (a native caption drag, so Aero snap works).
-**Rejected:** reading back egui's framebuffer for the blur (a callback runs inside egui's render pass), `HTCAPTION` drag rects (the window procedure can't know which parts of the toolbar are empty), Windows' `GetDateFormatEx` (no medium length).
-
-### 2026-10-28 · Packaging and releases
-
-**Decided:**
-- *Data folder:* the packaged app (feature `packaged`, set by `cargo xtask dist`) uses `%APPDATA%\good-gallery`, the folder every earlier version used; every other build uses `%APPDATA%\good-gallery-rust`, so `cargo run` (also `--release`) never touches the real index (`app::startup::default_data_dir`).
-- *The packaged app* has no console (`windows_subsystem = "windows"`); a startup failure shows a message box and panics are logged. The app logs which helpers it found.
-- *Icon:* `crates/app/assets/app-icon.svg`, rendered into `app-icon.ico` (16–256 px PNG entries; exe icon and version info through `winresource` in `crates/app/build.rs`, needs `rc.exe` from the Windows SDK) and `app-icon.png` (window icon). `cargo xtask icons` renders both again when the SVG changes.
-- *Helpers:* `packaging/fetch-helpers.ps1` downloads pinned versions (exiftool 13.59, ffmpeg-static b6.1.1, libmpv 20261021) and checks their SHA-256. The folder layout is one set of constants (`media::helpers::{EXIFTOOL,FFMPEG,MPV}_BUNDLED`) used by the app's lookup and by `cargo xtask dist`. PowerShell, not xtask, so no HTTP client enters the workspace (REQ-011-11).
-- *Package and releases:* `cargo xtask dist` (NSIS installer, portable zip), `cargo xtask release` (git-cliff with `cliff.toml`, version in `[workspace.package]`), `.github/workflows/release.yml`. Details in spec 014's plan.
-- *README screenshots:* `cargo xtask screenshots` generates a demo library (landscapes drawn with `image`, tags through exiftool, two ffmpeg videos) on a `subst` drive, indexes it and runs the app with `--screenshot` per view.
-**Rejected:** `cargo-packager` (another tool for one NSIS script, and its resource layout would differ from the folders the app looks in), WiX / MSI (per-machine by habit), a separate portable data folder (out of scope in spec 014), an HTTP client in xtask for the helpers.
-
-### 2026-10-28 · Linux
-
-**Decided:** Linux is a supported platform (spec 018), built and tested in CI beside Windows. Platform code stays behind `cfg(windows)` / `cfg(target_os = "linux")` (not `unix`: macOS will need its own answers); POSIX path rules (`indexer::libraries`, `db::libraries::find_by_path`) branch on `cfg!(windows)`.
-- *Data folder:* `$XDG_DATA_HOME/good-gallery` (else `~/.local/share`), `good-gallery-rust` for development builds (`app::startup::data_home`).
-- *Helpers* come from the distribution: exiftool and ffmpeg on `PATH`, libmpv by its soname `libmpv.so.2` through the dynamic loader. Every helper starts through `media::helpers::spawn_helper`: on Linux from one long-lived thread with `PR_SET_PDEATHSIG = SIGKILL`, the counterpart of the Windows job object.
-- *Title bar:* the window is undecorated; `app::titlebar` draws GNOME-style round caption buttons (`Area`s on the `Foreground` order, so the content below gets no presses) and 4 px resize handles (12 px corners, on top of the `Middle` order: above the viewer, below menus) that send `ViewportCommand::BeginResize`, which winit hands to the compositor on X11 and Wayland.
-- *Desktop services* run processes, not a D-Bus crate: _Show in folder_ is `org.freedesktop.FileManager1.ShowItems` through `gdbus` / `dbus-send`, else `xdg-open`; reduced motion reads `gsettings` / `kreadconfig` on a background thread every 2 s. Decode threads get nice 10.
-- *Package:* `cargo xtask dist` writes a `.tar.gz` (app, `.desktop` file, icon, `install.sh` into `~/.local`), built on `ubuntu-latest` for an older glibc. Snapshot tests keep a Linux set (`*_linux.png`, lavapipe renders like WARP otherwise), checked in CI in an `ubuntu:26.04` container.
-- *Video:* mpv gets `video-rotate=no` and the UI reads `video-dec-params/rotate`, since mpv 0.41's software renderer aborts on rotated videos.
-**Rejected:** winit's client-side decorations (a bar above the toolbar, so the search isn't in the title bar), zbus (its async runtime trips REQ-011-11's guard), bundling the helpers on Linux (distributions ship them; an AppImage can bundle them later).
-
-### 2026-10-29 · Browser version
-
-**Decided:** the app also builds for `wasm32-unknown-unknown` and runs as a static page on GitHub Pages (spec 019; details in its plan).
-- *One wasm instance on the main thread.* No wasm threads (nightly and COOP / COEP headers, which Pages can't send). Slow work is the browser's (decoding, encoding, file reads); our own is sliced by `app::web::Slice`, which yields after 8 ms.
-- *Seams:* desktop-only code sits behind `cfg(not(target_arch = "wasm32"))` in `app`, `indexer` and the crate graph (`media` is desktop only); `app::web` implements the same seams the desktop fills (`ScanRequests`, `IndexerEvent`s, `ThumbnailReady`s, `video::Playback`). `app::WEB` hides desktop-only actions. The desktop entry point is `crates/app/src/desktop.rs`.
-- *Index:* `db` on `sqlite-wasm-rs`'s in-memory file system, with a snapshot in the Origin Private File System, saved after changes and when the page is hidden. *Thumbnails:* OPFS files under `thumbs/<library>/`, the desktop cache's names, size limit and LRU.
-- *Metadata without exiftool:* `meta`'s readers produce exiftool-shaped tags, including `-use MWG`'s keyword reconciliation; a test compares them with exiftool on the same files.
-- *Privacy:* a content security policy without inline scripts (`cargo xtask web` moves Trunk's start script into a file); `no_network.rs` checks the `web-sys` features and the page's scripts.
-- *Tests:* Playwright (`web/tests`, `cargo xtask web-test`) in Chromium with SwiftShader, clicking by position in a fixed viewport and comparing screenshots; npm only there.
-**Rejected:** an index worker with SQLite on OPFS (`sahpool`), a separate web UI, sql.js / IndexedDB, `image` + libwebp in wasm, a DOM `<video>` over the canvas, Chromium only.
-
-### 2026-10-30 · Appearance: light, dark or the system's
-
-**Decided:** `theme` holds two `Palette`s (`DARK`, `LIGHT`) named by role (`base`, `recess`, `raised`, `text`, `muted`, …). egui gets a style for each theme in `theme::install`; the _Appearance_ setting maps onto egui's `ThemePreference` (System follows eframe's report of the OS or browser preference, dark where there is none), and egui's own `ViewportCommand::SetTheme` sets the native window frame. Each frame, `theme::begin_frame` sets a per-thread current palette from `ctx.theme()`; call sites read `theme::text()` and so on. The viewer draws inside `theme::with_palette(&DARK, …)` and its area gets egui's dark style; menus apply the current palette's style themselves (egui builds popups from the global style). Details in spec 020's plan.
-**Rejected:** passing the context to every color lookup (the same result, threaded through ~170 call sites), a global (tests draw in parallel on their own threads, with different appearances).
-
-### 2026-10-30 · Photo editing: a recipe rendered from the unedited original
-
-**Decided:** an edit is a `domain::edit::Recipe` (spec 021; details in its plan). `domain::edit::Params::pixel` holds the formulas, in 32-bit float on linear light (tone and curves on perceptual values); `app::edit` previews them on the GPU with `edit.wgsl`, a paint callback over the original's texture (a test compares it with the CPU within two levels), and without a wgpu renderer (kittest) from a small copy on the CPU. `media::edit` saves at full resolution on all cores: the original's format and bit depth, an 8-bit dither below half a step, metadata and the color profile copied by a one-shot exiftool with a config for our `gg` XMP namespace (written into the data folder, since exiftool runs it as Perl), orientation baked in, a temporary dot file renamed into place. Replacing an original first copies it to `<library>/.good-gallery/originals/<path>`; _Revert_ renames it back. The recipe and the unedited original's path live in the saved file (`gg:EditRecipe`, `gg:EditSource`) and, as indexing reads them, in `media_edits`. After a save the app marks the row for reading again (`db::media::mark_rewritten`), deletes the old thumbnails and asks the indexer for a changes scan of the path (`ScanRequests::request_paths`); the gallery drops textures of items whose size, date or ThumbHash changed.
-**Rejected:** backups in the user profile (lost with it, unknown on other computers), a sidecar for the recipe (other tools' sidecars share the names), Lightroom's `crs:` tags (applied a second time by Lightroom to pixels that already contain the edit), a GPU readback for saving (the preview's texture may be shrunk to the GPU's limit).
-**Amended 2026-11-01 (#99):** editing opens at once (REQ-021-19). The panel shows as soon as the recipe is known; for the file itself the session borrows the viewer's original texture (`Originals::lend`, which then leaves it to wgpu to free instead of destroying it) and reads its small copy back from a mip level (media textures carry `COPY_SRC`). Only an edited copy's source, or an original the viewer couldn't load, is decoded again.
-
-### 2026-10-31 · Subject and background: a network in the executable
-
-**Decided:** the subject of a photo (spec 022) is found by U²-Net-p (4.6 MB, Apache-2.0), a salient object detection network, run on the CPU by `tract-onnx` (pure Rust) in `media::subject`. The model is embedded with `include_bytes!`, so there is nothing to download or bundle (REQ-011-11). Its 320 × 320 soft mask (`domain::edit::Mask`) is sampled bilinearly over the photo: on the CPU when saving, as an `R8Unorm` texture in `edit.wgsl`. The recipe gets optional `subject` and `background` recipes with light and color only, applied after the whole photo's and blended by the mask; the mask is never stored, but found again from the unedited original, and handed to saving so the file matches the preview.
-**Rejected:** larger matting networks (ISNet, BiRefNet, RMBG: 170 MB and more, slow on a CPU), person-only models (MODNet, MediaPipe), ONNX Runtime through `ort` (a native library per platform), storing the mask in the file.
-
-### 2026-10-31 · Blur from an image pyramid
-
-**Decided:** blurs (spec 023) sample a pyramid of the photo, halved by 2 × 2 boxes as the GPU texture's mip chain, with a cubic B-spline at the level of each spot's blur (σ ≈ 0.65 · 2^level), mixing two levels in between. The shader uses the texture's own mips (four bilinear taps per level), saving builds the same levels in 32-bit float (`domain::edit::Pyramid`). The blur comes before the other adjustments, as a lens's would.
-**Rejected:** a convolution per pixel with a varying kernel (too slow live on large photos), blurring on the GPU into extra textures per change (a readback or a second pipeline, and a different result when saving).
-
-### 2026-10-31 · Faster CI
-
-**Decided:** CI runs the tests with cargo-nextest (`.config/nextest.toml`, profile `ci`): the test binaries run in parallel instead of one after another, and every test in its own process, so the `GPU` lock of the UI tests (one wgpu harness per process at a time) still holds. A test that hangs fails after 5 minutes. nextest skips doctests, so `cargo test --workspace --doc` runs them. Only `main` saves the Rust cache (pull requests restore it; a tag's cache can't be restored by any other ref). `cargo test --workspace` stays the local command.
-**Rejected:** skipping wasm-opt in CI's web build (the browser tests would check a different build than the one published), a different linker on the Windows runners (CI would link differently from the release), a Dev Drive there (another third-party action for a gain not measured yet), skipping CI for documentation changes (the spec check reads `docs/specs`).
-
-### 2026-11-01 · Ratings written where they are read
-
-**Decided:** a rating set by hand (spec 024) is written by a one-shot exiftool (`media::rating`, sharing `exiftool::run_once` with saving edits) where `meta` reads it first: into photos, and into a video's sidecar (an existing one, else `<file name>.xmp`) unless the video has a rating of its own; an existing sidecar with a rating is kept in agreement. `-Rating=N -XMP-xmp:Rating=N` updates every rating the file has and makes sure the XMP one exists, the date modified is restored to the exact time afterwards (exiftool's `-P` keeps whole seconds), and 0 means unrated, so no other source takes its place. The index is updated (`db::media::set_rating`) only after the file, because with the date kept the file's size may not change and a scan wouldn't read it again; the row is marked for reading again anyway, since a new sidecar is only noted then.
-**Rejected:** writing into videos (slow over a network, impossible for WebM and Matroska), the Lightroom sidecar name `clip.xmp` (also read as the sidecar of a `clip.mov` beside it), keeping ratings in the index only (lost with the index, unseen by other tools).
-
-### 2026-11-01 · Selection as "these" or "all except these"
-
-**Decided:** the gallery's selection (spec 025) is `domain::selection::Selection`: a set of ids, or the ids left out of "all of the search", plus the anchor for Shift-click. Ctrl+A on 500,000 items is free; the ids are made from the layout, which already holds every id of the search, only when an action runs. A new search clears the selection and a new layout trims it to the items still there. Rating a selection runs `media::rating::write` per file on one background thread and updates each index row after its file (`db::media::files_of` gives the files).
-**Rejected:** selected ids in the index (a write per click, and stale after a crash), materializing all ids on Ctrl+A (megabytes per press on large searches), keeping the selection across searches (hidden items would be changed).
-
-### 2026-11-01 · Tags written by hand, read back by indexing
-
-**Decided:** adding or removing a tag (spec 026) reads the file's keyword fields with a one-shot exiftool, changes the lists in `domain::tagging` and writes back only the fields that changed (`media::tagging`), into the same targets as ratings. A removal also takes the tag out of the sidecar, and its hierarchy's unused levels out of the flat lists. The index isn't written directly: the row is marked for reading (`db::media::mark_for_reading`) and a changes scan of the path reads the file with indexing's own rules. The viewer ignores its shortcuts while a text field has the keyboard, also in the frame after, since egui drops the focus before a frame with Escape.
-**Rejected:** writing tags into the index directly (indexing's normalization and one-hierarchy-per-name rules would have to be repeated), appending with exiftool's `+=`/`-=` per field (it can't express "this name in any field, and the hierarchy's levels"), removing names from face regions (other programs' drawings).
-
-### 2026-11-01 · Worktrees sharing a target folder
-
-**Decided:** `.cargo/config.toml` sets `GOOD_GALLERY_WORKTREE` to the worktree's path (`[env]`, `relative`, `force`), and every workspace crate root reads it with `option_env!`. Cargo tracks the value, so a crate built by another worktree into the same `CARGO_TARGET_DIR` is rebuilt instead of counting as fresh (cargo names workspace crates' artifacts by their path relative to the workspace). Dependencies stay shared. `xtask/tests/worktrees.rs` checks that every crate root reads it.
-**Rejected:** a target folder per worktree (every worktree builds all dependencies again, gigabytes each), an agent hook that cleans the workspace crates when the worktree changes (it sees only the session's folder, not a `cd` in the command, and misses builds outside the agent).
+Dependencies point one way:
+
+```
+domain ◄── meta ◄── media ◄──┐
+   ▲                          ├── indexer ◄── app
+   └────── db ◄───────────────┘
+```
+
+- `domain` and `meta` do no IO, so layout, search, tag and metadata rules are tested without files, a database or a GPU. New pure logic goes there.
+- `db` knows SQL and the schema, nothing about files. `media` knows files and helper processes, nothing about the index.
+- `indexer` joins them: it walks folders, reads files through `media` and writes the index through `db`.
+- `app` is a library (`app::ui`, `AppState`) with a thin `main.rs` / `desktop.rs`, so the UI tests drive the same code as the window.
+- `media` is desktop only; in the browser `meta`'s readers and `app::web` take its place.
+
+## Threads and data flow
+
+There is no async runtime: work runs on OS threads that talk over channels (`crossbeam-channel`) and wake the UI with `request_repaint`.
+
+| Thread | Owns | Talks to the UI by |
+| --- | --- | --- |
+| UI (eframe) | `AppState`, a read connection for library rows | — |
+| Indexer | the write connection (`IndexWriter`), the scan queue, the watchers | `IndexerEvent`s, applied in `AppState::poll` |
+| Scan workers (`io_concurrency`) | stat and metadata reads of one scan | results to the indexer thread |
+| Scheduler | a read connection | queues scans on the indexer |
+| Thumbnail service (`io_concurrency`) | rendering, its own write connection | a callback per finished thumbnail |
+| Gallery loader | a read connection | layout, tile data, suggestions, sidebar lists |
+| Texture workers (4) | thumbnail decode, mips, `wgpu::Texture` creation | finished textures, registered by the UI within 3 ms per frame |
+| Originals workers (2) | full-size decodes for the viewer | finished textures |
+| mpv render / event | libmpv's render context and events | a published frame per load |
+| Background jobs | reachability, folder dialog, writing ratings and tags, cache clearing | an event applied in `AppState::poll` |
+
+- The UI never waits for IO. Each frame it applies what arrived (`AppState::poll`), draws, and sends requests; requests are priority lists replaced every frame, so work that scrolled out of view drops out.
+- Every job runs under `catch_unwind`: a panic costs that file or that job, not the app.
+- Tests call `AppState::wait_for_jobs` before stepping the harness, so they never race the threads. OS dialogs and the video player sit behind traits (`FolderPicker`, `video::Playback`) with fakes in tests.
+
+## Storage
+
+- **Index:** SQLite in WAL mode in the data folder. One write connection (the indexer's), read-only connections for readers. Migrations are drizzle-compatible SQL files in `crates/db/migrations/`, so indexes made by earlier versions keep opening (REQ-001-08); a schema change is a new migration, never an edited one.
+- **Settings:** the `settings` table of the index, validated by `db::settings`.
+- **Thumbnail cache:** one WebP file per thumbnail and width under `<data>/thumbs/`, named by a hash of the file's identity, LRU by file mtime within a size limit.
+- **Data folder:** `%APPDATA%\good-gallery` (Windows) or `$XDG_DATA_HOME/good-gallery` (Linux) for the packaged app; development builds use `good-gallery-rust`. Logs are in `logs/` there.
+- **User files:** the app writes into them only when the user asks: ratings and tags (through exiftool, into the file or its XMP sidecar), and saved edits (with the recipe in our `gg:` XMP namespace; replaced originals are kept in `<library>/.good-gallery/originals/`). Indexing then reads them back with its normal rules.
+- **Browser:** the index is an in-memory SQLite database with a snapshot in the Origin Private File System; thumbnails are OPFS files with the desktop cache's names.
+
+## Rendering
+
+- egui draws everything with its own painter on wgpu. Thumbnails, originals and video frames are our own `wgpu::Texture`s (with mips), created off the UI thread and registered with egui's renderer.
+- The gallery lays out all tiles up front (`domain::layout`), so the scroll length is exact; only tiles near the viewport are drawn and only their data and textures are loaded. A byte budget (LRU) bounds GPU memory.
+- **Glass** (`app::glass`) blurs what lies under the toolbar, menus and the viewer's chrome in a paint callback: a recorded backdrop rendered at half resolution, a dual-Kawase blur, then tint and rounded corners. Without a wgpu render state (kittest) or with transparency effects off, surfaces are opaque.
+- **Photo editing** previews the recipe with `edit.wgsl` in a paint callback over the original's texture; saving runs the same formulas on the CPU at full resolution (`media::edit`).
+- **Theme:** `theme` holds a dark and a light palette named by role; `theme::begin_frame` picks the current one each frame.
+
+## Platforms
+
+Platform code sits behind `cfg(windows)`, `cfg(target_os = "linux")` and `cfg(target_arch = "wasm32")`; `app::WEB` hides desktop-only actions in shared code.
+
+| | Windows | Linux | Browser |
+| --- | --- | --- | --- |
+| Window | own caption buttons; `WM_NCHITTEST` answers natively (snap layouts) | undecorated; GNOME-style buttons and resize handles drawn by `app::titlebar` | a canvas in the page |
+| Helpers | bundled; ended with the app by a job object | from the distribution; `PR_SET_PDEATHSIG` | none: `meta`'s readers and the browser's own image and video decoding |
+| Threads | as above | as above | one wasm instance on the main thread; slow work is the browser's, our own is sliced (`app::web::Slice`) |
+| Package | NSIS installer, portable zip | `.tar.gz` with an install script | static files on GitHub Pages |
+
+## Conventions
+
+- **Errors:** `thiserror` enums in library crates, `anyhow` in `app` and `xtask`. **Logging:** `tracing`, to stderr and `logs/app.log`.
+- **No network:** the app makes no network requests (REQ-011-11); `xtask/tests/no_network.rs` keeps network crates out.
+- **Specs and tests:** every test that covers a REQ names it (`fn req_007_01_…` or a doc comment); `cargo xtask check-specs` checks it.
+- **Visual checks:** `egui_kittest` snapshots (`UPDATE_SNAPSHOTS=1`), and `cargo run -p app -- --screenshot <file.png>` for the real window with glass.
+- **Pinned UI crates:** egui, eframe, egui_kittest and wgpu are pinned to exact versions.

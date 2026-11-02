@@ -1,6 +1,6 @@
 # 007 · Search · Plan
 
-Records the approach that was taken. Decisions that outlive this spec are in `docs/architecture.md`.
+Records the approach that was taken. Lasting decisions are under _Decisions_ at the end.
 
 ## Approach
 
@@ -32,3 +32,10 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 - [x] `cargo xtask search-bench` (REQ-007-14, measured)
 - [x] Cheaper query shapes for broad tags and file names (REQ-007-14, #13)
 - [x] Suggestions summed in Rust, kind index, budget for broad results (REQ-007-14, #13)
+
+## Decisions
+
+### 2026-10-27 · Search queries
+
+**Decided:** `domain::search::GallerySearch` is the search state; `db::gallery::layout` builds its WHERE clause as SQL text with bound parameters. Tag conditions pick a query shape per search (the rarest tag drives up to 200,000 estimated matches, primary key probes while walking the sort index beyond), a file name's matches come from the name index, and unary `+` operators and `INDEXED BY` pin the plans (checked by a query plan test). `cargo xtask search-bench` measures REQ-007-14.
+**Decided:** broad results (tens of thousands of matches and more) have a budget of 1 s instead of 50 ms (REQ-007-14): SQLite costs ≈ 1.5 µs per result row, and the search runs off the UI thread. An in-memory copy of the sort columns would meet 50 ms but would have to follow every index write. See spec 007's plan.

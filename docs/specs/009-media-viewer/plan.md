@@ -1,6 +1,6 @@
 # 009 · Media viewer · Plan
 
-Records the approach that was taken. Decisions that outlive this spec are in `docs/architecture.md`.
+Records the approach that was taken. Lasting decisions are under _Decisions_ at the end.
 
 ## Approach
 
@@ -31,3 +31,20 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 - [x] Face regions over the photo (REQ-009-17)
 - [ ] Automated test for the thumbnail preview (REQ-009-14; needs the GPU texture streamer)
 - [ ] Pass exiftool's orientation to the original's decode, for photos oriented only in XMP
+
+## Decisions
+
+### 2026-10-26 · Video playback: libmpv, software render API, display-synced
+
+**Decided:** video plays through libmpv (`libmpv-2.dll`, loaded at runtime with `libloading` through a small own FFI; `hwdec=auto-copy`). A render thread renders each frame with mpv's software render API (`rgb0`) at the size the video occupies on screen and writes it into a `wgpu::Texture`; the UI draws the texture as a quad, rotated by `video-params/rotate` (the software renderer ignores rotation). Timing is display-synced: `video-sync=display-resample` with the monitor's refresh rate; the UI wakes the render thread once per presented frame, which calls `report_swap` and skips frames mpv marks as repeats. The render thread never calls non-render libmpv functions. MP4 H.264, MOV HEVC (incl. 4K and rotation), MKV and WebM VP9 + Opus play with 0–4 dropped frames per 600; 4K costs ≈ 2 cores and 5.7 ms render per frame. Ships as one 121 MB GPL DLL that hard-imports `vulkan-1.dll`.
+**Why:** mpv brings decoding, audio output, A/V sync, seeking and every container; the software render API works with wgpu as is. Display-synced timing removes the judder that audio-clock timing causes against our vsync (45–265 of 600 frames).
+**Rejected:** `libmpv2` crate (only the OpenGL render API), audio-clock timing (judder), rendering at the video's own size (4K: ≈ 19 ms CPU per frame), GL interop (would need a WGL context beside wgpu), `ffmpeg-next` + `cpal`, GStreamer.
+
+### 2026-10-27 · Viewer
+
+**Decided:** the viewer (`app::viewer`) is `AppState::viewer`, drawn in an area over the window while the gallery keeps drawing below; it takes its keys at the start of the frame. Originals come from `app::originals`: two worker threads decode the wanted set (shown item, then neighbours nearest first) and create mipped `wgpu::Texture`s themselves; a request that leaves the set before it starts never runs. Zoom math, preloading order and control timing are pure functions in `domain::viewer`. The info panel and the gallery's info sheet share `app::info`; the viewer reports what it needs as `viewer::Action` (close, filter by tag, show in Explorer). `theme::motion` is off when Windows' animation effects are off.
+
+### 2026-10-27 · Video playback in the viewer
+
+**Decided:** the viewer talks to a `video::Playback`; the app's is `video::MpvPlayer`, UI tests use `video::FakePlayback`. `AppState::videos` makes the player when the first video shows, or holds why it can't (libmpv not found). All of the app's video `unsafe` is in `video::mpv`. Frames belong to a load: the UI counts the `loadfile`s it sent, the event thread counts mpv's `START_FILE`s, and frames show only after the `FILE_LOADED` of the latest load, so a video stepped away from never flashes. The UI reads mpv properties at most every 100 ms.
+**Rejected:** egui's `Slider` for seek and volume (its rail doesn't show with our widget visuals), loading libmpv at startup.
