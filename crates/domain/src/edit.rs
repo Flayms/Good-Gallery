@@ -346,6 +346,17 @@ pub struct Recipe {
     /// A film look under the adjustments (REQ-028-01); one only a newer version knows reads as none.
     #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "look_or_none")]
     pub look: Option<crate::look::LookChoice>,
+    /// Quarter turns clockwise, 0 to 3 (REQ-029-01).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub quarter_turns: u8,
+    /// `x, y, w, h` as fractions of the upright, unturned original, so it stays on the content (REQ-029-02); `None`
+    /// for the whole photo.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crop: Option<[f32; 4]>,
+}
+
+fn is_zero(turns: &u8) -> bool {
+    *turns == 0
 }
 
 impl Default for Recipe {
@@ -377,6 +388,8 @@ impl Default for Recipe {
             subject: None,
             background: None,
             look: None,
+            quarter_turns: 0,
+            crop: None,
         }
     }
 }
@@ -392,6 +405,7 @@ impl Recipe {
             .all(|adjustment| adjustment.get(self) == adjustment.neutral())
             && self.curves.is_identity()
             && self.look.is_none()
+            && self.geometry().is_identity()
             && [&self.subject, &self.background]
                 .into_iter()
                 .all(|part| part.as_ref().is_none_or(|part| part.is_neutral()))
@@ -413,6 +427,11 @@ impl Recipe {
             Part::Subject => self.subject.get_or_insert_default(),
             Part::Background => self.background.get_or_insert_default(),
         }
+    }
+
+    /// Its crop and quarter turns.
+    pub fn geometry(&self) -> Geometry {
+        Geometry::new(self.crop, self.quarter_turns)
     }
 
     /// Whether rendering needs the photo's subject: for the parts' adjustments or a background blur.
@@ -482,6 +501,99 @@ impl Recipe {
         if let Some(look) = &mut self.look {
             look.sanitize();
         }
+        self.quarter_turns %= 4;
+        self.crop = self.crop.and_then(sanitized_crop);
+    }
+}
+
+/// A crop inside the photo; `None` for an invalid one and for the whole photo (REQ-011-10).
+fn sanitized_crop([x, y, w, h]: [f32; 4]) -> Option<[f32; 4]> {
+    if ![x, y, w, h].iter().all(|n| n.is_finite()) || !(0.0..1.0).contains(&x) || !(0.0..1.0).contains(&y) {
+        return None;
+    }
+    let (w, h) = (w.min(1.0 - x), h.min(1.0 - y));
+    let whole = x == 0.0 && y == 0.0 && w >= 1.0 && h >= 1.0;
+    (w > 0.0 && h > 0.0 && !whole).then_some([x, y, w, h])
+}
+
+/// A recipe's crop and quarter turns: how the rendered photo becomes the output (spec 029).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Geometry {
+    crop: [f32; 4],
+    quarter_turns: u8,
+}
+
+impl Geometry {
+    pub fn new(crop: Option<[f32; 4]>, quarter_turns: u8) -> Self {
+        Self {
+            crop: crop.and_then(sanitized_crop).unwrap_or([0.0, 0.0, 1.0, 1.0]),
+            quarter_turns: quarter_turns % 4,
+        }
+    }
+
+    pub fn is_identity(&self) -> bool {
+        self.quarter_turns == 0 && self.crop == [0.0, 0.0, 1.0, 1.0]
+    }
+
+    /// The crop as `x, y, w, h`, fractions of the upright, unturned original; the whole photo without one.
+    pub fn crop(&self) -> [f32; 4] {
+        self.crop
+    }
+
+    pub fn quarter_turns(&self) -> u8 {
+        self.quarter_turns
+    }
+
+    /// The crop in pixels of an upright original: `x, y, w, h`, at least one pixel and inside the photo.
+    pub fn crop_pixels(&self, width: u32, height: u32) -> [u32; 4] {
+        let side = |start: f32, size: f32, whole: u32| {
+            let whole_f = whole as f32;
+            let first = ((start * whole_f).round() as u32).min(whole.saturating_sub(1));
+            let end = (((start + size) * whole_f).round() as u32).clamp(first + 1, whole.max(first + 1));
+            (first, end - first)
+        };
+        let (x, w) = side(self.crop[0], self.crop[2], width);
+        let (y, h) = side(self.crop[1], self.crop[3], height);
+        [x, y, w, h]
+    }
+
+    /// The size of the output for an upright original of this size.
+    pub fn output_size(&self, width: u32, height: u32) -> (u32, u32) {
+        let [_, _, w, h] = self.crop_pixels(width, height);
+        if self.quarter_turns % 2 == 1 { (h, w) } else { (w, h) }
+    }
+
+    /// Where a point of the original (fractions of its size) lies on the output; outside 0–1 if cropped away.
+    pub fn to_output(&self, [u, v]: [f32; 2]) -> [f32; 2] {
+        let [x, y, w, h] = self.crop;
+        let (u, v) = ((u - x) / w, (v - y) / h);
+        match self.quarter_turns {
+            1 => [1.0 - v, u],
+            2 => [1.0 - u, 1.0 - v],
+            3 => [v, 1.0 - u],
+            _ => [u, v],
+        }
+    }
+
+    /// Where a point of the output lies on the original.
+    pub fn to_original(&self, [u, v]: [f32; 2]) -> [f32; 2] {
+        let (u, v) = match self.quarter_turns {
+            1 => (v, 1.0 - u),
+            2 => (1.0 - u, 1.0 - v),
+            3 => (1.0 - v, u),
+            _ => (u, v),
+        };
+        let [x, y, w, h] = self.crop;
+        [x + u * w, y + v * h]
+    }
+
+    /// A rectangle of the original (`x, y, w, h`) on the output, cut at the crop's edge; `None` if entirely outside.
+    pub fn place(&self, [x, y, w, h]: [f32; 4]) -> Option<[f32; 4]> {
+        let a = self.to_output([x, y]);
+        let b = self.to_output([x + w, y + h]);
+        let (left, right) = (a[0].min(b[0]).max(0.0), a[0].max(b[0]).min(1.0));
+        let (top, bottom) = (a[1].min(b[1]).max(0.0), a[1].max(b[1]).min(1.0));
+        (right > left && bottom > top).then_some([left, top, right - left, bottom - top])
     }
 }
 
@@ -978,6 +1090,8 @@ pub struct Params {
     pub hue: f32,
     pub vignette: f32,
     pub vignette_start: f32,
+    /// The crop, whose center and edges the vignette takes (REQ-029-04): `x, y, w, h`.
+    pub vignette_frame: [f32; 4],
     pub grain: f32,
     /// Grain cell size in pixels of the full photo.
     pub grain_cell: f32,
@@ -1028,6 +1142,7 @@ impl Params {
             hue: recipe.hue.to_radians(),
             vignette: recipe.vignette / 100.0,
             vignette_start: recipe.vignette_midpoint / 100.0 * 0.8,
+            vignette_frame: recipe.geometry().crop(),
             grain: recipe.grain / 100.0,
             grain_cell: 1.0 + recipe.grain_size / 100.0 * 3.0,
             curves,
@@ -1105,7 +1220,8 @@ impl Params {
     /// Vignette and grain, over the whole photo; returns encoded values in 0–1.
     fn finish(&self, mut lin: [f32; 3], uv: [f32; 2], size: [f32; 2]) -> [f32; 3] {
         if self.vignette != 0.0 {
-            let (u, v) = ((uv[0] - 0.5) * 2.0, (uv[1] - 0.5) * 2.0);
+            let [x, y, w, h] = self.vignette_frame;
+            let (u, v) = (((uv[0] - x) / w - 0.5) * 2.0, ((uv[1] - y) / h - 0.5) * 2.0);
             let r = (u * u + v * v).sqrt() / std::f32::consts::SQRT_2;
             let t = self.vignette * smoothstep(self.vignette_start, self.vignette_start + 0.5, r);
             lin = if t < 0.0 {
@@ -1854,6 +1970,117 @@ mod tests {
         for name in ["a.gif", "b.avif", "c.mp4", ".jpg", "jpg"] {
             assert!(!is_editable(name), "{name}");
         }
+    }
+
+    fn near(a: [f32; 2], b: [f32; 2]) -> bool {
+        (a[0] - b[0]).abs() < 1e-5 && (a[1] - b[1]).abs() < 1e-5
+    }
+
+    /// REQ-029-01, REQ-029-06: the output's size and where points land, turned clockwise.
+    #[test]
+    fn req_029_01_quarter_turns_swap_the_sides_and_move_points_clockwise() {
+        for (turns, size, corner) in [
+            (0, (40, 20), [0.0, 0.0]),
+            (1, (20, 40), [1.0, 0.0]),
+            (2, (40, 20), [1.0, 1.0]),
+            (3, (20, 40), [0.0, 1.0]),
+        ] {
+            let geometry = Geometry::new(None, turns);
+            assert_eq!(geometry.output_size(40, 20), size, "{turns}");
+            assert!(near(geometry.to_output([0.0, 0.0]), corner), "{turns}");
+        }
+        assert!(!Geometry::new(None, 1).is_identity());
+        assert!(Geometry::new(None, 0).is_identity());
+    }
+
+    /// REQ-029-06: a crop in pixels, inside the photo and never empty, whatever the rounding.
+    #[test]
+    fn req_029_06_the_crop_in_pixels_stays_inside_the_photo() {
+        let crop = Geometry::new(Some([0.25, 0.5, 0.5, 0.5]), 0);
+        assert_eq!(crop.crop_pixels(40, 20), [10, 10, 20, 10]);
+        assert_eq!(crop.output_size(40, 20), (20, 10));
+        assert_eq!(
+            Geometry::new(Some([0.25, 0.5, 0.5, 0.5]), 1).output_size(40, 20),
+            (10, 20)
+        );
+        let tiny = Geometry::new(Some([0.999, 0.999, 0.0001, 0.0001]), 0);
+        let [x, y, w, h] = tiny.crop_pixels(40, 20);
+        assert!(w >= 1 && h >= 1 && x + w <= 40 && y + h <= 20, "{x} {y} {w} {h}");
+    }
+
+    /// REQ-029-04: a point of the photo and of the output are each other's images, for every crop and turn.
+    #[test]
+    fn req_029_04_the_mapping_to_the_output_and_back_agree() {
+        for turns in 0..4 {
+            let geometry = Geometry::new(Some([0.2, 0.1, 0.5, 0.4]), turns);
+            for point in [[0.2, 0.1], [0.7, 0.5], [0.3, 0.3]] {
+                assert!(
+                    near(geometry.to_original(geometry.to_output(point)), point),
+                    "{turns} {point:?}"
+                );
+            }
+        }
+        let crop = Geometry::new(Some([0.5, 0.5, 0.5, 0.5]), 0);
+        assert!(near(crop.to_output([0.75, 0.75]), [0.5, 0.5]));
+    }
+
+    /// REQ-029-08: regions follow the crop and the turn, are cut at its edge, and are gone when entirely outside.
+    #[test]
+    fn req_029_08_places_rectangles_on_the_output() {
+        let crop = Geometry::new(Some([0.5, 0.0, 0.5, 1.0]), 0);
+        let inside = crop.place([0.6, 0.2, 0.2, 0.2]).unwrap();
+        assert!(near([inside[0], inside[1]], [0.2, 0.2]) && near([inside[2], inside[3]], [0.4, 0.2]));
+        let cut = crop.place([0.4, 0.2, 0.2, 0.2]).unwrap();
+        assert!(near([cut[0], cut[2]], [0.0, 0.2]), "{cut:?}");
+        assert_eq!(crop.place([0.1, 0.2, 0.2, 0.2]), None);
+        // A quarter turn clockwise: the left edge becomes the top.
+        let turned = Geometry::new(None, 1).place([0.0, 0.0, 0.2, 0.4]).unwrap();
+        assert!(
+            near([turned[0], turned[1]], [0.6, 0.0]) && near([turned[2], turned[3]], [0.4, 0.2]),
+            "{turned:?}"
+        );
+    }
+
+    /// REQ-029-07: both survive the file, older recipes have neither, and hostile values are tamed (REQ-011-10).
+    #[test]
+    fn req_029_07_crop_and_turns_round_trip_and_hostile_ones_are_tamed() {
+        let recipe = Recipe {
+            quarter_turns: 3,
+            crop: Some([0.25, 0.25, 0.5, 0.5]),
+            ..Default::default()
+        };
+        assert!(!recipe.is_neutral());
+        assert_eq!(Recipe::from_json(&recipe.to_json()), Some(recipe));
+        let older = Recipe::from_json(&Recipe::default().to_json()).unwrap();
+        assert_eq!((older.quarter_turns, older.crop), (0, None));
+        assert!(!Recipe::default().to_json().contains("crop"));
+
+        let parse = |json: &str| Recipe::from_json(json).unwrap();
+        assert_eq!(parse(r#"{"quarterTurns":7}"#).quarter_turns, 3);
+        for bad in [
+            r#"{"crop":[0.5,0.5,0,0.5]}"#,
+            r#"{"crop":[0.5,0.5,-1,0.5]}"#,
+            r#"{"crop":[2,0,0.5,0.5]}"#,
+            r#"{"crop":[0,0,1,1]}"#,
+        ] {
+            assert_eq!(parse(bad).crop, None, "{bad}");
+        }
+        assert_eq!(parse(r#"{"crop":[0.5,0.5,9,9]}"#).crop, Some([0.5, 0.5, 0.5, 0.5]));
+    }
+
+    /// REQ-029-04: the vignette's center and edges are the crop's; only pixels away from it darken.
+    #[test]
+    fn req_029_04_the_vignette_follows_the_crop() {
+        let recipe = Recipe {
+            vignette: -100.0,
+            crop: Some([0.5, 0.5, 0.5, 0.5]),
+            ..Default::default()
+        };
+        let params = Params::new(&recipe);
+        let gray = [0.5, 0.5, 0.5];
+        let at = |uv: [f32; 2]| params.pixel(gray, uv, [100.0, 100.0])[0];
+        assert!((at([0.75, 0.75]) - 0.5).abs() < 0.01, "the crop's center stays");
+        assert!(at([0.99, 0.99]) < 0.3, "the crop's corner darkens");
     }
 
     #[test]

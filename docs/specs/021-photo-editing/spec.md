@@ -128,6 +128,7 @@ Users who find a photo that is too dark, has a color cast or lacks punch fix it 
 - **Given** a photo with metadata (dates, rating, tags, face regions, GPS)
 - **When** it is saved as a copy or over the original
 - **Then** the saved file carries the same metadata as the original, and its orientation is upright in the pixels (orientation tag 1)
+- **And** its face regions are moved with the pixels, so they mark the same faces (REQ-029-08)
 - **And** a copy gets a copy of the original's sidecar under its own name, so it has the same rating and tags
 
 ### REQ-021-15 · Date modified on save
@@ -145,7 +146,7 @@ Users who find a photo that is too dark, has a color cast or lacks punch fix it 
 
 ## Out of scope
 
-- Crop and rotate (#34), which will be more adjustments of the same edit.
+- Crop and rotate, which are in spec 029.
 - Editing videos, GIFs and AVIF photos, raw files, and in the browser version.
 - Local adjustments (brushes, masks, gradients; the subject and background of spec 022 aside), presets (film looks aside, spec 028), copying an edit to other photos, batch editing.
 - Reading or writing other tools' edit settings (Lightroom's `crs:` tags, darktable's history); see the plan.
@@ -178,6 +179,6 @@ Users who find a photo that is too dark, has a color cast or lacks punch fix it 
 | REQ-021-11 | `crates/app/tests/edit.rs` › req_021_11_edits_again_from_the_original_with_the_saved_recipe; `crates/domain/src/edit.rs` › req_021_11_*; `crates/db/src/writer.rs` › req_021_11_stores_the_saved_edit_and_drops_it_when_the_file_has_none; `crates/meta/src/rules.rs` › req_021_11_reads_the_saved_edit_from_the_file_but_not_from_its_sidecar | pass |
 | REQ-021-12 | `crates/media/src/edit.rs` › req_021_10_req_021_12_replacing_keeps_a_backup_and_reverting_restores_the_original_byte_for_byte (exiftool); `crates/app/tests/edit.rs` › req_021_10_req_021_12_saves_over_the_original_and_reverts (exiftool) | pass |
 | REQ-021-13 | `crates/media/src/edit.rs` › req_021_13_* (16 bits and profile, banding, lossless WebP) (exiftool); `crates/domain/src/edit.rs` › req_021_13_dither_stays_within_one_step_and_repeats | pass |
-| REQ-021-14 | `crates/media/src/edit.rs` › req_021_09_req_021_14_saves_a_copy_beside_the_original_with_its_metadata_and_sidecar, req_021_14_bakes_the_orientation_into_the_pixels (exiftool) | pass |
+| REQ-021-14 | `crates/media/src/edit.rs` › req_021_09_req_021_14_saves_a_copy_beside_the_original_with_its_metadata_and_sidecar, req_021_14_bakes_the_orientation_into_the_pixels, req_021_14_baking_the_orientation_moves_the_regions (exiftool) | pass |
 | REQ-021-15 | `crates/media/src/edit.rs` › req_021_15_keeps_or_updates_the_date_modified (exiftool); `crates/db/src/settings.rs` › req_021_15_stores_the_date_modified_choice_and_falls_back_to_keep; `crates/app/tests/edit.rs` › req_021_15_the_date_modified_setting_is_on_the_settings_page | pass |
 | REQ-021-16 | `crates/media/src/edit.rs` › req_021_16_a_failed_save_leaves_the_original_and_no_temporary_file, req_021_16_a_read_only_folder_fails_and_changes_nothing (exiftool); `crates/app/tests/edit.rs` › req_021_16_a_failed_save_keeps_editing_open | pass |

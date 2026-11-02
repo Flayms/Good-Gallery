@@ -15,6 +15,7 @@ The issue (#34) left these open; to review in the PR:
 5. **Preview: same shader, new mapping.** `edit.wgsl` computes `uv` from the rect's `t`. It gets a turn and the crop in that mapping, and the vignette gets the crop. GPU and CPU stay compared by `req_021_02_req_021_06_the_gpu_preview_matches_the_cpu_render`, extended with geometry.
 6. **The viewer asks the session for the size to fit.** `natural` in `viewer.rs` becomes the session's output size while editing, except in _Crop_ (the whole turned photo) and _Compare_ (the whole unedited photo). One `Geometry` type in `domain::edit` maps screen to original and back, for the white balance picker, the blur's focus handle and the glass backdrop that records the photo.
 7. **Face regions in the file are rewritten on save.** `metadata_args` stops copying `RegionInfo` and `RegionInfoMP` as they are. Saving reads them, moves them through `Geometry` and writes MWG `RegionInfo`, keeping non-face regions. `RegionInfoMP` is converted to it, so a stale copy can't disagree.
+   Regions are also moved when saving only bakes an orientation into the pixels, which left them in the wrong place before (REQ-021-14). They are written through exiftool's `-json=` from a temporary file, so names need no escaping. A person who loses every region is added to `PersonInImage`, so their People tag stays.
 8. **Face regions in a sidecar are moved when read.** `meta::rules::extract_metadata` knows which source a region came from and the saved recipe, so a sidecar's regions go through the same `Geometry`. We don't rewrite other tools' sidecars (021's decision 3).
    _Rejected:_ dropping sidecar regions when a crop is saved (the faces are lost in the viewer).
 
@@ -28,10 +29,10 @@ The issue (#34) left these open; to review in the PR:
 Three PRs, each green and usable on its own:
 
 1. Domain and saving: nothing to see in the UI yet.
-   - [ ] `Geometry`, recipe fields, tidy and JSON round trip (REQ-029-07)
-   - [ ] CPU render: crop, turn, vignette on the crop (REQ-029-04, REQ-029-06)
-   - [ ] Face regions: rewrite on save with exiftool, move sidecar regions when read (REQ-029-08)
-   - [ ] Amend REQ-021-14 and 021's Out of scope
+   - [x] `Geometry`, recipe fields, tidy and JSON round trip (REQ-029-07)
+   - [x] CPU render: crop, turn, vignette on the crop (REQ-029-04, REQ-029-06)
+   - [x] Face regions: rewrite on save with exiftool, move sidecar regions when read (REQ-029-08)
+   - [x] Amend REQ-021-14 and 021's Out of scope
 2. Rotation in the UI.
    - [ ] Shader mapping and GPU / CPU parity with geometry (REQ-029-01, REQ-029-04)
    - [ ] Viewer size, picker, blur focus and glass backdrop through `Geometry` (REQ-029-01, REQ-029-04)

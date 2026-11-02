@@ -3,6 +3,7 @@
 //! (spec 019) from this crate's readers.
 
 use chrono::{FixedOffset, Local, NaiveDate, NaiveDateTime, TimeZone};
+use domain::edit::Geometry;
 use domain::faces::FaceRegion;
 use domain::media::MediaMetadata;
 use domain::tags::{PEOPLE_TAG_ROOT, clean_tag, normalize_tag};
@@ -175,6 +176,101 @@ fn face_positions(tags: &Tags, orientation: u8) -> Vec<FaceRegion> {
     faces
 }
 
+/// The regions of a saved file, placed on its pixels (REQ-029-08).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SavedRegions {
+    /// The MWG `RegionInfo` struct; `None` if no region remains.
+    pub info: Option<Value>,
+    /// People whose every region was cropped away, so their names have to stay some other way.
+    pub lost_people: Vec<String>,
+}
+
+/// `tags`' MWG and Microsoft Photo regions, on the photo as stored in the original, moved onto an output of `size` that
+/// was turned upright by `orientation` and through `geometry`. Microsoft's become MWG's, so a stale copy can't disagree;
+/// regions without a normalized area can't be placed and go. `None` if `tags` has no regions.
+pub fn regions_on_output(
+    tags: &Tags,
+    orientation: u8,
+    geometry: &Geometry,
+    (width, height): (u32, u32),
+) -> Option<SavedRegions> {
+    let list = |value: Option<&Value>| match value {
+        Some(Value::Array(items)) => items.clone(),
+        Some(item @ Value::Object(_)) => vec![item.clone()],
+        _ => Vec::new(),
+    };
+    let number = |value: Option<&Value>| match value {
+        Some(Value::Number(n)) => n.as_f64().map(|n| n as f32),
+        Some(Value::String(text)) => text.trim().parse().ok(),
+        _ => None,
+    };
+    let mwg = list(tags.get("RegionInfo").and_then(|info| info.get("RegionList")));
+    let microsoft = list(tags.get("RegionInfoMP").and_then(|info| info.get("Regions")));
+    if mwg.is_empty() && microsoft.is_empty() {
+        return None;
+    }
+    // Regions as (the struct's other fields, the area on the stored photo as `x, y, w, h`, the person's name).
+    let mut found: Vec<(Value, Option<[f32; 4]>, Option<String>)> = Vec::new();
+    for region in mwg {
+        let area = region.get("Area");
+        let field = |key: &str| number(area.and_then(|area| area.get(key)));
+        let normalized = area.and_then(|area| area.get("Unit")).and_then(Value::as_str) == Some("normalized");
+        let rect = match (normalized, field("X"), field("Y"), field("W"), field("H")) {
+            (true, Some(x), Some(y), Some(w), Some(h)) => Some([x - w / 2.0, y - h / 2.0, w, h]),
+            _ => None,
+        };
+        let face = region.get("Type").and_then(Value::as_str) == Some("Face");
+        let name = face
+            .then(|| text_values(region.get("Name")).into_iter().next())
+            .flatten();
+        found.push((region, rect, name));
+    }
+    let named_in_mwg: HashSet<String> = found.iter().filter_map(|(_, _, name)| name.clone()).collect();
+    for region in microsoft {
+        let Some(name) = text_values(region.get("PersonDisplayName")).into_iter().next() else {
+            continue;
+        };
+        if named_in_mwg.contains(&name) {
+            continue;
+        }
+        let rectangle: Vec<f32> = region
+            .get("Rectangle")
+            .and_then(Value::as_str)
+            .map(|text| text.split(',').filter_map(|n| n.trim().parse().ok()).collect())
+            .unwrap_or_default();
+        let rect = <[f32; 4]>::try_from(rectangle.as_slice()).ok();
+        let fields = serde_json::json!({ "Name": name, "Type": "Face" });
+        found.push((fields, rect, Some(name)));
+    }
+    let mut regions = Vec::new();
+    let mut lost_people = Vec::new();
+    let mut kept_people = HashSet::new();
+    for (mut region, rect, name) in found {
+        let placed = rect
+            .filter(|rect| rect.iter().all(|n| n.is_finite()) && rect[2] > 0.0 && rect[3] > 0.0)
+            .and_then(|rect| geometry.place(domain::faces::upright_rect(rect, orientation)));
+        let Some([x, y, w, h]) = placed else {
+            lost_people.extend(name);
+            continue;
+        };
+        region["Area"] = serde_json::json!({
+            "X": x + w / 2.0, "Y": y + h / 2.0, "W": w, "H": h, "Unit": "normalized",
+        });
+        kept_people.extend(name);
+        regions.push(region);
+    }
+    lost_people.retain(|name| !kept_people.contains(name));
+    lost_people.sort();
+    lost_people.dedup();
+    let info = (!regions.is_empty()).then(|| {
+        serde_json::json!({
+            "AppliedToDimensions": { "W": width, "H": height, "Unit": "pixel" },
+            "RegionList": regions,
+        })
+    });
+    Some(SavedRegions { info, lost_people })
+}
+
 /// First valid rating; -1 (rejected) and 0 (unrated) both mean "no rating".
 fn extract_rating(sources: &[&Tags]) -> Option<i64> {
     sources
@@ -202,6 +298,31 @@ pub fn extract_metadata(tags: &Tags, sidecar: Option<&Tags>) -> MediaMetadata {
         let zone = file_zone(source);
         DATE_TAGS.iter().find_map(|name| date_millis(source.get(*name)?, zone))
     });
+    let edit = domain::edit::SavedEdit::parse(
+        // Only the file's own: a copy of a sidecar doesn't carry another file's edit.
+        tags.get("EditRecipe").and_then(Value::as_str),
+        tags.get("EditSource").and_then(Value::as_str),
+    )
+    .map(Box::new);
+    // A saved edit moved the file's regions onto its pixels, but a sidecar's still describe the unedited photo, whose
+    // orientation the file no longer tells (REQ-029-08).
+    let sidecar_faces = |sidecar: &Tags| {
+        let Some(edit) = &edit else {
+            return face_positions(sidecar, orientation);
+        };
+        let geometry = edit.recipe().geometry();
+        face_positions(sidecar, sidecar_orientation.unwrap_or(1))
+            .into_iter()
+            .filter_map(|face| {
+                let [x, y, w, h] = geometry.place([face.x, face.y, face.w, face.h])?;
+                Some(FaceRegion { x, y, w, h, ..face })
+            })
+            .collect()
+    };
+    let faces = Some(face_positions(tags, orientation))
+        .filter(|faces| !faces.is_empty())
+        .or_else(|| sidecar.map(sidecar_faces))
+        .unwrap_or_default();
     MediaMetadata {
         width,
         height,
@@ -210,17 +331,8 @@ pub fn extract_metadata(tags: &Tags, sidecar: Option<&Tags>) -> MediaMetadata {
         rating: extract_rating(&sources),
         sidecar_orientation,
         tags: extract_tags(&sources),
-        // Only the file's own: a copy of a sidecar doesn't carry another file's edit.
-        edit: domain::edit::SavedEdit::parse(
-            tags.get("EditRecipe").and_then(Value::as_str),
-            tags.get("EditSource").and_then(Value::as_str),
-        )
-        .map(Box::new),
-        faces: sources
-            .iter()
-            .map(|source| face_positions(source, orientation))
-            .find(|faces| !faces.is_empty())
-            .unwrap_or_default(),
+        edit,
+        faces,
     }
 }
 
@@ -435,6 +547,7 @@ fn local_millis(local: &NaiveDateTime) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use domain::edit::Recipe;
     use serde_json::json;
 
     fn tags(value: Value) -> Tags {
@@ -529,6 +642,56 @@ mod tests {
     }
 
     /// REQ-004-13: the region structs as exiftool returns them with `-n -api struct=1`.
+    /// REQ-029-08: a sidecar's regions describe the unedited photo, so they follow the file's saved crop and turn.
+    #[test]
+    fn req_029_08_moves_a_sidecars_regions_by_the_saved_edit() {
+        let recipe = Recipe {
+            crop: Some([0.5, 0.0, 0.5, 1.0]),
+            ..Default::default()
+        };
+        let file = tags(json!({ "EditRecipe": recipe.to_json(), "EditSource": "a.jpg" }));
+        let sidecar = tags(json!({ "RegionInfo": { "RegionList": [
+            { "Type": "Face", "Name": "Anna", "Area": { "X": 0.75, "Y": 0.5, "W": 0.2, "H": 0.2, "Unit": "normalized" } },
+            { "Type": "Face", "Name": "Bob", "Area": { "X": 0.25, "Y": 0.5, "W": 0.2, "H": 0.2, "Unit": "normalized" } },
+        ] } }));
+        let faces = extract_metadata(&file, Some(&sidecar)).faces;
+        assert_eq!(faces.len(), 1, "Bob is cropped away: {faces:?}");
+        assert_eq!(rect(&faces[0]), ("Anna", [0.3, 0.4, 0.4, 0.2]));
+    }
+
+    /// REQ-029-08: regions land on the saved pixels; Microsoft's become MWG's, and people left without a region are
+    /// named so that their People tag stays.
+    #[test]
+    fn req_029_08_places_regions_on_the_output_and_names_who_is_gone() {
+        let source = tags(json!({
+            "RegionInfo": { "RegionList": [
+                { "Type": "Face", "Name": "Anna", "Area": { "X": 0.75, "Y": 0.5, "W": 0.2, "H": 0.2, "Unit": "normalized" } },
+                { "Type": "Face", "Name": "Bob", "Area": { "X": 0.25, "Y": 0.5, "W": 0.2, "H": 0.2, "Unit": "normalized" } },
+                { "Type": "Focus", "Area": { "X": 0.8, "Y": 0.5, "W": 0.1, "H": 0.1, "Unit": "normalized" } },
+            ] },
+            "RegionInfoMP": { "Regions": [
+                { "PersonDisplayName": "Anna", "Rectangle": "0.65, 0.4, 0.2, 0.2" },
+                { "PersonDisplayName": "Cleo", "Rectangle": "0.5, 0, 0.1, 0.1" },
+            ] },
+        }));
+        let geometry = Geometry::new(Some([0.5, 0.0, 0.5, 1.0]), 0);
+        let saved = regions_on_output(&source, 1, &geometry, (50, 100)).unwrap();
+        assert_eq!(saved.lost_people, ["Bob"]);
+        let info = saved.info.unwrap();
+        assert_eq!(info["AppliedToDimensions"]["W"], 50);
+        let names: Vec<_> = info["RegionList"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|region| region["Name"].as_str().unwrap_or("-"))
+            .collect();
+        assert_eq!(names, ["Anna", "-", "Cleo"], "Anna once, the focus region kept");
+        let anna = &info["RegionList"][0]["Area"];
+        assert!((anna["X"].as_f64().unwrap() - 0.5).abs() < 1e-5);
+        assert!((anna["W"].as_f64().unwrap() - 0.4).abs() < 1e-5);
+        assert_eq!(regions_on_output(&tags(json!({})), 1, &geometry, (50, 100)), None);
+    }
+
     #[test]
     fn req_004_13_keeps_named_face_regions_with_their_place_on_the_upright_photo() {
         let area = |x: f64, y: f64, unit: &str| json!({ "X": x, "Y": y, "W": 0.2, "H": 0.4, "Unit": unit });
