@@ -1127,6 +1127,9 @@ pub struct Params {
     pub grain_midtones: bool,
     /// How much the grain differs between the color channels, 0–1 (REQ-028-06).
     pub grain_color: f32,
+    /// What a film look does to each hue, at its strength: turn in radians, chroma's factor, lightness added
+    /// (REQ-028-07). `None` where it changes nothing.
+    pub hue_nodes: Option<[[f32; 3]; crate::look::HUE_NODES]>,
     /// The curves, all channels composed into one table per channel; `None` for straight curves.
     pub curves: Option<Vec<[f32; 3]>>,
     pub blur_kind: BlurKind,
@@ -1145,6 +1148,15 @@ impl Params {
     pub fn new(recipe: &Recipe) -> Self {
         // A film look adds to the adjustments, and its curves go before the recipe's own (REQ-028-04).
         let look = recipe.look.map(|choice| choice.look);
+        let hue_nodes = recipe.look.and_then(|choice| {
+            let strength = choice.strength / 100.0;
+            let nodes = choice.look.hue_nodes();
+            (strength > 0.0 && nodes != [[0.0, 1.0, 0.0]; crate::look::HUE_NODES]).then(|| {
+                nodes.map(|[turn, chroma, light]| {
+                    [turn.to_radians() * strength, 1.0 + (chroma - 1.0) * strength, light * strength]
+                })
+            })
+        });
         let (folded, look_curves) = crate::look::fold(recipe);
         let recipe = &folded;
         let curves = (!recipe.curves.is_identity() || look_curves.is_some()).then(|| {
@@ -1180,6 +1192,7 @@ impl Params {
             grain_cell: 1.0 + recipe.grain_size / 100.0 * 3.0,
             grain_midtones: look.is_some(),
             grain_color: look.map_or(0.0, crate::look::Look::grain_color),
+            hue_nodes,
             curves,
             blur_kind: recipe.blur_kind,
             blur: if recipe.blur_kind == BlurKind::None {

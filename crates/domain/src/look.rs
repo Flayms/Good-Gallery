@@ -5,6 +5,9 @@
 use crate::edit::{Adjustment, Curve, Curves, Recipe};
 use serde::{Deserialize, Serialize};
 
+/// Steps around the color wheel in [`Look::hue_nodes`].
+pub const HUE_NODES: usize = 8;
+
 /// The points of the RGB, red, green and blue curves.
 type CurvePoints = [&'static [[f32; 2]]; 4];
 
@@ -51,6 +54,13 @@ impl Look {
             Self::PolaroidBw | Self::Hp5 => 0.0,
             _ => 0.6,
         }
+    }
+
+    /// What the look does to each hue (REQ-028-07): the [`HUE_NODES`] even steps around Oklab's color wheel from red's
+    /// side (0°, 45° orange, 90° yellow, 135° green, 180° teal, 225° sky, 270° blue, 315° purple), each as the turn in
+    /// degrees, the chroma's factor and the lightness added. Between the steps they blend.
+    pub fn hue_nodes(self) -> [[f32; 3]; HUE_NODES] {
+        [[0.0, 1.0, 0.0]; HUE_NODES]
     }
 
     /// The look at full strength, as the editor's adjustments and curves.
@@ -356,6 +366,56 @@ mod tests {
             g - r
         };
         assert!(green(&superia) > green(&gold) + 0.02);
+    }
+
+    /// `rgb`'s chroma through `look`, with and without what it does to each hue.
+    fn chroma_with_and_without_hues(look: Look, rgb: [f32; 3]) -> (f32, f32) {
+        let recipe = with_look(look, 100.0, 0.0);
+        let with = Params::new(&recipe);
+        let mut without = Params::new(&recipe);
+        without.hue_nodes = None;
+        let chroma = |params: &Params| {
+            let [r, g, b] = params.pixel(rgb, [0.5, 0.5], SIZE);
+            r.max(g).max(b) - r.min(g).min(b)
+        };
+        (chroma(&with), chroma(&without))
+    }
+
+    const SKIN: [f32; 3] = [0.85, 0.65, 0.55];
+    const SKY: [f32; 3] = [0.3, 0.5, 0.85];
+    const FOLIAGE: [f32; 3] = [0.3, 0.5, 0.2];
+
+    /// REQ-028-07: looks treat hues differently: Velvia strengthens greens and blues more than skin, Portra mutes greens
+    /// and keeps skin.
+    #[test]
+    fn req_028_07_looks_treat_hues_differently() {
+        let gain = |look: Look, rgb: [f32; 3]| {
+            let (with, without) = chroma_with_and_without_hues(look, rgb);
+            with / without
+        };
+        let skin = gain(Look::Velvia50, SKIN);
+        assert!(gain(Look::Velvia50, FOLIAGE) > skin + 0.08, "Velvia's greens");
+        assert!(gain(Look::Velvia50, SKY) > skin + 0.08, "Velvia's blues");
+        assert!(gain(Look::Portra400, FOLIAGE) < 0.92, "Portra's greens");
+        assert!((gain(Look::Portra400, SKIN) - 1.0).abs() < 0.05, "Portra's skin");
+    }
+
+    /// REQ-028-07: greys stay grey, and at strength 0 no hue changes.
+    #[test]
+    fn req_028_07_greys_stay_and_strength_scales_it() {
+        for look in Look::ALL {
+            let recipe = with_look(look, 100.0, 0.0);
+            let with = Params::new(&recipe);
+            let mut without = Params::new(&recipe);
+            without.hue_nodes = None;
+            for v in [0.1, 0.5, 0.9] {
+                let (a, b) = (with.pixel([v; 3], [0.5, 0.5], SIZE), without.pixel([v; 3], [0.5, 0.5], SIZE));
+                assert!(distance(a, b) < 0.01, "{look:?} on grey {v}: {a:?} vs {b:?}");
+            }
+            assert_eq!(Params::new(&with_look(look, 0.0, 0.0)).hue_nodes, None);
+        }
+        assert_eq!(Params::new(&Recipe::default()).hue_nodes, None);
+        assert_eq!(Params::new(&with_look(Look::Hp5, 100.0, 0.0)).hue_nodes, None);
     }
 
     /// How much grain shows on `rgb` in the color channel `c`: its deviation across the photo.
