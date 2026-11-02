@@ -3,6 +3,7 @@
 #![allow(dead_code, reason = "each test file uses a different part")]
 
 use app::{AppState, FolderPicker};
+use eframe::egui;
 use egui_kittest::Harness;
 use indexer::{ScanKind, ScanRequests};
 use std::path::PathBuf;
@@ -109,7 +110,17 @@ pub fn harness_with_step(state: AppState, step_dt: f32) -> Harness<'static, AppS
         .with_step_dt(step_dt)
         .with_context_setup(app::setup)
         .wgpu()
-        .build_ui_state(app::ui, state)
+        .build_ui_state(whole_window, state)
+}
+
+/// Draws the app over the whole window, as eframe does. kittest insets its UI by 8 px, but the Linux caption buttons
+/// align to the window's edge, so they would sit above the toolbar row (#110).
+fn whole_window(ui: &mut egui::Ui, state: &mut AppState) {
+    let window = ui.ctx().content_rect();
+    ui.scope_builder(egui::UiBuilder::new().max_rect(window), |ui| {
+        ui.set_clip_rect(window);
+        app::ui(ui, state);
+    });
 }
 
 /// Runs a few frames, waits for background jobs, and runs a few more, so their results are on screen.
