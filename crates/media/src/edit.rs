@@ -381,7 +381,7 @@ fn is_lossless_webp(data: &[u8]) -> bool {
 pub fn render(params: &Params, image: &mut Rgba32FImage, subject: Option<&Mask>) {
     let (width, height) = image.dimensions();
     let size = [width as f32, height as f32];
-    let pyramid = (params.blur > 0.0).then(|| {
+    let pyramid = (params.blur > 0.0 || params.halation > 0.0).then(|| {
         let pixels = image.pixels().map(|pixel| pixel.0).collect();
         Pyramid::new(width, height, pixels)
     });
@@ -397,17 +397,21 @@ pub fn render(params: &Params, image: &mut Rgba32FImage, subject: Option<&Mask>)
                     let y = (chunk * rows_per_chunk + i / width as usize) as f32;
                     let uv = [(x + 0.5) / size[0], (y + 0.5) / size[1]];
                     let inside = subject.map_or(0.0, |mask| mask.sample(uv));
+                    let mut glow = [0.0; 3];
                     if let Some(pyramid) = pyramid {
-                        let lod = blur_lod(params.blur_sigma(uv, size, inside), pyramid.levels());
                         let sharp = [pixel[0], pixel[1], pixel[2], pixel[3]];
+                        if params.halation > 0.0 {
+                            let lod = blur_lod(Params::halation_sigma(size), pyramid.levels());
+                            let around = pyramid.blurred(sharp, uv, lod);
+                            glow =
+                                params.halation_glow([sharp[0], sharp[1], sharp[2]], [around[0], around[1], around[2]]);
+                        }
+                        let lod = blur_lod(params.blur_sigma(uv, size, inside), pyramid.levels());
                         // Transparency stays sharp, as in the preview.
                         pixel[..3].copy_from_slice(&pyramid.blurred(sharp, uv, lod)[..3]);
                     }
                     let rgb = [pixel[0], pixel[1], pixel[2]];
-                    let [r, g, b] = match subject {
-                        Some(_) => params.pixel_masked(rgb, uv, size, inside),
-                        None => params.pixel(rgb, uv, size),
-                    };
+                    let [r, g, b] = params.pixel_glowing(rgb, glow, uv, size, subject.map(|_| inside));
                     pixel[..3].copy_from_slice(&[r, g, b]);
                 }
             });
@@ -1053,6 +1057,43 @@ mod tests {
             "the subject is brighter"
         );
         assert_eq!(saved.get_pixel(3, 3), disc.get_pixel(3, 3), "the background stays");
+    }
+
+    /// REQ-028-08: saving lets a bright light glow red beside it, and leaves what's far from it alone.
+    #[test]
+    fn req_028_08_saving_lets_bright_lights_glow() {
+        let (width, height) = (800, 600);
+        let photo = || {
+            Rgba32FImage::from_fn(width, height, |x, _| {
+                let v = if (390..410).contains(&x) { 1.0 } else { 0.1 };
+                image::Rgba([v, v, v, 1.0])
+            })
+        };
+        let render_with = |recipe: &Recipe| {
+            let mut image = photo();
+            render(&Params::new(recipe), &mut image, None);
+            image
+        };
+        let look = domain::look::LookChoice {
+            strength: 100.0,
+            grain: 0.0,
+            ..domain::look::LookChoice::new(domain::look::Look::Gold200)
+        };
+        let with = render_with(&Recipe {
+            look: Some(look),
+            ..Recipe::default()
+        });
+        let mut without = Params::new(&Recipe {
+            look: Some(look),
+            ..Recipe::default()
+        });
+        without.halation = 0.0;
+        let mut plain = photo();
+        render(&without, &mut plain, None);
+        let (beside, far) = ((387, 300), (40, 300));
+        let red = |image: &Rgba32FImage, (x, y): (u32, u32)| image.get_pixel(x, y).0;
+        assert!(red(&with, beside)[0] > red(&plain, beside)[0] + 0.01);
+        assert!((red(&with, far)[0] - red(&plain, far)[0]).abs() < 1e-4);
     }
 
     /// REQ-023-04: saving blurs from the photo's pyramid: away from the focus a hard edge softens, at the focus it

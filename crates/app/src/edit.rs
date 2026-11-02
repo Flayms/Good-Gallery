@@ -1623,7 +1623,8 @@ fn cpu_preview(
     let size = full_size.map(|side| side.max(1) as f32);
     // A background blur waits for the subject (REQ-023-02).
     let blurs = params.blur > 0.0 && flags & 1 == 0 && (params.blur_kind != BlurKind::Background || flags & 4 != 0);
-    let pyramid = blurs.then(|| {
+    let glows = params.halation > 0.0 && flags & 1 == 0;
+    let pyramid = (blurs || glows).then(|| {
         let pixels = small.pixels().map(|p| p.0.map(|c| f32::from(c) / 255.0)).collect();
         Pyramid::new(width, height, pixels)
     });
@@ -1632,16 +1633,25 @@ fn cpu_preview(
         let uv = [(x as f32 + 0.5) / width as f32, (y as f32 + 0.5) / height as f32];
         let subject = mask.map_or(0.0, |mask| mask.sample(uv));
         let mut rgba_in = pixel.0.map(|c| f32::from(c) / 255.0);
+        let mut glow = [0.0; 3];
         if let Some(pyramid) = &pyramid {
             // σ in pixels of the small copy.
-            let sigma = params.blur_sigma(uv, size, subject) * width as f32 / size[0];
-            rgba_in = pyramid.blurred(rgba_in, uv, blur_lod(sigma, pyramid.levels()));
+            let scale = width as f32 / size[0];
+            if glows {
+                let lod = blur_lod(Params::halation_sigma(size) * scale, pyramid.levels());
+                let around = pyramid.blurred(rgba_in, uv, lod);
+                glow = params.halation_glow([rgba_in[0], rgba_in[1], rgba_in[2]], [around[0], around[1], around[2]]);
+            }
+            if blurs {
+                let sigma = params.blur_sigma(uv, size, subject) * scale;
+                rgba_in = pyramid.blurred(rgba_in, uv, blur_lod(sigma, pyramid.levels()));
+            }
         }
         let rgb = [rgba_in[0], rgba_in[1], rgba_in[2]];
         let mut out = match mask {
             _ if flags & 1 != 0 => rgb,
-            Some(_) if flags & 4 != 0 => params.pixel_masked(rgb, uv, size, subject),
-            _ => params.pixel(rgb, uv, size),
+            Some(_) if flags & 4 != 0 => params.pixel_glowing(rgb, glow, uv, size, Some(subject)),
+            _ => params.pixel_glowing(rgb, glow, uv, size, None),
         };
         if flags & 8 != 0 {
             let selected = if flags & 16 != 0 { 1.0 - subject } else { subject };
@@ -1735,7 +1745,7 @@ fn uniform(
         f32::from(u8::from(params.grain_midtones)),
         params.grain_color,
         f32::from(u8::from(params.hue_nodes.is_some())),
-        0.0,
+        params.halation,
     ]);
     for i in 0..domain::look::HUE_NODES {
         let [turn, chroma, light] = params.hue_nodes.map_or([0.0, 1.0, 0.0], |nodes| nodes[i]);
@@ -2329,6 +2339,40 @@ mod tests {
                 "{changed} changed with {recipe:?}"
             );
         }
+    }
+
+    /// REQ-028-05, REQ-028-08: the preview's halation matches the saved render, on a photo large enough for it to reach
+    /// beyond a pixel, and it does glow red beside a light.
+    #[test]
+    fn req_028_08_the_gpu_halation_matches_the_cpu_render() {
+        let (_gpu, render_state) = render_state();
+        let (width, height) = (512, 384);
+        let image = image::RgbaImage::from_fn(width, height, |x, _| {
+            let v = if (250..262).contains(&x) { 255 } else { 25 };
+            image::Rgba([v, v, v, 255])
+        });
+        let recipe = Recipe {
+            look: Some(domain::look::LookChoice {
+                grain: 0.0,
+                ..domain::look::LookChoice::new(domain::look::Look::Gold200)
+            }),
+            ..Recipe::default()
+        };
+        let gpu = render_gpu(&render_state, &image, &recipe, None, 0);
+        let cpu = cpu_preview(&image, &recipe, recipe.geometry(), [width, height], None, 0);
+        for (i, (gpu, cpu)) in gpu.chunks_exact(4).zip(cpu.pixels.iter()).enumerate() {
+            for c in 0..3 {
+                let diff = (i32::from(gpu[c]) - i32::from(cpu.to_array()[c])).abs();
+                assert!(diff <= 3, "pixel {i} channel {c}: GPU {gpu:?}, CPU {cpu:?}");
+            }
+        }
+        let red = |x: usize| i32::from(gpu[(height as usize / 2 * width as usize + x) * 4]);
+        assert!(
+            red(248) > red(100) + 8,
+            "beside the light {} vs far {}",
+            red(248),
+            red(100)
+        );
     }
 
     #[test]

@@ -37,8 +37,8 @@ struct Edit {
     focus: vec4<f32>,
     // The crop on the upright, unturned photo: x, y, w, h (spec 029).
     crop: vec4<f32>,
-    // A film look's grain (REQ-028-06): strongest in the midtones (x), how much it differs per channel (y); and its
-    // change per hue (z: on, REQ-028-07).
+    // A film look's grain (REQ-028-06): strongest in the midtones (x), how much it differs per channel (y); its change
+    // per hue (z: on, REQ-028-07) and its halation (w, REQ-028-08).
     film: vec4<f32>,
     // Around the color wheel: the turn in radians (x), chroma's factor (y), the lightness added (z).
     hue_nodes: array<vec4<f32>, 8>,
@@ -218,7 +218,12 @@ fn part(lin: vec3<f32>, p: Part) -> vec3<f32> {
     return lin;
 }
 
-fn develop(rgb: vec3<f32>, uv: vec2<f32>, subject: f32) -> vec3<f32> {
+// `domain::edit::Params::halation_glow`.
+fn halation_light(rgb: vec3<f32>) -> f32 {
+    return smoothstep(0.3, 0.9, max(rgb.r, max(rgb.g, rgb.b)));
+}
+
+fn develop(rgb: vec3<f32>, uv: vec2<f32>, subject: f32, glow: vec3<f32>) -> vec3<f32> {
     let photo = Part(edit.gains, edit.tone, edit.color, edit.turn);
     var lin = core(vec3<f32>(to_linear(rgb.r), to_linear(rgb.g), to_linear(rgb.b)), photo, edit.gains.w > 0.5);
     if edit.film.z > 0.5 {
@@ -227,6 +232,7 @@ fn develop(rgb: vec3<f32>, uv: vec2<f32>, subject: f32) -> vec3<f32> {
     if (u32(edit.size.w) & 4u) != 0u {
         lin = mix(part(lin, edit.background), part(lin, edit.subject), subject);
     }
+    lin += glow;
     let vignette = edit.fx.x;
     if vignette != 0.0 {
         let centered = ((uv - edit.crop.xy) / edit.crop.zw - 0.5) * 2.0;
@@ -351,7 +357,14 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         if sigma > 0.0 {
             rgb = blurred(texel, uv, sigma).rgb;
         }
-        rgb = develop(rgb, uv, subject);
+        var glow = vec3<f32>(0.0);
+        if edit.film.w > 0.0 {
+            // `domain::edit::Params::halation_sigma`.
+            let around = blurred(texel, uv, 0.006 * max(edit.size.x, edit.size.y));
+            let light = max(halation_light(around.rgb) - halation_light(texel.rgb), 0.0);
+            glow = vec3<f32>(1.0, 0.22, 0.06) * light * edit.film.w;
+        }
+        rgb = develop(rgb, uv, subject, glow);
     }
     if (flags & 8u) != 0u {
         var selected = subject;

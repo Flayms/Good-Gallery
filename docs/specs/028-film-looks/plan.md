@@ -18,6 +18,11 @@ A look is a recipe of the editor's own adjustments and curves (`domain::look`), 
 
 ## Decisions
 
+### 2026-11-02 · Halation from the blur's pyramid
+
+**Decided:** the glow comes from the photo's pyramid (spec 023), at σ 0.6 % of the longer side, before developing: how much brighter the highlights around a pixel are than the pixel itself, in a red color, added on linear light after the parts and before the vignette. Only the difference counts, so an evenly bright sky doesn't turn red and the glow forms a rim, as on film.
+**Rejected:** glowing from every highlight (it tints whole skies), a blur per color channel (three more lookups per pixel for a difference too small to see at this size).
+
 ### 2026-11-02 · Colors per hue with eight nodes
 
 **Decided:** a look gives eight nodes around Oklab's color wheel (turn, chroma's factor, lightness), blended between neighbours and applied after the photo's chroma step, at the look's strength (`Look::hue_nodes`, `edit.wgsl`'s `turn_hues`). The user's own adjustments stay global. This replaces the earlier "no hue-selective adjustments for now".

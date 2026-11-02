@@ -1127,6 +1127,8 @@ pub struct Params {
     pub grain_midtones: bool,
     /// How much the grain differs between the color channels, 0–1 (REQ-028-06).
     pub grain_color: f32,
+    /// How strongly bright lights glow red around them, for a film look (REQ-028-08).
+    pub halation: f32,
     /// What a film look does to each hue, at its strength: turn in radians, chroma's factor, lightness added
     /// (REQ-028-07). `None` where it changes nothing.
     pub hue_nodes: Option<[[f32; 3]; crate::look::HUE_NODES]>,
@@ -1148,6 +1150,7 @@ impl Params {
     pub fn new(recipe: &Recipe) -> Self {
         // A film look adds to the adjustments, and its curves go before the recipe's own (REQ-028-04).
         let look = recipe.look.map(|choice| choice.look);
+        let recipe_look = recipe.look;
         let hue_nodes = recipe.look.and_then(|choice| {
             let strength = choice.strength / 100.0;
             let nodes = choice.look.hue_nodes();
@@ -1197,6 +1200,7 @@ impl Params {
             grain_midtones: look.is_some(),
             grain_color: look.map_or(0.0, crate::look::Look::grain_color),
             hue_nodes,
+            halation: recipe_look.map_or(0.0, |choice| choice.look.halation() * choice.strength / 100.0),
             curves,
             blur_kind: recipe.blur_kind,
             blur: if recipe.blur_kind == BlurKind::None {
@@ -1215,18 +1219,45 @@ impl Params {
     /// One pixel: `rgb` as stored (sRGB-encoded, 0–1), at `uv` (0–1 across the photo) of a photo `size` pixels large
     /// at full resolution. Returns encoded values in 0–1.
     pub fn pixel(&self, rgb: [f32; 3], uv: [f32; 2], size: [f32; 2]) -> [f32; 3] {
-        let lin = self.develop(rgb.map(to_linear));
-        self.finish(lin, uv, size)
+        self.pixel_glowing(rgb, [0.0; 3], uv, size, None)
     }
 
     /// [`Self::pixel`] with the subject's and the background's own adjustments, `subject` being how much the pixel
     /// belongs to the subject (REQ-022-03).
     pub fn pixel_masked(&self, rgb: [f32; 3], uv: [f32; 2], size: [f32; 2], subject: f32) -> [f32; 3] {
-        let lin = self.develop(rgb.map(to_linear));
-        let part = |params: &Option<Box<Params>>| params.as_ref().map_or(lin, |params| params.develop(lin));
-        let (inside, outside) = (part(&self.subject), part(&self.background));
-        let lin = std::array::from_fn(|c| outside[c] + (inside[c] - outside[c]) * subject);
-        self.finish(lin, uv, size)
+        self.pixel_glowing(rgb, [0.0; 3], uv, size, Some(subject))
+    }
+
+    /// One pixel with the [`Self::halation_glow`] it gets, and with its parts if `subject` is given.
+    pub fn pixel_glowing(
+        &self,
+        rgb: [f32; 3],
+        glow: [f32; 3],
+        uv: [f32; 2],
+        size: [f32; 2],
+        subject: Option<f32>,
+    ) -> [f32; 3] {
+        let mut lin = self.develop(rgb.map(to_linear));
+        if let Some(subject) = subject {
+            let part = |params: &Option<Box<Params>>| params.as_ref().map_or(lin, |params| params.develop(lin));
+            let (inside, outside) = (part(&self.subject), part(&self.background));
+            lin = std::array::from_fn(|c| outside[c] + (inside[c] - outside[c]) * subject);
+        }
+        self.finish(std::array::from_fn(|c| lin[c] + glow[c]), uv, size)
+    }
+
+    /// The blur that halation gathers the light with, as σ in pixels of a photo `size` large (REQ-028-08).
+    pub fn halation_sigma(size: [f32; 2]) -> f32 {
+        HALATION_SIZE * size[0].max(size[1])
+    }
+
+    /// The red glow on linear light of a pixel, `sharp` and `blurred` being it and its surroundings as stored
+    /// (REQ-028-08): only where the surroundings are brighter highlights than it, so that an evenly bright sky keeps
+    /// its color.
+    pub fn halation_glow(&self, sharp: [f32; 3], blurred: [f32; 3]) -> [f32; 3] {
+        let light = |rgb: [f32; 3]| smoothstep(0.3, 0.9, rgb[0].max(rgb[1]).max(rgb[2]));
+        let glow = (light(blurred) - light(sharp)).max(0.0) * self.halation;
+        HALATION_COLOR.map(|c| c * glow)
     }
 
     /// The blur at `uv` of a photo `size` pixels large, as σ in its pixels, `subject` being how much the spot belongs to
@@ -1454,6 +1485,11 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
+
+/// The size of halation's blur, in parts of the photo's longer side (REQ-028-08).
+const HALATION_SIZE: f32 = 0.006;
+/// Halation's color, on linear light: the red layer catches most of what scatters back.
+const HALATION_COLOR: [f32; 3] = [1.0, 0.22, 0.06];
 
 /// A film look's change per hue (REQ-028-07), blended between the two nearest nodes. Greys have no hue, so the lightness
 /// only applies as a color gets some chroma.

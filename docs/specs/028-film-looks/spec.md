@@ -55,11 +55,17 @@ Users who edit a photo (spec 021) give it the color response and grain of a well
 - **Then** it changes hues differently, as its film does: Velvia 50 strengthens greens and blues more than skin, and Portra 400 mutes greens and keeps skin
 - **And** greys stay grey, the change follows _Strength_, and a black and white look has none
 
+### REQ-028-08 · Halation
+
+- **Given** a color look that has it (_Portra 400_, _Velvia 50_, _Gold 200_, _Superia 200_)
+- **When** a photo has bright lights
+- **Then** they glow red into what lies beside them, following _Strength_; an evenly bright area keeps its color
+
 ## Out of scope
 
 - Previews of each look on the photo itself (the looks are named buttons).
 - Looks the user saves (presets), importing LUTs (`.cube`), more looks than these seven.
-- Instant frames (the white Polaroid border), light leaks, dust and scratches, halation.
+- Instant frames (the white Polaroid border), light leaks, dust and scratches.
 - Looks for the subject or background alone, for videos, in the browser version, or for many photos at once.
 
 ## Assumptions
@@ -78,3 +84,4 @@ Users who edit a photo (spec 021) give it the color response and grain of a well
 | REQ-028-05 | `crates/app/src/edit.rs` › req_028_05_the_gpu_preview_of_a_look_matches_the_cpu_render | pass |
 | REQ-028-06 | `crates/domain/src/look.rs` › req_028_06_grain_is_strongest_in_the_midtones, req_028_06_color_film_has_grain_per_channel; `crates/app/src/edit.rs` › req_028_05_the_gpu_preview_of_a_look_matches_the_cpu_render | pass |
 | REQ-028-07 | `crates/domain/src/look.rs` › req_028_07_looks_treat_hues_differently, req_028_07_greys_stay_and_strength_scales_it; `crates/app/src/edit.rs` › req_028_05_the_gpu_preview_of_a_look_matches_the_cpu_render | pass |
+| REQ-028-08 | `crates/domain/src/look.rs` › req_028_08_bright_lights_glow_red_around_them; `crates/media/src/edit.rs` › req_028_08_saving_lets_bright_lights_glow; `crates/app/src/edit.rs` › req_028_08_the_gpu_halation_matches_the_cpu_render | pass |

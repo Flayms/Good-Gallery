@@ -120,6 +120,18 @@ impl Look {
         }
     }
 
+    /// How strongly bright lights glow red into their surroundings (REQ-028-08). Black and white film scatters too, but
+    /// has no red layer to show it in.
+    pub fn halation(self) -> f32 {
+        match self {
+            Self::Portra400 => 0.5,
+            Self::Gold200 => 0.7,
+            Self::Superia200 => 0.6,
+            Self::Velvia50 => 0.3,
+            Self::Polaroid600 | Self::PolaroidBw | Self::Hp5 => 0.0,
+        }
+    }
+
     /// The look at full strength, as the editor's adjustments and curves.
     pub fn recipe(self) -> Recipe {
         use Adjustment as A;
@@ -472,6 +484,27 @@ mod tests {
         }
         assert_eq!(Params::new(&Recipe::default()).hue_nodes, None);
         assert_eq!(Params::new(&with_look(Look::Hp5, 100.0, 0.0)).hue_nodes, None);
+    }
+
+    /// REQ-028-08: light from a bright neighbour glows red, an even area doesn't, and the glow follows the strength.
+    #[test]
+    fn req_028_08_bright_lights_glow_red_around_them() {
+        let params = |strength: f32| Params::new(&with_look(Look::Gold200, strength, 0.0));
+        let (dark, around_a_light) = ([0.1; 3], [0.7; 3]);
+        let [r, g, b] = params(100.0).halation_glow(dark, around_a_light);
+        assert!(r > 2.0 * g && g > b && b >= 0.0, "{r} {g} {b}");
+        let half = params(50.0).halation_glow(dark, around_a_light)[0];
+        assert!((half - r / 2.0).abs() < 1e-5);
+        assert_eq!(params(100.0).halation_glow([0.8; 3], [0.8; 3]), [0.0; 3]);
+        assert_eq!(params(100.0).halation_glow(around_a_light, dark), [0.0; 3]);
+        assert_eq!(params(0.0).halation, 0.0);
+        assert_eq!(Params::new(&with_look(Look::Hp5, 100.0, 0.0)).halation, 0.0);
+        assert_eq!(Params::new(&Recipe::default()).halation, 0.0);
+        // What it adds shows in the photo.
+        let photo = params(100.0);
+        let lit = photo.pixel_glowing(dark, [r, g, b], [0.5, 0.5], SIZE, None);
+        let plain = photo.pixel(dark, [0.5, 0.5], SIZE);
+        assert!(lit[0] > plain[0] + 0.01, "{lit:?} vs {plain:?}");
     }
 
     /// How much grain shows on `rgb` in the color channel `c`: its deviation across the photo.
