@@ -25,8 +25,8 @@
 
 ### 2026-11-02 · Four shapes per mask
 
-**Decided:** four shapes in a mask, as fixed slots in the shader's uniform. FXC inlines every call, so this is what eight masks cost at compile time: watch how long the editor's pipeline takes on Windows if the numbers ever grow.
-**Rejected:** a loop over a count (FXC can't compile it, see `docs/known-pitfalls.md`).
+**Decided:** four shapes in a mask, as fixed slots in the shader's uniform, with real loops over the masks and the shapes, so the shader holds one copy of a mask's code however many there are.
+**Rejected:** one explicit call per mask and shape, as phase 1 had it to get past FXC's X3511: FXC inlines them all, which made the app's start on Windows seconds slower and rendered wrongly with 32 copies. The real cause was a variable-index write in `core` (`docs/known-pitfalls.md`).
 
 ### 2026-11-02 · Masks as a list beside the parts
 
