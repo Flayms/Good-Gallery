@@ -37,8 +37,11 @@ struct Edit {
     focus: vec4<f32>,
     // The crop on the upright, unturned photo: x, y, w, h (spec 029).
     crop: vec4<f32>,
-    // A film look's grain (REQ-028-06): strongest in the midtones (x), how much it differs per channel (y).
+    // A film look's grain (REQ-028-06): strongest in the midtones (x), how much it differs per channel (y); and its
+    // change per hue (z: on, REQ-028-07).
     film: vec4<f32>,
+    // Around the color wheel: the turn in radians (x), chroma's factor (y), the lightness added (z).
+    hue_nodes: array<vec4<f32>, 8>,
     curves: array<vec4<f32>, 256>,
 }
 
@@ -191,6 +194,23 @@ fn core(linear: vec3<f32>, p: Part, curves: bool) -> vec3<f32> {
     return lin;
 }
 
+// `domain::edit::turn_hues`.
+fn turn_hues(lin: vec3<f32>) -> vec3<f32> {
+    let lab = to_oklab(lin);
+    let at = fract(atan2(lab.z, lab.y) / 6.2831855) * 8.0;
+    let i = u32(floor(at)) % 8u;
+    let node = mix(edit.hue_nodes[i], edit.hue_nodes[(i + 1u) % 8u], fract(at));
+    let colorful = min(length(lab.yz) / 0.1, 1.0);
+    let ab = lab.yz * node.y;
+    let cos_turn = cos(node.x);
+    let sin_turn = sin(node.x);
+    return from_oklab(vec3<f32>(
+        lab.x + node.z * colorful,
+        ab.x * cos_turn - ab.y * sin_turn,
+        ab.x * sin_turn + ab.y * cos_turn,
+    ));
+}
+
 fn part(lin: vec3<f32>, p: Part) -> vec3<f32> {
     if p.gains.w > 0.5 {
         return core(lin, p, false);
@@ -201,6 +221,9 @@ fn part(lin: vec3<f32>, p: Part) -> vec3<f32> {
 fn develop(rgb: vec3<f32>, uv: vec2<f32>, subject: f32) -> vec3<f32> {
     let photo = Part(edit.gains, edit.tone, edit.color, edit.turn);
     var lin = core(vec3<f32>(to_linear(rgb.r), to_linear(rgb.g), to_linear(rgb.b)), photo, edit.gains.w > 0.5);
+    if edit.film.z > 0.5 {
+        lin = turn_hues(lin);
+    }
     if (u32(edit.size.w) & 4u) != 0u {
         lin = mix(part(lin, edit.background), part(lin, edit.subject), subject);
     }

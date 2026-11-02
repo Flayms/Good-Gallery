@@ -18,6 +18,11 @@ A look is a recipe of the editor's own adjustments and curves (`domain::look`), 
 
 ## Decisions
 
+### 2026-11-02 · Colors per hue with eight nodes
+
+**Decided:** a look gives eight nodes around Oklab's color wheel (turn, chroma's factor, lightness), blended between neighbours and applied after the photo's chroma step, at the look's strength (`Look::hue_nodes`, `edit.wgsl`'s `turn_hues`). The user's own adjustments stay global. This replaces the earlier "no hue-selective adjustments for now".
+**Rejected:** a 3D LUT per look, for the same reasons as below (a new 3D texture, files to make and license); a hue panel for the user, which nobody asked for here.
+
 ### 2026-11-02 · Grain like film's, only for looks
 
 **Decided:** a look's grain follows the brightness (`0.35 + 0.65 · 4v(1−v)`) and, for color films, mixes in a noise per channel. `Params` carries both, and the shader gets them in `film`. _Grain_ without a look stays as it was, so edits without a look render as before.

@@ -1127,6 +1127,9 @@ pub struct Params {
     pub grain_midtones: bool,
     /// How much the grain differs between the color channels, 0–1 (REQ-028-06).
     pub grain_color: f32,
+    /// What a film look does to each hue, at its strength: turn in radians, chroma's factor, lightness added
+    /// (REQ-028-07). `None` where it changes nothing.
+    pub hue_nodes: Option<[[f32; 3]; crate::look::HUE_NODES]>,
     /// The curves, all channels composed into one table per channel; `None` for straight curves.
     pub curves: Option<Vec<[f32; 3]>>,
     pub blur_kind: BlurKind,
@@ -1145,6 +1148,19 @@ impl Params {
     pub fn new(recipe: &Recipe) -> Self {
         // A film look adds to the adjustments, and its curves go before the recipe's own (REQ-028-04).
         let look = recipe.look.map(|choice| choice.look);
+        let hue_nodes = recipe.look.and_then(|choice| {
+            let strength = choice.strength / 100.0;
+            let nodes = choice.look.hue_nodes();
+            (strength > 0.0 && nodes != [[0.0, 1.0, 0.0]; crate::look::HUE_NODES]).then(|| {
+                nodes.map(|[turn, chroma, light]| {
+                    [
+                        turn.to_radians() * strength,
+                        1.0 + (chroma - 1.0) * strength,
+                        light * strength,
+                    ]
+                })
+            })
+        });
         let (folded, look_curves) = crate::look::fold(recipe);
         let recipe = &folded;
         let curves = (!recipe.curves.is_identity() || look_curves.is_some()).then(|| {
@@ -1180,6 +1196,7 @@ impl Params {
             grain_cell: 1.0 + recipe.grain_size / 100.0 * 3.0,
             grain_midtones: look.is_some(),
             grain_color: look.map_or(0.0, crate::look::Look::grain_color),
+            hue_nodes,
             curves,
             blur_kind: recipe.blur_kind,
             blur: if recipe.blur_kind == BlurKind::None {
@@ -1248,6 +1265,9 @@ impl Params {
         }
         if self.saturation != 0.0 || self.vibrance != 0.0 || self.hue != 0.0 {
             lin = self.chroma(lin);
+        }
+        if let Some(nodes) = &self.hue_nodes {
+            lin = turn_hues(nodes, lin);
         }
         lin
     }
@@ -1433,6 +1453,20 @@ fn luminance([r, g, b]: [f32; 3]) -> f32 {
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+/// A film look's change per hue (REQ-028-07), blended between the two nearest nodes. Greys have no hue, so the lightness
+/// only applies as a color gets some chroma.
+fn turn_hues(nodes: &[[f32; 3]; crate::look::HUE_NODES], lin: [f32; 3]) -> [f32; 3] {
+    let [l, a, b] = to_oklab(lin);
+    let at = (b.atan2(a) / std::f32::consts::TAU).rem_euclid(1.0) * crate::look::HUE_NODES as f32;
+    let (i, f) = (at.floor() as usize % crate::look::HUE_NODES, at.fract());
+    let (low, high) = (nodes[i], nodes[(i + 1) % crate::look::HUE_NODES]);
+    let [turn, chroma, light] = std::array::from_fn(|k| low[k] + (high[k] - low[k]) * f);
+    let colorful = ((a * a + b * b).sqrt() / 0.1).min(1.0);
+    let (sin, cos) = turn.sin_cos();
+    let (a, b) = (a * chroma, b * chroma);
+    from_oklab([l + light * colorful, a * cos - b * sin, a * sin + b * cos])
 }
 
 fn to_oklab([r, g, b]: [f32; 3]) -> [f32; 3] {

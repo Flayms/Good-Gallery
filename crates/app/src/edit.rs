@@ -1707,7 +1707,7 @@ fn uniform(
     opacity: f32,
     flags: f32,
 ) -> Vec<f32> {
-    let mut floats = Vec::with_capacity(80 + CURVE_SAMPLES * 4);
+    let mut floats = Vec::with_capacity(112 + CURVE_SAMPLES * 4);
     floats.extend_from_slice(&rect);
     floats.extend_from_slice(&uv);
     floats.extend_from_slice(&[full_size[0], full_size[1], opacity, flags]);
@@ -1731,7 +1731,16 @@ fn uniform(
         0.0,
     ]);
     floats.extend_from_slice(&geometry.crop());
-    floats.extend_from_slice(&[f32::from(u8::from(params.grain_midtones)), params.grain_color, 0.0, 0.0]);
+    floats.extend_from_slice(&[
+        f32::from(u8::from(params.grain_midtones)),
+        params.grain_color,
+        f32::from(u8::from(params.hue_nodes.is_some())),
+        0.0,
+    ]);
+    for i in 0..domain::look::HUE_NODES {
+        let [turn, chroma, light] = params.hue_nodes.map_or([0.0, 1.0, 0.0], |nodes| nodes[i]);
+        floats.extend_from_slice(&[turn, chroma, light, 0.0]);
+    }
     for i in 0..CURVE_SAMPLES {
         let [r, g, b] = params.curves.as_ref().map_or([0.0; 3], |table| table[i]);
         floats.extend_from_slice(&[r, g, b, 0.0]);

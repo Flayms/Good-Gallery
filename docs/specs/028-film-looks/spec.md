@@ -48,6 +48,13 @@ Users who edit a photo (spec 021) give it the color response and grain of a well
 - **And** a color film's grain differs between the color channels; a black and white film's doesn't
 - **And** _Grain_ among the _Effects_, without a look, stays as it is (REQ-021-06)
 
+### REQ-028-07 · Colors per hue
+
+- **Given** a color look
+- **When** it is applied
+- **Then** it changes hues differently, as its film does: Velvia 50 strengthens greens and blues more than skin, and Portra 400 mutes greens and keeps skin
+- **And** greys stay grey, the change follows _Strength_, and a black and white look has none
+
 ## Out of scope
 
 - Previews of each look on the photo itself (the looks are named buttons).
@@ -70,3 +77,4 @@ Users who edit a photo (spec 021) give it the color response and grain of a well
 | REQ-028-04 | `crates/domain/src/look.rs` › req_028_04_adjustments_add_to_the_look_and_curves_bend_its_result, req_028_04_the_look_is_saved_with_the_edit | pass |
 | REQ-028-05 | `crates/app/src/edit.rs` › req_028_05_the_gpu_preview_of_a_look_matches_the_cpu_render | pass |
 | REQ-028-06 | `crates/domain/src/look.rs` › req_028_06_grain_is_strongest_in_the_midtones, req_028_06_color_film_has_grain_per_channel; `crates/app/src/edit.rs` › req_028_05_the_gpu_preview_of_a_look_matches_the_cpu_render | pass |
+| REQ-028-07 | `crates/domain/src/look.rs` › req_028_07_looks_treat_hues_differently, req_028_07_greys_stay_and_strength_scales_it; `crates/app/src/edit.rs` › req_028_05_the_gpu_preview_of_a_look_matches_the_cpu_render | pass |
