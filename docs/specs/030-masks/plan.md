@@ -13,10 +13,20 @@
 - [x] Shader and CPU preview, parity test (REQ-030-07, REQ-030-08)
 - [x] Saving (REQ-030-08)
 - [x] Panel and handles (REQ-030-01, REQ-030-03, REQ-030-06, REQ-030-07)
-- [ ] Next phase of #139: combine masks; subject and background as components
+- [x] Shapes combined in a mask; the subject and background among them (REQ-030-10, REQ-030-11)
 - [ ] Phase after that: brush and freeform
 
 ## Decisions
+
+### 2026-11-02 · A mask keeps its first shape and adds `more`
+
+**Decided:** `LocalMask::shape` stays the first shape, and `more` holds up to three `MaskPart`s (a shape and how it combines), so masks saved before this read as they are. Add is the larger of the two values, subtract the smaller of the value and the inverse of the shape, intersect the smaller, as add, subtract and intersect work in Lightroom. Invert applies to the whole result. A further shape defaults to _Intersect_, the usual reason to add one to a gradient.
+**Rejected:** a list of parts in place of `shape` (saved edits would need migrating), multiplying instead of the smaller value (two soft shapes would darken each other's selection), a separate Part::Subject migration (the switch does its job and saved edits keep rendering the same).
+
+### 2026-11-02 · Four shapes per mask
+
+**Decided:** four shapes in a mask, as fixed slots in the shader's uniform. FXC inlines every call, so this is what eight masks cost at compile time: watch how long the editor's pipeline takes on Windows if the numbers ever grow.
+**Rejected:** a loop over a count (FXC can't compile it, see `docs/known-pitfalls.md`).
 
 ### 2026-11-02 · Masks as a list beside the parts
 

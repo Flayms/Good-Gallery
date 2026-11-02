@@ -8,8 +8,9 @@ use crate::originals::OriginalState;
 use crate::theme;
 use domain::crop::{self, Grip, Ratio};
 use domain::edit::{
-    Adjustment, BlurKind, CURVE_SAMPLES, Channel, Geometry, HISTOGRAM_BINS, Histogram, History, LocalMask, MAX_MASKS,
-    Mask, MaskShape, Params, Part, Pyramid, Recipe, SavedEdit, Section, blur_lod,
+    Adjustment, BlurKind, CURVE_SAMPLES, Channel, Geometry, HISTOGRAM_BINS, Histogram, History, LocalMask,
+    MAX_MASK_SHAPES, MAX_MASKS, Mask, MaskOp, MaskPart, MaskShape, Params, Part, Pyramid, Recipe, SavedEdit, Section,
+    blur_lod,
 };
 use domain::look::{Look, LookChoice};
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2, pos2, vec2};
@@ -156,6 +157,8 @@ pub struct EditSession {
     gradient_drag: Option<bool>,
     /// Where the photo was last drawn with a gradient chosen.
     gradient_area: Option<Rect>,
+    /// Which shape of the chosen mask the panel changes (REQ-030-10).
+    mask_shape: usize,
     channel: Channel,
     dragging_point: Option<usize>,
     picking: bool,
@@ -200,6 +203,7 @@ impl EditSession {
             crop_area: None,
             gradient_drag: None,
             gradient_area: None,
+            mask_shape: 0,
             channel: Channel::All,
             dragging_point: None,
             picking: false,
@@ -435,6 +439,7 @@ impl EditSession {
     pub fn choose_part(&mut self, part: Part) {
         if part != self.part {
             self.show_selection = false;
+            self.mask_shape = 0;
         }
         self.part = part;
         if matches!(part, Part::Subject | Part::Background) {
@@ -721,7 +726,7 @@ impl EditSession {
     /// The chosen mask's gradient, if it is one: its handles.
     fn gradient(&self) -> Option<([f32; 2], [f32; 2])> {
         let Part::Mask(i) = self.part else { return None };
-        match self.draft.masks.get(i)?.shape {
+        match self.draft.masks.get(i)?.shape_at(self.mask_shape) {
             MaskShape::Linear { from, to } => Some((from, to)),
             _ => None,
         }
@@ -776,10 +781,8 @@ impl EditSession {
                 (pos.y - area.top()) / area.height(),
             ]);
             let point = [u.clamp(-1.0, 2.0), v.clamp(-1.0, 2.0)];
-            if let Some(LocalMask {
-                shape: MaskShape::Linear { from, to },
-                ..
-            }) = self.draft.masks.get_mut(i)
+            let chosen = self.mask_shape;
+            if let Some(MaskShape::Linear { from, to }) = self.draft.masks.get_mut(i).map(|mask| mask.shape_mut(chosen))
             {
                 *(if second { to } else { from }) = point;
             }
@@ -1285,25 +1288,98 @@ impl EditSession {
         });
     }
 
-    /// What the chosen mask selects, and turning it around, showing or removing it (REQ-030-03 … REQ-030-07).
+    /// What the chosen mask is made of and selects, and turning it around, showing or removing it
+    /// (REQ-030-03 … REQ-030-07, REQ-030-10, REQ-030-11).
     fn mask_controls(&mut self, ui: &mut egui::Ui, i: usize) {
         let Some(mask) = self.draft.masks.get(i) else { return };
-        let (shape, invert) = (mask.shape, mask.invert);
+        let (count, invert) = (mask.shapes(), mask.invert);
+        // Undo may have taken the chosen shape away.
+        self.mask_shape = self.mask_shape.min(count - 1);
+        let chosen = self.mask_shape;
+        let shape = mask.shape_at(chosen);
+        if count > 1 {
+            ui.horizontal_wrapped(|ui| {
+                for j in 0..count {
+                    let label = format!("{}. {}", j + 1, self.draft.masks[i].shape_at(j).label());
+                    if ui.add(egui::Button::selectable(chosen == j, label)).clicked() {
+                        self.mask_shape = j;
+                    }
+                }
+            });
+            ui.add_space(4.0);
+        }
+        if let Some(op) = chosen.checked_sub(1).map(|j| self.draft.masks[i].more[j].op) {
+            ui.horizontal_wrapped(|ui| {
+                for choice in MaskOp::ALL {
+                    if ui.add(egui::Button::selectable(op == choice, choice.label())).clicked() {
+                        let mut recipe = self.draft.clone();
+                        recipe.masks[i].more[chosen - 1].op = choice;
+                        self.commit(recipe);
+                    }
+                }
+                if ui.button("Remove shape").clicked() {
+                    let mut recipe = self.draft.clone();
+                    recipe.masks[i].more.remove(chosen - 1);
+                    self.commit(recipe);
+                    self.mask_shape = chosen - 1;
+                }
+            });
+            ui.add_space(4.0);
+        }
         if matches!(shape, MaskShape::Linear { .. }) {
             let hint = "Drag the two handles on the photo: full at the white one, none at the dark one.";
             ui.add(egui::Label::new(hint).wrap());
             ui.add_space(4.0);
         }
+        if self.draft.masks[i].uses_subject() {
+            match &self.subject {
+                Subject::Found(..) => {}
+                Subject::Failed(_) => {
+                    ui.add(egui::Label::new("No subject found in this photo, so that shape selects nothing.").wrap());
+                }
+                Subject::Unknown | Subject::Finding(_) => {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Finding the subject…");
+                    });
+                }
+            }
+        }
         for (slider, (label, value, range, unit)) in shape.sliders().into_iter().enumerate() {
             let mut current = f64::from(value);
             let response = slider_row(ui, label, &format!("{value:.0}{unit}"), &mut current, range, 1.0);
             if response.changed() {
-                self.draft.masks[i].shape.set_slider(slider, current as f32);
+                self.draft.masks[i].shape_mut(chosen).set_slider(slider, current as f32);
             }
             if response.drag_stopped() || response.clicked() || (response.changed() && !response.dragged()) {
                 self.commit(self.draft.clone());
             }
         }
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            for (label, shape) in [
+                ("+ Gradient", MaskShape::LINEAR),
+                ("+ Luminance", MaskShape::LUMINANCE),
+                ("+ Color", MaskShape::COLOR),
+                ("+ Subject", MaskShape::Subject),
+                ("+ Background", MaskShape::Background),
+            ] {
+                let room = count < MAX_MASK_SHAPES;
+                if ui.add_enabled(room, egui::Button::new(label)).clicked() {
+                    let mut recipe = self.draft.clone();
+                    recipe.masks[i].more.push(MaskPart {
+                        op: MaskOp::Intersect,
+                        shape,
+                    });
+                    self.commit(recipe);
+                    self.mask_shape = count;
+                    if shape.uses_subject() {
+                        self.find_subject();
+                    }
+                }
+            }
+        });
+        ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
             let response = ui.add(egui::Button::new("Invert").selected(invert));
             response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, invert, "Invert"));
@@ -1828,6 +1904,7 @@ fn cpu_preview(
     flags: u32,
 ) -> egui::ColorImage {
     let params = Params::new(recipe);
+    let mask_given = mask.is_some();
     let (width, height) = small.dimensions();
     let size = full_size.map(|side| side.max(1) as f32);
     // A background blur waits for the subject (REQ-023-02).
@@ -1867,7 +1944,8 @@ fn cpu_preview(
             out = tint(out, selected);
         }
         if let Some(mask) = (flags >> 8).checked_sub(1).and_then(|i| params.masks.get(i as usize)) {
-            out = tint(out, mask.weight(rgb, uv, size));
+            let found = (flags & 4 != 0 && mask_given).then_some(subject);
+            out = tint(out, mask.weight(rgb, uv, size, found));
         }
         rgba.extend(out.map(|c| (c * 255.0).round() as u8));
         rgba.push(pixel[3]);
@@ -1929,7 +2007,7 @@ fn uniform(
     opacity: f32,
     flags: f32,
 ) -> Vec<f32> {
-    let mut floats = Vec::with_capacity(116 + 24 * MAX_MASKS * 4 + CURVE_SAMPLES * 4);
+    let mut floats = Vec::with_capacity(116 + (20 + 8 * MAX_MASK_SHAPES) * MAX_MASKS + CURVE_SAMPLES * 4);
     floats.extend_from_slice(&rect);
     floats.extend_from_slice(&uv);
     floats.extend_from_slice(&[full_size[0], full_size[1], opacity, flags]);
@@ -1968,10 +2046,17 @@ fn uniform(
         match params.masks.get(i) {
             Some(mask) => {
                 floats.extend_from_slice(&part_floats(&mask.params, 1.0));
-                let [kind, a, b, c, d] = mask.shape.numbers();
-                floats.extend_from_slice(&[kind, f32::from(u8::from(mask.invert)), a, b, c, d, 0.0, 0.0]);
+                let shapes = 1 + mask.more.len();
+                floats.extend_from_slice(&[f32::from(u8::from(mask.invert)), shapes as f32, 0.0, 0.0]);
+                let parts = std::iter::once((MaskOp::Add, mask.shape))
+                    .chain(mask.more.iter().map(|part| (part.op, part.shape)));
+                for (op, shape) in parts {
+                    let [kind, a, b, c, d] = shape.numbers();
+                    floats.extend_from_slice(&[kind, op.number(), a, b, c, d, 0.0, 0.0]);
+                }
+                floats.extend(std::iter::repeat_n(0.0, 8 * (MAX_MASK_SHAPES - shapes)));
             }
-            None => floats.extend_from_slice(&[0.0; 24]),
+            None => floats.extend(std::iter::repeat_n(0.0, 20 + 8 * MAX_MASK_SHAPES)),
         }
     }
     for i in 0..CURVE_SAMPLES {
@@ -2657,6 +2742,73 @@ mod tests {
             for c in 0..3 {
                 let diff = (i32::from(gpu[c]) - i32::from(cpu.to_array()[c])).abs();
                 assert!(diff <= 3, "pixel {i} channel {c}: GPU {gpu:?}, CPU {cpu:?}");
+            }
+        }
+    }
+
+    /// REQ-030-10, REQ-030-11: combined shapes preview as saving renders them, with the subject and without one yet.
+    #[test]
+    fn req_030_10_req_030_11_the_gpu_preview_of_combined_masks_matches_the_cpu_render() {
+        let (_gpu, render_state) = render_state();
+        let image = pattern();
+        let values = (0..SIZE * SIZE)
+            .map(|i| if i % SIZE < SIZE / 2 { 1.0 } else { 0.0 })
+            .collect();
+        let subject = Mask::new(SIZE, SIZE, values).unwrap();
+        let linear = MaskShape::Linear {
+            from: [0.0, 0.0],
+            to: [1.0, 1.0],
+        };
+        let bright = MaskShape::Luminance {
+            low: 30.0,
+            high: 90.0,
+            feather: 10.0,
+        };
+        let mask = |shape: MaskShape, more: &[(MaskOp, MaskShape)], adjustment: Adjustment, value: f32| {
+            let mut mask = LocalMask::new(shape);
+            mask.more = more.iter().map(|&(op, shape)| MaskPart { op, shape }).collect();
+            adjustment.set(&mut mask.recipe, value);
+            mask
+        };
+        let recipe = Recipe {
+            masks: vec![
+                mask(
+                    linear,
+                    &[
+                        (MaskOp::Intersect, bright),
+                        (MaskOp::Add, MaskShape::COLOR),
+                        (MaskOp::Subtract, MaskShape::Subject),
+                    ],
+                    Adjustment::Exposure,
+                    1.0,
+                ),
+                mask(
+                    MaskShape::Background,
+                    &[(MaskOp::Intersect, bright)],
+                    Adjustment::Saturation,
+                    -80.0,
+                ),
+            ],
+            ..Recipe::default()
+        };
+        // With the subject, its tint, and without a subject yet.
+        for (mask, flags) in [
+            (Some(&subject), 4),
+            (Some(&subject), 4 | (1 << 8)),
+            (Some(&subject), 4 | (2 << 8)),
+            (None, 0),
+            (None, 2 << 8),
+        ] {
+            let gpu = render_gpu(&render_state, &image, &recipe, mask, flags);
+            let cpu = cpu_preview(&image, &recipe, recipe.geometry(), [SIZE, SIZE], mask, flags);
+            for (i, (gpu, cpu)) in gpu.chunks_exact(4).zip(cpu.pixels.iter()).enumerate() {
+                for c in 0..3 {
+                    let diff = (i32::from(gpu[c]) - i32::from(cpu.to_array()[c])).abs();
+                    assert!(
+                        diff <= 2,
+                        "pixel {i} channel {c}: GPU {gpu:?}, CPU {cpu:?} with flags {flags}"
+                    );
+                }
             }
         }
     }
