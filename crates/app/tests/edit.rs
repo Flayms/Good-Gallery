@@ -386,6 +386,110 @@ fn req_029_04_a_pick_lands_on_the_same_spot_of_the_photo() {
     );
 }
 
+/// REQ-029-02, REQ-029-05: _Crop_ shows the whole photo with a frame; a drag resizes it, one undo step each; leaving
+/// shows only the cropped part.
+#[test]
+fn req_029_02_req_029_05_crops_by_dragging_the_frame() {
+    let fixture = Fixture::new();
+    let (mut harness, _dir) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    settle_all(&mut harness);
+
+    harness.get_by_role_and_label(Role::Button, "Crop").click();
+    harness.run_steps(2);
+    assert!(session(&harness).unwrap().is_cropping());
+    harness.snapshot(common::snapshot_name("edit_crop"));
+    let area = session(&harness).unwrap().crop_area().expect("the photo is drawn");
+
+    // The bottom right corner to the photo's middle.
+    harness.drag_at(area.right_bottom());
+    harness.run_steps(2);
+    harness.hover_at(area.center());
+    harness.run_steps(2);
+    harness.drop_at(area.center());
+    harness.run_steps(3);
+    let crop = session(&harness).unwrap().recipe().crop.expect("a crop");
+    for (value, expected) in crop.iter().zip([0.0, 0.0, 0.5, 0.5]) {
+        assert!((value - expected).abs() < 0.02, "{crop:?}");
+    }
+    assert_eq!(
+        session(&harness).unwrap().shown_size(false),
+        Some([120.0, 80.0]),
+        "the whole photo"
+    );
+
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+    let editing = session(&harness).expect("Escape leaves the crop, not the editor");
+    assert!(!editing.is_cropping());
+    let [width, height] = editing.shown_size(false).unwrap();
+    assert!(
+        (width - 60.0).abs() < 2.5 && (height - 40.0).abs() < 2.5,
+        "{width} {height}"
+    );
+    assert_eq!(editing.shown_size(true), Some([120.0, 80.0]), "Compare shows all of it");
+
+    harness.get_by_role_and_label(Role::Button, "Undo").click();
+    harness.run_steps(2);
+    assert_eq!(session(&harness).unwrap().recipe().crop, None);
+}
+
+/// REQ-029-03: a shape gives a centered frame of it; _Swap_ turns 4:3 upright.
+#[test]
+fn req_029_03_picks_the_frames_shape() {
+    let fixture = Fixture::new();
+    let (mut harness, _dir) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    settle_all(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "Crop").click();
+    harness.run_steps(2);
+    let shape = |harness: &App| {
+        let [_, _, w, h] = session(harness).unwrap().recipe().crop.expect("a crop");
+        w * 120.0 / (h * 80.0)
+    };
+
+    harness.get_by_label("1:1").click();
+    harness.run_steps(2);
+    assert!((shape(&harness) - 1.0).abs() < 1e-3);
+
+    // From the whole photo again, for the widest 4:3.
+    harness.get_by_role_and_label(Role::Button, "Reset all").click();
+    harness.run_steps(2);
+    harness.get_by_label("4:3").click();
+    harness.run_steps(2);
+    assert!((shape(&harness) - 4.0 / 3.0).abs() < 1e-3);
+    harness.get_by_label("Swap").click();
+    harness.run_steps(2);
+    assert!((shape(&harness) - 3.0 / 4.0).abs() < 1e-3);
+
+    harness.get_by_label("Done").click();
+    harness.run_steps(2);
+    assert!(!session(&harness).unwrap().is_cropping());
+}
+
+/// REQ-029-06: saving ends the crop and writes only what the frame held.
+#[test]
+fn req_029_06_saves_what_the_frame_holds() {
+    let fixture = Fixture::new();
+    let Some(tools) = tools(&fixture) else { return };
+    let (mut harness, dir) = app(&fixture, None, Some(tools));
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    settle_all(&mut harness);
+    let recipe = Recipe {
+        crop: Some([0.5, 0.0, 0.5, 0.5]),
+        quarter_turns: 1,
+        ..Default::default()
+    };
+    set_recipe(&mut harness, recipe);
+    harness.get_by_role_and_label(Role::Button, "Save as copy").click();
+    harness.run_steps(1);
+    settle_all(&mut harness);
+    assert_eq!(image::image_dimensions(dir.join("a (edited).jpg")).unwrap(), (40, 60));
+}
+
 /// REQ-021-09: _Save as copy_ writes `a (edited).jpg` beside the untouched original, asks the index to read it and
 /// ends editing.
 #[test]

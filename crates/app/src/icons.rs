@@ -28,6 +28,7 @@ macro_rules! icons {
 
 icons! {
     ArrowDownWideNarrow => "arrow-down-wide-narrow",
+    Crop => "crop",
     Crosshair => "crosshair",
     ArrowUpNarrowWide => "arrow-up-narrow-wide",
     Calendar => "calendar",

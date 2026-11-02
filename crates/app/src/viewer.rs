@@ -1004,6 +1004,11 @@ impl Viewer {
         let fitted = zoom::fit_size(natural, viewport);
         let photo = item.kind == MediaKind::Image;
         let picking = editing && self.edit.as_ref().is_some_and(EditSession::is_picking);
+        let cropping = editing && !compare && self.edit.as_ref().is_some_and(EditSession::is_cropping);
+        // The frame goes over the whole photo.
+        if cropping {
+            self.view = FIT;
+        }
 
         // Not over the chrome: its own widgets take those clicks and wheel turns.
         let over_chrome = backdrop.hover_pos().is_some_and(|pos| layout.is_chrome(pos));
@@ -1020,6 +1025,16 @@ impl Viewer {
                     (pos.y - target.top()) / target.height(),
                 ));
             }
+        } else if cropping {
+            let target = photo_rect(area, fitted, FIT);
+            if let Some(session) = &mut self.edit {
+                session.set_crop_area(target);
+                // A drag goes on over the chrome.
+                if !over_chrome || session.is_dragging_crop() {
+                    session.crop_input(ui, backdrop, target);
+                }
+            }
+            self.close_at = None;
         } else if photo && !over_chrome {
             self.handle_zoom(ui, backdrop, area, natural, fitted, viewport, keys);
             // A click beside the photo doesn't close while editing.
@@ -1053,6 +1068,7 @@ impl Viewer {
         };
         if photo
             && !over_chrome
+            && !cropping
             && let Some(pos) = backdrop.hover_pos()
         {
             let icon = if !target.intersect(area).contains(pos) {
@@ -1104,6 +1120,9 @@ impl Viewer {
                 .as_mut()
                 .is_some_and(|session| session.paint(ui, rect, uv, clip, compare, 1.0));
         if edited {
+            if cropping && let Some(session) = &self.edit {
+                session.paint_crop(&painter, target);
+            }
         } else if let Some(loaded) = &loaded {
             let tint = Color32::WHITE.gamma_multiply(fade);
             painter.image(loaded.id, rect, uv, tint);
@@ -1434,6 +1453,11 @@ impl Viewer {
             if keys.close {
                 session.dialog = None;
             }
+            return Keys::default();
+        }
+        // Escape leaves the crop first.
+        if keys.close && session.is_cropping() {
+            session.set_cropping(false);
             return Keys::default();
         }
         if keys.undo {
