@@ -37,6 +37,8 @@ struct Edit {
     focus: vec4<f32>,
     // The crop on the upright, unturned photo: x, y, w, h (spec 029).
     crop: vec4<f32>,
+    // A film look's grain (REQ-028-06): strongest in the midtones (x), how much it differs per channel (y).
+    film: vec4<f32>,
     curves: array<vec4<f32>, 256>,
 }
 
@@ -217,7 +219,19 @@ fn develop(rgb: vec3<f32>, uv: vec2<f32>, subject: f32) -> vec3<f32> {
     var out = vec3<f32>(to_encoded(lin.r), to_encoded(lin.g), to_encoded(lin.b));
     let grain = edit.fx.z;
     if grain != 0.0 {
-        out += value_noise(uv * edit.size.xy / edit.fx.w) * grain * 0.2;
+        let p = uv * edit.size.xy / edit.fx.w;
+        let n = value_noise(p);
+        // Each color channel's own noise, as a color film's three layers have.
+        var own = vec3<f32>(n);
+        if edit.film.y > 0.0 {
+            own = vec3<f32>(value_noise(p + vec2<f32>(37.0, 17.0)), n, value_noise(p + vec2<f32>(59.0, 91.0)));
+        }
+        var amount = grain;
+        if edit.film.x > 0.5 {
+            let v = clamp((out.r + out.g + out.b) / 3.0, 0.0, 1.0);
+            amount = grain * (0.35 + 0.65 * 4.0 * v * (1.0 - v));
+        }
+        out += (n + (own - n) * edit.film.y) * amount * 0.2;
     }
     return clamp(out, vec3<f32>(0.0), vec3<f32>(1.0));
 }
