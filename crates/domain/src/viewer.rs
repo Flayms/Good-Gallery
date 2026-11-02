@@ -92,6 +92,17 @@ pub fn toggle_scale(view: ZoomView, natural_width: f32, fitted_width: f32) -> f3
     }
 }
 
+/// The gallery position a step of `by` leads to from `index` in a gallery of `count`. For an item that left the result
+/// (`left_result`), `index` is the place it had, where the next item is now (REQ-009-18).
+pub fn step_target(index: usize, count: usize, by: i32, left_result: bool) -> Option<usize> {
+    let target = if left_result && by > 0 {
+        index
+    } else {
+        index.checked_add_signed(by.signum() as isize)?
+    };
+    (target < count).then_some(target)
+}
+
 /// Gallery positions up to [`PRELOAD_RADIUS`] places around `index` in a gallery of `count`, nearest first, the next
 /// before the previous.
 pub fn neighbours(count: usize, index: usize) -> Vec<usize> {
@@ -174,6 +185,23 @@ impl Strip {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn req_009_18_steps_from_the_place_the_item_had() {
+        // Within the result: one place on, within its bounds.
+        assert_eq!(step_target(1, 3, 1, false), Some(2));
+        assert_eq!(step_target(1, 3, -1, false), Some(0));
+        assert_eq!(step_target(2, 3, 1, false), None);
+        assert_eq!(step_target(0, 3, -1, false), None);
+        // Out of it: the next item moved into its place, the previous one is where it was.
+        assert_eq!(step_target(1, 3, 1, true), Some(1));
+        assert_eq!(step_target(1, 3, -1, true), Some(0));
+        // It was the last, or the only one.
+        assert_eq!(step_target(3, 3, 1, true), None);
+        assert_eq!(step_target(3, 3, -1, true), Some(2));
+        assert_eq!(step_target(0, 0, 1, true), None);
+        assert_eq!(step_target(0, 0, -1, true), None);
+    }
 
     const VIEWPORT: Size = Size::new(1000.0, 800.0);
     const CONTENT: Size = Size::new(1000.0, 500.0);

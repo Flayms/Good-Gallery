@@ -90,6 +90,7 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 - **Given** an item that is no longer indexed (e.g. removed by a scan while the viewer shows it), or whose file vanished
 - **When** the viewer shows it
 - **Then** it shows "Media not found", or the media fails to load, instead of showing something else
+- **And** an item that is still indexed but no longer matches the search isn't missing (REQ-009-18)
 
 ### REQ-009-13 · Preload ahead
 
@@ -129,6 +130,18 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 - **Then** each region is drawn as a box with the person's name, on the person, upright and at any zoom and pan
 - **And** the choice is remembered across items and restarts, and turning it off hides the boxes
 
+### REQ-009-18 · An item leaves the search
+
+- **Given** the viewer showing an item that is still indexed
+- **When** the gallery reloads and the item no longer matches the search (a tag or rating changed in the viewer, or a scan changed them)
+- **Then** the viewer keeps showing it, with the info panel, rating, tagging and editing working as before
+- **When** the user steps to the next or the previous item, or picks one in the filmstrip
+- **Then** the viewer goes there, to the neighbours of the place the item had, and the item can't be stepped back to
+- **When** the user closes the viewer
+- **Then** it fades, with no tile to shrink into, and the gallery shows the search's result, even an empty one
+- **When** the item matches the search again
+- **Then** the viewer follows it to its new position
+
 ## Out of scope
 
 - Adding, editing or removing face regions, finding faces (#36), and face regions in videos.
@@ -158,9 +171,10 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 | REQ-009-09 | `crates/app/tests/viewer.rs` › req_009_09_filters_by_a_tag_from_the_info_panel | pass |
 | REQ-009-10 | `crates/app/tests/viewer.rs` › req_009_10_shows_the_file_in_explorer_or_says_it_is_gone, req_009_11_context_menus_show_in_explorer_and_information | pass (Explorer itself checked by hand: `explorer.exe /select` outside the app's job object) |
 | REQ-009-11 | `crates/app/tests/viewer.rs` › req_009_11_context_menus_show_in_explorer_and_information | pass |
-| REQ-009-12 | `crates/app/tests/viewer.rs` › req_009_12_shows_media_not_found_for_a_removed_item, req_009_15_says_when_the_original_fails | pass |
+| REQ-009-12 | `crates/app/tests/viewer.rs` › req_009_12_shows_media_not_found_for_a_removed_item, req_009_15_says_when_the_original_fails, req_009_18_says_when_a_kept_item_is_gone | pass |
 | REQ-009-13 | `crates/domain/src/viewer.rs` › req_009_13_lists_the_items_up_to_two_places_around_nearest_first, req_009_13_stops_at_the_ends_of_the_gallery; `crates/app/src/originals.rs` › req_009_13_frees_originals_that_are_no_longer_wanted, req_009_13_drops_photos_that_stopped_being_wanted_before_they_loaded, req_009_13_loads_a_photo_wanted_again_while_its_cancelled_load_finishes; `crates/app/tests/viewer.rs` › req_009_13_req_009_14_preloads_two_places_around | pass |
 | REQ-009-14 | `crates/app/tests/viewer.rs` › req_009_13_req_009_14_preloads_two_places_around | partial: a preloaded original shows without a fade; the thumbnail preview needs the GPU streamer, checked in the running app |
 | REQ-009-15 | `crates/media/src/original.rs` › req_009_15_fails_for_missing_and_broken_files_and_avif_without_ffmpeg; `crates/app/src/originals.rs` › req_009_15_remembers_failures_until_wanted_anew; `crates/app/tests/viewer.rs` › req_009_15_says_when_the_original_fails | pass |
 | REQ-009-16 | `crates/domain/src/viewer.rs` › req_009_16_toggles_between_fitted_and_actual_pixels_at_least_2x; `crates/app/tests/viewer.rs` › req_009_16_click_toggles_between_fitted_and_actual_pixels, req_009_03_req_009_16_clicks_on_the_photo_and_double_clicks_dont_close | pass |
+| REQ-009-18 | `crates/domain/src/viewer.rs` › req_009_18_steps_from_the_place_the_item_had; `crates/app/tests/viewer.rs` › req_009_18_keeps_an_item_that_left_the_search, req_009_18_steps_back_from_an_item_that_left_the_search, req_009_18_closes_with_an_empty_result, req_009_18_follows_the_item_back_into_the_search, req_009_18_says_when_a_kept_item_is_gone | pass |
 | REQ-009-17 | `crates/domain/src/faces.rs` › req_009_17_face_regions_are_hidden_until_shown; `crates/app/tests/viewer.rs` › req_009_17_shows_face_regions_and_remembers_the_choice (snapshot `viewer_faces`) | pass |

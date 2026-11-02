@@ -176,13 +176,16 @@ impl Transition {
 pub struct Viewer {
     /// A text field had the keyboard at the end of the last frame (a new tag, REQ-026-01).
     typing: bool,
-    /// The shown item: its gallery position, and its id to find it again after a reload.
+    /// The shown item: its gallery position (out of the result, the place it had), and its id to find it again after a
+    /// reload.
     index: usize,
     id: i64,
     /// The gallery result the position was checked against.
     version: u64,
-    /// No longer in the result (REQ-009-12).
+    /// No longer in the index (REQ-009-12).
     missing: bool,
+    /// No longer in the result, and shown all the same (REQ-009-18).
+    left_result: bool,
     view: ZoomView,
     /// The original was loaded when the item came up: it shows without a fade (REQ-009-14). `None` until the first
     /// frame of the item.
@@ -242,6 +245,7 @@ impl Viewer {
             id,
             version,
             missing: false,
+            left_result: false,
             view: FIT,
             instant: None,
             fade_from: None,
@@ -525,6 +529,7 @@ impl Viewer {
         let Some(id) = gallery.id_at(index) else { return };
         (self.index, self.id) = (index, id);
         self.missing = false;
+        self.left_result = false;
         self.view = FIT;
         self.instant = None;
         self.fade_from = None;
@@ -547,18 +552,26 @@ impl Viewer {
             return;
         }
         if gallery.id_at(self.index) == Some(self.id) {
-            self.missing = false;
+            (self.missing, self.left_result) = (false, false);
         } else if let Some(index) = gallery.position_of(self.id) {
-            (self.index, self.missing) = (index, false);
+            self.index = index;
+            (self.missing, self.left_result) = (false, false);
         } else {
-            self.missing = true;
+            // Whether it is still indexed comes with `Gallery::item_outside` (REQ-009-18).
+            self.left_result = true;
+            self.index = self.index.min(gallery.count().unwrap_or(0));
         }
+    }
+
+    /// The gallery position a step of `by` leads to.
+    fn step_target(&self, by: i32, count: usize) -> Option<usize> {
+        zoom::step_target(self.index, count, by, self.left_result)
     }
 
     /// Starts closing: the photo shrinks back into its tile, or the viewer fades (REQ-013-12).
     fn close(&mut self, gallery: &Gallery, action: Action) {
         if self.closing.is_none() {
-            let tile = if self.missing {
+            let tile = if self.missing || self.left_result {
                 None
             } else {
                 gallery.tile_rect(self.index)
@@ -616,9 +629,8 @@ impl Viewer {
                     ));
                 }
                 _ if keys.step != 0 => {
-                    let target = self.index as i64 + i64::from(keys.step.signum());
-                    if target >= 0 && (target as usize) < count {
-                        self.go_to(target as usize, gallery);
+                    if let Some(target) = self.step_target(keys.step, count) {
+                        self.go_to(target, gallery);
                     }
                 }
                 _ => {}
@@ -653,13 +665,17 @@ impl Viewer {
             return Some(action.clone());
         }
 
-        preload(gallery, originals, libraries, self.index, count);
-        gallery.set_viewed((!self.missing).then_some((self.index, self.id)));
-        let item = if self.missing {
-            None
+        let item = if self.left_result {
+            let item = gallery.item_outside(self.id).cloned();
+            self.missing = gallery.is_outside_gone(self.id);
+            item
         } else {
+            gallery.forget_outside();
             gallery.item(self.index).cloned()
         };
+        let outside = item.as_ref().filter(|_| self.left_result);
+        preload(gallery, originals, libraries, outside, self.index, count);
+        gallery.set_viewed((!self.missing).then_some((self.index, self.id)));
         let original = originals.get(self.id);
         if item.is_some() && self.instant.is_none() {
             self.instant = Some(matches!(original, OriginalState::Loaded(_)));
@@ -1249,13 +1265,13 @@ impl Viewer {
         });
         let text = bar_text(ui, screen, item, libraries, has_faces);
         let bar = control_bar_rect(layout, &text);
-        let previous = (self.index > 0).then(|| {
+        let previous = self.step_target(-1, count).map(|_| {
             Rect::from_center_size(
                 pos2(screen.left() + INSET + NAV_SIZE / 2.0, layout.media.center().y),
                 Vec2::splat(NAV_SIZE),
             )
         });
-        let next = (self.index + 1 < count).then(|| {
+        let next = self.step_target(1, count).map(|_| {
             Rect::from_center_size(
                 pos2(layout.right - INSET - NAV_SIZE / 2.0, layout.media.center().y),
                 Vec2::splat(NAV_SIZE),
@@ -1321,7 +1337,7 @@ impl Viewer {
                 let Some(rect) = rect else { continue };
                 let tooltip = if by < 0 { "Previous (←)" } else { "Next (→)" };
                 if round_button(ui, rect, icon, label, tooltip, bar_backing).clicked() {
-                    step = Some((self.index as i64 + by).max(0) as usize);
+                    step = self.step_target(by, count);
                 }
             }
             if let Some(strip) = layout.strip
@@ -1355,7 +1371,7 @@ impl Viewer {
         }
         if let Some(index) = step
             && index < count
-            && index != self.index
+            && (index != self.index || self.left_result)
         {
             if self.edit.is_some() {
                 self.leave_edit(Leave::Step(index), gallery);
@@ -1484,11 +1500,10 @@ impl Viewer {
         if keys.close {
             self.leave_edit(Leave::Exit, gallery);
         }
-        if keys.step != 0 {
-            let target = self.index as i64 + i64::from(keys.step.signum());
-            if target >= 0 && (target as usize) < count {
-                self.leave_edit(Leave::Step(target as usize), gallery);
-            }
+        if keys.step != 0
+            && let Some(target) = zoom::step_target(self.index, count, keys.step, self.left_result)
+        {
+            self.leave_edit(Leave::Step(target), gallery);
         }
         Keys {
             zoom: keys.zoom,
@@ -1632,7 +1647,7 @@ impl Viewer {
                 continue;
             };
             let (id, video, name) = (item.id, item.kind == MediaKind::Video, item.file_name.clone());
-            let current = index == self.index && !self.missing;
+            let current = index == self.index && !self.missing && !self.left_result;
             let response = ui.interact(
                 thumb.intersect(rect),
                 ui.make_persistent_id(("filmstrip item", id)),
@@ -1800,22 +1815,29 @@ fn lerp_rect(from: Rect, to: Rect, t: f32) -> Rect {
     Rect::from_min_max(from.min.lerp(to.min, t), from.max.lerp(to.max, t))
 }
 
-/// Asks for the originals of the shown photo and its neighbours, nearest first (REQ-009-13).
-fn preload(gallery: &mut Gallery, originals: &mut Originals, libraries: &[Library], index: usize, count: usize) {
-    let mut wanted = Vec::new();
-    for at in std::iter::once(index).chain(zoom::neighbours(count, index)) {
-        let Some(item) = gallery.item(at) else { continue };
+/// Asks for the originals of the shown photo and its neighbours, nearest first (REQ-009-13); first of all `outside`, the
+/// shown item if it left the result (REQ-009-18).
+fn preload(
+    gallery: &mut Gallery,
+    originals: &mut Originals,
+    libraries: &[Library],
+    outside: Option<&GalleryItem>,
+    index: usize,
+    count: usize,
+) {
+    let request = |item: &GalleryItem| {
         if item.kind != MediaKind::Image {
-            continue;
+            return None;
         }
-        let Some(path) = file_in(libraries, item.root_id, &item.rel_path) else {
-            continue;
-        };
-        wanted.push(OriginalRequest {
+        Some(OriginalRequest {
             media: item.id,
-            path,
+            path: file_in(libraries, item.root_id, &item.rel_path)?,
             sidecar_orientation: item.sidecar_orientation,
-        });
+        })
+    };
+    let mut wanted: Vec<_> = outside.and_then(request).into_iter().collect();
+    for at in std::iter::once(index).chain(zoom::neighbours(count, index)) {
+        wanted.extend(gallery.item(at).and_then(request));
     }
     originals.set(wanted);
 }
