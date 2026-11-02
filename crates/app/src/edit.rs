@@ -429,7 +429,7 @@ impl EditSession {
             self.show_selection = false;
         }
         self.part = part;
-        if part != Part::Photo {
+        if matches!(part, Part::Subject | Part::Background) {
             self.find_subject();
         }
     }
@@ -819,10 +819,16 @@ impl EditSession {
         };
         // Parts by the mask (4); the selection tinted (8), the background's (16) (REQ-022-03, REQ-022-04).
         let mut flags = u32::from(compare);
+        // The chosen mask tinted, as index + 1 above the other flags (REQ-030-07).
+        if let (Part::Mask(i), true) = (self.part, self.show_selection) {
+            flags |= (i as u32 + 1) << 8;
+        }
         if mask.is_some() {
             flags |= 4;
             if self.show_selection {
-                flags |= 8 | if self.part == Part::Background { 16 } else { 0 };
+                if matches!(self.part, Part::Subject | Part::Background) {
+                    flags |= 8 | if self.part == Part::Background { 16 } else { 0 };
+                }
             }
         }
         if let (Some(view), Some(render_state)) = (&loaded.view, &self.render_state)
@@ -1657,6 +1663,9 @@ fn cpu_preview(
             let selected = if flags & 16 != 0 { 1.0 - subject } else { subject };
             out = tint(out, selected);
         }
+        if let Some(mask) = (flags >> 8).checked_sub(1).and_then(|i| params.masks.get(i as usize)) {
+            out = tint(out, mask.weight(rgb, uv, size));
+        }
         rgba.extend(out.map(|c| (c * 255.0).round() as u8));
         rgba.push(pixel[3]);
     }
@@ -1717,7 +1726,7 @@ fn uniform(
     opacity: f32,
     flags: f32,
 ) -> Vec<f32> {
-    let mut floats = Vec::with_capacity(112 + CURVE_SAMPLES * 4);
+    let mut floats = Vec::with_capacity(116 + 24 * MAX_MASKS * 4 + CURVE_SAMPLES * 4);
     floats.extend_from_slice(&rect);
     floats.extend_from_slice(&uv);
     floats.extend_from_slice(&[full_size[0], full_size[1], opacity, flags]);
@@ -1750,6 +1759,18 @@ fn uniform(
     for i in 0..domain::look::HUE_NODES {
         let [turn, chroma, light] = params.hue_nodes.map_or([0.0, 1.0, 0.0], |nodes| nodes[i]);
         floats.extend_from_slice(&[turn, chroma, light, 0.0]);
+    }
+    floats.extend_from_slice(&[params.masks.len() as f32, 0.0, 0.0, 0.0]);
+    for i in 0..MAX_MASKS {
+        match params.masks.get(i) {
+            Some(mask) => {
+                let has_any = !mask.params.is_neutral_part();
+                floats.extend_from_slice(&part_floats(&mask.params, f32::from(u8::from(has_any))));
+                let [kind, a, b, c, d] = mask.shape.numbers();
+                floats.extend_from_slice(&[kind, f32::from(u8::from(mask.invert)), a, b, c, d, 0.0, 0.0]);
+            }
+            None => floats.extend_from_slice(&[0.0; 24]),
+        }
     }
     for i in 0..CURVE_SAMPLES {
         let [r, g, b] = params.curves.as_ref().map_or([0.0; 3], |table| table[i]);

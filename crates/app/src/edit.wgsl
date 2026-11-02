@@ -10,6 +10,14 @@ struct Part {
     turn: vec4<f32>,
 }
 
+// A mask (spec 030): its light and color, then its kind (x: 0 gradient, 1 luminance, 2 color), inverted (y), and the
+// shape's numbers (`domain::edit::MaskShape::numbers`).
+struct LocalMask {
+    part: Part,
+    kind: vec4<f32>,
+    shape: vec4<f32>,
+}
+
 struct Edit {
     // The photo's rect in framebuffer pixels: min (xy), max (zw).
     rect: vec4<f32>,
@@ -42,6 +50,9 @@ struct Edit {
     film: vec4<f32>,
     // Around the color wheel: the turn in radians (x), chroma's factor (y), the lightness added (z).
     hue_nodes: array<vec4<f32>, 8>,
+    // How many masks there are (x).
+    mask_count: vec4<f32>,
+    masks: array<LocalMask, 8>,
     curves: array<vec4<f32>, 256>,
 }
 
@@ -218,6 +229,41 @@ fn part(lin: vec3<f32>, p: Part) -> vec3<f32> {
     return lin;
 }
 
+// `domain::edit::MaskShape::weight` and `MaskParams::weight`, `rgb` as stored.
+fn mask_weight(i: u32, rgb: vec3<f32>, uv: vec2<f32>) -> f32 {
+    let mask = edit.masks[i];
+    let shape = mask.shape;
+    var weight = 0.0;
+    switch u32(mask.kind.x) {
+        case 0u: {
+            let along = (shape.zw - vec2<f32>(mask.kind.z, mask.kind.w)) * edit.size.xy;
+            let length_squared = dot(along, along);
+            if length_squared > 0.0 {
+                let at = (uv - vec2<f32>(mask.kind.z, mask.kind.w)) * edit.size.xy;
+                weight = 1.0 - smoothstep(0.0, 1.0, dot(at, along) / length_squared);
+            }
+        }
+        case 1u: {
+            let lin = vec3<f32>(to_linear(rgb.r), to_linear(rgb.g), to_linear(rgb.b));
+            let value = to_encoded(max(luminance(lin), 0.0));
+            let feather = max(shape.y, 0.005);
+            weight = smoothstep(mask.kind.z - feather, mask.kind.z, value)
+                * (1.0 - smoothstep(mask.kind.w, mask.kind.w + feather, value));
+        }
+        default: {
+            let lab = to_oklab(vec3<f32>(to_linear(rgb.r), to_linear(rgb.g), to_linear(rgb.b)));
+            let turned = degrees(atan2(lab.z, lab.y)) - mask.kind.z + 180.0;
+            let away = abs(turned - 360.0 * floor(turned / 360.0) - 180.0);
+            weight = (1.0 - smoothstep(mask.kind.w, mask.kind.w + max(shape.x, 0.5), away))
+                * smoothstep(0.02, 0.06, length(lab.yz));
+        }
+    }
+    if mask.kind.y > 0.5 {
+        return 1.0 - weight;
+    }
+    return weight;
+}
+
 // `domain::edit::Params::halation_glow`.
 fn halation_light(rgb: vec3<f32>) -> f32 {
     return smoothstep(0.3, 0.9, max(rgb.r, max(rgb.g, rgb.b)));
@@ -231,6 +277,9 @@ fn develop(rgb: vec3<f32>, uv: vec2<f32>, subject: f32, glow: vec3<f32>) -> vec3
     }
     if (u32(edit.size.w) & 4u) != 0u {
         lin = mix(part(lin, edit.background), part(lin, edit.subject), subject);
+    }
+    for (var i = 0u; i < u32(edit.mask_count.x); i++) {
+        lin = mix(lin, part(lin, edit.masks[i].part), mask_weight(i, rgb, uv));
     }
     lin += glow;
     let vignette = edit.fx.x;
@@ -352,10 +401,12 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     }
     let flags = u32(edit.size.w);
     var rgb = texel.rgb;
+    var stored = texel.rgb;
     if (flags & 1u) == 0u {
         let sigma = blur_sigma(uv, subject);
         if sigma > 0.0 {
             rgb = blurred(texel, uv, sigma).rgb;
+            stored = rgb;
         }
         var glow = vec3<f32>(0.0);
         if edit.film.w > 0.0 {
@@ -372,6 +423,10 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
             selected = 1.0 - subject;
         }
         rgb = mix(rgb, vec3<f32>(1.0, 0.25, 0.25), 0.45 * selected);
+    }
+    // The chosen mask (index + 1) tinted (REQ-030-07).
+    if (flags >> 8u) != 0u {
+        rgb = mix(rgb, vec3<f32>(1.0, 0.25, 0.25), 0.45 * mask_weight((flags >> 8u) - 1u, stored, uv));
     }
     if (flags & 2u) != 0u {
         rgb = vec3<f32>(to_linear(rgb.r), to_linear(rgb.g), to_linear(rgb.b));

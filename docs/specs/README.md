@@ -33,6 +33,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [027-open-with](027-open-with/spec.md)                   | Open a photo or video with Good Gallery from the file manager    | Implemented |
 | [028-film-looks](028-film-looks/spec.md)                 | Film looks: one click for a film's colors and grain, with strength | Implemented |
 | [029-crop-and-rotate](029-crop-and-rotate/spec.md)       | Crop and rotate photos in the viewer's editing mode              | Implemented |
+| [030-masks](030-masks/spec.md)                           | Gradient, luminance and color masks with their own light and color | Implemented |
 
 ## Conventions
 

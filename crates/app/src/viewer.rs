@@ -1122,6 +1122,7 @@ impl Viewer {
         if edited {
             if cropping && let Some(session) = &self.edit {
                 session.paint_crop(&painter, target);
+                session.paint_gradient(&painter, target);
             }
         } else if let Some(loaded) = &loaded {
             let tint = Color32::WHITE.gamma_multiply(fade);
