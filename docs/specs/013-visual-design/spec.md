@@ -121,6 +121,13 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 - **Then** each given star is a filled star in the Star color
 - **And** where all five stars are shown (the info panel), the ones not given are outlined in Muted
 
+### REQ-013-17 · Reduce transparency setting
+
+- **Given** the settings, on any platform
+- **When** the user turns on _Reduce transparency_
+- **Then** translucent surfaces are opaque as in REQ-013-06 from the next frame on, and stay so after a restart
+- **And** while the OS asks for reduced transparency they are opaque whatever the setting says
+
 ## Out of scope
 
 - A light theme or following the OS light / dark setting (the app stays dark).
@@ -156,3 +163,4 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 | REQ-013-14 | `crates/app/tests/viewer.rs` › req_009_01_req_009_04_opens_the_clicked_item_with_its_original (snapshot `viewer`, opaque); `crates/app/src/glass.rs` › req_013_06_req_013_14_surfaces_are_opaque_without_glass | pass (blurred scrim checked in the running app) |
 | REQ-013-15 | `crates/app/src/gallery/mod.rs` › req_013_15_the_scrollbar_starts_below_the_toolbar | pass (Settings starts its bar below its header the same way) |
 | REQ-013-16 | `crates/app/src/icons.rs` › req_013_16_given_stars_are_filled_and_missing_ones_outlined | pass |
+| REQ-013-17 | `crates/app/src/theme.rs` › req_013_17_the_setting_or_the_os_reduces_transparency; `crates/app/tests/settings.rs` › req_013_17_the_setting_turns_glass_off_and_stays_after_a_restart; `crates/db/src/settings.rs` › req_010_01_starts_with_defaults_and_persists_updates | pass |

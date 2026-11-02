@@ -86,7 +86,7 @@ People with their libraries on a Linux desktop (and developers working on Linux)
 - AppImage, Flatpak, `.deb` and distribution repositories; bundling the helpers on Linux.
 - Buttons of the desktop's layout the app doesn't have (the app menu, the window icon, _On all desktops_, spacers).
 - Window shadows and rounded corners of the undecorated window on Wayland compositors that don't add them.
-- Reduced transparency on Linux: no desktop has a common setting for it, so glass stays on (REQ-013-06 applies only where the OS has one).
+- Reading a reduced transparency setting from the desktop: no desktop has a common one (REQ-013-06 applies only where the OS has one). The app has its own setting (REQ-013-17).
 - Opening files with Good Gallery from the file manager.
 
 ## Assumptions

@@ -1,7 +1,7 @@
 # Publishes a GitHub release with the Windows installer, the portable zip and the Linux archive for every version tag
 # pushed by `cargo xtask release` (xtask/src/release.rs, docs/specs/014-ci-release, docs/specs/018-linux), and the
-# browser version to the repository's GitHub Pages site (docs/specs/019-web). Pages' source must be set to "GitHub
-# Actions" in the repository's settings.
+# browser version to the repository's GitHub Pages site and as a zip (docs/specs/019-web). Pages' source must be set
+# to "GitHub Actions" in the repository's settings.
 name: Release
 
 on:
@@ -41,16 +41,10 @@ jobs:
           path: target/dist/*.tar.gz
           if-no-files-found: error
 
-  pages:
-    name: Publish the page
+  web:
+    name: Build the page
     needs: checks
     runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
       - run: rustup toolchain install
@@ -62,6 +56,32 @@ jobs:
         with:
           tool: trunk@0.22.1
       - run: cargo xtask web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: page
+          path: target/web
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: page-zip
+          path: target/dist/*-web.zip
+          if-no-files-found: error
+
+  pages:
+    name: Publish the page
+    needs: web
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: page
+          path: target/web
       - uses: actions/upload-pages-artifact@v4
         with:
           path: target/web
@@ -70,7 +90,7 @@ jobs:
 
   release:
     name: Build and publish
-    needs: [checks, linux]
+    needs: [checks, linux, web]
     runs-on: windows-latest
     permissions:
       contents: write
@@ -126,6 +146,10 @@ jobs:
         with:
           name: linux
           path: target/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: page-zip
+          path: target/dist
 
       - name: Write the release notes
         env:
@@ -143,6 +167,7 @@ jobs:
           | **good-gallery-$VERSION-windows-x64-setup.exe** | Installer: pick the folder, installs for your user |
           | **good-gallery-$VERSION-windows-x64-portable.zip** | Portable: extract anywhere and run \`good-gallery.exe\` |
           | **good-gallery-$VERSION-linux-x64.tar.gz** | Linux: extract, install exiftool, ffmpeg and libmpv from your distribution (see \`README.txt\`), run \`./install.sh\` or \`./good-gallery\` |
+          | **good-gallery-$VERSION-web.zip** | Browser version to host yourself: put the files on any static web server, served over HTTPS |
 
           The Windows downloads keep the index, settings and thumbnail cache in \`%APPDATA%\\good-gallery\`, the Linux one in \`~/.local/share/good-gallery\`, so an update picks them up as they are.
 
@@ -158,6 +183,7 @@ jobs:
             "target/dist/good-gallery-$VERSION-windows-x64-setup.exe" \
             "target/dist/good-gallery-$VERSION-windows-x64-portable.zip" \
             "target/dist/good-gallery-$VERSION-linux-x64.tar.gz" \
+            "target/dist/good-gallery-$VERSION-web.zip" \
             --title "Good Gallery $VERSION" \
             --notes-file release-notes.md \
             --verify-tag

@@ -118,8 +118,28 @@ fn req_010_01_shows_the_defaults_and_keeps_changes_across_restarts() {
             io_concurrency: 4,
             appearance: domain::appearance::Appearance::System,
             mtime_on_save: domain::edit::MtimeOnSave::Keep,
+            reduce_transparency: false,
         }
     );
+}
+
+#[test]
+fn req_013_17_the_setting_turns_glass_off_and_stays_after_a_restart() {
+    let fixture = Fixture::new();
+    let db = fixture.dir.path().join("gallery.db");
+    let mut harness = on_settings(&fixture, &db, Arc::new(FakeTargets::default()));
+    assert!(!app::theme::reduced_transparency(&harness.ctx));
+
+    harness
+        .get_by_role_and_label(Role::CheckBox, "Reduce transparency")
+        .click();
+    settle(&mut harness);
+    assert!(app::theme::reduced_transparency(&harness.ctx));
+    drop(harness);
+
+    let restarted = on_settings(&fixture, &db, Arc::new(FakeTargets::default()));
+    assert!(restarted.state().settings.reduce_transparency);
+    assert!(app::theme::reduced_transparency(&restarted.ctx));
 }
 
 #[test]
