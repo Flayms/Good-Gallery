@@ -65,6 +65,14 @@ People with their libraries on a Linux desktop (and developers working on Linux)
 - **Then** it builds a `.tar.gz` with the app, a `.desktop` file, the app icon, the license and the third-party notices, whose app uses the system's exiftool, ffmpeg and libmpv
 - **And** the release workflow attaches it beside the Windows downloads
 
+### REQ-018-12 · Packages for the package manager
+
+- **Given** `cargo xtask dist` on Linux
+- **When** it runs
+- **Then** it also builds a `.deb` and an `.rpm` that install the app, its menu entry for the file types of REQ-027-05, its icon and the licenses, and that depend on the distribution's exiftool, ffmpeg and libmpv
+- **And** the release workflow attaches them beside the `.tar.gz`, after installing each into a clean Ubuntu 24.04, Ubuntu 26.04 and Fedora system, starting the app and removing it again
+- **And** removing a package keeps the index, settings and thumbnail cache
+
 ### REQ-018-10 · Caption buttons in the desktop's layout
 
 - **Given** a desktop whose button layout names the window controls' sides and order (GNOME's `org.gnome.desktop.wm.preferences button-layout`, KDE's _Titlebar Buttons_)
@@ -83,7 +91,7 @@ People with their libraries on a Linux desktop (and developers working on Linux)
 ## Out of scope
 
 - macOS (a later spec).
-- AppImage, Flatpak, `.deb` and distribution repositories; bundling the helpers on Linux.
+- AppImage, Flatpak and distribution repositories, so packages get no updates through the package manager; bundling the helpers on Linux.
 - Buttons of the desktop's layout the app doesn't have (the app menu, the window icon, _On all desktops_, spacers).
 - Window shadows and rounded corners of the undecorated window on Wayland compositors that don't add them.
 - Reading a reduced transparency setting from the desktop: no desktop has a common one (REQ-013-06 applies only where the OS has one). The app has its own setting (REQ-013-17).
@@ -94,6 +102,9 @@ People with their libraries on a Linux desktop (and developers working on Linux)
 - Desktops in scope: GNOME and KDE Plasma on Wayland and X11. Other desktops get the same window, untested.
 - The system packages are a Linux distribution's (tested on Ubuntu 26.04): `libimage-exiftool-perl`, `ffmpeg`, `libmpv2`, a Vulkan driver.
 - Display-synced video starts timed to 60 Hz on Linux (neither X11 and Wayland nor eframe tell the window's refresh rate in a common way) and follows the measured rate within about half a second of playing (REQ-018-11). Where the app can't keep up with the display, the measured rate is the one it presents at, which is the one to time video to.
+
+- Packages are built on Ubuntu 24.04, whose glibc is the oldest they run on. Video playback is tested with Ubuntu 26.04's libmpv 0.41; on 24.04 the package test only starts the app.
+- Fedora's own `ffmpeg-free` satisfies the package's dependency but lacks some video codecs; the full ffmpeg comes from RPM Fusion.
 
 ## Verification
 
@@ -108,5 +119,6 @@ People with their libraries on a Linux desktop (and developers working on Linux)
 | REQ-018-07 | `crates/media/src/helpers.rs` › exiftool_ends_with_an_app_that_exits_without_cleaning_up | pass |
 | REQ-018-08 | `crates/media/src/helpers.rs` › req_018_08_lowers_the_calling_threads_priority_only | pass |
 | REQ-018-09 | `xtask/src/dist.rs` › req_018_09_stages_the_linux_package; `xtask/tests/workflows.rs` › req_018_01_req_018_09_ci_and_the_release_cover_linux | pass |
+| REQ-018-12 | `xtask/src/dist.rs` › req_018_12_packages_are_named_like_the_archive, req_018_12_the_packages_hold_the_app_and_depend_on_the_helpers; `xtask/tests/workflows.rs` › req_018_12_the_release_tests_and_attaches_the_packages; `packaging/linux/smoke-test.sh` (`linux-packages.yml`) | pass |
 | REQ-018-10 | `crates/domain/src/caption.rs` › req_018_10_reads_gnomes_button_layout, req_018_10_reads_kdes_button_layout, req_018_10_a_button_named_twice_is_shown_once, req_018_10_an_unreadable_gnome_value_is_none; `crates/app/src/titlebar.rs` › req_018_10_places_the_buttons_as_the_layout_names_them, req_018_10_round_caption_buttons_follow_the_layout; `crates/app/tests/gallery.rs` › req_018_10_caption_buttons_at_the_left (`caption_left*_linux.png`) | partial (reading the setting on a real GNOME and KDE desktop checked by hand only) |
 | REQ-018-11 | `crates/domain/src/video.rs` › req_018_11_measures_the_rate_frames_are_presented_at, req_018_11_dropped_frames_and_pauses_dont_move_the_rate, req_018_11_follows_a_new_rate; `crates/app/src/video/mpv.rs` › req_018_11_the_display_fps_changes_while_mpv_runs | partial (smooth playback on a 120/144 Hz display checked by hand only) |

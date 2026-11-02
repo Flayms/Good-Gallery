@@ -37,6 +37,11 @@ pub fn linux_artifact_name(version: &str) -> String {
     format!("good-gallery-{version}-linux-x64.tar.gz")
 }
 
+/// The Linux packages' names, by the packager that builds each (REQ-018-12).
+pub fn linux_package_names(version: &str) -> [(&'static str, String); 2] {
+    ["deb", "rpm"].map(|packager| (packager, format!("good-gallery-{version}-linux-x64.{packager}")))
+}
+
 /// The files of the Linux package besides the executable: `(source below the workspace, name in the package)`.
 const LINUX_FILES: [(&str, &str); 6] = [
     ("LICENSE", "LICENSE.txt"),
@@ -235,6 +240,25 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
                 .arg(&folder),
         )?;
         println!("{}", out.join(&name).display());
+        if !installer {
+            return Ok(());
+        }
+        for (packager, name) in linux_package_names(version) {
+            crate::process::run_command(
+                Command::new("nfpm")
+                    .arg("package")
+                    .arg("--config")
+                    .arg(root.join("packaging/linux/nfpm.yaml"))
+                    .arg("--packager")
+                    .arg(packager)
+                    .arg("--target")
+                    .arg(out.join(&name))
+                    .current_dir(&stage_dir)
+                    .env("VERSION", version),
+            )
+            .context("can't build the Linux packages; install nfpm, or pass --no-installer")?;
+            println!("{}", out.join(&name).display());
+        }
         return Ok(());
     }
     let exe = root.join(r"target\release\app.exe");
@@ -395,6 +419,43 @@ mod tests {
             )
         );
         assert_eq!(linux_artifact_name("1.2.3"), "good-gallery-1.2.3-linux-x64.tar.gz");
+    }
+
+    #[test]
+    fn req_018_12_packages_are_named_like_the_archive() {
+        assert_eq!(
+            linux_package_names("1.2.3"),
+            [
+                ("deb", "good-gallery-1.2.3-linux-x64.deb".to_owned()),
+                ("rpm", "good-gallery-1.2.3-linux-x64.rpm".to_owned()),
+            ]
+        );
+    }
+
+    /// REQ-018-12: what the packages install, and the helpers they depend on under each distribution's names.
+    /// `packaging/linux/smoke-test.sh` checks the real packages.
+    #[test]
+    fn req_018_12_the_packages_hold_the_app_and_depend_on_the_helpers() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let config = std::fs::read_to_string(root.join("packaging/linux/nfpm.yaml")).unwrap();
+        for part in [
+            "dst: /usr/bin/good-gallery",
+            "dst: /usr/share/applications/good-gallery.desktop",
+            "dst: /usr/share/icons/hicolor/256x256/apps/good-gallery.png",
+            "dst: /usr/share/doc/good-gallery/LICENSE.txt",
+            "dst: /usr/share/doc/good-gallery/THIRD-PARTY-NOTICES.txt",
+            "- libimage-exiftool-perl",
+            "- ffmpeg",
+            "- libmpv2",
+            "- perl-Image-ExifTool",
+            "- /usr/bin/ffmpeg",
+            "- mpv-libs",
+            // winit panics on X11 without it, and it loads it at run time, so nothing else asks for it.
+            "- libxkbcommon-x11-0",
+            "- libxkbcommon-x11\n",
+        ] {
+            assert!(config.contains(part), "nfpm.yaml lacks {part}");
+        }
     }
 
     /// REQ-018-09: the Linux package holds the app, its menu entry, icon, install script and licenses, and the app and

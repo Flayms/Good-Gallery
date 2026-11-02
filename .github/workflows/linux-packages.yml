@@ -1,0 +1,71 @@
+# Builds the Linux downloads and tests the .deb and .rpm in clean systems (docs/specs/018-linux, REQ-018-12): for every
+# release, and for pull requests that touch the packages, since a release is too late to find out.
+name: Linux packages
+
+on:
+  workflow_call:
+  pull_request:
+    paths:
+      - packaging/linux/**
+      - xtask/src/dist.rs
+      - .github/workflows/linux-packages.yml
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  NFPM_VERSION: 2.48.0
+  NFPM_SHA256: 6d7f9a28b2f397934403950fcbba83f598b08d02edbe79a0815b3b4897341750
+
+jobs:
+  build:
+    name: Build the Linux downloads
+    # The oldest system the packages run on: its glibc is what they need (REQ-018-12).
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # A tag's cache can only be restored by the same tag, so saving it is wasted time.
+          save-if: false
+      - name: Install nfpm
+        run: |
+          curl -fsSL -o nfpm.tar.gz "https://github.com/goreleaser/nfpm/releases/download/v$NFPM_VERSION/nfpm_${NFPM_VERSION}_Linux_x86_64.tar.gz"
+          echo "$NFPM_SHA256  nfpm.tar.gz" | sha256sum -c -
+          sudo tar -xzf nfpm.tar.gz -C /usr/local/bin nfpm
+          rm nfpm.tar.gz
+      - name: Build the Linux downloads
+        run: cargo xtask dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            target/dist/*.tar.gz
+            target/dist/*.deb
+            target/dist/*.rpm
+          if-no-files-found: error
+
+  smoke-test:
+    name: Test the package on ${{ matrix.image }}
+    needs: build
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu:24.04
+            package: deb
+          - image: ubuntu:26.04
+            package: deb
+          - image: fedora:latest
+            package: rpm
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux
+          path: target/dist
+      - run: ./packaging/linux/smoke-test.sh target/dist/*.${{ matrix.package }}
