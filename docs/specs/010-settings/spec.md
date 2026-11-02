@@ -48,8 +48,17 @@ The user adapts indexing and the thumbnail cache to their hardware and network: 
 - **Then** the current size of the thumbnail cache is shown and refreshed every 10 seconds ("…" while unknown, "unknown" if it can't be determined)
 - **And** _Clear_ asks for confirmation, then deletes all cached thumbnails (except ones being read at that moment), shows the new size and confirms with a toast. Thumbnails are rendered again when next shown
 
+### REQ-010-07 · Version and latest release
+
+- **Given** the Settings page
+- **When** it is open
+- **Then** _About_ shows the app's version and a _See the latest release_ button
+- **When** the user clicks the button
+- **Then** the releases page opens in the default browser, which makes the connection, not the app (REQ-011-11); if it can't be opened, a toast says why
+
 ## Out of scope
 
+- Checking for new versions or installing them from the app (#28).
 - Choosing the location of the index or the thumbnail cache.
 - Settings for language or keyboard shortcuts. The appearance (light, dark or the system's) is in 020, the sidebar's groups in 008.
 - Per-library settings.
@@ -70,3 +79,4 @@ The user adapts indexing and the thumbnail cache to their hardware and network: 
 | REQ-010-04 | `crates/indexer/src/thumbnails.rs` › req_010_04_renders_with_as_many_threads_as_set; `crates/app/tests/settings.rs` › req_010_04_saves_parallel_reads_when_the_slider_is_released | pass (scans read the new value at their start, exiftool's pool resizes) |
 | REQ-010-05 | `crates/indexer/src/thumb_cache.rs` › evicts_down_to_a_lowered_cap; `crates/app/tests/settings.rs` › req_010_05_applies_a_new_cache_limit_and_shows_the_new_usage | pass |
 | REQ-010-06 | `crates/indexer/src/thumb_cache.rs` › req_010_06_clears_all_thumbnails; `crates/app/tests/settings.rs` › req_010_06_shows_usage_and_clears_after_confirmation, req_010_06_says_unknown_without_a_thumbnail_cache | pass |
+| REQ-010-07 | `crates/app/tests/settings.rs` › req_010_07_shows_the_version_and_opens_the_latest_release, req_010_07_says_why_the_browser_didnt_open | pass |

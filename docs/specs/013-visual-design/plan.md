@@ -29,6 +29,8 @@ Records the approach that was taken. Tokens and surfaces are in `docs/design.md`
 - [x] Title bar, caption buttons, drag areas, minimum size (REQ-013-02, -08)
 - [x] Scrollbars (REQ-013-15)
 - [x] Tinted chrome, tile ↔ viewer transition, controls stepping aside (REQ-013-10 … -12)
+- [x] `gallery-bench --viewer`, `--no-glass` and `--glass-matrix` to measure the glass pass (#14)
+- [ ] Run `gallery-bench --thumbs <cache copy> --glass-matrix` on the integrated laptop GPU and record the cost here (#14)
 
 ## Decisions
 
