@@ -1059,6 +1059,28 @@ mod tests {
         assert_eq!(saved.get_pixel(3, 3), disc.get_pixel(3, 3), "the background stays");
     }
 
+    /// REQ-030-08: saving applies the masks: the gradient's side changes, the other side doesn't.
+    #[test]
+    fn req_030_08_saving_applies_the_masks() {
+        let mut mask = domain::edit::LocalMask::new(domain::edit::MaskShape::Linear {
+            from: [0.0, 0.2],
+            to: [0.0, 0.6],
+        });
+        Adjustment::Exposure.set(&mut mask.recipe, 1.0);
+        let recipe = Recipe {
+            masks: vec![mask],
+            ..Recipe::default()
+        };
+        let mut image = Rgba32FImage::from_pixel(40, 40, image::Rgba([0.4, 0.4, 0.4, 1.0]));
+        render(&Params::new(&recipe), &mut image, None);
+        assert!(image.get_pixel(20, 2)[0] > 0.5, "{:?}", image.get_pixel(20, 2));
+        assert!(
+            (image.get_pixel(20, 38)[0] - 0.4).abs() < 1e-3,
+            "{:?}",
+            image.get_pixel(20, 38)
+        );
+    }
+
     /// REQ-028-08: saving lets a bright light glow red beside it, and leaves what's far from it alone.
     #[test]
     fn req_028_08_saving_lets_bright_lights_glow() {

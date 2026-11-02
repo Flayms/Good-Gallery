@@ -7,7 +7,7 @@ use common::{Fixture, settle};
 use db::libraries::LibraryStatus;
 use db::rusqlite::Connection;
 use db::writer::{IndexWriter, IndexedFile};
-use domain::edit::{Adjustment, BlurKind, Channel, Part, Recipe, SavedEdit};
+use domain::edit::{Adjustment, BlurKind, Channel, MaskShape, Part, Recipe, SavedEdit};
 use domain::look::{Look, LookChoice};
 use domain::media::{MediaKind, MediaMetadata};
 use eframe::egui::accesskit::Role;
@@ -835,4 +835,108 @@ fn req_028_01_req_028_02_req_028_03_picks_a_look_and_sets_its_strength_and_grain
     harness.run_steps(2);
     assert_eq!(look(&harness), None);
     assert!(harness.query_by_label("Strength").is_none());
+}
+
+/// Room for the panel's sections, with _Masks_ open.
+fn open_masks(harness: &mut App) {
+    harness.set_size(egui::vec2(900.0, 1600.0));
+    harness.run_steps(2);
+    harness.get_by_role_and_label(Role::Button, "Masks").click();
+    harness.run_steps(2);
+}
+
+/// REQ-030-01, REQ-030-06, REQ-030-07: masks are added, chosen, changed and removed, each as an undo step.
+#[test]
+fn req_030_01_req_030_06_req_030_07_adds_changes_and_removes_masks() {
+    let fixture = Fixture::new();
+    let (mut harness, _dir) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    settle_all(&mut harness);
+    open_masks(&mut harness);
+
+    harness.get_by_role_and_label(Role::Button, "Add luminance").click();
+    harness.run_steps(2);
+    let masks = |harness: &App| session(harness).unwrap().recipe().masks.clone();
+    assert_eq!(masks(&harness)[0].shape, MaskShape::LUMINANCE);
+    assert_eq!(session(&harness).unwrap().part(), Part::Mask(0));
+    assert!(harness.query_by_label("Curves").is_none(), "light and color only");
+    harness.snapshot(common::snapshot_name("edit_mask"));
+
+    harness.get_by_role_and_label(Role::Slider, "From").focus();
+    harness.run_steps(1);
+    harness.key_press(Key::ArrowLeft);
+    harness.run_steps(2);
+    match masks(&harness)[0].shape {
+        MaskShape::Luminance { low, .. } => assert_eq!(low, 59.0),
+        other => panic!("{other:?}"),
+    }
+
+    harness.get_by_role_and_label(Role::Button, "Invert").click();
+    harness.run_steps(2);
+    assert!(masks(&harness)[0].invert);
+    harness.get_by_role_and_label(Role::Button, "Show selection").click();
+    harness.run_steps(2);
+    assert!(masks(&harness)[0].invert, "showing it changes nothing");
+
+    harness.get_by_role_and_label(Role::Button, "Add color").click();
+    harness.run_steps(2);
+    assert_eq!(masks(&harness).len(), 2);
+    assert_eq!(session(&harness).unwrap().part(), Part::Mask(1));
+    harness.get_by_role_and_label(Role::Button, "Remove mask").click();
+    harness.run_steps(2);
+    assert_eq!(masks(&harness).len(), 1);
+    assert_eq!(session(&harness).unwrap().part(), Part::Photo);
+
+    // Undo brings it back; once more takes it away, and with it the choice of it.
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run_steps(2);
+    assert_eq!(masks(&harness).len(), 2);
+    harness.get_by_role_and_label(Role::Button, "Color 2").click();
+    harness.run_steps(2);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run_steps(3);
+    assert_eq!(masks(&harness).len(), 1);
+    assert_eq!(
+        session(&harness).unwrap().part(),
+        Part::Photo,
+        "the chosen mask is gone"
+    );
+}
+
+/// REQ-030-03: a handle follows the drag, in one undo step.
+#[test]
+fn req_030_03_drags_a_gradients_handle() {
+    let fixture = Fixture::new();
+    let (mut harness, _dir) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    settle_all(&mut harness);
+    open_masks(&mut harness);
+
+    harness.get_by_role_and_label(Role::Button, "Add gradient").click();
+    harness.run_steps(3);
+    harness.snapshot(common::snapshot_name("edit_gradient"));
+    let area = session(&harness).unwrap().gradient_area().expect("the photo is drawn");
+    let at = |u: f32, v: f32| area.min + egui::vec2(u * area.width(), v * area.height());
+
+    harness.drag_at(at(0.5, 0.1));
+    harness.run_steps(2);
+    harness.hover_at(at(0.25, 0.3));
+    harness.run_steps(2);
+    harness.drop_at(at(0.25, 0.3));
+    harness.run_steps(3);
+    match session(&harness).unwrap().recipe().masks[0].shape {
+        MaskShape::Linear { from, to } => {
+            assert!(
+                (from[0] - 0.25).abs() < 0.03 && (from[1] - 0.3).abs() < 0.03,
+                "{from:?}"
+            );
+            assert_eq!(to, [0.5, 0.5]);
+        }
+        other => panic!("{other:?}"),
+    }
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run_steps(3);
+    assert_eq!(session(&harness).unwrap().recipe().masks[0].shape, MaskShape::LINEAR);
 }

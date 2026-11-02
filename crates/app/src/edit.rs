@@ -8,8 +8,8 @@ use crate::originals::OriginalState;
 use crate::theme;
 use domain::crop::{self, Grip, Ratio};
 use domain::edit::{
-    Adjustment, BlurKind, CURVE_SAMPLES, Channel, Geometry, HISTOGRAM_BINS, Histogram, History, Mask, Params, Part,
-    Pyramid, Recipe, SavedEdit, Section, blur_lod,
+    Adjustment, BlurKind, CURVE_SAMPLES, Channel, Geometry, HISTOGRAM_BINS, Histogram, History, LocalMask, MAX_MASKS,
+    Mask, MaskShape, Params, Part, Pyramid, Recipe, SavedEdit, Section, blur_lod,
 };
 use domain::look::{Look, LookChoice};
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2, pos2, vec2};
@@ -142,6 +142,7 @@ pub struct EditSession {
     /// Whether the _Look_ section is open.
     look_open: bool,
     geometry_open: bool,
+    masks_open: bool,
     /// Whether the crop's frame is shown over the whole photo (REQ-029-02).
     cropping: bool,
     crop_ratio: Ratio,
@@ -151,6 +152,10 @@ pub struct EditSession {
     crop_drag: Option<(Grip, [f32; 4])>,
     /// Where the whole photo was last drawn while cropping.
     crop_area: Option<Rect>,
+    /// The gradient's handle being dragged: its second if true (REQ-030-03).
+    gradient_drag: Option<bool>,
+    /// Where the photo was last drawn with a gradient chosen.
+    gradient_area: Option<Rect>,
     channel: Channel,
     dragging_point: Option<usize>,
     picking: bool,
@@ -187,11 +192,14 @@ impl EditSession {
             open: [true, false, true, false],
             look_open: true,
             geometry_open: true,
+            masks_open: false,
             cropping: false,
             crop_ratio: Ratio::Free,
             crop_portrait: false,
             crop_drag: None,
             crop_area: None,
+            gradient_drag: None,
+            gradient_area: None,
             channel: Channel::All,
             dragging_point: None,
             picking: false,
@@ -429,7 +437,7 @@ impl EditSession {
             self.show_selection = false;
         }
         self.part = part;
-        if part != Part::Photo {
+        if matches!(part, Part::Subject | Part::Background) {
             self.find_subject();
         }
     }
@@ -710,6 +718,102 @@ impl EditSession {
         }
     }
 
+    /// The chosen mask's gradient, if it is one: its handles.
+    fn gradient(&self) -> Option<([f32; 2], [f32; 2])> {
+        let Part::Mask(i) = self.part else { return None };
+        match self.draft.masks.get(i)?.shape {
+            MaskShape::Linear { from, to } => Some((from, to)),
+            _ => None,
+        }
+    }
+
+    /// Whether the chosen mask is a gradient, whose handles need the whole photo (REQ-030-03).
+    pub fn is_on_gradient(&self) -> bool {
+        self.gradient().is_some()
+    }
+
+    pub fn is_dragging_gradient(&self) -> bool {
+        self.gradient_drag.is_some()
+    }
+
+    /// Where the photo was last drawn with a gradient chosen.
+    pub fn gradient_area(&self) -> Option<Rect> {
+        self.gradient_area
+    }
+
+    pub fn set_gradient_area(&mut self, area: Rect) {
+        self.gradient_area = Some(area);
+    }
+
+    /// A point of the original on the photo at `area`.
+    fn on_photo(&self, point: [f32; 2], area: Rect) -> Pos2 {
+        let [u, v] = self.shown_geometry(false).to_output(point);
+        pos2(area.left() + u * area.width(), area.top() + v * area.height())
+    }
+
+    /// Takes drags on the chosen gradient's handles, on the photo at `area` (REQ-030-03).
+    pub fn gradient_input(&mut self, ui: &egui::Ui, backdrop: &egui::Response, area: Rect) {
+        let Some((from, to)) = self.gradient() else { return };
+        let (first, second) = (self.on_photo(from, area), self.on_photo(to, area));
+        let grabs = |pos: Pos2| -> Option<bool> {
+            let (near_first, near_second) = (pos.distance(first), pos.distance(second));
+            (near_first.min(near_second) <= GRIP_REACH).then_some(near_second < near_first)
+        };
+        if self.gradient_drag.is_some() || backdrop.hover_pos().and_then(grabs).is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
+        let origin = ui.input(|input| input.pointer.press_origin());
+        if backdrop.drag_started()
+            && let Some(origin) = origin
+        {
+            self.gradient_drag = grabs(origin);
+        }
+        if let (Some(second), Some(pos), Part::Mask(i)) =
+            (self.gradient_drag, backdrop.interact_pointer_pos(), self.part)
+        {
+            let [u, v] = self.shown_geometry(false).to_original([
+                (pos.x - area.left()) / area.width(),
+                (pos.y - area.top()) / area.height(),
+            ]);
+            let point = [u.clamp(-1.0, 2.0), v.clamp(-1.0, 2.0)];
+            if let Some(LocalMask {
+                shape: MaskShape::Linear { from, to },
+                ..
+            }) = self.draft.masks.get_mut(i)
+            {
+                *(if second { to } else { from }) = point;
+            }
+            ui.ctx().request_repaint();
+        }
+        // One undo step per drag.
+        if backdrop.drag_stopped() && self.gradient_drag.take().is_some() {
+            self.commit(self.draft.clone());
+        }
+    }
+
+    /// The chosen gradient over the photo at `area`: its two handles, each with a line across the photo.
+    pub fn paint_gradient(&self, painter: &egui::Painter, area: Rect) {
+        let Some((from, to)) = self.gradient() else { return };
+        let (first, second) = (self.on_photo(from, area), self.on_photo(to, area));
+        let painter = painter.with_clip_rect(area);
+        let dark = egui::Stroke::new(3.0, Color32::from_black_alpha(120));
+        let white = egui::Stroke::new(1.0, Color32::WHITE);
+        let across = (second - first).normalized().rot90() * (area.width() + area.height());
+        for stroke in [dark, white] {
+            painter.line_segment([first, second], stroke);
+            for handle in [first, second] {
+                painter.line_segment([handle - across, handle + across], stroke);
+            }
+        }
+        painter.circle(first, 6.0, Color32::WHITE, dark);
+        painter.circle(
+            second,
+            6.0,
+            Color32::from_black_alpha(160),
+            egui::Stroke::new(1.5, Color32::WHITE),
+        );
+    }
+
     /// The crop's frame over the whole photo at `area`: darkened outside, thirds and grips inside (REQ-029-02).
     pub fn paint_crop(&self, painter: &egui::Painter, area: Rect) {
         let [x, y, w, h] = self.crop_frame();
@@ -819,9 +923,13 @@ impl EditSession {
         };
         // Parts by the mask (4); the selection tinted (8), the background's (16) (REQ-022-03, REQ-022-04).
         let mut flags = u32::from(compare);
+        // The chosen mask tinted, as index + 1 above the other flags (REQ-030-07).
+        if let (Part::Mask(i), true) = (self.part, self.show_selection) {
+            flags |= (i as u32 + 1) << 8;
+        }
         if mask.is_some() {
             flags |= 4;
-            if self.show_selection {
+            if self.show_selection && matches!(self.part, Part::Subject | Part::Background) {
                 flags |= 8 | if self.part == Part::Background { 16 } else { 0 };
             }
         }
@@ -1074,6 +1182,14 @@ impl EditSession {
             }
             ui.add_space(8.0);
         }
+        // The subject and the background have their own switch; masks go with the photo.
+        if matches!(self.part, Part::Photo | Part::Mask(_)) {
+            section_header(ui, "Masks", &mut self.masks_open);
+            if self.masks_open {
+                self.add_mask(ui);
+            }
+            ui.add_space(8.0);
+        }
     }
 
     /// The switch between the photo, its subject and its background, and the state of finding the subject
@@ -1088,8 +1204,14 @@ impl EditSession {
             }
         });
         ui.add_space(4.0);
+        self.masks(ui);
         if self.part == Part::Photo {
             ui.add_space(4.0);
+            return true;
+        }
+        if let Part::Mask(i) = self.part {
+            self.mask_controls(ui, i);
+            ui.add_space(8.0);
             return true;
         }
         let ready = match &self.subject {
@@ -1118,6 +1240,93 @@ impl EditSession {
         };
         ui.add_space(8.0);
         ready
+    }
+
+    /// The photo's masks to choose from, once it has any (REQ-030-01).
+    fn masks(&mut self, ui: &mut egui::Ui) {
+        // Undo may have taken the chosen mask away.
+        if matches!(self.part, Part::Mask(i) if i >= self.draft.masks.len()) {
+            self.choose_part(Part::Photo);
+        }
+        if self.draft.masks.is_empty() {
+            return;
+        }
+        ui.horizontal_wrapped(|ui| {
+            for i in 0..self.draft.masks.len() {
+                let label = format!("{} {}", self.draft.masks[i].shape.label(), i + 1);
+                if ui
+                    .add(egui::Button::selectable(self.part == Part::Mask(i), label))
+                    .clicked()
+                {
+                    self.choose_part(Part::Mask(i));
+                }
+            }
+        });
+        ui.add_space(4.0);
+    }
+
+    /// One button per kind of mask (REQ-030-01).
+    fn add_mask(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            let room = self.draft.masks.len() < MAX_MASKS;
+            for (label, shape) in [
+                ("Add gradient", MaskShape::LINEAR),
+                ("Add luminance", MaskShape::LUMINANCE),
+                ("Add color", MaskShape::COLOR),
+            ] {
+                if ui.add_enabled(room, egui::Button::new(label)).clicked() {
+                    let mut recipe = self.draft.clone();
+                    recipe.masks.push(LocalMask::new(shape));
+                    let chosen = Part::Mask(recipe.masks.len() - 1);
+                    self.commit(recipe);
+                    self.choose_part(chosen);
+                }
+            }
+        });
+    }
+
+    /// What the chosen mask selects, and turning it around, showing or removing it (REQ-030-03 … REQ-030-07).
+    fn mask_controls(&mut self, ui: &mut egui::Ui, i: usize) {
+        let Some(mask) = self.draft.masks.get(i) else { return };
+        let (shape, invert) = (mask.shape, mask.invert);
+        if matches!(shape, MaskShape::Linear { .. }) {
+            let hint = "Drag the two handles on the photo: full at the white one, none at the dark one.";
+            ui.add(egui::Label::new(hint).wrap());
+            ui.add_space(4.0);
+        }
+        for (slider, (label, value, range, unit)) in shape.sliders().into_iter().enumerate() {
+            let mut current = f64::from(value);
+            let response = slider_row(ui, label, &format!("{value:.0}{unit}"), &mut current, range, 1.0);
+            if response.changed() {
+                self.draft.masks[i].shape.set_slider(slider, current as f32);
+            }
+            if response.drag_stopped() || response.clicked() || (response.changed() && !response.dragged()) {
+                self.commit(self.draft.clone());
+            }
+        }
+        ui.horizontal_wrapped(|ui| {
+            let response = ui.add(egui::Button::new("Invert").selected(invert));
+            response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, invert, "Invert"));
+            if response.clicked() {
+                let mut recipe = self.draft.clone();
+                recipe.masks[i].invert = !invert;
+                self.commit(recipe);
+            }
+            let shown = self.show_selection;
+            let response = ui
+                .add(egui::Button::new("Show selection").selected(shown))
+                .on_hover_text("Tint the part these adjustments change");
+            response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, shown, "Show selection"));
+            if response.clicked() {
+                self.set_show_selection(!shown);
+            }
+            if ui.button("Remove mask").clicked() {
+                let mut recipe = self.draft.clone();
+                recipe.masks.remove(i);
+                self.commit(recipe);
+                self.choose_part(Part::Photo);
+            }
+        });
     }
 
     /// The crop's shapes (REQ-029-03), and leaving it.
@@ -1657,6 +1866,9 @@ fn cpu_preview(
             let selected = if flags & 16 != 0 { 1.0 - subject } else { subject };
             out = tint(out, selected);
         }
+        if let Some(mask) = (flags >> 8).checked_sub(1).and_then(|i| params.masks.get(i as usize)) {
+            out = tint(out, mask.weight(rgb, uv, size));
+        }
         rgba.extend(out.map(|c| (c * 255.0).round() as u8));
         rgba.push(pixel[3]);
     }
@@ -1717,7 +1929,7 @@ fn uniform(
     opacity: f32,
     flags: f32,
 ) -> Vec<f32> {
-    let mut floats = Vec::with_capacity(112 + CURVE_SAMPLES * 4);
+    let mut floats = Vec::with_capacity(116 + 24 * MAX_MASKS * 4 + CURVE_SAMPLES * 4);
     floats.extend_from_slice(&rect);
     floats.extend_from_slice(&uv);
     floats.extend_from_slice(&[full_size[0], full_size[1], opacity, flags]);
@@ -1750,6 +1962,17 @@ fn uniform(
     for i in 0..domain::look::HUE_NODES {
         let [turn, chroma, light] = params.hue_nodes.map_or([0.0, 1.0, 0.0], |nodes| nodes[i]);
         floats.extend_from_slice(&[turn, chroma, light, 0.0]);
+    }
+    floats.extend_from_slice(&[params.masks.len() as f32, 0.0, 0.0, 0.0]);
+    for i in 0..MAX_MASKS {
+        match params.masks.get(i) {
+            Some(mask) => {
+                floats.extend_from_slice(&part_floats(&mask.params, 1.0));
+                let [kind, a, b, c, d] = mask.shape.numbers();
+                floats.extend_from_slice(&[kind, f32::from(u8::from(mask.invert)), a, b, c, d, 0.0, 0.0]);
+            }
+            None => floats.extend_from_slice(&[0.0; 24]),
+        }
     }
     for i in 0..CURVE_SAMPLES {
         let [r, g, b] = params.curves.as_ref().map_or([0.0; 3], |table| table[i]);
@@ -2373,6 +2596,69 @@ mod tests {
             red(248),
             red(100)
         );
+    }
+
+    /// REQ-030-07, REQ-030-08: every kind of mask, and its tint, previews as saving renders it (within two levels).
+    #[test]
+    fn req_030_07_req_030_08_the_gpu_preview_of_masks_matches_the_cpu_render() {
+        let (_gpu, render_state) = render_state();
+        let image = pattern();
+        let mask = |shape: MaskShape, invert: bool, adjustment: Adjustment, value: f32| {
+            let mut mask = LocalMask::new(shape);
+            mask.invert = invert;
+            adjustment.set(&mut mask.recipe, value);
+            mask
+        };
+        let linear = MaskShape::Linear {
+            from: [0.2, 0.1],
+            to: [0.7, 0.8],
+        };
+        let luminance = MaskShape::Luminance {
+            low: 30.0,
+            high: 70.0,
+            feather: 10.0,
+        };
+        let color = MaskShape::Color {
+            hue: 30.0,
+            range: 60.0,
+            feather: 30.0,
+        };
+        let recipe = Recipe {
+            masks: vec![
+                mask(linear, false, Adjustment::Exposure, 1.0),
+                mask(luminance, false, Adjustment::Temperature, 60.0),
+                mask(color, false, Adjustment::Saturation, -80.0),
+                mask(linear, true, Adjustment::Contrast, 40.0),
+            ],
+            ..Recipe::default()
+        };
+        let plain = render_gpu(&render_state, &image, &Recipe::default(), None, 0);
+        for flags in [0, 1 << 8, 2 << 8, 3 << 8, 4 << 8] {
+            let gpu = render_gpu(&render_state, &image, &recipe, None, flags);
+            let cpu = cpu_preview(&image, &recipe, recipe.geometry(), [SIZE, SIZE], None, flags);
+            for (i, (gpu, cpu)) in gpu.chunks_exact(4).zip(cpu.pixels.iter()).enumerate() {
+                for c in 0..3 {
+                    let diff = (i32::from(gpu[c]) - i32::from(cpu.to_array()[c])).abs();
+                    assert!(
+                        diff <= 2,
+                        "pixel {i} channel {c}: GPU {gpu:?}, CPU {cpu:?} with flags {flags}"
+                    );
+                }
+            }
+            assert_ne!(gpu, plain, "the masks change the photo");
+        }
+        // Cropped and turned, a gradient stays on its part of the photo.
+        let mut turned = recipe;
+        turned.quarter_turns = 1;
+        turned.crop = Some([0.5, 0.0, 0.5, 0.5]);
+        let gpu = render_gpu(&render_state, &image, &turned, None, 0);
+        let cpu = cpu_preview(&image, &turned, turned.geometry(), [SIZE, SIZE], None, 0);
+        for (i, (gpu, cpu)) in gpu.chunks_exact(4).zip(cpu.pixels.iter()).enumerate() {
+            for c in 0..3 {
+                let diff = (i32::from(gpu[c]) - i32::from(cpu.to_array()[c])).abs();
+                assert!(diff <= 3, "pixel {i} channel {c}: GPU {gpu:?}, CPU {cpu:?}");
+            }
+        }
     }
 
     #[test]

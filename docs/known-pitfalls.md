@@ -169,3 +169,5 @@ Add every pitfall you hit. A trap in a tool, library, OS or our tests that we ca
 * **A 1 % screenshot tolerance hides small changes** like a status badge: the browser test allows 50 pixels. Fix the page's clock (`page.clock.setFixedTime`), time zone and locale, since Settings show when a library was last indexed.
 * **The page can't be driven through Chromium's directory picker headless:** the test deletes `showDirectoryPicker`, so the page falls back to the folder upload input, which `setInputFiles` fills.
 * **`pkill -f <pattern>` in a shell command can kill the shell itself** when the pattern appears in its own command line. Stop the test server by port: `fuser -k 8765/tcp`.
+
+* **Windows' shader compiler (FXC) must unroll loops it can't address**: a WGSL `for` over a uniform array with a count from a uniform fails only on Windows with `X3511: unable to unroll loop`, at pipeline creation, while Linux (Vulkan) is fine. `edit.wgsl` calls `apply_mask` once per mask instead. Run shader changes through Windows CI before trusting them.

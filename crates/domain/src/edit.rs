@@ -343,6 +343,9 @@ pub struct Recipe {
     /// The background's own light and color.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub background: Option<Box<Recipe>>,
+    /// Masks with their own light and color, on top of the rest, in order (REQ-030-02).
+    #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "masks_known")]
+    pub masks: Vec<LocalMask>,
     /// A film look under the adjustments (REQ-028-01); one only a newer version knows reads as none.
     #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "look_or_none")]
     pub look: Option<crate::look::LookChoice>,
@@ -387,6 +390,7 @@ impl Default for Recipe {
             blur_focus: [0.5, 0.5],
             subject: None,
             background: None,
+            masks: Vec::new(),
             look: None,
             quarter_turns: 0,
             crop: None,
@@ -409,6 +413,7 @@ impl Recipe {
             && [&self.subject, &self.background]
                 .into_iter()
                 .all(|part| part.as_ref().is_none_or(|part| part.is_neutral()))
+            && self.masks.iter().all(|mask| mask.recipe.is_neutral())
     }
 
     /// The adjustments of `part`: the recipe itself for [`Part::Photo`], `None` for a part without any.
@@ -417,6 +422,7 @@ impl Recipe {
             Part::Photo => Some(self),
             Part::Subject => self.subject.as_deref(),
             Part::Background => self.background.as_deref(),
+            Part::Mask(i) => self.masks.get(i).map(|mask| &*mask.recipe),
         }
     }
 
@@ -426,6 +432,9 @@ impl Recipe {
             Part::Photo => self,
             Part::Subject => self.subject.get_or_insert_default(),
             Part::Background => self.background.get_or_insert_default(),
+            Part::Mask(i) if i < self.masks.len() => &mut self.masks[i].recipe,
+            // No such mask (any more): nothing that is shown changes.
+            Part::Mask(_) => self,
         }
     }
 
@@ -446,17 +455,24 @@ impl Recipe {
 
     /// Drops the parts that are neutral, and from the parts everything but light and color.
     pub fn tidy(&mut self) {
+        let light_and_color = |recipe: &Recipe| {
+            let mut kept = Recipe::default();
+            for adjustment in Adjustment::ALL.into_iter().filter(|a| a.in_parts()) {
+                adjustment.set(&mut kept, adjustment.get(recipe));
+            }
+            kept
+        };
         for part in [&mut self.subject, &mut self.background] {
             if let Some(recipe) = part {
-                let mut kept = Recipe::default();
-                for adjustment in Adjustment::ALL.into_iter().filter(|a| a.in_parts()) {
-                    adjustment.set(&mut kept, adjustment.get(recipe));
-                }
-                **recipe = kept;
+                **recipe = light_and_color(recipe);
             }
             if part.as_ref().is_some_and(|recipe| recipe.is_neutral()) {
                 *part = None;
             }
+        }
+        // A neutral mask stays: it was just added, or is about to get its adjustments.
+        for mask in &mut self.masks {
+            *mask.recipe = light_and_color(&mask.recipe);
         }
     }
 
@@ -475,6 +491,11 @@ impl Recipe {
         recipe.sanitize();
         for part in [&mut recipe.subject, &mut recipe.background].into_iter().flatten() {
             part.sanitize();
+        }
+        recipe.masks.truncate(MAX_MASKS);
+        for mask in &mut recipe.masks {
+            mask.recipe.sanitize();
+            mask.shape.sanitize();
         }
         recipe.tidy();
         Some(recipe)
@@ -632,6 +653,8 @@ pub enum Part {
     Photo,
     Subject,
     Background,
+    /// A mask of the recipe, by its place in the list (REQ-030-01).
+    Mask(usize),
 }
 
 impl Part {
@@ -642,7 +665,193 @@ impl Part {
             Self::Photo => "Photo",
             Self::Subject => "Subject",
             Self::Background => "Background",
+            Self::Mask(_) => "Mask",
         }
+    }
+}
+
+/// Masks a recipe can have (REQ-030-01).
+pub const MAX_MASKS: usize = 8;
+
+/// What a mask selects (REQ-030-03 … REQ-030-05). Positions are fractions of the upright, unturned original, as the
+/// crop's are; brightness and softness in percent of the encoded scale, hue, range and color softness in degrees of
+/// Oklab's color wheel.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum MaskShape {
+    /// Full at `from`, fading to nothing at `to`.
+    Linear {
+        from: [f32; 2],
+        to: [f32; 2],
+    },
+    Luminance {
+        low: f32,
+        high: f32,
+        feather: f32,
+    },
+    Color {
+        hue: f32,
+        range: f32,
+        feather: f32,
+    },
+}
+
+impl MaskShape {
+    /// From the top to the middle of the photo: a sky, usually.
+    pub const LINEAR: Self = Self::Linear {
+        from: [0.5, 0.1],
+        to: [0.5, 0.5],
+    };
+    /// The bright half.
+    pub const LUMINANCE: Self = Self::Luminance {
+        low: 60.0,
+        high: 100.0,
+        feather: 15.0,
+    };
+    /// Greens.
+    pub const COLOR: Self = Self::Color {
+        hue: 140.0,
+        range: 30.0,
+        feather: 20.0,
+    };
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Linear { .. } => "Gradient",
+            Self::Luminance { .. } => "Luminance",
+            Self::Color { .. } => "Color",
+        }
+    }
+
+    /// The panel's sliders of this shape: name, value, range, unit (REQ-030-04, REQ-030-05). A gradient has handles.
+    pub fn sliders(self) -> Vec<(&'static str, f32, (f32, f32), &'static str)> {
+        match self {
+            Self::Linear { .. } => Vec::new(),
+            Self::Luminance { low, high, feather } => vec![
+                ("From", low, (0.0, 100.0), " %"),
+                ("To", high, (0.0, 100.0), " %"),
+                ("Softness", feather, (0.0, 50.0), " %"),
+            ],
+            Self::Color { hue, range, feather } => vec![
+                ("Mask hue", hue, (0.0, 360.0), "°"),
+                ("Range", range, (0.0, 180.0), "°"),
+                ("Softness", feather, (0.0, 90.0), "°"),
+            ],
+        }
+    }
+
+    /// Sets slider `i` of [`Self::sliders`].
+    pub fn set_slider(&mut self, i: usize, value: f32) {
+        match self {
+            Self::Linear { .. } => {}
+            Self::Luminance { low, high, feather } => *[low, high, feather][i] = value,
+            Self::Color { hue, range, feather } => *[hue, range, feather][i] = value,
+        }
+    }
+
+    /// Values from a file brought into their ranges (REQ-011-10).
+    fn sanitize(&mut self) {
+        let fit = |value: &mut f32, low: f32, high: f32, or: f32| {
+            *value = if value.is_finite() { value.clamp(low, high) } else { or };
+        };
+        match self {
+            Self::Linear { from, to } => {
+                for c in from.iter_mut().chain(to.iter_mut()) {
+                    fit(c, -1.0, 2.0, 0.5);
+                }
+            }
+            Self::Luminance { low, high, feather } => {
+                fit(low, 0.0, 100.0, 0.0);
+                fit(high, 0.0, 100.0, 100.0);
+                fit(feather, 0.0, 100.0, 0.0);
+            }
+            Self::Color { hue, range, feather } => {
+                fit(hue, 0.0, 360.0, 0.0);
+                fit(range, 0.0, 180.0, 30.0);
+                fit(feather, 0.0, 90.0, 0.0);
+            }
+        }
+    }
+
+    /// How much of the pixel `rgb` as stored, at `uv` of a photo `size` pixels large, this selects: 0 to 1.
+    pub fn weight(self, rgb: [f32; 3], uv: [f32; 2], size: [f32; 2]) -> f32 {
+        match self {
+            Self::Linear { from, to } => {
+                let along = [(to[0] - from[0]) * size[0], (to[1] - from[1]) * size[1]];
+                let length = along[0] * along[0] + along[1] * along[1];
+                if length <= 0.0 {
+                    return 0.0;
+                }
+                let at = [(uv[0] - from[0]) * size[0], (uv[1] - from[1]) * size[1]];
+                1.0 - smoothstep(0.0, 1.0, (at[0] * along[0] + at[1] * along[1]) / length)
+            }
+            Self::Luminance { low, high, feather } => {
+                let value = to_encoded(luminance(rgb.map(to_linear)).max(0.0)) * 100.0;
+                let feather = feather.max(0.5);
+                smoothstep(low - feather, low, value) * (1.0 - smoothstep(high, high + feather, value))
+            }
+            Self::Color { hue, range, feather } => {
+                let [_, a, b] = to_oklab(rgb.map(to_linear));
+                let chroma = (a * a + b * b).sqrt();
+                // The short way around the wheel.
+                let away = ((b.atan2(a).to_degrees() - hue + 180.0).rem_euclid(360.0) - 180.0).abs();
+                (1.0 - smoothstep(range, range + feather.max(0.5), away)) * smoothstep(0.02, 0.06, chroma)
+            }
+        }
+    }
+
+    /// The numbers the shader's `LocalMask` holds: its kind, then the shape's.
+    pub fn numbers(self) -> [f32; 5] {
+        match self {
+            Self::Linear { from, to } => [0.0, from[0], from[1], to[0], to[1]],
+            Self::Luminance { low, high, feather } => [1.0, low / 100.0, high / 100.0, feather / 100.0, 0.0],
+            Self::Color { hue, range, feather } => [2.0, hue, range, feather, 0.0],
+        }
+    }
+}
+
+/// A mask of a recipe: what it selects, and the light and color it gives that (REQ-030-02).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LocalMask {
+    pub shape: MaskShape,
+    #[serde(default)]
+    pub invert: bool,
+    #[serde(default)]
+    pub recipe: Box<Recipe>,
+}
+
+impl LocalMask {
+    pub fn new(shape: MaskShape) -> Self {
+        Self {
+            shape,
+            invert: false,
+            recipe: Box::default(),
+        }
+    }
+}
+
+/// The masks of a recipe from a file; a kind only a newer version knows is left out (REQ-030-08).
+fn masks_known<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<LocalMask>, D::Error> {
+    let masks = Vec::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(masks
+        .into_iter()
+        .filter_map(|mask| serde_json::from_value(mask).ok())
+        .collect())
+}
+
+/// A mask's numbers in [`Params`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct MaskParams {
+    pub shape: MaskShape,
+    pub invert: bool,
+    pub params: Box<Params>,
+}
+
+impl MaskParams {
+    /// How much of the pixel this mask selects (REQ-030-02, REQ-030-06).
+    pub fn weight(&self, rgb: [f32; 3], uv: [f32; 2], size: [f32; 2]) -> f32 {
+        let weight = self.shape.weight(rgb, uv, size);
+        if self.invert { 1.0 - weight } else { weight }
     }
 }
 
@@ -1127,6 +1336,8 @@ pub struct Params {
     pub grain_midtones: bool,
     /// How much the grain differs between the color channels, 0–1 (REQ-028-06).
     pub grain_color: f32,
+    /// The masks' numbers, in order (REQ-030-02).
+    pub masks: Vec<MaskParams>,
     /// How strongly bright lights glow red around them, for a film look (REQ-028-08).
     pub halation: f32,
     /// What a film look does to each hue, at its strength: turn in radians, chroma's factor, lightness added
@@ -1200,6 +1411,15 @@ impl Params {
             grain_midtones: look.is_some(),
             grain_color: look.map_or(0.0, crate::look::Look::grain_color),
             hue_nodes,
+            masks: recipe
+                .masks
+                .iter()
+                .map(|mask| MaskParams {
+                    shape: mask.shape,
+                    invert: mask.invert,
+                    params: Box::new(Params::new(&mask.recipe)),
+                })
+                .collect(),
             halation: recipe_look.map_or(0.0, |choice| choice.look.halation() * choice.strength / 100.0),
             curves,
             blur_kind: recipe.blur_kind,
@@ -1242,6 +1462,11 @@ impl Params {
             let part = |params: &Option<Box<Params>>| params.as_ref().map_or(lin, |params| params.develop(lin));
             let (inside, outside) = (part(&self.subject), part(&self.background));
             lin = std::array::from_fn(|c| outside[c] + (inside[c] - outside[c]) * subject);
+        }
+        for mask in &self.masks {
+            let weight = mask.weight(rgb, uv, size);
+            let developed = mask.params.develop(lin);
+            lin = std::array::from_fn(|c| lin[c] + (developed[c] - lin[c]) * weight);
         }
         self.finish(std::array::from_fn(|c| lin[c] + glow[c]), uv, size)
     }
@@ -2041,6 +2266,199 @@ mod tests {
         // Grain is monochrome.
         assert!(a[0] == a[1] && a[1] == a[2]);
         assert!((-0.5..=0.5).contains(&value_noise(12.3, -4.5)));
+    }
+
+    fn masked(shape: MaskShape, adjustment: Adjustment, value: f32) -> Recipe {
+        let mut mask = LocalMask::new(shape);
+        adjustment.set(&mut mask.recipe, value);
+        Recipe {
+            masks: vec![mask],
+            ..Recipe::default()
+        }
+    }
+
+    const GREY: [f32; 3] = [0.5, 0.5, 0.5];
+
+    /// REQ-030-02: full where the mask selects, nothing where it doesn't, softly in between.
+    #[test]
+    fn req_030_02_a_mask_changes_only_what_it_selects() {
+        let shape = MaskShape::Linear {
+            from: [0.0, 0.0],
+            to: [0.0, 1.0],
+        };
+        let params = Params::new(&masked(shape, Adjustment::Exposure, 1.0));
+        let at = |v: f32| params.pixel(GREY, [0.5, v], SIZE)[1];
+        let full = Params::new(&with(Adjustment::Exposure, 1.0)).pixel(GREY, MID, SIZE)[1];
+        assert!((at(0.0) - full).abs() < 0.01, "{} vs {full}", at(0.0));
+        assert!((at(1.0) - 0.5).abs() < 0.01, "{}", at(1.0));
+        assert!(at(0.5) > 0.52 && at(0.5) < full - 0.02, "{}", at(0.5));
+        // Neutral masks change nothing.
+        let neutral = Recipe {
+            masks: vec![LocalMask::new(MaskShape::LINEAR)],
+            ..Recipe::default()
+        };
+        assert!(neutral.is_neutral());
+        assert_eq!(
+            Params::new(&neutral).pixel(GREY, MID, SIZE),
+            Params::new(&Recipe::default()).pixel(GREY, MID, SIZE)
+        );
+    }
+
+    /// REQ-030-02: each mask works on the result of the one before.
+    #[test]
+    fn req_030_02_masks_apply_in_order() {
+        let all = MaskShape::Luminance {
+            low: 0.0,
+            high: 100.0,
+            feather: 0.0,
+        };
+        let mut warmer = LocalMask::new(all);
+        Adjustment::Temperature.set(&mut warmer.recipe, 60.0);
+        let mut pale = LocalMask::new(all);
+        Adjustment::Saturation.set(&mut pale.recipe, -100.0);
+        let recipe = |masks: Vec<LocalMask>| Recipe {
+            masks,
+            ..Recipe::default()
+        };
+        let cast = |rgb: [f32; 3]| (rgb[0] - rgb[2]).abs();
+        let pale_last = Params::new(&recipe(vec![warmer.clone(), pale.clone()])).pixel(GREY, MID, SIZE);
+        assert!(cast(pale_last) < 0.01, "{pale_last:?}");
+        let warm_last = Params::new(&recipe(vec![pale, warmer])).pixel(GREY, MID, SIZE);
+        assert!(cast(warm_last) > 0.05, "{warm_last:?}");
+    }
+
+    /// REQ-030-03: full at the first handle, nothing at the second, whichever way it points.
+    #[test]
+    fn req_030_03_a_gradient_fades_between_its_handles() {
+        let shape = MaskShape::Linear {
+            from: [0.2, 0.5],
+            to: [0.8, 0.5],
+        };
+        let weight = |u: f32| shape.weight(GREY, [u, 0.5], SIZE);
+        assert_eq!(weight(0.1), 1.0);
+        assert_eq!(weight(0.2), 1.0);
+        assert_eq!(weight(0.8), 0.0);
+        assert_eq!(weight(0.9), 0.0);
+        assert!((weight(0.5) - 0.5).abs() < 1e-5);
+        assert!(weight(0.35) > weight(0.5) && weight(0.5) > weight(0.65));
+        let same = MaskShape::Linear {
+            from: [0.5, 0.5],
+            to: [0.5, 0.5],
+        };
+        assert_eq!(same.weight(GREY, [0.1, 0.9], SIZE), 0.0, "no direction selects nothing");
+    }
+
+    /// REQ-030-04: what is that bright as stored, whatever the photo's own sliders do.
+    #[test]
+    fn req_030_04_a_luminance_mask_reads_the_unedited_photo() {
+        let shape = MaskShape::Luminance {
+            low: 40.0,
+            high: 60.0,
+            feather: 10.0,
+        };
+        let weight = |v: f32| shape.weight([v; 3], MID, SIZE);
+        assert_eq!(weight(0.5), 1.0);
+        assert_eq!(weight(0.2), 0.0);
+        assert_eq!(weight(0.8), 0.0);
+        assert!(weight(0.35) > 0.0 && weight(0.35) < 1.0, "{}", weight(0.35));
+
+        let mut recipe = masked(shape, Adjustment::Exposure, 1.0);
+        assert!(Params::new(&recipe).pixel(GREY, MID, SIZE)[1] > 0.6);
+        // The photo twice as bright: the mask still selects this pixel, and adds to it.
+        Adjustment::Exposure.set(&mut recipe, 1.0);
+        let photo = Params::new(&with(Adjustment::Exposure, 1.0)).pixel(GREY, MID, SIZE)[1];
+        assert!(Params::new(&recipe).pixel(GREY, MID, SIZE)[1] > photo + 0.1);
+    }
+
+    /// REQ-030-05: the chosen hues, and no greys.
+    #[test]
+    fn req_030_05_a_color_mask_selects_hues_and_no_greys() {
+        let weight = |shape: MaskShape, rgb: [f32; 3]| shape.weight(rgb, MID, SIZE);
+        let greens = MaskShape::COLOR;
+        let (green, red) = ([0.2, 0.6, 0.2], [0.7, 0.15, 0.15]);
+        assert_eq!(weight(greens, green), 1.0);
+        assert_eq!(weight(greens, red), 0.0);
+        assert_eq!(weight(greens, GREY), 0.0);
+        // Across the wheel's seam: red lies just past 0°, the mask's center just before it.
+        let reds = MaskShape::Color {
+            hue: 355.0,
+            range: 40.0,
+            feather: 10.0,
+        };
+        assert_eq!(weight(reds, red), 1.0);
+        assert_eq!(weight(reds, green), 0.0);
+    }
+
+    /// REQ-030-06: _Invert_ selects what was left out.
+    #[test]
+    fn req_030_06_invert_swaps_the_selection() {
+        let mut recipe = masked(MaskShape::COLOR, Adjustment::Exposure, 1.0);
+        let green = [0.2, 0.6, 0.2];
+        let plain = Params::new(&Recipe::default());
+        assert_ne!(
+            Params::new(&recipe).pixel(green, MID, SIZE),
+            plain.pixel(green, MID, SIZE)
+        );
+        assert_eq!(
+            Params::new(&recipe).pixel(GREY, MID, SIZE),
+            plain.pixel(GREY, MID, SIZE)
+        );
+        recipe.masks[0].invert = true;
+        assert_eq!(
+            Params::new(&recipe).pixel(green, MID, SIZE),
+            plain.pixel(green, MID, SIZE)
+        );
+        assert_ne!(
+            Params::new(&recipe).pixel(GREY, MID, SIZE),
+            plain.pixel(GREY, MID, SIZE)
+        );
+    }
+
+    /// REQ-030-08: masks survive saving; values from a file stay in range; an unknown kind is left out, not the recipe.
+    #[test]
+    fn req_030_08_masks_are_saved_and_values_stay_in_range() {
+        let mut recipe = masked(MaskShape::LINEAR, Adjustment::Exposure, 0.5);
+        recipe.masks.push(LocalMask {
+            shape: MaskShape::LUMINANCE,
+            invert: true,
+            recipe: Box::default(),
+        });
+        assert_eq!(Recipe::from_json(&recipe.to_json()), Some(recipe));
+        assert!(
+            !Recipe::default().to_json().contains("masks"),
+            "recipes without masks stay as they were"
+        );
+
+        let hostile = r#"{"version":1,"masks":[
+            {"shape":{"kind":"luminance","low":-50,"high":900,"feather":1e30},"recipe":{"exposure":99,"grain":50}},
+            {"shape":{"kind":"spiral","turns":3}},
+            {"shape":{"kind":"linear","from":[50,-50],"to":[0,0]}},
+            {"shape":{"kind":"color","hue":720,"range":-1,"feather":500}}]}"#;
+        let read = Recipe::from_json(hostile).unwrap();
+        assert_eq!(read.masks.len(), 3, "{read:?}");
+        assert_eq!(
+            read.masks[0].shape,
+            MaskShape::Luminance {
+                low: 0.0,
+                high: 100.0,
+                feather: 100.0
+            }
+        );
+        let (low, high) = Adjustment::Exposure.range();
+        assert!((low..=high).contains(&read.masks[0].recipe.exposure));
+        assert_eq!(read.masks[0].recipe.grain, 0.0, "only light and color");
+        assert_eq!(
+            read.masks[1].shape,
+            MaskShape::Linear {
+                from: [2.0, -1.0],
+                to: [0.0, 0.0]
+            }
+        );
+        let many = format!(
+            r#"{{"version":1,"masks":[{}]}}"#,
+            vec![r#"{"shape":{"kind":"luminance","low":0,"high":100,"feather":0}}"#; 20].join(",")
+        );
+        assert_eq!(Recipe::from_json(&many).unwrap().masks.len(), MAX_MASKS);
     }
 
     #[test]
