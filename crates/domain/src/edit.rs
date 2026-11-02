@@ -2633,7 +2633,7 @@ mod tests {
         let part = r#"{"op":"add","shape":{"kind":"luminance","low":-5,"high":500,"feather":0}}"#;
         let json = format!(
             r#"{{"version":1,"masks":[{{"shape":{{"kind":"subject"}},"more":[{}]}}]}}"#,
-            vec![part; 9].join(",")
+            [part; 9].join(",")
         );
         let read = Recipe::from_json(&json).unwrap();
         assert_eq!(read.masks[0].shapes(), MAX_MASK_SHAPES);
