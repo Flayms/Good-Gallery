@@ -23,15 +23,19 @@ if command -v apt-get > /dev/null; then
   apt-get update -q
   apt-get install -qy "$package" xvfb xauth mesa-vulkan-drivers
   remove="apt-get remove -qy good-gallery"
+  files="dpkg -L good-gallery"
 else
   dnf install -qy "$package" xorg-x11-server-Xvfb xauth mesa-vulkan-drivers
   remove="dnf remove -qy good-gallery"
+  files="rpm -ql good-gallery"
 fi
 
 for file in /usr/bin/good-gallery /usr/share/applications/good-gallery.desktop \
-  /usr/share/icons/hicolor/256x256/apps/good-gallery.png /usr/share/doc/good-gallery/LICENSE.txt; do
+  /usr/share/icons/hicolor/256x256/apps/good-gallery.png; do
   check "[ -e $file ]" "installed $file"
 done
+# Asked of the package manager: container images leave out /usr/share/doc when installing.
+check "$files | grep -q /usr/share/doc/good-gallery/LICENSE.txt" "the package has the license"
 check "grep -q '^MimeType=.*image/jpeg' /usr/share/applications/good-gallery.desktop" "the menu entry opens photos"
 for helper in exiftool ffmpeg; do
   check "command -v $helper > /dev/null" "the package brought $helper"

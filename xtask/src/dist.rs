@@ -450,6 +450,9 @@ mod tests {
             "- perl-Image-ExifTool",
             "- /usr/bin/ffmpeg",
             "- mpv-libs",
+            // winit panics on X11 without it, and it loads it at run time, so nothing else asks for it.
+            "- libxkbcommon-x11-0",
+            "- libxkbcommon-x11\n",
         ] {
             assert!(config.contains(part), "nfpm.yaml lacks {part}");
         }

@@ -28,6 +28,8 @@ overrides:
       - libimage-exiftool-perl
       - ffmpeg
       - libmpv2
+      # winit panics on X11 without it, and loads it at run time, so no other dependency brings it.
+      - libxkbcommon-x11-0
     recommends:
       - mesa-vulkan-drivers
   rpm:
@@ -36,5 +38,6 @@ overrides:
       # Fedora's ffmpeg-free provides it, and RPM Fusion's ffmpeg too.
       - /usr/bin/ffmpeg
       - mpv-libs
+      - libxkbcommon-x11
     recommends:
       - mesa-vulkan-drivers
