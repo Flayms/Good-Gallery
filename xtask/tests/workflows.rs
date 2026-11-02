@@ -151,10 +151,10 @@ fn req_018_01_req_018_09_ci_and_the_release_cover_linux() {
         assert!(job.contains(needs) && job.contains("if: always() &&"), "{job}");
     }
     let release = workflow("release.yml");
-    let linux = &release[release.find("  linux:").expect("no linux job")..release.find("  pages:").unwrap()];
+    let linux = &release[release.find("  linux:").expect("no linux job")..release.find("  web:").unwrap()];
     assert!(linux.contains("runs-on: ubuntu-latest") && linux.contains("needs: checks"));
     assert!(commands(linux).contains(&"cargo xtask dist"));
-    assert!(release.contains("needs: [checks, linux]"));
+    assert!(release.contains("needs: [checks, linux, web]"));
 }
 
 /// REQ-019-14: CI builds the page and runs its browser tests; a release publishes it to GitHub Pages.
@@ -176,11 +176,42 @@ fn req_019_14_ci_tests_the_page_and_the_release_publishes_it() {
     let release = workflow("release.yml");
     let pages = &release[release.find("\n  pages:").expect("release.yml has no pages job")..];
     for step in [
-        "needs: checks",
-        "cargo xtask web",
+        "needs: web",
+        "actions/download-artifact",
         "actions/upload-pages-artifact",
         "actions/deploy-pages",
     ] {
         assert!(pages.contains(step), "release.yml's pages job lacks {step}");
     }
+}
+
+/// REQ-019-16: the job that builds the page hands it to Pages and attaches its zip to the release, so a failed Pages
+/// deploy doesn't hold back the release.
+#[test]
+fn req_019_16_the_release_attaches_the_page_as_a_zip() {
+    let release = workflow("release.yml");
+    let web = &release[release.find("\n  web:").expect("release.yml has no web job")..];
+    let web = &web[..web[1..].find("\n  pages:").expect("the pages job follows the web job")];
+    for part in [
+        "needs: checks",
+        "cargo xtask web",
+        "target/web",
+        "target/dist/*-web.zip",
+    ] {
+        assert!(web.contains(part), "release.yml's web job lacks {part}");
+    }
+    let publish = &release[release.find("\n  release:").expect("no release job")..];
+    assert!(
+        publish.contains("needs: [checks, linux, web]"),
+        "the release doesn't wait for the zip"
+    );
+    let create = &publish[publish.find("gh release create").expect("no gh release create")..];
+    assert!(
+        create.contains("good-gallery-$VERSION-web.zip"),
+        "the release doesn't attach the zip"
+    );
+    assert!(
+        publish.contains("**good-gallery-$VERSION-web.zip**"),
+        "the notes' download table doesn't list the zip"
+    );
 }

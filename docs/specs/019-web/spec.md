@@ -106,6 +106,13 @@ People who want to try Good Gallery, or who are on a computer where they can't i
 - **Then** the sidebar is hidden and the gallery, the empty state and the settings use the whole width; _Show sidebar_ (or Ctrl + B) opens the sidebar over the gallery, and picking something in it or clicking beside it closes it again
 - **And** the info sheet and the viewer's info panel are at most as wide as the screen; whether the sidebar is hidden on wider screens (REQ-008-09) stays as it was
 
+### REQ-019-16 · Hosted anywhere
+
+- **Given** a release (spec 014)
+- **When** the release workflow runs
+- **Then** the release has `good-gallery-<version>-web.zip` attached, with the files published to GitHub Pages and `index.html` at the top of the zip
+- **And** served from the root or a subfolder of any static web server, over HTTPS or on localhost, the page runs as it does on GitHub Pages
+
 ## Out of scope
 
 - A server, accounts, sharing or syncing between browsers and devices.
@@ -123,7 +130,7 @@ People who want to try Good Gallery, or who are on a computer where they can't i
 - WebGPU is available in Chrome and Edge on Windows and macOS, in Safari 26 and in Firefox on Windows; elsewhere the page draws with WebGL 2.
 - The browser's storage quota for the page is large enough for the index and the thumbnail cache of the libraries in scope (a few GB for 50,000 files); the cache size limit (REQ-005-11, REQ-010-05) applies.
 - Libraries in scope have up to 20,000 files on a local disk. Larger ones are slower to scan than in the desktop app, which reads files in parallel.
-- The page's host serves it over HTTPS (browsers offer folder access and storage only there).
+- The page's host serves it over HTTPS or on localhost (browsers offer folder access and storage only there).
 
 ## Verification
 
@@ -144,3 +151,4 @@ People who want to try Good Gallery, or who are on a computer where they can't i
 | REQ-019-13 | `web/tests/web.spec.js` › pick, scan, browse, … | partial: the settings page; the gallery's and viewer's menus by inspection |
 | REQ-019-14 | `xtask/tests/workflows.rs` › req_019_14_ci_tests_the_page_and_the_release_publishes_it | pass |
 | REQ-019-15 | `crates/app/tests/search.rs` › req_019_15_a_narrow_window_opens_the_sidebar_over_the_gallery, req_019_15_the_info_sheet_fits_a_narrow_window; `crates/app/tests/snapshots.rs` › req_019_15_a_narrow_screen_shows_the_empty_state_and_settings_without_the_sidebar | partial: the viewer's info panel and a real phone by hand |
+| REQ-019-16 | `xtask/src/web.rs` › req_019_16_zips_the_page_with_its_index_on_top, req_019_16_the_zip_says_the_app_the_version_and_web; `xtask/tests/workflows.rs` › req_019_16_the_release_attaches_the_page_as_a_zip; `web/tests/web.spec.js` › REQ-019-16: the page runs from a subfolder | pass |

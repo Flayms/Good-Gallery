@@ -185,6 +185,17 @@ test("REQ-019-01: a browser without what the page needs is told which browsers w
   await expect(page.locator("#problem")).toContainText("Chrome, Edge, Firefox and Safari");
 });
 
+test("REQ-019-16: the page runs from a subfolder of the server", async ({ page }) => {
+  const log = watchLog(page);
+  const failed = [];
+  page.on("response", (response) => {
+    if (!response.ok()) failed.push(response.url());
+  });
+  await page.goto("/some/folder/");
+  await log.waitFor("event handlers installed");
+  expect(failed).toEqual([]);
+});
+
 test("REQ-020-02: in a browser that prefers light, the page and the app are light", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light" });
   const log = watchLog(page);
