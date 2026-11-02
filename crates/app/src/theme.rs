@@ -313,14 +313,25 @@ fn transparency_id() -> egui::Id {
     egui::Id::unique("reduced transparency")
 }
 
-/// Makes glass opaque for reduced transparency (REQ-013-06), or translucent again.
+/// Makes glass opaque because the OS asks for reduced transparency (REQ-013-06), or translucent again.
 pub fn set_reduced_transparency(ctx: &egui::Context, reduced: bool) {
     ctx.data_mut(|data| data.insert_temp(transparency_id(), reduced));
 }
 
-/// Whether glass is opaque because the OS asks for reduced transparency.
+/// Whether glass is opaque: the OS asks for reduced transparency (REQ-013-06) or the setting does (REQ-013-17).
 pub fn reduced_transparency(ctx: &egui::Context) -> bool {
-    ctx.data(|data| data.get_temp(transparency_id())).unwrap_or(false)
+    ctx.data(|data| {
+        data.get_temp(transparency_id()).unwrap_or(false) || data.get_temp(transparency_setting_id()).unwrap_or(false)
+    })
+}
+
+fn transparency_setting_id() -> egui::Id {
+    egui::Id::unique("reduce transparency setting")
+}
+
+/// Applies the _Reduce transparency_ setting (REQ-013-17).
+pub fn set_transparency_setting(ctx: &egui::Context, on: bool) {
+    ctx.data_mut(|data| data.insert_temp(transparency_setting_id(), on));
 }
 
 /// The OS asks for reduced motion: Windows' _Animation effects_, GNOME's animations, or the browser's
@@ -796,6 +807,21 @@ mod tests {
         assert!(!reduced_transparency(&ctx));
         set_reduced_transparency(&ctx, true);
         assert!(reduced_transparency(&ctx));
+    }
+
+    #[test]
+    fn req_013_17_the_setting_or_the_os_reduces_transparency() {
+        let ctx = themed();
+        for (setting, os, reduced) in [
+            (false, false, false),
+            (true, false, true),
+            (false, true, true),
+            (true, true, true),
+        ] {
+            set_transparency_setting(&ctx, setting);
+            set_reduced_transparency(&ctx, os);
+            assert_eq!(reduced_transparency(&ctx), reduced, "setting {setting}, OS {os}");
+        }
     }
 
     /// REQ-013-01, REQ-020-01, REQ-020-02: the app's own colors whatever the OS theme or accent color; the OS only

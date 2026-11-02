@@ -18,6 +18,8 @@ pub struct Settings {
     pub appearance: Appearance,
     /// What saving an edit does to the file's date modified (REQ-021-15).
     pub mtime_on_save: MtimeOnSave,
+    /// Glass is opaque, whatever the OS says (REQ-013-17).
+    pub reduce_transparency: bool,
 }
 
 impl Default for Settings {
@@ -28,6 +30,7 @@ impl Default for Settings {
             io_concurrency: 4,
             appearance: Appearance::System,
             mtime_on_save: MtimeOnSave::Keep,
+            reduce_transparency: false,
         }
     }
 }
@@ -37,6 +40,7 @@ const QUICK_CHECK: &str = "quickCheckIntervalMinutes";
 const IO_CONCURRENCY: &str = "ioConcurrency";
 const APPEARANCE: &str = "appearance";
 const MTIME_ON_SAVE: &str = "editingMtime";
+const REDUCE_TRANSPARENCY: &str = "reduceTransparency";
 const MAX_QUICK_CHECK: u32 = 7 * 24 * 60;
 
 fn thumb_cache(value: &Value) -> Option<f64> {
@@ -95,6 +99,9 @@ pub fn load(conn: &Connection) -> Result<Settings> {
                     .and_then(MtimeOnSave::parse)
                     .unwrap_or(settings.mtime_on_save)
             }
+            REDUCE_TRANSPARENCY => {
+                settings.reduce_transparency = value.as_bool().unwrap_or(settings.reduce_transparency)
+            }
             _ => {}
         }
     }
@@ -111,6 +118,7 @@ pub fn save(conn: &Connection, settings: &Settings) -> Result<()> {
         (IO_CONCURRENCY, Value::from(settings.io_concurrency)),
         (APPEARANCE, Value::from(settings.appearance.key())),
         (MTIME_ON_SAVE, Value::from(settings.mtime_on_save.as_str())),
+        (REDUCE_TRANSPARENCY, Value::from(settings.reduce_transparency)),
     ] {
         tx.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
@@ -164,6 +172,7 @@ mod tests {
                 io_concurrency: 4,
                 appearance: Appearance::System,
                 mtime_on_save: MtimeOnSave::Keep,
+                reduce_transparency: false,
             }
         );
 
@@ -173,6 +182,7 @@ mod tests {
             io_concurrency: 8,
             appearance: Appearance::Dark,
             mtime_on_save: MtimeOnSave::Update,
+            reduce_transparency: true,
         };
         save(&conn, &changed).unwrap();
 
