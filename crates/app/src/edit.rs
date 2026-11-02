@@ -6,6 +6,7 @@
 use crate::icons::Icon;
 use crate::originals::OriginalState;
 use crate::theme;
+use domain::crop::{self, Grip, Ratio};
 use domain::edit::{
     Adjustment, BlurKind, CURVE_SAMPLES, Channel, Geometry, HISTOGRAM_BINS, Histogram, History, Mask, Params, Part,
     Pyramid, Recipe, SavedEdit, Section, blur_lod,
@@ -22,6 +23,10 @@ use std::sync::mpsc::{Receiver, channel};
 const SMALL_SIDE: u32 = 512;
 /// The picker averages this many pixels around the click, in both directions, in the small copy.
 const PICK_RADIUS: i64 = 2;
+/// How far from the crop's frame a press still takes hold of it, in points.
+const GRIP_REACH: f32 = 12.0;
+/// How long the crop's corner marks are, in points.
+const GRIP_LENGTH: f32 = 18.0;
 /// About this many pixels of the small copy go into the histogram.
 const HISTOGRAM_SAMPLES: u32 = 25_000;
 const ROW_HEIGHT: f32 = 22.0;
@@ -93,8 +98,8 @@ struct Loaded {
     view: Option<wgpu::TextureView>,
     /// Once read back from the viewer's texture, or decoded with it.
     small: Option<image::RgbaImage>,
-    /// The CPU preview, and the recipe and the flags it shows.
-    cpu: Option<(Recipe, u32, egui::TextureHandle)>,
+    /// The CPU preview, and the recipe, the part of the photo and the flags it shows.
+    cpu: Option<(Recipe, Geometry, u32, egui::TextureHandle)>,
 }
 
 /// The photo's subject (REQ-022-02).
@@ -137,6 +142,15 @@ pub struct EditSession {
     /// Whether the _Look_ section is open.
     look_open: bool,
     geometry_open: bool,
+    /// Whether the crop's frame is shown over the whole photo (REQ-029-02).
+    cropping: bool,
+    crop_ratio: Ratio,
+    /// Whether the crop's 4:3 or 16:9 is upright.
+    crop_portrait: bool,
+    /// The drag under way: what it took hold of and the frame when it began.
+    crop_drag: Option<(Grip, [f32; 4])>,
+    /// Where the whole photo was last drawn while cropping.
+    crop_area: Option<Rect>,
     channel: Channel,
     dragging_point: Option<usize>,
     picking: bool,
@@ -173,6 +187,11 @@ impl EditSession {
             open: [true, false, true, false],
             look_open: true,
             geometry_open: true,
+            cropping: false,
+            crop_ratio: Ratio::Free,
+            crop_portrait: false,
+            crop_drag: None,
+            crop_area: None,
             channel: Channel::All,
             dragging_point: None,
             picking: false,
@@ -577,16 +596,167 @@ impl EditSession {
         if width == 0 || height == 0 {
             return None;
         }
-        let (width, height) = if compare {
-            (width, height)
-        } else {
-            self.draft.geometry().output_size(width, height)
-        };
+        let (width, height) = self.shown_geometry(compare).output_size(width, height);
         Some([width as f32, height as f32])
+    }
+
+    /// What is drawn of the photo: while comparing all of it unturned, while cropping all of it turned, else the output.
+    fn shown_geometry(&self, compare: bool) -> Geometry {
+        if compare {
+            Geometry::new(None, 0)
+        } else if self.cropping {
+            Geometry::new(None, self.draft.quarter_turns)
+        } else {
+            self.draft.geometry()
+        }
+    }
+
+    pub fn is_cropping(&self) -> bool {
+        self.cropping
+    }
+
+    /// Where the whole photo was last drawn while cropping.
+    pub fn crop_area(&self) -> Option<Rect> {
+        self.crop_area
+    }
+
+    pub fn set_crop_area(&mut self, area: Rect) {
+        self.crop_area = Some(area);
+    }
+
+    pub fn is_dragging_crop(&self) -> bool {
+        self.crop_drag.is_some()
+    }
+
+    /// Shows the crop's frame over the whole photo, or leaves it (REQ-029-02).
+    pub fn set_cropping(&mut self, cropping: bool) {
+        self.cropping = cropping;
+        self.crop_drag = None;
+    }
+
+    /// The whole photo's size as it is turned on screen.
+    fn turned_size(&self) -> [f32; 2] {
+        let [width, height] = self.target.full_size;
+        let (width, height) = Geometry::new(None, self.draft.quarter_turns).output_size(width, height);
+        [width as f32, height as f32]
+    }
+
+    fn crop_frame(&self) -> [f32; 4] {
+        self.draft.geometry().frame()
+    }
+
+    fn with_frame(&self, frame: [f32; 4]) -> Recipe {
+        let mut recipe = self.draft.clone();
+        recipe.crop = Geometry::crop_of_frame(frame, recipe.quarter_turns);
+        recipe
+    }
+
+    /// Picks a shape: the largest frame of it inside the current one (REQ-029-03).
+    fn set_crop_ratio(&mut self, ratio: Ratio) {
+        self.crop_ratio = ratio;
+        let (frame, size) = (self.crop_frame(), self.turned_size());
+        self.crop_portrait = crop::is_portrait(frame, size);
+        if let Some(value) = ratio.value(self.crop_portrait, size) {
+            self.commit(self.with_frame(crop::fit_ratio(frame, value, size)));
+        }
+    }
+
+    /// Turns the 4:3 or 16:9 to its other form (REQ-029-03).
+    fn swap_crop_ratio(&mut self) {
+        self.crop_portrait = !self.crop_portrait;
+        self.commit(self.with_frame(crop::swap_sides(self.crop_frame(), self.turned_size())));
+    }
+
+    /// Takes drags on the crop's frame, over the whole photo at `area` (REQ-029-02).
+    pub fn crop_input(&mut self, ui: &egui::Ui, backdrop: &egui::Response, area: Rect) {
+        let fraction = |pos: Pos2| {
+            [
+                (pos.x - area.left()) / area.width(),
+                (pos.y - area.top()) / area.height(),
+            ]
+        };
+        let tolerance = [GRIP_REACH / area.width(), GRIP_REACH / area.height()];
+        let frame = self.crop_frame();
+        let hover = backdrop
+            .hover_pos()
+            .and_then(|pos| crop::grip_at(frame, fraction(pos), tolerance));
+        if let Some(grip) = self.crop_drag.map(|(grip, _)| grip).or(hover) {
+            ui.ctx().set_cursor_icon(match grip {
+                Grip::Move => egui::CursorIcon::Grab,
+                Grip::Left | Grip::Right => egui::CursorIcon::ResizeHorizontal,
+                Grip::Top | Grip::Bottom => egui::CursorIcon::ResizeVertical,
+                Grip::TopLeft | Grip::BottomRight => egui::CursorIcon::ResizeNwSe,
+                Grip::TopRight | Grip::BottomLeft => egui::CursorIcon::ResizeNeSw,
+            });
+        }
+        let origin = ui.input(|input| input.pointer.press_origin());
+        if backdrop.drag_started()
+            && let Some(origin) = origin
+        {
+            self.crop_drag = crop::grip_at(frame, fraction(origin), tolerance).map(|grip| (grip, frame));
+        }
+        if let (Some((grip, start)), Some(origin), Some(pos)) =
+            (self.crop_drag, origin, backdrop.interact_pointer_pos())
+        {
+            let delta = [(pos.x - origin.x) / area.width(), (pos.y - origin.y) / area.height()];
+            let size = self.turned_size();
+            let ratio = self.crop_ratio.value(self.crop_portrait, size);
+            self.draft = self.with_frame(crop::drag(start, grip, delta, ratio, size));
+            ui.ctx().request_repaint();
+        }
+        // One undo step per drag.
+        if backdrop.drag_stopped() && self.crop_drag.take().is_some() {
+            self.commit(self.draft.clone());
+        }
+    }
+
+    /// The crop's frame over the whole photo at `area`: darkened outside, thirds and grips inside (REQ-029-02).
+    pub fn paint_crop(&self, painter: &egui::Painter, area: Rect) {
+        let [x, y, w, h] = self.crop_frame();
+        let frame = Rect::from_min_size(
+            pos2(area.left() + x * area.width(), area.top() + y * area.height()),
+            Vec2::new(w * area.width(), h * area.height()),
+        );
+        let dark = Color32::from_black_alpha(150);
+        for outside in [
+            Rect::from_min_max(area.min, pos2(area.right(), frame.top())),
+            Rect::from_min_max(pos2(area.left(), frame.bottom()), area.max),
+            Rect::from_min_max(pos2(area.left(), frame.top()), pos2(frame.left(), frame.bottom())),
+            Rect::from_min_max(pos2(frame.right(), frame.top()), pos2(area.right(), frame.bottom())),
+        ] {
+            painter.rect_filled(outside, 0.0, dark);
+        }
+        let thin = egui::Stroke::new(1.0, Color32::from_white_alpha(120));
+        for third in [1.0, 2.0] {
+            let across = frame.left() + frame.width() * third / 3.0;
+            let down = frame.top() + frame.height() * third / 3.0;
+            painter.line_segment([pos2(across, frame.top()), pos2(across, frame.bottom())], thin);
+            painter.line_segment([pos2(frame.left(), down), pos2(frame.right(), down)], thin);
+        }
+        painter.rect_stroke(
+            frame,
+            0.0,
+            egui::Stroke::new(1.0, Color32::WHITE),
+            egui::StrokeKind::Outside,
+        );
+        let grip = egui::Stroke::new(3.0, Color32::WHITE);
+        let long = GRIP_LENGTH.min(frame.width() / 2.0).min(frame.height() / 2.0);
+        for (corner, sign_x, sign_y) in [
+            (frame.left_top(), 1.0, 1.0),
+            (frame.right_top(), -1.0, 1.0),
+            (frame.left_bottom(), 1.0, -1.0),
+            (frame.right_bottom(), -1.0, -1.0),
+        ] {
+            painter.line_segment([corner, corner + Vec2::new(sign_x * long, 0.0)], grip);
+            painter.line_segment([corner, corner + Vec2::new(0.0, sign_y * long)], grip);
+        }
     }
 
     /// Turns the photo by `quarters` quarter turns clockwise (REQ-029-01).
     fn rotate(&mut self, quarters: u8) {
+        if quarters % 2 == 1 {
+            self.crop_portrait = !self.crop_portrait;
+        }
         let mut recipe = self.draft.clone();
         recipe.quarter_turns = (recipe.quarter_turns + quarters) % 4;
         self.commit(recipe);
@@ -596,8 +766,7 @@ impl EditSession {
     pub fn pick(&mut self, uv: Pos2) {
         // `uv` is on the output as shown; the photo's own coordinates stay on the content (REQ-029-04).
         let [x, y] = self
-            .draft
-            .geometry()
+            .shown_geometry(false)
             .to_original([uv.x.clamp(0.0, 1.0), uv.y.clamp(0.0, 1.0)]);
         let uv = pos2(x, y);
         if std::mem::take(&mut self.placing_focus) {
@@ -639,6 +808,7 @@ impl EditSession {
     /// Draws the photo through the recipe into `rect` (texture coordinates `uv`), clipped to `clip`; the original
     /// while `compare` (REQ-021-02, REQ-021-07). False while there is nothing to draw yet.
     pub fn paint(&mut self, ui: &egui::Ui, rect: Rect, uv: Rect, clip: Rect, compare: bool, opacity: f32) -> bool {
+        let geometry = self.shown_geometry(compare);
         let Base::Loaded(loaded) = &mut self.base else {
             return false;
         };
@@ -668,11 +838,7 @@ impl EditSession {
                 let flags = flags | if render_state.target_format.is_srgb() { 2 } else { 0 };
                 let uniform = uniform(
                     &Params::new(&self.draft),
-                    if compare {
-                        Geometry::new(None, 0)
-                    } else {
-                        self.draft.geometry()
-                    },
+                    geometry,
                     [rect.min.x * ppp, rect.min.y * ppp, rect.max.x * ppp, rect.max.y * ppp],
                     [uv.min.x, uv.min.y, uv.max.x, uv.max.y],
                     self.target.full_size.map(|side| side as f32),
@@ -699,22 +865,25 @@ impl EditSession {
         if loaded
             .cpu
             .as_ref()
-            .is_none_or(|(shown, shown_flags, _)| *shown != recipe || *shown_flags != flags)
+            .is_none_or(|(shown, shown_geometry, shown_flags, _)| {
+                *shown != recipe || *shown_geometry != geometry || *shown_flags != flags
+            })
         {
-            let image = cpu_preview(small, &recipe, self.target.full_size, mask, flags);
+            let image = cpu_preview(small, &recipe, geometry, self.target.full_size, mask, flags);
             match &mut loaded.cpu {
-                Some((shown, shown_flags, handle)) => {
+                Some((shown, shown_geometry, shown_flags, handle)) => {
                     handle.set(image, egui::TextureOptions::LINEAR);
                     *shown = recipe;
+                    *shown_geometry = geometry;
                     *shown_flags = flags;
                 }
                 None => {
                     let handle = ctx.load_texture("edit preview", image, egui::TextureOptions::LINEAR);
-                    loaded.cpu = Some((recipe, flags, handle));
+                    loaded.cpu = Some((recipe, geometry, flags, handle));
                 }
             }
         }
-        if let Some((_, _, handle)) = &loaded.cpu {
+        if let Some((_, _, _, handle)) = &loaded.cpu {
             ui.painter()
                 .with_clip_rect(clip)
                 .image(handle.id(), rect, uv, Color32::WHITE.gamma_multiply(opacity));
@@ -842,7 +1011,17 @@ impl EditSession {
                     if icon_button(ui, Icon::RotateCw, "Rotate right", "Rotate right", true).clicked() {
                         self.rotate(1);
                     }
+                    let cropping = self.cropping;
+                    let button = egui::Button::image_and_text(Icon::Crop.small(), "Crop").selected(cropping);
+                    let response = ui.add(button);
+                    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, cropping, "Crop"));
+                    if response.clicked() {
+                        self.set_cropping(!cropping);
+                    }
                 });
+                if self.cropping {
+                    self.crop_shapes(ui);
+                }
                 ui.add_space(8.0);
             }
         }
@@ -939,6 +1118,29 @@ impl EditSession {
         };
         ui.add_space(8.0);
         ready
+    }
+
+    /// The crop's shapes (REQ-029-03), and leaving it.
+    fn crop_shapes(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            for ratio in Ratio::ALL {
+                let response = ui.add(egui::Button::selectable(self.crop_ratio == ratio, ratio.label()));
+                if response.clicked() {
+                    self.set_crop_ratio(ratio);
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(self.crop_ratio.can_swap(), egui::Button::new("Swap"))
+                .clicked()
+            {
+                self.swap_crop_ratio();
+            }
+            if ui.button("Done").on_hover_text("Done cropping (Esc)").clicked() {
+                self.set_cropping(false);
+            }
+        });
     }
 
     /// The kind of blur, and placing its focus (REQ-023-01, REQ-023-03). _Background_ looks for the subject.
@@ -1411,6 +1613,7 @@ fn read_small(render_state: &egui_wgpu::RenderState, texture: &wgpu::Texture) ->
 fn cpu_preview(
     small: &image::RgbaImage,
     recipe: &Recipe,
+    geometry: Geometry,
     full_size: [u32; 2],
     mask: Option<&Mask>,
     flags: u32,
@@ -1447,7 +1650,6 @@ fn cpu_preview(
         rgba.extend(out.map(|c| (c * 255.0).round() as u8));
         rgba.push(pixel[3]);
     }
-    let geometry = recipe.geometry();
     let (out_width, out_height) = geometry.output_size(width, height);
     let mut output = Vec::with_capacity(out_width as usize * out_height as usize * 4);
     for y in 0..out_height {
@@ -1980,7 +2182,7 @@ mod tests {
         }
         for (recipe, mask, flags) in cases {
             let gpu = render_gpu(&render_state, &image, &recipe, mask, flags);
-            let cpu = cpu_preview(&image, &recipe, [SIZE, SIZE], mask, flags);
+            let cpu = cpu_preview(&image, &recipe, recipe.geometry(), [SIZE, SIZE], mask, flags);
             let mut worst = 0;
             for (i, (gpu, cpu)) in gpu.chunks_exact(4).zip(cpu.pixels.iter()).enumerate() {
                 for c in 0..3 {
@@ -2013,7 +2215,7 @@ mod tests {
             recipe.crop = crop;
             recipe.quarter_turns = turns;
             let gpu = render_gpu(&render_state, &image, &recipe, None, 0);
-            let cpu = cpu_preview(&image, &recipe, [SIZE, SIZE], None, 0);
+            let cpu = cpu_preview(&image, &recipe, recipe.geometry(), [SIZE, SIZE], None, 0);
             let (width, height) = recipe.geometry().output_size(SIZE, SIZE);
             assert_eq!(cpu.size, [width as usize, height as usize], "{crop:?} {turns}");
             assert_eq!(gpu.len(), cpu.pixels.len() * 4, "{crop:?} {turns}");
@@ -2043,7 +2245,7 @@ mod tests {
                 grain: [100.0, 200.0, 0.0][i % 3],
             });
             let gpu = render_gpu(&render_state, &image, &recipe, None, 0);
-            let cpu = cpu_preview(&image, &recipe, [SIZE, SIZE], None, 0);
+            let cpu = cpu_preview(&image, &recipe, recipe.geometry(), [SIZE, SIZE], None, 0);
             for (i, (gpu, cpu)) in gpu.chunks_exact(4).zip(cpu.pixels.iter()).enumerate() {
                 for c in 0..3 {
                     let diff = (i32::from(gpu[c]) - i32::from(cpu.to_array()[c])).abs();
@@ -2093,7 +2295,7 @@ mod tests {
         ];
         for (recipe, mask, flags) in cases {
             let gpu = render_gpu(&render_state, &image, &recipe, mask, flags);
-            let cpu = cpu_preview(&image, &recipe, [width, height], mask, flags);
+            let cpu = cpu_preview(&image, &recipe, recipe.geometry(), [width, height], mask, flags);
             let mut worst = 0;
             for (i, (gpu, cpu)) in gpu.chunks_exact(4).zip(cpu.pixels.iter()).enumerate() {
                 for c in 0..3 {

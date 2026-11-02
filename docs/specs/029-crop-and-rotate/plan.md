@@ -22,7 +22,7 @@ The issue (#34) left these open; to review in the PR:
 ### Risks
 
 - ~~`glass` records the photo as a backdrop with no turn.~~ It doesn't while editing: the preview records nothing, so the turned photo never reaches it.
-- The tile's shape changes on save, which earlier edits never did, so the masonry and date groups must take the new dimensions from re-indexing without a stale frame.
+- The tile's shape changes on save, which earlier edits never did. Checked in the running app: re-indexing brings the new size, and the tile takes it.
 
 ## Tasks
 
@@ -37,12 +37,12 @@ Three PRs, each green and usable on its own:
    - [x] Shader mapping and GPU / CPU parity with geometry (REQ-029-01, REQ-029-04)
    - [x] Viewer size, picker and blur focus through `Geometry` (REQ-029-01, REQ-029-04)
    - [x] _Rotate left_, _Rotate right_; undo, reset, compare (REQ-029-01, REQ-029-05)
-   - [ ] Gallery tile takes the new shape (REQ-029-06)
+   - [x] Gallery tile takes the new shape (REQ-029-06)
 3. Crop in the UI.
-   - [ ] Pure drag logic in `domain`: edges, corners, moving, ratio, minimum size (REQ-029-02, REQ-029-03)
-   - [ ] _Crop_ with its frame, darkening, grid and ratio picker (REQ-029-02, REQ-029-03, REQ-029-05)
-   - [ ] Screenshots of the running app, `README.md`, spec status
+   - [x] Pure drag logic in `domain`: edges, corners, moving, ratio, minimum size (REQ-029-02, REQ-029-03)
+   - [x] _Crop_ with its frame, darkening, grid and ratio picker (REQ-029-02, REQ-029-03, REQ-029-05)
+   - [x] Screenshots of the running app, `README.md`, spec status
 
 ## Decisions
 
-The decisions above move here as they are carried out.
+All carried out as listed under _Approach_, with the changes noted there. Added while building: _Swap_ turns the frame around its center rather than fitting inside the current frame, which would shrink it a little more on every press; a person's People tag stays through `PersonInImage` when their last region is cropped away.

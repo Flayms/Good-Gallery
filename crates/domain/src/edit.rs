@@ -563,6 +563,21 @@ impl Geometry {
         if self.quarter_turns % 2 == 1 { (h, w) } else { (w, h) }
     }
 
+    /// The crop as a frame on the whole photo as it is turned on screen (`domain::crop`).
+    pub fn frame(&self) -> [f32; 4] {
+        Self::new(None, self.quarter_turns)
+            .place(self.crop)
+            .unwrap_or([0.0, 0.0, 1.0, 1.0])
+    }
+
+    /// The crop for a frame on the whole photo turned by `quarter_turns`; `None` for the whole photo.
+    pub fn crop_of_frame([x, y, w, h]: [f32; 4], quarter_turns: u8) -> Option<[f32; 4]> {
+        let whole = Self::new(None, quarter_turns);
+        let a = whole.to_original([x, y]);
+        let b = whole.to_original([x + w, y + h]);
+        sanitized_crop([a[0].min(b[0]), a[1].min(b[1]), (a[0] - b[0]).abs(), (a[1] - b[1]).abs()])
+    }
+
     /// The upright original's size, about, from its output's: a saved edit's item knows only that one.
     pub fn original_size(&self, width: u32, height: u32) -> (u32, u32) {
         let (width, height) = if self.quarter_turns % 2 == 1 {
@@ -2004,6 +2019,26 @@ mod tests {
         }
         assert!(!Geometry::new(None, 1).is_identity());
         assert!(Geometry::new(None, 0).is_identity());
+    }
+
+    /// REQ-029-02: the frame on screen and the crop on the content are each other's images, for every turn.
+    #[test]
+    fn req_029_02_the_frame_on_screen_and_the_crop_agree() {
+        let crop = [0.2, 0.1, 0.5, 0.4];
+        for turns in 0..4 {
+            let frame = Geometry::new(Some(crop), turns).frame();
+            let back = Geometry::crop_of_frame(frame, turns).unwrap();
+            for (a, b) in back.iter().zip(crop) {
+                assert!((a - b).abs() < 1e-5, "{turns}: {back:?}");
+            }
+        }
+        // Turned clockwise, the photo's left edge is on top.
+        let frame = Geometry::new(Some([0.0, 0.0, 0.5, 1.0]), 1).frame();
+        assert!(
+            near([frame[0], frame[1]], [0.0, 0.0]) && near([frame[2], frame[3]], [1.0, 0.5]),
+            "{frame:?}"
+        );
+        assert_eq!(Geometry::crop_of_frame([0.0, 0.0, 1.0, 1.0], 1), None);
     }
 
     /// REQ-029-07: editing a saved crop again works out the whole photo's size from the saved file's.
