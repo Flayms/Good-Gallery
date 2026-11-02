@@ -49,6 +49,12 @@ Users add the tags, People and Places a photo lacks, and take back wrong ones, w
 - **Then** every selected item gets that tag, written as for one item (REQ-026-03), in the background
 - **And** more than 100 items are written only after the user confirms (`Tag 2,345 items with Rome?`), and files that can't be written are counted in a toast that names the first one and why, as for ratings (REQ-025-07)
 
+### REQ-026-07 · Safe writes
+
+- **Given** a tag added or removed as in REQ-026-01, REQ-026-02 or REQ-026-06
+- **When** it is written into a file or sidecar
+- **Then** a failure leaves the file as it was, as for a rating (REQ-024-06), and changes in quick succession are all written, in order (REQ-024-07)
+
 ## Out of scope
 
 - Renaming, moving or merging tags across the library.
@@ -71,3 +77,4 @@ Users add the tags, People and Places a photo lacks, and take back wrong ones, w
 | REQ-026-04 | `crates/media/src/tagging.rs` › req_026_04_leaves_a_read_only_file_as_it_was; `crates/app/tests/tagging.rs` › req_026_04_keeps_the_tags_of_a_file_it_cant_write | pass |
 | REQ-026-05 | by inspection: `crate::WEB` turns off _Add_ and the remove buttons (`info.rs`); `cargo clippy -p app --target wasm32-unknown-unknown` | no test |
 | REQ-026-06 | `crates/app/tests/tagging.rs` › req_026_06_tags_the_selection, req_026_06_asks_before_tagging_many | pass |
+| REQ-026-07 | `crates/media/src/tagging.rs` › req_026_07_*; `crates/app/tests/tagging.rs` › req_026_07_writes_quick_changes_one_after_another | pass |

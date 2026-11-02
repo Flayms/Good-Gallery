@@ -68,10 +68,12 @@ There is no async runtime: work runs on OS threads that talk over channels (`cro
 | Texture workers (4) | thumbnail decode, mips, `wgpu::Texture` creation | finished textures, registered by the UI within 3 ms per frame |
 | Originals workers (2) | full-size decodes for the viewer | finished textures |
 | mpv render / event | libmpv's render context and events | a published frame per load |
-| Background jobs | reachability, folder dialog, writing ratings and tags, cache clearing | an event applied in `AppState::poll` |
+| Background jobs | reachability, folder dialog, cache clearing | an event applied in `AppState::poll` |
+| Writer (1) | every write into a library file: ratings, tags, saving and reverting edits, one after another in the order made (REQ-024-07) | an event applied in `AppState::poll` |
 
 - The UI never waits for IO. Each frame it applies what arrived (`AppState::poll`), draws, and sends requests; requests are priority lists replaced every frame, so work that scrolled out of view drops out.
 - Every job runs under `catch_unwind`: a panic costs that file or that job, not the app.
+- Library files are never renamed over: `media::replace` writes a new version beside the file, moves the original aside, renames the new one into the free name and reads it back, putting the original back if the file system lost it (REQ-024-06, #140).
 - Tests call `AppState::wait_for_jobs` before stepping the harness, so they never race the threads. OS dialogs and the video player sit behind traits (`FolderPicker`, `video::Playback`) with fakes in tests.
 
 ## Storage
