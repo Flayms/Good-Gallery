@@ -69,7 +69,7 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 
 - **Given** a release's downloads
 - **When** a user looks at their file names
-- **Then** each name says the app, the version, the operating system and the processor architecture it is for, and for Windows whether it is the installer or the portable zip: `good-gallery-<version>-windows-x64-setup.exe`, `good-gallery-<version>-windows-x64-portable.zip`, `good-gallery-<version>-linux-x64.tar.gz`. The browser version's zip says `web` instead of a system: `good-gallery-<version>-web.zip` (REQ-019-16)
+- **Then** each name says the app, the version, the operating system and the processor architecture it is for, and for Windows whether it is the installer or the portable zip: `good-gallery-<version>-windows-x64-setup.exe`, `good-gallery-<version>-windows-x64-portable.zip`, `good-gallery-<version>-linux-x64.tar.gz`, `good-gallery-<version>-linux-x64.deb`, `good-gallery-<version>-linux-x64.rpm`. The browser version's zip says `web` instead of a system: `good-gallery-<version>-web.zip` (REQ-019-16)
 
 ### REQ-014-11 · Notes of unpublished versions
 

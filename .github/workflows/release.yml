@@ -1,4 +1,4 @@
-# Publishes a GitHub release with the Windows installer, the portable zip and the Linux archive for every version tag
+# Publishes a GitHub release with the Windows installer, the portable zip and the Linux downloads for every version tag
 # pushed by `cargo xtask release` (xtask/src/release.rs, docs/specs/014-ci-release, docs/specs/018-linux), and the
 # browser version to the repository's GitHub Pages site and as a zip (docs/specs/019-web). Pages' source must be set
 # to "GitHub Actions" in the repository's settings.
@@ -23,23 +23,9 @@ jobs:
     uses: ./.github/workflows/ci.yml
 
   linux:
-    name: Build the Linux archive
+    name: Build and test the Linux downloads
     needs: checks
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # A tag's cache can only be restored by the same tag, so saving it is wasted time.
-          save-if: false
-      - name: Build the Linux archive
-        run: cargo xtask dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux
-          path: target/dist/*.tar.gz
-          if-no-files-found: error
+    uses: ./.github/workflows/linux-packages.yml
 
   web:
     name: Build the page
@@ -167,6 +153,8 @@ jobs:
           | **good-gallery-$VERSION-windows-x64-setup.exe** | Installer: pick the folder, installs for your user |
           | **good-gallery-$VERSION-windows-x64-portable.zip** | Portable: extract anywhere and run \`good-gallery.exe\` |
           | **good-gallery-$VERSION-linux-x64.tar.gz** | Linux: extract, install exiftool, ffmpeg and libmpv from your distribution (see \`README.txt\`), run \`./install.sh\` or \`./good-gallery\` |
+          | **good-gallery-$VERSION-linux-x64.deb** | Ubuntu 24.04 or newer: \`sudo apt install ./good-gallery-$VERSION-linux-x64.deb\` brings the helpers too |
+          | **good-gallery-$VERSION-linux-x64.rpm** | Fedora: \`sudo dnf install ./good-gallery-$VERSION-linux-x64.rpm\` brings the helpers too. For all video codecs, install ffmpeg from RPM Fusion |
           | **good-gallery-$VERSION-web.zip** | Browser version to host yourself: put the files on any static web server, served over HTTPS |
 
           The Windows downloads keep the index, settings and thumbnail cache in \`%APPDATA%\\good-gallery\`, the Linux one in \`~/.local/share/good-gallery\`, so an update picks them up as they are.
@@ -183,6 +171,8 @@ jobs:
             "target/dist/good-gallery-$VERSION-windows-x64-setup.exe" \
             "target/dist/good-gallery-$VERSION-windows-x64-portable.zip" \
             "target/dist/good-gallery-$VERSION-linux-x64.tar.gz" \
+            "target/dist/good-gallery-$VERSION-linux-x64.deb" \
+            "target/dist/good-gallery-$VERSION-linux-x64.rpm" \
             "target/dist/good-gallery-$VERSION-web.zip" \
             --title "Good Gallery $VERSION" \
             --notes-file release-notes.md \

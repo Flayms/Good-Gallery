@@ -45,7 +45,16 @@ Your index, settings and thumbnails live in `%APPDATA%\good-gallery`. Updates re
 
 ### Linux
 
-Download **`good-gallery-<version>-linux-x64.tar.gz`** (x86-64, X11 or Wayland). It uses your distribution's helpers; on Ubuntu or Debian:
+On Ubuntu 24.04 or newer and on Fedora (x86-64, X11 or Wayland), download the package and install it, which also brings exiftool, ffmpeg and libmpv:
+
+```sh
+sudo apt install ./good-gallery-<version>-linux-x64.deb
+sudo dnf install ./good-gallery-<version>-linux-x64.rpm
+```
+
+On Fedora, install ffmpeg from RPM Fusion for all video codecs. There's no package repository yet, so install a new release the same way.
+
+On other distributions, download **`good-gallery-<version>-linux-x64.tar.gz`**. It uses your distribution's helpers; on Debian, for example:
 
 ```sh
 sudo apt install libimage-exiftool-perl ffmpeg libmpv2
