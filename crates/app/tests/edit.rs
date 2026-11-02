@@ -8,6 +8,7 @@ use db::libraries::LibraryStatus;
 use db::rusqlite::Connection;
 use db::writer::{IndexWriter, IndexedFile};
 use domain::edit::{Adjustment, BlurKind, Channel, Part, Recipe, SavedEdit};
+use domain::look::{Look, LookChoice};
 use domain::media::{MediaKind, MediaMetadata};
 use eframe::egui::accesskit::Role;
 use eframe::egui::{self, Key, Modifiers};
@@ -588,8 +589,8 @@ fn req_023_01_req_023_02_req_023_03_chooses_a_blur_and_places_its_focus() {
     disc_photo(&dir);
     open(&mut harness, "a.jpg");
     edit(&mut harness);
-    // Light and Color folded away, Effects open.
-    for section in ["Light", "Color", "Effects"] {
+    // Look, Light and Color folded away, Effects open.
+    for section in ["Look", "Light", "Color", "Effects"] {
         harness.get_by_role_and_label(Role::Button, section).click();
         harness.run_steps(2);
     }
@@ -620,4 +621,47 @@ fn req_023_01_req_023_02_req_023_03_chooses_a_blur_and_places_its_focus() {
     assert_eq!(session(&harness).unwrap().recipe().blur_kind, BlurKind::Background);
     assert!(session(&harness).unwrap().subject().is_some());
     assert!(harness.query_by_label("Place focus").is_none());
+}
+
+/// REQ-028-01, REQ-028-02, REQ-028-03: _Look_ offers the film looks; a picked one shows _Strength_ and _Grain_, each
+/// pick is one undo step, and _None_ takes it away.
+#[test]
+fn req_028_01_req_028_02_req_028_03_picks_a_look_and_sets_its_strength_and_grain() {
+    let fixture = Fixture::new();
+    let (mut harness, _dir) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    assert!(harness.query_by_label("Strength").is_none(), "no look yet");
+
+    harness.get_by_role_and_label(Role::Button, "Portra 400").click();
+    harness.run_steps(2);
+    let look = |harness: &App| session(harness).unwrap().recipe().look;
+    assert_eq!(look(&harness), Some(LookChoice::new(Look::Portra400)));
+    assert!(harness.query_by_label("Strength").is_some() && harness.query_by_label("Grain").is_some());
+    harness.snapshot(common::snapshot_name("edit_look"));
+
+    // Strength and grain carry over to another look.
+    harness.get_by_role_and_label(Role::Slider, "Strength").focus();
+    harness.run_steps(1);
+    harness.key_press(egui::Key::ArrowLeft);
+    harness.run_steps(1);
+    harness.get_by_role_and_label(Role::Slider, "Grain").focus();
+    harness.run_steps(1);
+    harness.key_press(egui::Key::ArrowRight);
+    harness.run_steps(2);
+    let tuned = look(&harness).unwrap();
+    assert_eq!((tuned.strength, tuned.grain), (99.0, 101.0));
+    harness.get_by_role_and_label(Role::Button, "HP5").click();
+    harness.run_steps(2);
+    let hp5 = look(&harness).unwrap();
+    assert_eq!((hp5.look, hp5.strength, hp5.grain), (Look::Hp5, 99.0, 101.0));
+
+    // Undo goes back a pick, None takes the look away.
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    harness.run_steps(2);
+    assert_eq!(look(&harness).map(|choice| choice.look), Some(Look::Portra400));
+    harness.get_by_role_and_label(Role::Button, "None").click();
+    harness.run_steps(2);
+    assert_eq!(look(&harness), None);
+    assert!(harness.query_by_label("Strength").is_none());
 }
