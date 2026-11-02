@@ -17,6 +17,8 @@ struct Options {
     bench_scroll: Option<f32>,
     /// `--bench-cold`: thumbnails render while the bench scrolls (REQ-006-15), so it skips the warming pass.
     bench_cold: bool,
+    /// `--bench-no-glass`: measures without the glass pass, as reduced transparency turns it off (#14).
+    bench_no_glass: bool,
     view: Option<usize>,
     info: bool,
     edit: bool,
@@ -129,6 +131,7 @@ struct GalleryApp {
     frames: u32,
     screenshot_taken: bool,
     bench: Option<Bench>,
+    bench_no_glass: bool,
     /// `--view`: the gallery position to open in the viewer once it has loaded.
     view: Option<usize>,
     /// `--info`: the viewer opens with its info panel.
@@ -144,6 +147,9 @@ struct GalleryApp {
 impl eframe::App for GalleryApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.preferences.poll(ui.ctx());
+        if self.bench_no_glass {
+            app::theme::set_reduced_transparency(ui.ctx(), true);
+        }
         app::ui(ui, &mut self.state);
         self.frames += 1;
         if let Some(index) = self.view
@@ -247,13 +253,14 @@ fn demo_recipe() -> domain::edit::Recipe {
 
 fn parse_args() -> anyhow::Result<Options> {
     const USAGE: &str = "usage: app [--data-dir <folder>] [--screenshot <file.png> [--screenshot-after <seconds>]] \
-                         [--bench-scroll <seconds> [--bench-cold]] [--view <position> [--info] [--edit]] [--scroll <points>] [<file>]";
+                         [--bench-scroll <seconds> [--bench-cold] [--bench-no-glass]] [--view <position> [--info] [--edit]] [--scroll <points>] [<file>]";
     let mut args = std::env::args().skip(1);
     let mut data_dir = None;
     let mut screenshot = None;
     let mut screenshot_after = std::time::Duration::ZERO;
     let mut bench_scroll = None;
     let mut bench_cold = false;
+    let mut bench_no_glass = false;
     let mut view = None;
     let mut info = false;
     let mut edit = false;
@@ -273,6 +280,7 @@ fn parse_args() -> anyhow::Result<Options> {
                 bench_scroll = Some(seconds);
             }
             "--bench-cold" => bench_cold = true,
+            "--bench-no-glass" => bench_no_glass = true,
             "--view" => view = Some(args.next().context(USAGE)?.parse().context(USAGE)?),
             "--info" => info = true,
             "--edit" => edit = true,
@@ -293,6 +301,7 @@ fn parse_args() -> anyhow::Result<Options> {
         screenshot_after,
         bench_scroll,
         bench_cold,
+        bench_no_glass,
         view,
         info,
         edit,
@@ -678,6 +687,7 @@ fn run(options: Options) -> anyhow::Result<()> {
                 bench: options
                     .bench_scroll
                     .map(|seconds| Bench::new(seconds, options.bench_cold)),
+                bench_no_glass: options.bench_no_glass,
                 view: options.view,
                 info: options.info,
                 edit: options.edit,
