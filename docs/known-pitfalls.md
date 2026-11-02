@@ -125,6 +125,9 @@ Add every pitfall you hit. A trap in a tool, library, OS or our tests that we ca
 
 ## Packaging and releases
 
+* **Container images leave out `/usr/share/doc`** when installing (Ubuntu's `path-exclude`), so a package test can't look for its license on disk: ask `dpkg -L` / `rpm -ql`.
+* **winit loads `libxkbcommon-x11` at run time and panics on X11 without it**, and nothing in a package's other dependencies brings it on a minimal system. The `.deb` and `.rpm` depend on it.
+* **The `zip` crate's `deflate` feature switches `flate2` to `zlib-rs` for the whole workspace**, which changes the bytes of every PNG we encode. Use `deflate-flate2`.
 * **Git Bash's `tar` is GNU tar**, which can't write zip or read 7z. Call Windows' own `%SystemRoot%\System32\tar.exe` (bsdtar) by its full path; it writes zip with `-a` and reads 7z, but has no `-s` (rename while extracting): use `--strip-components` and copy afterwards.
 * **Freshly unpacked executables can't be moved or renamed right away** ("access denied"): Defender holds them open while it scans. Copy them instead, and retry the delete of the original.
 * **`git add` right after appending to a file through a still-open handle stages nothing** on Windows (the release tests): close the file before calling git.
