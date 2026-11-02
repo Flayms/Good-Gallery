@@ -11,6 +11,8 @@ pub mod glass;
 pub mod icons;
 pub mod indexer_progress;
 pub mod info;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod instance;
 pub mod originals;
 pub mod search_bar;
 pub mod settings_page;
@@ -57,6 +59,12 @@ pub fn setup(ctx: &egui::Context) {
 pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     state.poll();
     let ctx = ui.ctx().clone();
+    // A later start of the app handed over a file or asked for the window (REQ-027-02).
+    if std::mem::take(&mut state.bring_to_front) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+    }
+    state.show_pending_open();
     // Light, dark or the system's, from this frame on (REQ-020-01, REQ-020-02).
     theme::set_appearance(&ctx, state.settings.appearance);
     theme::begin_frame(&ctx);
@@ -121,6 +129,8 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
         show_viewer(&ctx, state);
     }
     confirm_revert(&ctx, state);
+    #[cfg(not(target_arch = "wasm32"))]
+    confirm_add_folder(&ctx, state);
     confirm_many(&ctx, state);
     indexer_progress::show(&ctx, state);
     state.toasts.show(&ctx);
@@ -204,6 +214,30 @@ fn confirm_revert(ctx: &egui::Context, state: &mut AppState) {
         state.confirm_revert = None;
         if chosen == 0 {
             state.revert_edit(target);
+        }
+    }
+}
+
+/// Offers to add the folder of a file opened with the app that is in no library (REQ-027-03).
+#[cfg(not(target_arch = "wasm32"))]
+fn confirm_add_folder(ctx: &egui::Context, state: &mut AppState) {
+    let Some(file) = state.confirm_add_folder.clone() else {
+        return;
+    };
+    let name = file.file_name().unwrap_or_default().to_string_lossy();
+    let folder = file.parent().unwrap_or(&file).display().to_string();
+    let title = format!("{name} isn't in a library");
+    let text = format!("Add its folder, {folder}, as a library to see it in Good Gallery.");
+    let ask = || widgets::dialog(ctx, "confirm-add-folder", &title, &text, &["Add folder", "Cancel"]);
+    let chosen = if state.viewer.is_some() {
+        theme::with_palette(&theme::DARK, ask)
+    } else {
+        ask()
+    };
+    if let Some(chosen) = chosen {
+        state.confirm_add_folder = None;
+        if chosen == 0 {
+            state.add_folder_of(file);
         }
     }
 }

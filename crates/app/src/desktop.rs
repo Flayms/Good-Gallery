@@ -21,6 +21,8 @@ struct Options {
     info: bool,
     edit: bool,
     scroll: Option<f32>,
+    /// A file to show, as _Open with_ passes it (REQ-027-01).
+    open: Option<PathBuf>,
 }
 
 /// Scrolling speed of `--bench-scroll`, points per second.
@@ -245,7 +247,7 @@ fn demo_recipe() -> domain::edit::Recipe {
 
 fn parse_args() -> anyhow::Result<Options> {
     const USAGE: &str = "usage: app [--data-dir <folder>] [--screenshot <file.png> [--screenshot-after <seconds>]] \
-                         [--bench-scroll <seconds> [--bench-cold]] [--view <position> [--info] [--edit]] [--scroll <points>]";
+                         [--bench-scroll <seconds> [--bench-cold]] [--view <position> [--info] [--edit]] [--scroll <points>] [<file>]";
     let mut args = std::env::args().skip(1);
     let mut data_dir = None;
     let mut screenshot = None;
@@ -256,6 +258,7 @@ fn parse_args() -> anyhow::Result<Options> {
     let mut info = false;
     let mut edit = false;
     let mut scroll = None;
+    let mut open = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--data-dir" => data_dir = Some(args.next().context(USAGE)?.into()),
@@ -274,6 +277,9 @@ fn parse_args() -> anyhow::Result<Options> {
             "--info" => info = true,
             "--edit" => edit = true,
             "--scroll" => scroll = Some(args.next().context(USAGE)?.parse().context(USAGE)?),
+            file if !file.starts_with("--") && open.is_none() => {
+                open = Some(std::path::absolute(file).with_context(|| format!("can't open {file}"))?);
+            }
             other => anyhow::bail!("unknown argument {other} ({USAGE})"),
         }
     }
@@ -291,6 +297,7 @@ fn parse_args() -> anyhow::Result<Options> {
         info,
         edit,
         scroll,
+        open,
     })
 }
 
@@ -576,11 +583,55 @@ pub fn main() -> std::process::ExitCode {
     }
 }
 
+/// Passes on what later starts of the app hand over, and wakes the UI for it (REQ-027-02).
+fn watch_open_requests(data_dir: PathBuf, ctx: egui::Context) -> std::sync::mpsc::Receiver<app::instance::Request> {
+    let (send, receive) = std::sync::mpsc::channel();
+    let watch = move || {
+        loop {
+            std::thread::sleep(app::instance::POLL);
+            let requests = app::instance::take_requests(&data_dir);
+            if requests.is_empty() {
+                continue;
+            }
+            for request in requests {
+                if send.send(request).is_err() {
+                    return;
+                }
+            }
+            ctx.request_repaint();
+        }
+    };
+    if let Err(error) = std::thread::Builder::new().name("open requests".into()).spawn(watch) {
+        tracing::warn!("files opened with the app while it runs won't show: {error}");
+    }
+    receive
+}
+
 fn run(options: Options) -> anyhow::Result<()> {
     // exiftool and ffmpeg must not outlive the app, however it ends.
     if let Err(error) = media::helpers::end_helpers_with_app() {
         tracing::warn!("helper processes may outlive the app: {error}");
     }
+    // One app per data folder: a later start hands its file to the running one (REQ-027-02). Screenshots and
+    // benchmarks always run on their own.
+    let automated = options.screenshot.is_some() || options.bench_scroll.is_some();
+    let instance = if automated {
+        None
+    } else {
+        let request = options
+            .open
+            .clone()
+            .map_or(app::instance::Request::Show, app::instance::Request::Open);
+        match app::instance::start(&options.data_dir, &request) {
+            Ok(app::instance::Start::First(instance)) => Some(instance),
+            Ok(app::instance::Start::Handed) => return Ok(()),
+            Err(error) => {
+                tracing::warn!("can't tell whether the app already runs: {error}");
+                None
+            }
+        }
+    };
+    let single = instance.is_some();
     let screenshot_failed = Arc::new(AtomicBool::new(false));
     let failed = screenshot_failed.clone();
     let mut native = eframe::NativeOptions {
@@ -610,8 +661,15 @@ fn run(options: Options) -> anyhow::Result<()> {
                 app::edit::install(render_state);
             }
             app::titlebar::install(cc);
+            let mut state = open_state(&options.data_dir, &cc.egui_ctx, cc.wgpu_render_state.clone());
+            if single {
+                state = state.with_open_requests(watch_open_requests(options.data_dir.clone(), cc.egui_ctx.clone()));
+            }
+            if let Some(file) = options.open.clone() {
+                state.open_file(file);
+            }
             Ok(Box::new(GalleryApp {
-                state: open_state(&options.data_dir, &cc.egui_ctx, cc.wgpu_render_state.clone()),
+                state,
                 screenshot: options.screenshot,
                 screenshot_failed: failed,
                 screenshot_at: std::time::Instant::now() + options.screenshot_after,
@@ -629,6 +687,7 @@ fn run(options: Options) -> anyhow::Result<()> {
         }),
     )
     .map_err(|error| anyhow::anyhow!("{error}"))?;
+    drop(instance);
     anyhow::ensure!(
         !screenshot_failed.load(Ordering::Relaxed),
         "the screenshot wasn't saved"
