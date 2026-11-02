@@ -99,12 +99,19 @@ People who want to try Good Gallery, or who are on a computer where they can't i
 - **When** the release workflow runs
 - **Then** it builds the page and publishes it to the repository's GitHub Pages site, and CI builds the page and runs its tests on every pull request
 
+### REQ-019-15 · Narrow screens
+
+- **Given** the page (or a window) narrower than 600 pt, such as a phone held upright
+- **When** it shows the gallery or the settings
+- **Then** the sidebar is hidden and the gallery, the empty state and the settings use the whole width; _Show sidebar_ (or Ctrl + B) opens the sidebar over the gallery, and picking something in it or clicking beside it closes it again
+- **And** the info sheet and the viewer's info panel are at most as wide as the screen; whether the sidebar is hidden on wider screens (REQ-008-09) stays as it was
+
 ## Out of scope
 
 - A server, accounts, sharing or syncing between browsers and devices.
 - Opening the desktop app's index or thumbnail cache in the page, or the other way round.
 - Formats the browser can't decode (HEIC, RAW), MKV, writing metadata.
-- Phones and tablets: touch, small screens, mobile browsers. The page targets desktop browsers.
+- Phones and tablets beyond a layout that fits a narrow screen (REQ-019-15): touch gestures, picking photos from a phone's photo library, mobile browsers' memory limits. The page targets desktop browsers (#65).
 - Installing the page as an app (PWA), working offline before the first visit.
 - Several tabs of the page at once: a second tab says the page is already open elsewhere.
 - Libraries of 50,000 files and more: they work, but there's no speed target for them in the page.
@@ -136,3 +143,4 @@ People who want to try Good Gallery, or who are on a computer where they can't i
 | REQ-019-12 | `web/tests/web.spec.js` › pick, scan, browse, …; `xtask/tests/no_network.rs` › req_019_12_…; `xtask/src/web.rs` › req_019_12_… | pass |
 | REQ-019-13 | `web/tests/web.spec.js` › pick, scan, browse, … | partial: the settings page; the gallery's and viewer's menus by inspection |
 | REQ-019-14 | `xtask/tests/workflows.rs` › req_019_14_ci_tests_the_page_and_the_release_publishes_it | pass |
+| REQ-019-15 | `crates/app/tests/search.rs` › req_019_15_a_narrow_window_opens_the_sidebar_over_the_gallery, req_019_15_the_info_sheet_fits_a_narrow_window; `crates/app/tests/snapshots.rs` › req_019_15_a_narrow_screen_shows_the_empty_state_and_settings_without_the_sidebar | partial: the viewer's info panel and a real phone by hand |

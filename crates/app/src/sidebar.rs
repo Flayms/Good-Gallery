@@ -15,6 +15,8 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 pub const WIDTH: f32 = 256.0;
+/// Below this window width the sidebar doesn't take room: it opens over the gallery (REQ-019-15).
+pub const NARROW: f32 = 600.0;
 const ROW: f32 = 32.0;
 const INDENT: f32 = 16.0;
 /// Top-level tags of a category shown before _Show all_ (REQ-008-03).
@@ -35,6 +37,10 @@ pub struct SidebarState {
     expanded_for: Option<(i64, Option<String>)>,
     /// Hidden with _Hide sidebar_ or Ctrl + B, stored under `sidebar.hidden` (REQ-008-08, REQ-008-09).
     hidden: bool,
+    /// The window is narrower than [`NARROW`]: the sidebar opens over the gallery and isn't stored (REQ-019-15).
+    narrow: bool,
+    /// Open over the gallery on a narrow window.
+    drawer_open: bool,
     /// Which groups show below the libraries, in which order (REQ-008-10).
     layout: SidebarLayout,
     loaded: bool,
@@ -79,11 +85,30 @@ impl SidebarState {
     }
 
     pub fn is_hidden(&self) -> bool {
-        self.hidden
+        if self.narrow { !self.drawer_open } else { self.hidden }
     }
 
-    /// Hides or shows the sidebar and remembers it (REQ-008-08, REQ-008-09).
+    /// Whether it opens over the gallery instead of beside it (REQ-019-15).
+    pub fn is_drawer(&self) -> bool {
+        self.narrow
+    }
+
+    /// Follows the window's width each frame; a narrow window starts with the sidebar closed (REQ-019-15).
+    pub fn set_window_width(&mut self, width: f32) {
+        let narrow = width < NARROW;
+        if narrow != self.narrow {
+            self.narrow = narrow;
+            self.drawer_open = false;
+        }
+    }
+
+    /// Hides or shows the sidebar and remembers it (REQ-008-08, REQ-008-09); on a narrow window only closes or opens
+    /// it over the gallery (REQ-019-15).
     pub fn set_hidden(&mut self, hidden: bool, db: Option<&Arc<Mutex<Connection>>>) {
+        if self.narrow {
+            self.drawer_open = !hidden;
+            return;
+        }
         self.hidden = hidden;
         // As for groups: if a background job holds the connection, the choice isn't stored this time.
         if let Some(Ok(conn)) = db.map(|db| db.try_lock())

@@ -74,6 +74,14 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     if let Some(error) = &state.error {
         empty_state::error(ui, "Couldn't open the index", error);
     } else {
+        state.sidebar.set_window_width(ctx.content_rect().width());
+        // Over the gallery, the sidebar closes once something in it is picked (REQ-019-15).
+        let before_drawer = (!state.sidebar.is_hidden() && state.sidebar.is_drawer()).then(|| {
+            (
+                state.page,
+                state.gallery.as_ref().map(|gallery| gallery.search().clone()),
+            )
+        });
         let input = sidebar::SidebarInput {
             libraries: &state.libraries,
             scanning: state.indexer_status.current.map(|scan| scan.library),
@@ -97,7 +105,9 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
             let hidden = !state.sidebar.is_hidden();
             state.sidebar.set_hidden(hidden, input.db.as_ref());
         }
-        if !state.sidebar.is_hidden() {
+        if !state.sidebar.is_hidden() && state.sidebar.is_drawer() {
+            sidebar_drawer(&ctx, &mut state.sidebar, gallery, input);
+        } else if !state.sidebar.is_hidden() {
             let sidebar = egui::Panel::left("sidebar")
                 .exact_size(sidebar::WIDTH)
                 .resizable(false)
@@ -106,10 +116,16 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
             // Behind the viewer the sidebar shows through the scrim too (REQ-013-14).
             glass::record_solid(&ctx, sidebar.response.rect, theme::recess(), true);
         }
+        if let Some((page, search)) = before_drawer
+            && (state.page != page || state.gallery.as_ref().map(|gallery| gallery.search()) != search.as_ref())
+        {
+            state.sidebar.set_hidden(true, None);
+        }
         // Not under the viewer: it has its own info panel.
         if state.page == Page::Gallery && state.info_sheet.is_some() && state.viewer.is_none() {
             egui::Panel::right("info sheet")
-                .exact_size(info::WIDTH)
+                // Never wider than the window (REQ-019-15).
+                .exact_size(info::WIDTH.min(ctx.content_rect().width()))
                 .resizable(false)
                 .frame(egui::Frame::new().fill(theme::recess()).inner_margin(16))
                 .show(ui, |ui| info_sheet(ui, state));
@@ -246,6 +262,45 @@ fn filter_by_tag(state: &mut AppState, tag: &str) {
 }
 
 /// The info sheet beside the gallery (REQ-009-11): the same details as the viewer's info panel.
+/// The sidebar over the gallery on a narrow window, the rest of the window dimmed; a click there closes it
+/// (REQ-019-15).
+fn sidebar_drawer(
+    ctx: &egui::Context,
+    sidebar_state: &mut sidebar::SidebarState,
+    gallery: Option<&mut gallery::Gallery>,
+    input: sidebar::SidebarInput,
+) {
+    let screen = ctx.content_rect();
+    let beside = egui::Area::new(egui::Id::unique("sidebar drawer scrim"))
+        .order(egui::Order::Middle)
+        .fixed_pos(screen.min)
+        .show(ctx, |ui| {
+            ui.painter()
+                .rect_filled(screen, 0.0, egui::Color32::from_black_alpha(128));
+            ui.allocate_rect(screen, egui::Sense::click())
+        })
+        .inner;
+    let width = sidebar::WIDTH.min(screen.width());
+    egui::Area::new(egui::Id::unique("sidebar drawer"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(screen.min)
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(theme::recess())
+                .stroke(egui::Stroke::new(1.0, theme::rim()))
+                .inner_margin(8)
+                .show(ui, |ui| {
+                    let inner = egui::vec2(width - 16.0, screen.height() - 16.0);
+                    ui.set_min_size(inner);
+                    ui.set_max_size(inner);
+                    sidebar::show(ui, sidebar_state, gallery, input);
+                });
+        });
+    if beside.clicked() {
+        sidebar_state.set_hidden(true, None);
+    }
+}
+
 fn info_sheet(ui: &mut egui::Ui, state: &mut AppState) {
     let Some(id) = state.info_sheet else { return };
     // Below the window controls, which take the top right of the window (REQ-013-02).
@@ -353,7 +408,8 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
     } else {
         state.gallery.as_mut()
     };
-    let sidebar_hidden = state.sidebar.is_hidden();
+    // Over a narrow window the sidebar opens above the toolbar, which keeps its button (REQ-019-15).
+    let sidebar_hidden = state.sidebar.is_hidden() || state.sidebar.is_drawer();
     let asked = toolbar::show(
         ui,
         area,

@@ -205,6 +205,11 @@ pub fn date_range_label(from: Option<NaiveDate>, to: Option<NaiveDate>) -> Strin
     }
 }
 
+/// Whether the toolbar's buttons drop their labels to leave the search bar room: on a narrow window (REQ-019-15).
+fn compact(ui: &egui::Ui) -> bool {
+    ui.ctx().content_rect().width() < crate::sidebar::NARROW
+}
+
 /// _Filters_: media kind, date range and rating; the button shows how many are set (REQ-007-07 … -09,
 /// REQ-013-08).
 fn filters_button(ui: &mut egui::Ui, gallery: &mut Gallery) {
@@ -214,16 +219,19 @@ fn filters_button(ui: &mut egui::Ui, gallery: &mut Gallery) {
     } else {
         "Filters".into()
     };
-    let text = if count > 0 {
-        format!("Filters · {count}")
-    } else {
-        "Filters".into()
+    // On a narrow window the icon and the count alone (REQ-019-15).
+    let text = match (count > 0, compact(ui)) {
+        (true, true) => count.to_string(),
+        (true, false) => format!("Filters · {count}"),
+        (false, true) => String::new(),
+        (false, false) => "Filters".into(),
     };
-    let response = ui.add(
+    let button = if text.is_empty() {
+        egui::Button::new(Icon::SlidersHorizontal.small())
+    } else {
         egui::Button::new((Icon::SlidersHorizontal.small(), text))
-            .frame(count > 0)
-            .min_size(vec2(0.0, theme::CONTROL_HEIGHT)),
-    );
+    };
+    let response = ui.add(button.frame(count > 0).min_size(vec2(0.0, theme::CONTROL_HEIGHT)));
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
     menu(&response, "filters menu", 320.0, |ui| filters_menu(ui, gallery));
 }
@@ -414,11 +422,12 @@ fn day_field(ui: &mut egui::Ui, id: &str, day: Option<NaiveDate>, fallback: Naiv
 
 /// The _View_ button, showing the current view's icon, and its menu (REQ-006-01, -06, REQ-016-03, REQ-017-03).
 fn view_button(ui: &mut egui::Ui, gallery: &mut Gallery) {
-    let button = egui::Button::new((
-        view_icon(gallery.view()).small(),
-        "View",
-        Icon::ChevronDown.image(theme::ICON_SIZE, theme::muted()),
-    ))
+    let chevron = Icon::ChevronDown.image(theme::ICON_SIZE, theme::muted());
+    let button = if compact(ui) {
+        egui::Button::new((view_icon(gallery.view()).small(), chevron))
+    } else {
+        egui::Button::new((view_icon(gallery.view()).small(), "View", chevron))
+    }
     .frame(false)
     .min_size(vec2(0.0, theme::CONTROL_HEIGHT));
     let response = ui.add(button);
