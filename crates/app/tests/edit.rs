@@ -7,7 +7,7 @@ use common::{Fixture, settle};
 use db::libraries::LibraryStatus;
 use db::rusqlite::Connection;
 use db::writer::{IndexWriter, IndexedFile};
-use domain::edit::{Adjustment, BlurKind, Channel, MaskOp, MaskShape, Part, Recipe, SavedEdit};
+use domain::edit::{Adjustment, BlurKind, Channel, MaskShape, Part, Recipe, SavedEdit};
 use domain::look::{Look, LookChoice};
 use domain::media::{MediaKind, MediaMetadata};
 use eframe::egui::accesskit::Role;
@@ -206,7 +206,9 @@ fn req_021_02_req_021_07_previews_compares_undoes_and_resets() {
     harness.run_steps(2);
     assert_eq!(session(&harness).unwrap().recipe().exposure, 1.0);
 
-    // A double-click on the slider resets it.
+    // A double-click on the slider, in view, resets it.
+    harness.set_size(egui::vec2(900.0, 1600.0));
+    harness.run_steps(2);
     let slider = harness.get_by_role_and_label(Role::Slider, "Exposure").rect().center();
     for _ in 0..2 {
         for pressed in [true, false] {
@@ -241,9 +243,11 @@ fn req_021_18_the_curve_editor_shows_the_histogram() {
         session(&harness).unwrap().histogram().is_none(),
         "only with Curves open"
     );
-    // Light folded away, so the curve is in view.
-    harness.get_by_role_and_label(Role::Button, "Light").click();
-    harness.run_steps(2);
+    // What lies above folded away, so the curve is in view.
+    for section in ["Crop and rotate", "Look", "Light"] {
+        harness.get_by_role_and_label(Role::Button, section).click();
+        harness.run_steps(2);
+    }
     harness.get_by_role_and_label(Role::Button, "Curves").click();
     harness.run_steps(2);
     let shown = session(&harness).unwrap().histogram().expect("a histogram").clone();
@@ -703,8 +707,8 @@ fn req_022_01_req_022_02_req_022_04_edits_the_subject_found_in_the_photo() {
     let mut recipe = session.recipe().clone();
     Adjustment::Exposure.set(recipe.part_mut(Part::Subject), 1.5);
     session.commit(recipe);
-    harness.get_by_role_and_label(Role::Button, "Show selection").click();
     harness.run_steps(2);
+    assert!(self::session(&harness).unwrap().tints_selection(), "tinted at once");
     harness.snapshot(common::snapshot_name("edit_subject"));
     assert_eq!(
         self::session(&harness)
@@ -754,6 +758,8 @@ fn req_023_01_req_023_02_req_023_03_chooses_a_blur_and_places_its_focus() {
     disc_photo(&dir);
     open(&mut harness, "a.jpg");
     edit(&mut harness);
+    harness.set_size(egui::vec2(900.0, 800.0));
+    harness.run_steps(2);
     // Crop and rotate, Look, Light and Color folded away, Effects open.
     for section in ["Crop and rotate", "Look", "Light", "Color", "Effects"] {
         harness.get_by_role_and_label(Role::Button, section).click();
@@ -837,11 +843,9 @@ fn req_028_01_req_028_02_req_028_03_picks_a_look_and_sets_its_strength_and_grain
     assert!(harness.query_by_label("Strength").is_none());
 }
 
-/// Room for the panel's sections, with _Masks_ open.
+/// Room for the panel's sections.
 fn open_masks(harness: &mut App) {
     harness.set_size(egui::vec2(900.0, 1600.0));
-    harness.run_steps(2);
-    harness.get_by_role_and_label(Role::Button, "Masks").click();
     harness.run_steps(2);
 }
 
@@ -904,6 +908,118 @@ fn req_030_01_req_030_06_req_030_07_adds_changes_and_removes_masks() {
     );
 }
 
+/// REQ-030-15: the parts, the masks and the buttons to add one come before all else, not folded away.
+#[test]
+fn req_030_15_what_to_edit_comes_first() {
+    let fixture = Fixture::new();
+    let (mut harness, _dir) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    settle_all(&mut harness);
+    harness.set_size(egui::vec2(900.0, 1600.0));
+    harness.run_steps(2);
+
+    assert!(
+        harness.query_by_role_and_label(Role::Button, "Masks").is_none(),
+        "no section"
+    );
+    let top = |harness: &App, label: &str| harness.get_by_role_and_label(Role::Button, label).rect().top();
+    let adds = [
+        "Add gradient",
+        "Add luminance",
+        "Add color",
+        "Add brush",
+        "Add freeform",
+    ];
+    for label in adds {
+        assert!(top(&harness, "Photo") < top(&harness, label), "{label}");
+        assert!(top(&harness, label) < top(&harness, "Crop and rotate"), "{label}");
+    }
+
+    // A mask joins the list, and its place in it is before its controls.
+    harness.get_by_role_and_label(Role::Button, "Add color").click();
+    harness.run_steps(2);
+    assert_eq!(top(&harness, "Photo"), top(&harness, "Subject"));
+    assert_eq!(top(&harness, "Photo"), top(&harness, "Background"));
+    assert!(top(&harness, "Color 1") < top(&harness, "Add color"));
+    assert!(top(&harness, "Add color") < top(&harness, "Remove mask"));
+
+    // Only masks can be removed.
+    for part in ["Photo", "Subject", "Background"] {
+        harness.get_by_role_and_label(Role::Button, part).click();
+        harness.run_steps(2);
+        assert!(harness.query_by_label("Remove mask").is_none(), "{part}");
+    }
+}
+
+/// REQ-030-07, REQ-022-04: a chosen mask or part is tinted at once; _Show selection_ turns it off for all of them, while
+/// _Photo_ has nothing to show.
+#[test]
+fn req_030_07_tints_by_default_until_turned_off() {
+    let fixture = Fixture::new();
+    let (mut harness, _dir) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    settle_all(&mut harness);
+    harness.set_size(egui::vec2(900.0, 1600.0));
+    harness.run_steps(2);
+    let tints = |harness: &App| session(harness).unwrap().tints_selection();
+
+    assert!(!tints(&harness), "the photo");
+    assert!(harness.query_by_label("Show selection").is_none());
+    harness.get_by_role_and_label(Role::Button, "Add gradient").click();
+    harness.run_steps(2);
+    assert!(tints(&harness), "on when added");
+    harness.get_by_role_and_label(Role::Button, "Photo").click();
+    harness.run_steps(2);
+    assert!(!tints(&harness));
+    harness.get_by_role_and_label(Role::Button, "Gradient 1").click();
+    harness.run_steps(2);
+    assert!(tints(&harness), "on when chosen");
+
+    harness.get_by_role_and_label(Role::Button, "Show selection").click();
+    harness.run_steps(2);
+    assert!(!tints(&harness), "off");
+    harness.get_by_role_and_label(Role::Button, "Add color").click();
+    harness.run_steps(2);
+    assert!(!tints(&harness), "stays off for the next mask");
+    harness.get_by_role_and_label(Role::Button, "Show selection").click();
+    harness.run_steps(2);
+    assert!(tints(&harness), "on again");
+}
+
+/// REQ-030-16: holding an adjustment's slider hides the tint, holding one of the selection's own doesn't.
+#[test]
+fn req_030_16_the_tint_steps_aside_while_adjusting() {
+    let fixture = Fixture::new();
+    let (mut harness, _dir) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    settle_all(&mut harness);
+    harness.set_size(egui::vec2(900.0, 1600.0));
+    harness.run_steps(2);
+    harness.get_by_role_and_label(Role::Button, "Add luminance").click();
+    harness.run_steps(2);
+    let tints = |harness: &App| session(harness).unwrap().tints_selection();
+    let middle = |harness: &App, label: &str| harness.get_by_role_and_label(Role::Slider, label).rect().center();
+
+    let exposure = middle(&harness, "Exposure");
+    harness.drag_at(exposure);
+    harness.run_steps(2);
+    assert!(!tints(&harness), "hidden while held");
+    harness.drop_at(exposure);
+    harness.run_steps(2);
+    assert!(tints(&harness), "back when let go");
+
+    let from = middle(&harness, "From");
+    harness.drag_at(from);
+    harness.run_steps(2);
+    assert!(tints(&harness), "it changes the selection");
+    harness.drop_at(from);
+    harness.run_steps(2);
+    assert!(tints(&harness));
+}
+
 /// REQ-030-03: a handle follows the drag, in one undo step.
 #[test]
 fn req_030_03_drags_a_gradients_handle() {
@@ -939,69 +1055,6 @@ fn req_030_03_drags_a_gradients_handle() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run_steps(3);
     assert_eq!(session(&harness).unwrap().recipe().masks[0].shape, MaskShape::LINEAR);
-}
-
-/// REQ-030-10, REQ-030-11: a mask gets further shapes, each with its controls and how it combines, as undo steps.
-#[test]
-fn req_030_10_req_030_11_makes_a_mask_of_several_shapes() {
-    let fixture = Fixture::new();
-    let (mut harness, _dir) = app(&fixture, None, None);
-    open(&mut harness, "a.jpg");
-    edit(&mut harness);
-    settle_all(&mut harness);
-    open_masks(&mut harness);
-
-    harness.get_by_role_and_label(Role::Button, "Add gradient").click();
-    harness.run_steps(2);
-    let mask = |harness: &App| session(harness).unwrap().recipe().masks[0].clone();
-    assert_eq!(mask(&harness).shapes(), 1);
-
-    // A further shape intersects at first, and shows its own controls.
-    harness.get_by_role_and_label(Role::Button, "+ Luminance").click();
-    harness.run_steps(2);
-    assert_eq!(mask(&harness).more[0].op, MaskOp::Intersect);
-    assert_eq!(mask(&harness).more[0].shape, MaskShape::LUMINANCE);
-    assert!(harness.query_by_label("From").is_some());
-    harness.snapshot(common::snapshot_name("edit_mask_shapes"));
-
-    harness.get_by_role_and_label(Role::Button, "Subtract").click();
-    harness.run_steps(2);
-    assert_eq!(mask(&harness).more[0].op, MaskOp::Subtract);
-
-    // Its slider changes it, not the first shape.
-    harness.get_by_role_and_label(Role::Slider, "From").focus();
-    harness.run_steps(1);
-    harness.key_press(Key::ArrowLeft);
-    harness.run_steps(2);
-    assert_eq!(mask(&harness).shape, MaskShape::LINEAR);
-    match mask(&harness).more[0].shape {
-        MaskShape::Luminance { low, .. } => assert_eq!(low, 59.0),
-        other => panic!("{other:?}"),
-    }
-
-    // The first shape is chosen again: its handles, no way to combine or remove it.
-    harness.get_by_role_and_label(Role::Button, "1. Gradient").click();
-    harness.run_steps(2);
-    assert!(session(&harness).unwrap().is_on_gradient());
-    assert!(harness.query_by_label("Subtract").is_none() && harness.query_by_label("Remove shape").is_none());
-
-    // The subject among them; four at most.
-    harness.get_by_role_and_label(Role::Button, "+ Subject").click();
-    harness.run_steps(2);
-    assert!(session(&harness).unwrap().recipe().needs_subject());
-    harness.get_by_role_and_label(Role::Button, "+ Background").click();
-    harness.run_steps(2);
-    assert_eq!(mask(&harness).shapes(), 4);
-    harness.get_by_role_and_label(Role::Button, "+ Color").click();
-    harness.run_steps(2);
-    assert_eq!(mask(&harness).shapes(), 4, "no room for a fifth");
-
-    harness.get_by_role_and_label(Role::Button, "Remove shape").click();
-    harness.run_steps(2);
-    assert_eq!(mask(&harness).shapes(), 3);
-    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
-    harness.run_steps(2);
-    assert_eq!(mask(&harness).shapes(), 4);
 }
 
 /// REQ-030-12: a drag paints a stroke, thinned, as one undo step; a click a dot; _Erase_ and _Clear_ do as they say.

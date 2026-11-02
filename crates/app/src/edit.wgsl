@@ -10,18 +10,18 @@ struct Part {
     turn: vec4<f32>,
 }
 
-// A shape of a mask (spec 030): its kind (x: 0 gradient, 1 luminance, 2 color, 3 subject, 4 background, 5 painted), how it combines
-// (y: 0 add, 1 subtract, 2 intersect), and its numbers (`domain::edit::MaskShape::numbers`).
+// What a mask selects (spec 030): its kind (x: 0 gradient, 1 luminance, 2 color, 3 painted), and its numbers
+// (`domain::edit::MaskShape::numbers`).
 struct MaskShape {
     kind: vec4<f32>,
     numbers: vec4<f32>,
 }
 
-// A mask: its light and color, inverted (info.x), how many shapes (info.y), and those.
+// A mask: its light and color, inverted (info.x), and its shape.
 struct LocalMask {
     part: Part,
     info: vec4<f32>,
-    shapes: array<MaskShape, 4>,
+    shape: MaskShape,
 }
 
 struct Edit {
@@ -242,21 +242,11 @@ fn part(lin: vec3<f32>, p: Part) -> vec3<f32> {
 }
 
 // `domain::edit::MaskShape::weight`, `rgb` as stored.
-fn shape_weight(i: u32, j: u32, rgb: vec3<f32>, uv: vec2<f32>, subject: f32) -> f32 {
-    let kind = edit.masks[i].shapes[j].kind;
-    let numbers = edit.masks[i].shapes[j].numbers;
-    if kind.x > 4.5 {
-        return textureSampleLevel(paintings, photo_sampler, uv, i32(kind.z + 0.5), 0.0).r;
-    }
+fn shape_weight(i: u32, rgb: vec3<f32>, uv: vec2<f32>) -> f32 {
+    let kind = edit.masks[i].shape.kind;
+    let numbers = edit.masks[i].shape.numbers;
     if kind.x > 2.5 {
-        // Without a subject, neither it nor the background selects anything.
-        if (u32(edit.size.w) & 4u) == 0u {
-            return 0.0;
-        }
-        if kind.x < 3.5 {
-            return subject;
-        }
-        return 1.0 - subject;
+        return textureSampleLevel(paintings, photo_sampler, uv, i32(kind.z + 0.5), 0.0).r;
     }
     if kind.x < 0.5 {
         let along = (numbers.xy - kind.zw) * edit.size.xy;
@@ -278,20 +268,9 @@ fn shape_weight(i: u32, j: u32, rgb: vec3<f32>, uv: vec2<f32>, subject: f32) -> 
     return (1.0 - smoothstep(kind.w, kind.w + max(numbers.x, 0.5), away)) * smoothstep(0.02, 0.06, length(lab.yz));
 }
 
-// `domain::edit::MaskParams::weight`: its shapes combined by `MaskOp::combine`.
-fn mask_weight(i: u32, rgb: vec3<f32>, uv: vec2<f32>, subject: f32) -> f32 {
-    var weight = shape_weight(i, 0u, rgb, uv, subject);
-    for (var j = 1u; j < u32(edit.masks[i].info.y); j++) {
-        let shape = shape_weight(i, j, rgb, uv, subject);
-        let op = edit.masks[i].shapes[j].kind.y;
-        if op < 0.5 {
-            weight = max(weight, shape);
-        } else if op < 1.5 {
-            weight = min(weight, 1.0 - shape);
-        } else {
-            weight = min(weight, shape);
-        }
-    }
+// `domain::edit::MaskParams::weight`.
+fn mask_weight(i: u32, rgb: vec3<f32>, uv: vec2<f32>) -> f32 {
+    let weight = shape_weight(i, rgb, uv);
     if edit.masks[i].info.x > 0.5 {
         return 1.0 - weight;
     }
@@ -313,7 +292,7 @@ fn develop(rgb: vec3<f32>, uv: vec2<f32>, subject: f32, glow: vec3<f32>) -> vec3
         lin = mix(part(lin, edit.background), part(lin, edit.subject), subject);
     }
     for (var i = 0u; i < u32(edit.mask_count.x); i++) {
-        lin = mix(lin, part(lin, edit.masks[i].part), mask_weight(i, rgb, uv, subject));
+        lin = mix(lin, part(lin, edit.masks[i].part), mask_weight(i, rgb, uv));
     }
     lin += glow;
     let vignette = edit.fx.x;
@@ -460,7 +439,7 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     }
     // The chosen mask (index + 1) tinted (REQ-030-07).
     if (flags >> 8u) != 0u {
-        rgb = mix(rgb, vec3<f32>(1.0, 0.25, 0.25), 0.45 * mask_weight((flags >> 8u) - 1u, stored, uv, subject));
+        rgb = mix(rgb, vec3<f32>(1.0, 0.25, 0.25), 0.45 * mask_weight((flags >> 8u) - 1u, stored, uv));
     }
     if (flags & 2u) != 0u {
         rgb = vec3<f32>(to_linear(rgb.r), to_linear(rgb.g), to_linear(rgb.b));

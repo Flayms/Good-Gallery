@@ -11,7 +11,7 @@ A portrait with a dull sky behind it, or a product shot against a busy wall, nee
 ### REQ-022-01 · Choose the part to edit
 
 - **Given** editing a photo
-- **When** the user chooses _Photo_, _Subject_ or _Background_ at the top of the adjustments panel
+- **When** the user chooses _Photo_, _Subject_ or _Background_ at the top of the adjustments panel (REQ-030-15)
 - **Then** the _Light_ and _Color_ sliders shown change that part; _Curves_ and _Effects_ are only offered for the whole photo
 - **And** _Photo_ is chosen when editing starts
 
@@ -32,8 +32,8 @@ A portrait with a dull sky behind it, or a product shot against a busy wall, nee
 ### REQ-022-04 · Show the part
 
 - **Given** _Subject_ or _Background_ chosen and the subject found
-- **When** the user turns on _Show selection_
-- **Then** the chosen part is tinted in the preview until it is turned off or another part is chosen
+- **When** the part is chosen
+- **Then** it is tinted in the preview, unless the user turned _Show selection_ off (REQ-030-07), and not while an adjustment's slider is held (REQ-030-16)
 - **And** the tint is never saved
 
 ### REQ-022-05 · Saved and editable again
