@@ -4,7 +4,9 @@
 //! original first copies it into the library's backup folder; reverting moves the backup back.
 
 use crate::thumbnail::{decode_error, limits};
-use domain::edit::{Mask, MtimeOnSave, Params, Pyramid, Recipe, backup_rel_path, blur_lod, copy_name, dither};
+use domain::edit::{
+    Geometry, Mask, MtimeOnSave, Params, Pyramid, Recipe, backup_rel_path, blur_lod, copy_name, dither,
+};
 use image::{DynamicImage, ImageReader, Rgba32FImage};
 use std::io::{Cursor, Write as _};
 use std::path::{Path, PathBuf};
@@ -131,6 +133,7 @@ pub fn save(tools: &Tools, request: &SaveRequest) -> Result<String, EditError> {
             source = backup;
         }
         copy_metadata(tools, &source, &temp, &request.recipe, &source_rel)?;
+        move_regions(tools, &source, &temp, &request.recipe, request.sidecar_orientation)?;
         if request.mtime == MtimeOnSave::Keep {
             set_mtime(&temp, original_mtime)?;
         }
@@ -408,6 +411,21 @@ pub fn render(params: &Params, image: &mut Rgba32FImage, subject: Option<&Mask>)
     });
 }
 
+/// The cropped, turned output of a rendered photo (REQ-029-06).
+fn apply_geometry(image: Rgba32FImage, geometry: &Geometry) -> Rgba32FImage {
+    if geometry.is_identity() {
+        return image;
+    }
+    let [x, y, w, h] = geometry.crop_pixels(image.width(), image.height());
+    let cropped = image::imageops::crop_imm(&image, x, y, w, h).to_image();
+    match geometry.quarter_turns() {
+        1 => image::imageops::rotate90(&cropped),
+        2 => image::imageops::rotate180(&cropped),
+        3 => image::imageops::rotate270(&cropped),
+        _ => cropped,
+    }
+}
+
 /// The original at `source` with `recipe` applied, encoded as `format`.
 fn render_file(
     source: &Path,
@@ -430,6 +448,8 @@ fn render_file(
         }
     };
     render(&Params::new(recipe), &mut decoded.image, subject);
+    // Last, so pixels outside the crop still feed the blur (REQ-029-04).
+    decoded.image = apply_geometry(decoded.image, &recipe.geometry());
     encode(&decoded, format)
 }
 
@@ -535,6 +555,76 @@ fn copy_metadata(
     crate::exiftool::run_once(&tools.exiftool, Some(&tools.config), &args)
         .map(drop)
         .map_err(EditError::Metadata)
+}
+
+/// Moves the regions just copied from `source` onto `target`'s pixels, which were turned upright and through the
+/// recipe's crop and turns (REQ-029-08, REQ-021-14). A person who loses every region keeps their People tag.
+fn move_regions(
+    tools: &Tools,
+    source: &Path,
+    target: &Path,
+    recipe: &Recipe,
+    sidecar_orientation: Option<u8>,
+) -> Result<(), EditError> {
+    let path = |path: &Path| path.to_string_lossy().into_owned();
+    let read = crate::exiftool::run_once(
+        &tools.exiftool,
+        None,
+        &[
+            "-charset".into(),
+            "filename=utf8".into(),
+            "-json".into(),
+            "-struct".into(),
+            "-Orientation#".into(),
+            "-XMP-mwg-rs:RegionInfo".into(),
+            "-XMP-MP:RegionInfoMP".into(),
+            path(source),
+        ],
+    )
+    .map_err(EditError::Metadata)?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&read).map_err(|error| EditError::Metadata(error.to_string()))?;
+    let Some(tags) = parsed.get(0).and_then(serde_json::Value::as_object) else {
+        return Ok(());
+    };
+    let orientation = tags
+        .get("Orientation")
+        .and_then(serde_json::Value::as_f64)
+        .map(|n| n as u8)
+        .or(sidecar_orientation)
+        .unwrap_or(1);
+    let geometry = recipe.geometry();
+    if geometry.is_identity() && orientation == 1 {
+        return Ok(());
+    }
+    let size = image::image_dimensions(target).map_err(|error| EditError::Encode(error.to_string()))?;
+    let Some(regions) = meta::rules::regions_on_output(tags, orientation, &geometry, size) else {
+        return Ok(());
+    };
+    let mut args = vec![
+        "-charset".to_string(),
+        "filename=utf8".into(),
+        "-XMP-MP:RegionInfoMP=".into(),
+    ];
+    // Through a file, so names need no escaping for exiftool's struct syntax.
+    let file = target.with_extension("gg-regions.json");
+    match &regions.info {
+        Some(info) => {
+            let json = serde_json::json!([{ "SourceFile": "*", "RegionInfo": info }]);
+            std::fs::write(&file, json.to_string())?;
+            args.push(format!("-json={}", path(&file)));
+        }
+        None => args.push("-XMP-mwg-rs:RegionInfo=".into()),
+    }
+    for name in regions.lost_people.iter().filter(|name| !name.contains(['\n', '\r'])) {
+        // Removing first keeps a name that is there already from appearing twice.
+        args.push(format!("-XMP-iptcExt:PersonInImage-={name}"));
+        args.push(format!("-XMP-iptcExt:PersonInImage+={name}"));
+    }
+    args.extend(["-overwrite_original".into(), "-ignoreMinorErrors".into(), path(target)]);
+    let written = crate::exiftool::run_once(&tools.exiftool, Some(&tools.config), &args);
+    let _ = std::fs::remove_file(&file);
+    written.map(drop).map_err(EditError::Metadata)
 }
 
 #[cfg(test)]
@@ -729,6 +819,132 @@ mod tests {
         let turned = image::open(lib.path(&written)).unwrap();
         assert_eq!((turned.width(), turned.height()), (32, 64));
         assert_eq!(lib.read(&written)["IFD0:Orientation"], 1);
+    }
+
+    fn cropped_and_turned() -> Recipe {
+        Recipe {
+            crop: Some([0.5, 0.0, 0.5, 0.5]),
+            quarter_turns: 1,
+            ..Default::default()
+        }
+    }
+
+    /// The saved file's metadata as the index would read it.
+    fn indexed(lib: &Library, rel: &str) -> domain::media::MediaMetadata {
+        let output = Command::new(&lib.tools.exiftool)
+            .args(["-j", "-struct", "-n"])
+            .arg(lib.path(rel))
+            .output()
+            .unwrap();
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        meta::rules::extract_metadata(value[0].as_object().unwrap(), None)
+    }
+
+    /// REQ-029-06: only the cropped, turned pixels, upright by the tag.
+    #[test]
+    fn req_029_06_saves_the_cropped_turned_pixels() {
+        let Some(lib) = library() else { return };
+        jpeg_file(&lib, "a.jpg");
+        let written = save(&lib.tools, &lib.request("a.jpg", cropped_and_turned(), true)).unwrap();
+        let saved = image::open(lib.path(&written)).unwrap().into_rgb8();
+        assert_eq!(saved.dimensions(), (16, 32));
+        assert_eq!(lib.read(&written)["IFD0:Orientation"], 1);
+        // The gradient's red grows to the right, its green downwards. Turned clockwise, the crop's top right (the
+        // photo's) is the output's bottom right, and red now grows downwards.
+        let (top, bottom) = (saved.get_pixel(8, 1), saved.get_pixel(8, 30));
+        assert!(bottom[0] > top[0] + 80, "{top:?} {bottom:?}");
+        assert!(top[0] > 110, "only the right half: {top:?}");
+    }
+
+    /// REQ-029-06: the turn works the same on a 16-bit PNG, which keeps its depth.
+    #[test]
+    fn req_029_06_keeps_16_bits() {
+        let Some(lib) = library() else { return };
+        let path = lib.path("deep.png");
+        DynamicImage::ImageRgb16(image::ImageBuffer::from_fn(40, 20, |x, _| {
+            image::Rgb([(x * 1600) as u16, 300, 300])
+        }))
+        .save(&path)
+        .unwrap();
+        let written = save(&lib.tools, &lib.request("deep.png", cropped_and_turned(), true)).unwrap();
+        let saved = image::open(lib.path(&written)).unwrap();
+        assert!(matches!(saved, DynamicImage::ImageRgb16(_)), "{:?}", saved.color());
+        assert_eq!((saved.width(), saved.height()), (10, 20));
+    }
+
+    /// REQ-029-07: saving again starts from the whole original, and reverting brings it back.
+    #[test]
+    fn req_029_07_editing_again_and_reverting_bring_back_the_whole_photo() {
+        let Some(lib) = library() else { return };
+        jpeg_file(&lib, "a.jpg");
+        let original = std::fs::read(lib.path("a.jpg")).unwrap();
+        save(&lib.tools, &lib.request("a.jpg", cropped_and_turned(), false)).unwrap();
+        assert_eq!(image::image_dimensions(lib.path("a.jpg")).unwrap(), (16, 32));
+
+        let mut again = lib.request("a.jpg", Recipe::default(), false);
+        again.source = backup_rel_path("a.jpg");
+        again.recipe.quarter_turns = 1;
+        save(&lib.tools, &again).unwrap();
+        assert_eq!(
+            image::image_dimensions(lib.path("a.jpg")).unwrap(),
+            (32, 64),
+            "the whole photo, turned"
+        );
+
+        revert(&lib.root(), "a.jpg", MtimeOnSave::Keep).unwrap();
+        assert_eq!(std::fs::read(lib.path("a.jpg")).unwrap(), original);
+    }
+
+    const REGIONS: [&str; 2] = [
+        "-XMP-mwg-rs:RegionInfo={AppliedToDimensions={W=64,H=32,Unit=pixel},RegionList=[\
+         {Area={X=0.75,Y=0.25,W=0.2,H=0.2,Unit=normalized},Name=Anna,Type=Face},\
+         {Area={X=0.25,Y=0.75,W=0.2,H=0.2,Unit=normalized},Name=Bob,Type=Face}]}",
+        "-XMP-MP:RegionInfoMP={Regions=[{PersonDisplayName=Anna,Rectangle=0.65|, 0.15|, 0.2|, 0.2}]}",
+    ];
+
+    /// REQ-029-08: in the saved file the regions mark the same faces; who was cropped away keeps their People tag.
+    #[test]
+    fn req_029_08_saved_regions_mark_the_same_faces() {
+        let Some(lib) = library() else { return };
+        jpeg_file(&lib, "a.jpg");
+        lib.tag("a.jpg", &REGIONS);
+        let recipe = Recipe {
+            crop: Some([0.5, 0.0, 0.5, 0.5]),
+            ..Default::default()
+        };
+        let written = save(&lib.tools, &lib.request("a.jpg", recipe, true)).unwrap();
+        let saved = indexed(&lib, &written);
+        assert_eq!(saved.faces.len(), 1, "{:?}", saved.faces);
+        let anna = &saved.faces[0];
+        assert_eq!(anna.name, "Anna");
+        assert!((anna.x - 0.3).abs() < 0.01 && (anna.y - 0.3).abs() < 0.01, "{anna:?}");
+        assert!((anna.w - 0.4).abs() < 0.01 && (anna.h - 0.4).abs() < 0.01, "{anna:?}");
+        let people: Vec<String> = saved.tags.iter().map(|tag| tag.join("|")).collect();
+        assert!(people.iter().any(|tag| tag.contains("Bob")), "{people:?}");
+        assert!(
+            lib.read(&written)
+                .keys()
+                .all(|key| !key.contains("RegionInfoMP") && !key.contains("Regions"))
+        );
+        let names: Vec<String> = std::fs::read_dir(lib.root())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(names.iter().all(|name| !name.contains("gg-regions")), "{names:?}");
+    }
+
+    /// REQ-021-14: baking the orientation into the pixels moves the regions with them, also without a crop.
+    #[test]
+    fn req_021_14_baking_the_orientation_moves_the_regions() {
+        let Some(lib) = library() else { return };
+        jpeg_file(&lib, "turned.jpg");
+        lib.tag("turned.jpg", &["-Orientation#=6", REGIONS[0]]);
+        let written = save(&lib.tools, &lib.request("turned.jpg", brighter(), true)).unwrap();
+        let faces = indexed(&lib, &written).faces;
+        // Orientation 6: the stored top right (0.75, 0.25) is the upright bottom right.
+        let anna = faces.iter().find(|face| face.name == "Anna").expect("Anna");
+        assert!((anna.x + anna.w / 2.0 - 0.75).abs() < 0.01, "{anna:?}");
+        assert!((anna.y + anna.h / 2.0 - 0.75).abs() < 0.01, "{anna:?}");
     }
 
     #[test]

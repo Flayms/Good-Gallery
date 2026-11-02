@@ -26,16 +26,13 @@ impl FaceRegion {
         if !inside(x, w) || !inside(y, h) {
             return None;
         }
-        let (left, top) = (x.max(0.0), y.max(0.0));
-        let (right, bottom) = ((x + w).min(1.0), (y + h).min(1.0));
-        let (ax, ay) = upright_point(left, top, orientation);
-        let (bx, by) = upright_point(right, bottom, orientation);
+        let [x, y, w, h] = upright_rect([x, y, w, h], orientation);
         Some(Self {
             name: name.to_string(),
-            x: ax.min(bx),
-            y: ay.min(by),
-            w: (ax - bx).abs(),
-            h: (ay - by).abs(),
+            x,
+            y,
+            w,
+            h,
         })
     }
 
@@ -43,6 +40,15 @@ impl FaceRegion {
     pub fn from_center(name: &str, cx: f32, cy: f32, w: f32, h: f32, orientation: u8) -> Option<Self> {
         Self::new(name, cx - w / 2.0, cy - h / 2.0, w, h, orientation)
     }
+}
+
+/// A rectangle of the stored photo (`x, y, w, h`, fractions of its size) on the upright photo, clamped to it.
+pub fn upright_rect([x, y, w, h]: [f32; 4], orientation: u8) -> [f32; 4] {
+    let (left, top) = (x.max(0.0), y.max(0.0));
+    let (right, bottom) = ((x + w).min(1.0), (y + h).min(1.0));
+    let (ax, ay) = upright_point(left, top, orientation);
+    let (bx, by) = upright_point(right, bottom, orientation);
+    [ax.min(bx), ay.min(by), (ax - bx).abs(), (ay - by).abs()]
 }
 
 /// Where a point of the stored photo (fractions of its width and height) lies on the upright photo.
