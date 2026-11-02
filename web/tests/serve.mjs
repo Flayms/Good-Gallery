@@ -1,4 +1,5 @@
-// A static server for the built page (`target/web`) on localhost, which browsers treat as secure like HTTPS.
+// A static server for the built page (`target/web`) on localhost, which browsers treat as secure like HTTPS. The page
+// is served from the root and from a subfolder (REQ-019-16).
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
@@ -6,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../../target/web/", import.meta.url));
 const port = Number(process.env.PORT || 8765);
+const subfolder = "/some/folder/";
 const types = {
   ".html": "text/html",
   ".js": "text/javascript",
@@ -15,7 +17,8 @@ const types = {
 };
 
 createServer(async (request, response) => {
-  const path = normalize(decodeURIComponent(new URL(request.url, "http://localhost").pathname));
+  const url = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
+  const path = normalize(url.startsWith(subfolder) ? "/" + url.slice(subfolder.length) : url);
   const file = join(root, path.endsWith("/") ? path + "index.html" : path);
   if (!file.startsWith(root)) {
     response.writeHead(403).end();

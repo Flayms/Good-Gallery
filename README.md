@@ -66,6 +66,8 @@ Extract the archive and run `./good-gallery`, or `./install.sh` to add it to you
 
 Try it at **[flayms.github.io/Good-Gallery](https://flayms.github.io/Good-Gallery/)** without installing anything. Pick a folder and browse it with the same gallery, search and viewer. Nothing is uploaded: the index and thumbnails stay in your browser. It works in current Chrome, Edge, Firefox and Safari, for folders up to about 20,000 files. Network shares and editing need the desktop app.
 
+To host it yourself, extract `good-gallery-<version>-web.zip` from the [releases](https://github.com/Flayms/Good-Gallery/releases) into any folder of a static web server. It needs no server-side code, but it has to be served over HTTPS (or on localhost), since browsers offer folder access and storage only there.
+
 ## Getting started
 
 Open **Settings**, add a folder as a library and wait for the first indexing to finish. Then:
