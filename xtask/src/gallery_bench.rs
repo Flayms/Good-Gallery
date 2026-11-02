@@ -8,6 +8,9 @@
 //!   folder of `items` hard links to the JPEG files found below the folder (e.g. a copy of real photos), reused
 //!   round-robin and indexed as a scan would, so the app's scans find nothing changed. Every run starts with an empty
 //!   cache, and the app skips the warming pass.
+//!
+//! `--viewer` measures with the viewer open over the scrolling gallery, `--no-glass` without the glass pass, and
+//! `--glass-matrix` runs all four combinations one after another and labels them (#14).
 
 use anyhow::{Context as _, bail};
 use db::libraries::{self, LibraryStatus};
@@ -16,7 +19,7 @@ use indexer::thumb_cache::thumb_path;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const USAGE: &str = "usage: cargo xtask gallery-bench (--thumbs | --originals) <folder> [--items 100000] [--out <data folder>] [--seconds 20]";
+const USAGE: &str = "usage: cargo xtask gallery-bench (--thumbs | --originals) <folder> [--items 100000] [--out <data folder>] [--seconds 20] [--viewer] [--no-glass] [--glass-matrix]";
 /// A drive letter no test machine has: the library stays offline, so scans never remove its media items.
 const LIBRARY: &str = "B:\\gallery-bench";
 /// Photo-like shapes, height / width.
@@ -147,6 +150,7 @@ fn reset_cold(out: &Path) -> anyhow::Result<()> {
 
 pub fn run(args: &[String]) -> anyhow::Result<()> {
     let (mut thumbs, mut originals, mut items, mut out, mut seconds) = (None, None, 100_000usize, None, 20.0f32);
+    let (mut viewer, mut no_glass, mut matrix) = (false, false, false);
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -155,6 +159,9 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
             "--items" => items = args.next().context(USAGE)?.parse().context(USAGE)?,
             "--out" => out = Some(PathBuf::from(args.next().context(USAGE)?)),
             "--seconds" => seconds = args.next().context(USAGE)?.parse().context(USAGE)?,
+            "--viewer" => viewer = true,
+            "--no-glass" => no_glass = true,
+            "--glass-matrix" => matrix = true,
             other => bail!("unknown argument {other} ({USAGE})"),
         }
     }
@@ -175,16 +182,42 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     } else {
         build(&out, &source, items)?;
     }
-    let mut app = Command::new(env!("CARGO"));
-    app.args(["run", "--release", "-q", "-p", "app", "--", "--data-dir"])
-        .arg(&out)
-        .args(["--bench-scroll", &seconds.to_string()]);
-    if cold {
-        app.arg("--bench-cold");
+    if matrix && (viewer || no_glass) {
+        bail!(USAGE);
     }
-    let status = app.status()?;
-    if !status.success() {
-        bail!("the app failed");
+    let runs = if matrix {
+        vec![(false, false), (false, true), (true, false), (true, true)]
+    } else {
+        vec![(viewer, no_glass)]
+    };
+    for (viewer, no_glass) in runs {
+        if matrix {
+            println!(
+                "{}, {}:",
+                if viewer { "viewer open" } else { "gallery" },
+                if no_glass { "no glass" } else { "glass" }
+            );
+        }
+        if cold {
+            reset_cold(&out)?;
+        }
+        let mut app = Command::new(env!("CARGO"));
+        app.args(["run", "--release", "-q", "-p", "app", "--", "--data-dir"])
+            .arg(&out)
+            .args(["--bench-scroll", &seconds.to_string()]);
+        if cold {
+            app.arg("--bench-cold");
+        }
+        if viewer {
+            app.args(["--view", "0"]);
+        }
+        if no_glass {
+            app.arg("--bench-no-glass");
+        }
+        let status = app.status()?;
+        if !status.success() {
+            bail!("the app failed");
+        }
     }
     if cold {
         let conn = db::open(&out.join("gallery.db"))?;
