@@ -1123,6 +1123,10 @@ pub struct Params {
     pub grain: f32,
     /// Grain cell size in pixels of the full photo.
     pub grain_cell: f32,
+    /// A film look's grain: strongest in the midtones (REQ-028-06).
+    pub grain_midtones: bool,
+    /// How much the grain differs between the color channels, 0–1 (REQ-028-06).
+    pub grain_color: f32,
     /// The curves, all channels composed into one table per channel; `None` for straight curves.
     pub curves: Option<Vec<[f32; 3]>>,
     pub blur_kind: BlurKind,
@@ -1140,6 +1144,7 @@ pub struct Params {
 impl Params {
     pub fn new(recipe: &Recipe) -> Self {
         // A film look adds to the adjustments, and its curves go before the recipe's own (REQ-028-04).
+        let look = recipe.look.map(|choice| choice.look);
         let (folded, look_curves) = crate::look::fold(recipe);
         let recipe = &folded;
         let curves = (!recipe.curves.is_identity() || look_curves.is_some()).then(|| {
@@ -1173,6 +1178,8 @@ impl Params {
             vignette_frame: recipe.geometry().crop(),
             grain: recipe.grain / 100.0,
             grain_cell: 1.0 + recipe.grain_size / 100.0 * 3.0,
+            grain_midtones: look.is_some(),
+            grain_color: look.map_or(0.0, crate::look::Look::grain_color),
             curves,
             blur_kind: recipe.blur_kind,
             blur: if recipe.blur_kind == BlurKind::None {
@@ -1260,8 +1267,23 @@ impl Params {
         }
         let mut out = lin.map(|c| to_encoded(c.max(0.0)));
         if self.grain != 0.0 {
-            let n = value_noise(uv[0] * size[0] / self.grain_cell, uv[1] * size[1] / self.grain_cell);
-            out = out.map(|c| c + n * self.grain * 0.2);
+            let (x, y) = (uv[0] * size[0] / self.grain_cell, uv[1] * size[1] / self.grain_cell);
+            let n = value_noise(x, y);
+            // Each color channel's own noise, as a color film's three layers have.
+            let own = if self.grain_color > 0.0 {
+                [value_noise(x + 37.0, y + 17.0), n, value_noise(x + 59.0, y + 91.0)]
+            } else {
+                [n; 3]
+            };
+            let amount = if self.grain_midtones {
+                let v = (out[0] + out[1] + out[2]) / 3.0;
+                self.grain * (0.35 + 0.65 * 4.0 * v.clamp(0.0, 1.0) * (1.0 - v.clamp(0.0, 1.0)))
+            } else {
+                self.grain
+            };
+            for (c, own) in out.iter_mut().zip(own) {
+                *c += (n + (own - n) * self.grain_color) * amount * 0.2;
+            }
         }
         out.map(|c| c.clamp(0.0, 1.0))
     }

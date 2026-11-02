@@ -17,16 +17,18 @@ pub enum Look {
     Portra400,
     Velvia50,
     Gold200,
+    Superia200,
     Hp5,
 }
 
 impl Look {
-    pub const ALL: [Look; 6] = [
+    pub const ALL: [Look; 7] = [
         Self::Polaroid600,
         Self::PolaroidBw,
         Self::Portra400,
         Self::Velvia50,
         Self::Gold200,
+        Self::Superia200,
         Self::Hp5,
     ];
 
@@ -37,7 +39,17 @@ impl Look {
             Self::Portra400 => "Portra 400",
             Self::Velvia50 => "Velvia 50",
             Self::Gold200 => "Gold 200",
+            Self::Superia200 => "Superia 200",
             Self::Hp5 => "HP5",
+        }
+    }
+
+    /// How much the grain differs between the color channels (REQ-028-06): none for black and white film, whose grain
+    /// is one layer of silver.
+    pub fn grain_color(self) -> f32 {
+        match self {
+            Self::PolaroidBw | Self::Hp5 => 0.0,
+            _ => 0.6,
         }
     }
 
@@ -144,6 +156,24 @@ impl Look {
                     &[[0.0, 0.0], [0.5, 0.53], [1.0, 1.0]],
                     &[[0.0, 0.0], [1.0, 1.0]],
                     &[[0.0, 0.0], [0.5, 0.45], [1.0, 0.92]],
+                ],
+            ),
+            // Superia 200, consumer film: cooler than Gold, leaning green.
+            Self::Superia200 => (
+                &[
+                    (A::Contrast, 10.0),
+                    (A::Temperature, -3.0),
+                    (A::Tint, -3.0),
+                    (A::Saturation, 8.0),
+                    (A::Vibrance, 8.0),
+                    (A::Grain, 25.0),
+                    (A::GrainSize, 40.0),
+                ],
+                [
+                    &[[0.0, 0.03], [0.5, 0.51], [1.0, 0.98]],
+                    &[[0.0, 0.0], [0.5, 0.49], [1.0, 1.0]],
+                    &[[0.0, 0.0], [0.5, 0.515], [1.0, 1.0]],
+                    &[[0.0, 0.01], [0.5, 0.51], [1.0, 1.0]],
                 ],
             ),
             // Punchy black and white with coarse grain.
@@ -309,6 +339,73 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// REQ-028-01: Superia is cooler than Gold and leans green.
+    #[test]
+    fn req_028_01_superia_is_cooler_and_greener_than_gold() {
+        let [superia, gold] = [Look::Superia200, Look::Gold200].map(|look| with_look(look, 100.0, 0.0));
+        let warmth = |recipe: &Recipe| {
+            let [r, _, b] = develop(recipe, [0.5; 3]);
+            r - b
+        };
+        assert!(warmth(&superia) < warmth(&gold) - 0.03);
+        let foliage = [0.25, 0.45, 0.15];
+        let green = |recipe: &Recipe| {
+            let [r, g, _] = develop(recipe, foliage);
+            g - r
+        };
+        assert!(green(&superia) > green(&gold) + 0.02);
+    }
+
+    /// How much grain shows on `rgb` in the color channel `c`: its deviation across the photo.
+    fn grain_amount(recipe: &Recipe, rgb: [f32; 3], c: usize) -> f32 {
+        let params = Params::new(recipe);
+        let values: Vec<f32> = (0..400)
+            .map(|i| params.pixel(rgb, [0.4 + i as f32 / 2000.0, 0.5], SIZE)[c])
+            .collect();
+        let mean = values.iter().sum::<f32>() / values.len() as f32;
+        (values.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / values.len() as f32).sqrt()
+    }
+
+    /// REQ-028-06: a look's grain shows most in the midtones.
+    #[test]
+    fn req_028_06_grain_is_strongest_in_the_midtones() {
+        for look in [Look::Gold200, Look::Hp5] {
+            let recipe = with_look(look, 0.0, 100.0);
+            let mid = grain_amount(&recipe, [0.5; 3], 1);
+            assert!(
+                mid > 1.5 * grain_amount(&recipe, [0.08; 3], 1),
+                "{look:?} in the shadows"
+            );
+            assert!(
+                mid > 1.5 * grain_amount(&recipe, [0.92; 3], 1),
+                "{look:?} in the highlights"
+            );
+        }
+    }
+
+    /// REQ-028-06: color film's grain differs per channel, black and white film's doesn't, and the _Grain_ slider
+    /// without a look stays as it was (REQ-021-06).
+    #[test]
+    fn req_028_06_color_film_has_grain_per_channel() {
+        let differs = |recipe: &Recipe| {
+            let params = Params::new(recipe);
+            (0..200).any(|i| {
+                let [r, g, b] = params.pixel([0.5; 3], [0.4 + i as f32 / 1000.0, 0.5], SIZE);
+                (r - g).abs() > 0.002 || (b - g).abs() > 0.002
+            })
+        };
+        assert!(differs(&with_look(Look::Portra400, 0.0, 200.0)));
+        assert!(!differs(&with_look(Look::Hp5, 0.0, 200.0)));
+
+        let plain = Recipe {
+            grain: 40.0,
+            ..Recipe::default()
+        };
+        assert!(!differs(&plain));
+        let (mid, dark) = (grain_amount(&plain, [0.5; 3], 1), grain_amount(&plain, [0.2; 3], 1));
+        assert!((mid - dark).abs() < 0.2 * mid, "{mid} vs {dark}");
     }
 
     #[test]
