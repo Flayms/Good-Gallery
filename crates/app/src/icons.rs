@@ -62,6 +62,8 @@ icons! {
     Plus => "plus",
     Redo2 => "redo-2",
     RefreshCw => "refresh-cw",
+    RotateCcw => "rotate-ccw",
+    RotateCw => "rotate-cw",
     Rows3 => "rows-3",
     ScanFace => "scan-face",
     Search => "search",

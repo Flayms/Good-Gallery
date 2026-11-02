@@ -563,6 +563,19 @@ impl Geometry {
         if self.quarter_turns % 2 == 1 { (h, w) } else { (w, h) }
     }
 
+    /// The upright original's size, about, from its output's: a saved edit's item knows only that one.
+    pub fn original_size(&self, width: u32, height: u32) -> (u32, u32) {
+        let (width, height) = if self.quarter_turns % 2 == 1 {
+            (height, width)
+        } else {
+            (width, height)
+        };
+        (
+            (width as f32 / self.crop[2]).round() as u32,
+            (height as f32 / self.crop[3]).round() as u32,
+        )
+    }
+
     /// Where a point of the original (fractions of its size) lies on the output; outside 0–1 if cropped away.
     pub fn to_output(&self, [u, v]: [f32; 2]) -> [f32; 2] {
         let [x, y, w, h] = self.crop;
@@ -1991,6 +2004,14 @@ mod tests {
         }
         assert!(!Geometry::new(None, 1).is_identity());
         assert!(Geometry::new(None, 0).is_identity());
+    }
+
+    /// REQ-029-07: editing a saved crop again works out the whole photo's size from the saved file's.
+    #[test]
+    fn req_029_07_the_originals_size_follows_from_the_outputs() {
+        let geometry = Geometry::new(Some([0.25, 0.5, 0.5, 0.5]), 1);
+        let (width, height) = geometry.output_size(40, 20);
+        assert_eq!(geometry.original_size(width, height), (40, 20));
     }
 
     /// REQ-029-06: a crop in pixels, inside the photo and never empty, whatever the rounding.

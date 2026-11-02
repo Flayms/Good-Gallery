@@ -84,11 +84,11 @@ Users who find a sideways photo or one with something distracting at its edge fi
 
 | REQ        | Test | Result |
 | ---------- | ---- | ------ |
-| REQ-029-01 | `crates/domain/src/edit.rs` › req_029_01_quarter_turns_swap_the_sides_and_move_points_clockwise | partial: no UI yet |
+| REQ-029-01 | `crates/domain/src/edit.rs` › req_029_01_quarter_turns_swap_the_sides_and_move_points_clockwise; `crates/app/tests/edit.rs` › req_029_01_req_029_05_turns_the_photo_and_takes_it_back | pass |
 | REQ-029-02 | | no test |
 | REQ-029-03 | | no test |
-| REQ-029-04 | `crates/domain/src/edit.rs` › req_029_04_the_mapping_to_the_output_and_back_agree, req_029_04_the_vignette_follows_the_crop | partial: no preview yet |
-| REQ-029-05 | | no test |
+| REQ-029-04 | `crates/domain/src/edit.rs` › req_029_04_the_mapping_to_the_output_and_back_agree, req_029_04_the_vignette_follows_the_crop; `crates/app/src/edit.rs` › req_029_04_the_gpu_preview_of_crop_and_turns_matches_the_cpu_render; `crates/app/tests/edit.rs` › req_029_04_a_pick_lands_on_the_same_spot_of_the_photo | pass |
+| REQ-029-05 | `crates/app/tests/edit.rs` › req_029_01_req_029_05_turns_the_photo_and_takes_it_back | partial: the crop not yet |
 | REQ-029-06 | `crates/domain/src/edit.rs` › req_029_06_the_crop_in_pixels_stays_inside_the_photo; `crates/media/src/edit.rs` › req_029_06_saves_the_cropped_turned_pixels, req_029_06_keeps_16_bits (exiftool) | partial: the tile's new shape not yet |
-| REQ-029-07 | `crates/domain/src/edit.rs` › req_029_07_crop_and_turns_round_trip_and_hostile_ones_are_tamed; `crates/media/src/edit.rs` › req_029_07_editing_again_and_reverting_bring_back_the_whole_photo (exiftool) | pass |
+| REQ-029-07 | `crates/domain/src/edit.rs` › req_029_07_crop_and_turns_round_trip_and_hostile_ones_are_tamed, req_029_07_the_originals_size_follows_from_the_outputs; `crates/media/src/edit.rs` › req_029_07_editing_again_and_reverting_bring_back_the_whole_photo (exiftool) | pass |
 | REQ-029-08 | `crates/domain/src/edit.rs` › req_029_08_places_rectangles_on_the_output; `crates/meta/src/rules.rs` › req_029_08_moves_a_sidecars_regions_by_the_saved_edit, req_029_08_places_regions_on_the_output_and_names_who_is_gone; `crates/media/src/edit.rs` › req_029_08_saved_regions_mark_the_same_faces (exiftool) | pass |

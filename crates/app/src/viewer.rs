@@ -220,6 +220,8 @@ pub struct Viewer {
     video_focus: bool,
     /// Editing the shown photo (spec 021).
     edit: Option<EditSession>,
+    /// What the session last asked to fit; a change fits the photo again.
+    edited_size: Option<[f32; 2]>,
     /// The bar's button or the context menu asked to start or stop editing.
     toggle_edit: bool,
     /// Where to go once the save that was asked for on leaving has finished (REQ-021-08).
@@ -263,6 +265,7 @@ impl Viewer {
             playing: None,
             video_focus: false,
             edit: None,
+            edited_size: None,
             toggle_edit: false,
             after_save: None,
             leave_next: None,
@@ -981,10 +984,25 @@ impl Viewer {
             (_, _, _, Some(thumbnail)) => Size::new(thumbnail.size[0] as f32, thumbnail.size[1] as f32),
             _ => Size::new(area.width(), area.height()),
         };
+        let editing = self.edit.as_ref().is_some_and(|session| session.media() == item.id);
+        // While editing, the photo through the recipe; held `\\` or _Compare_ shows the original (REQ-021-02, REQ-021-07).
+        let compare = self.comparing || ui.input(|input| input.key_down(Key::Backslash));
+        // The turned, cropped photo fits as a whole, wherever it was zoomed to (REQ-029-01).
+        let edited_size = self
+            .edit
+            .as_ref()
+            .filter(|_| editing)
+            .and_then(|session| session.shown_size(compare));
+        let natural = edited_size.map_or(natural, |[width, height]| Size::new(width, height));
+        if self.edited_size != edited_size {
+            if self.edited_size.is_some() && edited_size.is_some() {
+                self.view = FIT;
+            }
+            self.edited_size = edited_size;
+        }
         let viewport = Size::new(area.width(), area.height());
         let fitted = zoom::fit_size(natural, viewport);
         let photo = item.kind == MediaKind::Image;
-        let editing = self.edit.as_ref().is_some_and(|session| session.media() == item.id);
         let picking = editing && self.edit.as_ref().is_some_and(EditSession::is_picking);
 
         // Not over the chrome: its own widgets take those clicks and wheel turns.
@@ -1079,8 +1097,6 @@ impl Viewer {
                 }
             }
         }
-        // While editing, the photo through the recipe; held `\` or _Compare_ shows the original (REQ-021-02, REQ-021-07).
-        let compare = self.comparing || ui.input(|input| input.key_down(Key::Backslash));
         let edited = editing
             && transition.is_none()
             && self
