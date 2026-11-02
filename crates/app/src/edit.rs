@@ -7,8 +7,8 @@ use crate::icons::Icon;
 use crate::originals::OriginalState;
 use crate::theme;
 use domain::edit::{
-    Adjustment, BlurKind, CURVE_SAMPLES, Channel, HISTOGRAM_BINS, Histogram, History, Mask, Params, Part, Pyramid,
-    Recipe, SavedEdit, Section, blur_lod,
+    Adjustment, BlurKind, CURVE_SAMPLES, Channel, Geometry, HISTOGRAM_BINS, Histogram, History, Mask, Params, Part,
+    Pyramid, Recipe, SavedEdit, Section, blur_lod,
 };
 use domain::look::{Look, LookChoice};
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2, pos2, vec2};
@@ -136,6 +136,7 @@ pub struct EditSession {
     open: [bool; 4],
     /// Whether the _Look_ section is open.
     look_open: bool,
+    geometry_open: bool,
     channel: Channel,
     dragging_point: Option<usize>,
     picking: bool,
@@ -171,6 +172,7 @@ impl EditSession {
             reading: None,
             open: [true, false, true, false],
             look_open: true,
+            geometry_open: true,
             channel: Channel::All,
             dragging_point: None,
             picking: false,
@@ -221,6 +223,10 @@ impl EditSession {
 
     fn set_source(&mut self, source: String, recipe: Recipe) {
         self.source = Some(source);
+        // The item's size is the saved file's; the recipe's crop and turns start from the whole photo (REQ-029-07).
+        let [width, height] = self.target.full_size;
+        let (width, height) = recipe.geometry().original_size(width, height);
+        self.target.full_size = [width, height];
         self.history = History::new(recipe.clone());
         self.draft = recipe.clone();
         self.saved = recipe;
@@ -555,8 +561,45 @@ impl EditSession {
         }
     }
 
+    /// Asks for the next [`Self::pick`] to place the blur's focus (REQ-023-03).
+    pub fn place_focus(&mut self) {
+        self.placing_focus = true;
+    }
+
+    /// The size to fit into the media area while editing draws the photo: the output, or the whole unedited photo while
+    /// comparing (REQ-029-01, REQ-029-05). `None` until the original is there, while the viewer shows the file.
+    pub fn shown_size(&self, compare: bool) -> Option<[f32; 2]> {
+        if !matches!(self.base, Base::Loaded(_)) {
+            return None;
+        }
+        let [width, height] = self.target.full_size;
+        // The index doesn't know this photo's size: the viewer goes by the texture.
+        if width == 0 || height == 0 {
+            return None;
+        }
+        let (width, height) = if compare {
+            (width, height)
+        } else {
+            self.draft.geometry().output_size(width, height)
+        };
+        Some([width as f32, height as f32])
+    }
+
+    /// Turns the photo by `quarters` quarter turns clockwise (REQ-029-01).
+    fn rotate(&mut self, quarters: u8) {
+        let mut recipe = self.draft.clone();
+        recipe.quarter_turns = (recipe.quarter_turns + quarters) % 4;
+        self.commit(recipe);
+    }
+
     /// Picks the white balance at `uv` of the photo (REQ-021-05), or places the blur's focus there (REQ-023-03).
     pub fn pick(&mut self, uv: Pos2) {
+        // `uv` is on the output as shown; the photo's own coordinates stay on the content (REQ-029-04).
+        let [x, y] = self
+            .draft
+            .geometry()
+            .to_original([uv.x.clamp(0.0, 1.0), uv.y.clamp(0.0, 1.0)]);
+        let uv = pos2(x, y);
         if std::mem::take(&mut self.placing_focus) {
             let mut recipe = self.draft.clone();
             recipe.blur_focus = [uv.x.clamp(0.0, 1.0), uv.y.clamp(0.0, 1.0)];
@@ -625,6 +668,11 @@ impl EditSession {
                 let flags = flags | if render_state.target_format.is_srgb() { 2 } else { 0 };
                 let uniform = uniform(
                     &Params::new(&self.draft),
+                    if compare {
+                        Geometry::new(None, 0)
+                    } else {
+                        self.draft.geometry()
+                    },
                     [rect.min.x * ppp, rect.min.y * ppp, rect.max.x * ppp, rect.max.y * ppp],
                     [uv.min.x, uv.min.y, uv.max.x, uv.max.y],
                     self.target.full_size.map(|side| side as f32),
@@ -782,6 +830,21 @@ impl EditSession {
         ui.spacing_mut().item_spacing.y = 4.0;
         if !self.parts(ui) {
             return;
+        }
+        // Crop and rotate belong to the whole photo (spec 029).
+        if self.part == Part::Photo {
+            section_header(ui, "Crop and rotate", &mut self.geometry_open);
+            if self.geometry_open {
+                ui.horizontal(|ui| {
+                    if icon_button(ui, Icon::RotateCcw, "Rotate left", "Rotate left", true).clicked() {
+                        self.rotate(3);
+                    }
+                    if icon_button(ui, Icon::RotateCw, "Rotate right", "Rotate right", true).clicked() {
+                        self.rotate(1);
+                    }
+                });
+                ui.add_space(8.0);
+            }
         }
         // A film look, under all other adjustments; the subject and background have none (REQ-028-01).
         if self.part == Part::Photo {
@@ -1384,7 +1447,22 @@ fn cpu_preview(
         rgba.extend(out.map(|c| (c * 255.0).round() as u8));
         rgba.push(pixel[3]);
     }
-    egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &rgba)
+    let geometry = recipe.geometry();
+    let (out_width, out_height) = geometry.output_size(width, height);
+    let mut output = Vec::with_capacity(out_width as usize * out_height as usize * 4);
+    for y in 0..out_height {
+        for x in 0..out_width {
+            let [u, v] = geometry.to_original([
+                (x as f32 + 0.5) / out_width as f32,
+                (y as f32 + 0.5) / out_height as f32,
+            ]);
+            let from_x = ((u * width as f32) as u32).min(width - 1) as usize;
+            let from_y = ((v * height as f32) as u32).min(height - 1) as usize;
+            let at = (from_y * width as usize + from_x) * 4;
+            output.extend_from_slice(&rgba[at..at + 4]);
+        }
+    }
+    egui::ColorImage::from_rgba_unmultiplied([out_width as usize, out_height as usize], &output)
 }
 
 /// The selection's tint (REQ-022-04): towards red by how much a pixel is `selected`, as `edit.wgsl` does.
@@ -1418,8 +1496,16 @@ fn part_floats(params: &Params, on: f32) -> [f32; 16] {
 }
 
 /// The shader's uniform: `edit.wgsl`'s `Edit`, in its order.
-fn uniform(params: &Params, rect: [f32; 4], uv: [f32; 4], full_size: [f32; 2], opacity: f32, flags: f32) -> Vec<f32> {
-    let mut floats = Vec::with_capacity(72 + CURVE_SAMPLES * 4);
+fn uniform(
+    params: &Params,
+    geometry: Geometry,
+    rect: [f32; 4],
+    uv: [f32; 4],
+    full_size: [f32; 2],
+    opacity: f32,
+    flags: f32,
+) -> Vec<f32> {
+    let mut floats = Vec::with_capacity(76 + CURVE_SAMPLES * 4);
     floats.extend_from_slice(&rect);
     floats.extend_from_slice(&uv);
     floats.extend_from_slice(&[full_size[0], full_size[1], opacity, flags]);
@@ -1436,7 +1522,13 @@ fn uniform(params: &Params, rect: [f32; 4], uv: [f32; 4], full_size: [f32; 2], o
         .position(|kind| *kind == params.blur_kind)
         .unwrap_or(0) as f32;
     floats.extend_from_slice(&[params.blur, kind, params.blur_size, params.blur_feather]);
-    floats.extend_from_slice(&[params.blur_focus[0], params.blur_focus[1], 0.0, 0.0]);
+    floats.extend_from_slice(&[
+        params.blur_focus[0],
+        params.blur_focus[1],
+        f32::from(geometry.quarter_turns()),
+        0.0,
+    ]);
+    floats.extend_from_slice(&geometry.crop());
     for i in 0..CURVE_SAMPLES {
         let [r, g, b] = params.curves.as_ref().map_or([0.0; 3], |table| table[i]);
         floats.extend_from_slice(&[r, g, b, 0.0]);
@@ -1774,9 +1866,11 @@ mod tests {
         let source = crate::textures::upload(device, queue, size, &levels);
         let view = source.create_view(&wgpu::TextureViewDescriptor::default());
 
+        let (output_width, output_height) = recipe.geometry().output_size(width, height);
         let uniform = uniform(
             &Params::new(recipe),
-            [0.0, 0.0, width as f32, height as f32],
+            recipe.geometry(),
+            [0.0, 0.0, output_width as f32, output_height as f32],
             [0.0, 0.0, 1.0, 1.0],
             [width as f32, height as f32],
             1.0,
@@ -1787,8 +1881,8 @@ mod tests {
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("edit test"),
             size: wgpu::Extent3d {
-                width,
-                height,
+                width: output_width,
+                height: output_height,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -1798,6 +1892,7 @@ mod tests {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
+        let (width, height) = (output_width, output_height);
         let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
         let row = (width * 4).div_ceil(256) * 256;
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -1898,6 +1993,39 @@ mod tests {
                 }
             }
             eprintln!("worst difference: {worst}");
+        }
+    }
+
+    /// REQ-029-01, REQ-029-04: every turn and a crop preview as saving renders them, with the vignette on the crop.
+    #[test]
+    fn req_029_04_the_gpu_preview_of_crop_and_turns_matches_the_cpu_render() {
+        let (_gpu, render_state) = render_state();
+        let image = pattern();
+        for (crop, turns) in [
+            (None, 1),
+            (None, 2),
+            (None, 3),
+            (Some([0.0, 0.5, 0.5, 0.5]), 0),
+            (Some([0.5, 0.0, 0.5, 0.5]), 1),
+        ] {
+            let mut recipe = recipes()[1].clone();
+            Adjustment::Vignette.set(&mut recipe, -60.0);
+            recipe.crop = crop;
+            recipe.quarter_turns = turns;
+            let gpu = render_gpu(&render_state, &image, &recipe, None, 0);
+            let cpu = cpu_preview(&image, &recipe, [SIZE, SIZE], None, 0);
+            let (width, height) = recipe.geometry().output_size(SIZE, SIZE);
+            assert_eq!(cpu.size, [width as usize, height as usize], "{crop:?} {turns}");
+            assert_eq!(gpu.len(), cpu.pixels.len() * 4, "{crop:?} {turns}");
+            for (i, (gpu, cpu)) in gpu.chunks_exact(4).zip(cpu.pixels.iter()).enumerate() {
+                for c in 0..3 {
+                    let diff = (i32::from(gpu[c]) - i32::from(cpu.to_array()[c])).abs();
+                    assert!(
+                        diff <= 3,
+                        "pixel {i} channel {c}: GPU {gpu:?}, CPU {cpu:?}, {crop:?} {turns}"
+                    );
+                }
+            }
         }
     }
 
@@ -2070,6 +2198,7 @@ mod tests {
             mask: None,
             uniform: uniform(
                 &Params::new(&Recipe::default()),
+                Geometry::new(None, 0),
                 [0.0, 0.0, SIZE as f32, SIZE as f32],
                 [0.0, 0.0, 1.0, 1.0],
                 [SIZE as f32; 2],

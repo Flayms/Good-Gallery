@@ -33,8 +33,10 @@ struct Edit {
     // Blur (spec 023): the strongest as σ in parts of the longer side (x), the kind (y: 0 none, 1 background,
     // 2 tilt-shift, 3 radial), half the sharp area's size (z) and the transition (w), in parts of the longer side.
     blur: vec4<f32>,
-    // The focus (xy), 0–1 across the photo.
+    // The focus (xy), 0–1 across the photo, and the quarter turns clockwise (z).
     focus: vec4<f32>,
+    // The crop on the upright, unturned photo: x, y, w, h (spec 029).
+    crop: vec4<f32>,
     curves: array<vec4<f32>, 256>,
 }
 
@@ -202,7 +204,7 @@ fn develop(rgb: vec3<f32>, uv: vec2<f32>, subject: f32) -> vec3<f32> {
     }
     let vignette = edit.fx.x;
     if vignette != 0.0 {
-        let centered = (uv - 0.5) * 2.0;
+        let centered = ((uv - edit.crop.xy) / edit.crop.zw - 0.5) * 2.0;
         let r = length(centered) / sqrt(2.0);
         let t = vignette * smoothstep(edit.fx.y, edit.fx.y + 0.5, r);
         if t < 0.0 {
@@ -283,10 +285,22 @@ fn blurred(sharp: vec4<f32>, uv: vec2<f32>, sigma: f32) -> vec4<f32> {
     return mix(below, bspline(low + 1u, uv), t);
 }
 
+// `domain::edit::Geometry::to_original`: where a point of the output lies on the photo.
+fn to_original(p: vec2<f32>) -> vec2<f32> {
+    var q = p;
+    switch u32(edit.focus.z) {
+        case 1u: { q = vec2<f32>(p.y, 1.0 - p.x); }
+        case 2u: { q = vec2<f32>(1.0 - p.x, 1.0 - p.y); }
+        case 3u: { q = vec2<f32>(1.0 - p.y, p.x); }
+        default: {}
+    }
+    return edit.crop.xy + q * edit.crop.zw;
+}
+
 @fragment
 fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let t = (frag.xy - edit.rect.xy) / (edit.rect.zw - edit.rect.xy);
-    let uv = mix(edit.uv.xy, edit.uv.zw, t);
+    let uv = to_original(mix(edit.uv.xy, edit.uv.zw, t));
     let texel = textureSample(photo, photo_sampler, uv);
     let subject = textureSample(subject_mask, photo_sampler, uv).r;
     // Outside the photo: the triangle covers the whole viewport.

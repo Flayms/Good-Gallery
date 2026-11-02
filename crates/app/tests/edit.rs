@@ -325,6 +325,65 @@ fn req_021_08_asks_before_leaving_with_unsaved_changes() {
     assert!(harness.query_by_label("Save your changes?").is_none());
 }
 
+/// REQ-029-01, REQ-029-05: the buttons turn the photo a quarter at a time, the viewer fits the turned photo, _Compare_
+/// shows the whole original, and undo and reset take the turn back.
+#[test]
+fn req_029_01_req_029_05_turns_the_photo_and_takes_it_back() {
+    let fixture = Fixture::new();
+    let (mut harness, _dir) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    settle_all(&mut harness);
+    let turns = |harness: &App| session(harness).unwrap().recipe().quarter_turns;
+    assert_eq!(session(&harness).unwrap().shown_size(false), Some([120.0, 80.0]));
+
+    harness.get_by_role_and_label(Role::Button, "Rotate right").click();
+    harness.run_steps(2);
+    assert_eq!(turns(&harness), 1);
+    assert_eq!(session(&harness).unwrap().shown_size(false), Some([80.0, 120.0]));
+    assert_eq!(session(&harness).unwrap().shown_size(true), Some([120.0, 80.0]));
+
+    harness.get_by_role_and_label(Role::Button, "Rotate left").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(Role::Button, "Rotate left").click();
+    harness.run_steps(2);
+    assert_eq!(turns(&harness), 3, "left of no turn wraps around");
+
+    harness.get_by_role_and_label(Role::Button, "Undo").click();
+    harness.run_steps(2);
+    assert_eq!(turns(&harness), 0);
+
+    harness.get_by_role_and_label(Role::Button, "Rotate right").click();
+    harness.run_steps(2);
+    harness.get_by_role_and_label(Role::Button, "Reset all").click();
+    harness.run_steps(2);
+    assert_eq!(turns(&harness), 0);
+}
+
+/// REQ-029-04: the white balance picker and the blur's focus land on the spot clicked on the turned, cropped photo.
+#[test]
+fn req_029_04_a_pick_lands_on_the_same_spot_of_the_photo() {
+    let fixture = Fixture::new();
+    let (mut harness, _dir) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    settle_all(&mut harness);
+    let mut recipe = Recipe::default();
+    recipe.crop = Some([0.5, 0.0, 0.5, 0.5]);
+    recipe.quarter_turns = 1;
+    set_recipe(&mut harness, recipe);
+
+    let session = harness.state_mut().viewer.as_mut().unwrap().editing_mut().unwrap();
+    session.place_focus();
+    // The output's top left: turned clockwise, that's the crop's bottom left.
+    session.pick(eframe::egui::pos2(0.0, 0.0));
+    let focus = session.recipe().blur_focus;
+    assert!(
+        (focus[0] - 0.5).abs() < 1e-5 && (focus[1] - 0.5).abs() < 1e-5,
+        "{focus:?}"
+    );
+}
+
 /// REQ-021-09: _Save as copy_ writes `a (edited).jpg` beside the untouched original, asks the index to read it and
 /// ends editing.
 #[test]
@@ -589,8 +648,8 @@ fn req_023_01_req_023_02_req_023_03_chooses_a_blur_and_places_its_focus() {
     disc_photo(&dir);
     open(&mut harness, "a.jpg");
     edit(&mut harness);
-    // Look, Light and Color folded away, Effects open.
-    for section in ["Look", "Light", "Color", "Effects"] {
+    // Crop and rotate, Look, Light and Color folded away, Effects open.
+    for section in ["Crop and rotate", "Look", "Light", "Color", "Effects"] {
         harness.get_by_role_and_label(Role::Button, section).click();
         harness.run_steps(2);
     }
@@ -602,7 +661,13 @@ fn req_023_01_req_023_02_req_023_03_chooses_a_blur_and_places_its_focus() {
     assert!(recipe.blur > 0.0 && !recipe.is_neutral());
     assert!(harness.query_by_label("Focus size").is_some() && harness.query_by_label("Transition").is_some());
 
+    // The panel scrolls; the button has to be in view to take the click.
+    let size = harness.ctx.content_rect().size();
+    harness.set_size(egui::vec2(size.x, size.y + 100.0));
+    harness.run_steps(2);
     harness.get_by_role_and_label(Role::Button, "Place focus").click();
+    harness.run_steps(2);
+    harness.set_size(size);
     harness.run_steps(2);
     assert!(session(&harness).unwrap().is_picking());
     let viewer = harness.state_mut().viewer.as_mut().unwrap();
