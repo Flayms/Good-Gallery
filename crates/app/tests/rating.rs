@@ -217,3 +217,36 @@ fn req_024_04_says_so_without_exiftool() {
         "{toasts:?}"
     );
 }
+
+fn media_id(harness: &App, name: &str) -> i64 {
+    let db = harness.state().db().unwrap();
+    let conn = db.lock().unwrap();
+    conn.query_row("SELECT id FROM media WHERE file_name = ?1", [name], |row| row.get(0))
+        .unwrap()
+}
+
+/// REQ-024-07: ratings set in quick succession are written one after another, in order: the last one is in the file
+/// and the index, and none of them failed.
+#[test]
+fn req_024_07_writes_quick_changes_one_after_another() {
+    let Some(exiftool) = exiftool() else { return };
+    let fixture = Fixture::new();
+    let (mut harness, dir) = app(&fixture, Some(&exiftool));
+    let media = media_id(&harness, "a.png");
+
+    for rating in [1, 2, 3, 4, 5, 1, 2, 3, 4, 5, 1, 2, 3, 4] {
+        harness.state_mut().rate(app::state::Rate {
+            media,
+            root_id: 1,
+            rel_path: "a.png".into(),
+            kind: domain::media::MediaKind::Image,
+            rating: Some(rating),
+        });
+    }
+    settle(&mut harness);
+
+    let toasts = harness.state().toasts.current();
+    assert!(toasts.is_empty(), "{toasts:?}");
+    assert_eq!(in_file(&exiftool, &dir.join("a.png")), Some(4));
+    assert_eq!(indexed(&harness, "a.png"), Some(4));
+}

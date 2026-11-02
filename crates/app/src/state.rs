@@ -324,6 +324,10 @@ pub struct AppState {
     picker: Arc<dyn FolderPicker>,
     events: (Sender<Event>, Receiver<Event>),
     pending_jobs: usize,
+    /// The writer thread's queue: every write into a library file, one after another (REQ-024-07). Started with
+    /// the first write.
+    #[cfg(not(target_arch = "wasm32"))]
+    writer: Option<Sender<Box<dyn FnOnce() + Send>>>,
     pub settings_page: SettingsPage,
     pub toasts: Toasts,
     indexer_events: Option<Receiver<IndexerEvent>>,
@@ -579,7 +583,7 @@ impl AppState {
         };
         let (db, cache) = (self.db.clone(), self.thumbnail_cache());
         let (root_id, copy) = (request.root_id, request.copy);
-        self.spawn(move || {
+        self.spawn_write(move || {
             let result = media::edit::save(&tools, &save).map_err(|error| {
                 tracing::error!("can't save the edit of {}: {error}", save.rel_path);
                 error.to_string()
@@ -614,7 +618,7 @@ impl AppState {
         };
         let (folder, mtime) = (PathBuf::from(&library.path), self.settings.mtime_on_save);
         let (db, cache) = (self.db.clone(), self.thumbnail_cache());
-        self.spawn(move || {
+        self.spawn_write(move || {
             let result = media::edit::revert(&folder, &target.rel_path, mtime).map_err(|error| {
                 tracing::error!("can't revert {}: {error}", target.rel_path);
                 error.to_string()
@@ -648,7 +652,7 @@ impl AppState {
         };
         let folder = PathBuf::from(&library.path);
         let db = self.db.clone();
-        self.spawn(move || {
+        self.spawn_write(move || {
             let written =
                 media::rating::write(&exiftool, &folder, &rate.rel_path, rate.kind, rate.rating).map_err(|error| {
                     tracing::error!("can't rate {}: {error}", rate.rel_path);
@@ -695,7 +699,7 @@ impl AppState {
             Many::Rate(_) => format!("Rating {count} items…"),
             Many::Tag(_) => format!("Tagging {count} items…"),
         });
-        self.spawn(move || {
+        self.spawn_write(move || {
             let files = db::media::files_of(&lock(&db), &change.ids).map_err(|error| error.to_string());
             Event::ChangedMany(files.map(|files| {
                 let mut done = ChangedMany {
@@ -753,7 +757,7 @@ impl AppState {
         };
         let folder = PathBuf::from(&library.path);
         let db = self.db.clone();
-        self.spawn(move || {
+        self.spawn_write(move || {
             let written =
                 media::tagging::write(&exiftool, &folder, &tag.rel_path, tag.kind, &tag.change).map_err(|error| {
                     tracing::error!("can't tag {}: {error}", tag.rel_path);
@@ -937,6 +941,8 @@ impl AppState {
             picker,
             events: channel(),
             pending_jobs: 0,
+            #[cfg(not(target_arch = "wasm32"))]
+            writer: None,
             settings_page: SettingsPage::default(),
             toasts: Toasts::default(),
             indexer_events: None,
@@ -1035,6 +1041,27 @@ impl AppState {
             let event = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).unwrap_or(Event::Failed);
             let _ = tx.send(event);
         });
+    }
+
+    /// Runs `job`, a write into library files, on the writer thread after the writes queued before it, so changes to
+    /// one file are written in the order they were made and never at the same time (REQ-024-07). Sends exactly one
+    /// event, also when it panics.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn spawn_write(&mut self, job: impl FnOnce() -> Event + Send + 'static) {
+        let tx = self.events.0.clone();
+        self.pending_jobs += 1;
+        let writer = self.writer.get_or_insert_with(|| {
+            let (jobs, queue) = channel::<Box<dyn FnOnce() + Send>>();
+            std::thread::Builder::new()
+                .name("writer".into())
+                .spawn(move || queue.into_iter().for_each(|job| job()))
+                .expect("can't start the writer thread");
+            jobs
+        });
+        let _ = writer.send(Box::new(move || {
+            let event = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).unwrap_or(Event::Failed);
+            let _ = tx.send(event);
+        }));
     }
 
     /// The browser has no threads: runs `job` now; its event applies with the next [`Self::poll`].
