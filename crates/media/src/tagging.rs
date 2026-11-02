@@ -17,7 +17,7 @@ const PEOPLE: &str = "XMP-iptcExt:PersonInImage";
 
 /// Applies `change` to the media item `rel_path` of the library in `library` (REQ-026-03): an added tag goes into the
 /// file, or a video's sidecar unless the video has keywords itself; a removed one leaves the file and its sidecar.
-/// The date modified stays. A file that can't be written stays as it was (REQ-026-04).
+/// The date modified stays. A file that can't be written stays as it was (REQ-026-04, REQ-026-07).
 pub fn write(
     exiftool: &Path,
     library: &Path,
@@ -26,6 +26,7 @@ pub fn write(
     change: &Change,
 ) -> Result<(), WriteError> {
     let file = library_path(library, rel_path).ok_or(WriteError::UnsafePath)?;
+    crate::replace::recover(&file)?;
     if !file.is_file() {
         return Err(std::io::Error::from(std::io::ErrorKind::NotFound).into());
     }
@@ -69,10 +70,6 @@ pub fn write(
         }
     }
     for (target, before, after) in writes {
-        let modified = target
-            .exists()
-            .then(|| std::fs::metadata(&target)?.modified())
-            .transpose()?;
         let mut args = vec!["-charset".to_owned(), "filename=utf8".to_owned()];
         let lists = [
             (HIERARCHICAL, &before.hierarchical, &after.hierarchical),
@@ -92,17 +89,9 @@ pub fn write(
             args.push(format!("-{XP}={}", after.xp.as_deref().unwrap_or_default()));
         }
         if target.exists() {
-            args.extend(["-P".into(), "-overwrite_original".into()]);
+            crate::replace::write_metadata(exiftool, None, &args, &target)?;
         } else {
-            args.push("-o".into());
-        }
-        args.push(path_arg(&target));
-        crate::exiftool::run_once(exiftool, None, &args).map_err(WriteError::Exiftool)?;
-        if let Some(modified) = modified {
-            std::fs::File::options()
-                .write(true)
-                .open(&target)?
-                .set_modified(modified)?;
+            crate::replace::create(exiftool, None, &args, &target)?;
         }
     }
     Ok(())
@@ -244,6 +233,34 @@ mod tests {
         );
         assert_eq!(std::fs::metadata(&photo).unwrap().modified().unwrap(), before);
         assert!(!lib.path("a.jpg.xmp").exists());
+    }
+
+    /// REQ-026-07: a file system that loses the new version (#140) leaves the photo and a new sidecar as they were; a
+    /// temporary file of an older write doesn't block the next one.
+    #[test]
+    fn req_026_07_a_failed_write_leaves_the_file_as_it_was() {
+        let Some(lib) = library() else { return };
+        let photo = lib.photo("a.jpg", &["-XMP-dc:Subject=Beach"]);
+        let bytes = std::fs::read(&photo).unwrap();
+        let written =
+            crate::replace::tests::losing_renames(|| lib.write("a.jpg", MediaKind::Image, add(&["Places", "Rome"])));
+        assert!(written.is_err());
+        assert_eq!(std::fs::read(&photo).unwrap(), bytes);
+
+        lib.video("walk.mp4");
+        let written =
+            crate::replace::tests::losing_renames(|| lib.write("walk.mp4", MediaKind::Video, add(&["Places", "Rome"])));
+        assert!(written.is_err());
+        let mut names: Vec<_> = std::fs::read_dir(lib.dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["a.jpg", "walk.mp4"], "no empty sidecar and no temporary file");
+
+        std::fs::write(lib.path("a.jpg_exiftool_tmp"), b"partial").unwrap();
+        lib.write("a.jpg", MediaKind::Image, add(&["Places", "Rome"])).unwrap();
+        assert_eq!(lib.keywords(&photo)["XMP-lr:HierarchicalSubject"], "Places|Rome");
     }
 
     /// REQ-026-03: a video's tag goes into a new sidecar; the video stays as it was.

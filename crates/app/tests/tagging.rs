@@ -339,3 +339,49 @@ fn req_026_06_asks_before_tagging_many() {
         ("Rate 101 items with 4 stars?".to_owned(), "Rate")
     );
 }
+
+/// REQ-026-07: tags and a rating added in quick succession are all written into the file.
+#[test]
+fn req_026_07_writes_quick_changes_one_after_another() {
+    let Some(exiftool) = exiftool() else { return };
+    let fixture = Fixture::new();
+    let (mut harness, dir) = app(&fixture, Some(&exiftool));
+    let media = {
+        let db = harness.state().db().unwrap();
+        let conn = db.lock().unwrap();
+        conn.query_row("SELECT id FROM media WHERE file_name = 'b.png'", [], |row| row.get(0))
+            .unwrap()
+    };
+    let names = ["Alps", "Beach", "City", "Dunes", "Forest", "Garden"];
+    for name in names {
+        harness.state_mut().tag(app::state::TagChange {
+            media,
+            root_id: 1,
+            rel_path: "b.png".into(),
+            kind: MediaKind::Image,
+            change: domain::tagging::Change::Add(path(&[name])),
+        });
+    }
+    harness.state_mut().rate(app::state::Rate {
+        media,
+        root_id: 1,
+        rel_path: "b.png".into(),
+        kind: MediaKind::Image,
+        rating: Some(3),
+    });
+    settle(&mut harness);
+
+    let toasts = harness.state().toasts.current();
+    assert!(
+        toasts.iter().all(|toast| !toast.text.contains("Couldn't")),
+        "{toasts:?}"
+    );
+    assert_eq!(keywords(&exiftool, &dir.join("b.png"))["Subject"], json!(names));
+    let output = Command::new(&exiftool)
+        .args(["-j", "-n", "-XMP-xmp:Rating"])
+        .arg(dir.join("b.png"))
+        .output()
+        .unwrap();
+    let read: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(read[0]["Rating"], 3);
+}

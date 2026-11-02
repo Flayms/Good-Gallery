@@ -14,11 +14,13 @@ pub enum WriteError {
     UnsafePath,
     #[error("exiftool: {0}")]
     Exiftool(String),
+    #[error(transparent)]
+    Replace(#[from] crate::replace::Error),
 }
 
 /// Writes `rating` (`None` removes it) for the media item `rel_path` of the library in `library`: into the file or
 /// its sidecar, and into an existing sidecar that has a rating too (REQ-024-03). The date modified stays. A file that
-/// can't be written stays as it was (REQ-024-04).
+/// can't be written stays as it was (REQ-024-04, REQ-024-06).
 pub fn write(
     exiftool: &Path,
     library: &Path,
@@ -27,6 +29,7 @@ pub fn write(
     rating: Option<i64>,
 ) -> Result<(), WriteError> {
     let file = library_path(library, rel_path).ok_or(WriteError::UnsafePath)?;
+    crate::replace::recover(&file)?;
     let name = rel_path.rsplit('/').next().unwrap_or(rel_path);
     let folder = file.parent().ok_or(WriteError::UnsafePath)?;
     let sidecar = existing_sidecar(folder, name)?;
@@ -52,11 +55,6 @@ pub fn write(
     }
     let value = rating.unwrap_or(0).clamp(0, MAX);
     for target in targets {
-        // exiftool's `-P` keeps whole seconds only; the index compares the exact time.
-        let modified = target
-            .exists()
-            .then(|| std::fs::metadata(&target)?.modified())
-            .transpose()?;
         let mut args = vec![
             "-charset".into(),
             "filename=utf8".into(),
@@ -64,18 +62,10 @@ pub fn write(
         ];
         if target.exists() {
             // Every rating the file already has, so none of them disagrees.
-            args.extend([format!("-Rating={value}"), "-P".into(), "-overwrite_original".into()]);
+            args.push(format!("-Rating={value}"));
+            crate::replace::write_metadata(exiftool, None, &args, &target)?;
         } else {
-            // A new sidecar.
-            args.push("-o".into());
-        }
-        args.push(path_arg(&target));
-        crate::exiftool::run_once(exiftool, None, &args).map_err(WriteError::Exiftool)?;
-        if let Some(modified) = modified {
-            std::fs::File::options()
-                .write(true)
-                .open(&target)?
-                .set_modified(modified)?;
+            crate::replace::create(exiftool, None, &args, &target)?;
         }
     }
     Ok(())
@@ -251,6 +241,71 @@ mod tests {
         lib.write("walk.mp4", MediaKind::Video, Some(5)).unwrap();
         assert_eq!(lib.ratings(&video), json!({ "XMP-xmp:Rating": 5 }));
         assert!(!lib.path("walk.mp4.xmp").exists());
+    }
+
+    /// REQ-024-06: temporary files left by an ended exiftool, of this app's or an older write, don't block the next one.
+    #[test]
+    fn req_024_06_leftover_temporary_files_dont_block_the_next_write() {
+        let Some(lib) = library() else { return };
+        let photo = lib.photo("a.jpg");
+        std::fs::write(lib.path("a.jpg_exiftool_tmp"), b"partial").unwrap();
+        std::fs::write(lib.path(".a.jpg.gg-write.jpg"), b"partial").unwrap();
+
+        lib.write("a.jpg", MediaKind::Image, Some(3)).unwrap();
+        assert_eq!(lib.ratings(&photo), json!({ "XMP-xmp:Rating": 3 }));
+        assert!(!lib.path(".a.jpg.gg-write.jpg").exists());
+        // An older version's file may hold the only copy of a photo (#140): it stays for the user.
+        assert_eq!(std::fs::read(lib.path("a.jpg_exiftool_tmp")).unwrap(), b"partial");
+    }
+
+    /// REQ-024-06: the date modified to the sub-second, the date created and the permissions stay.
+    #[test]
+    fn req_024_06_keeps_the_dates_and_permissions() {
+        let Some(lib) = library() else { return };
+        let photo = lib.photo("a.jpg");
+        let modified = SystemTime::UNIX_EPOCH + std::time::Duration::new(1_700_000_000, 123_456_700);
+        let file = std::fs::File::options().write(true).open(&photo).unwrap();
+        #[cfg_attr(not(windows), allow(unused_mut))]
+        let mut times = std::fs::FileTimes::new().set_modified(modified);
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::FileTimesExt as _;
+            times = times.set_created(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_000));
+        }
+        file.set_times(times).unwrap();
+        drop(file);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&photo, std::fs::Permissions::from_mode(0o640)).unwrap();
+        }
+        let before = std::fs::metadata(&photo).unwrap();
+
+        lib.write("a.jpg", MediaKind::Image, Some(2)).unwrap();
+        let after = std::fs::metadata(&photo).unwrap();
+        assert_eq!(after.modified().unwrap(), modified);
+        #[cfg(windows)]
+        assert_eq!(after.created().unwrap(), before.created().unwrap());
+        assert_eq!(after.permissions(), before.permissions());
+    }
+
+    /// REQ-024-06: a file system that loses the new version while it says it renamed it (#140) leaves the photo as
+    /// it was, and the write fails.
+    #[test]
+    fn req_024_06_a_lost_replacement_leaves_the_file_as_it_was() {
+        let Some(lib) = library() else { return };
+        let photo = lib.photo("a.jpg");
+        lib.tag(&photo, &["-XMP-xmp:Rating=1"]);
+        let bytes = std::fs::read(&photo).unwrap();
+
+        let written = crate::replace::tests::losing_renames(|| lib.write("a.jpg", MediaKind::Image, Some(5)));
+        assert!(written.is_err());
+        assert_eq!(std::fs::read(&photo).unwrap(), bytes);
+        let names: Vec<_> = std::fs::read_dir(lib.dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["a.jpg"], "no temporary file is left");
     }
 
     /// REQ-024-04: a read-only file, a missing one and a path outside the library are left alone, with the reason.

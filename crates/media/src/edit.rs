@@ -50,6 +50,8 @@ pub enum EditError {
     UnsafePath,
     #[error("can't find the subject: {0}")]
     Subject(String),
+    #[error(transparent)]
+    Replace(#[from] crate::replace::Error),
 }
 
 /// Writes exiftool's configuration for the `gg` namespace into `dir` (the app's data folder, not a shared temporary
@@ -110,7 +112,11 @@ pub fn save(tools: &Tools, request: &SaveRequest) -> Result<String, EditError> {
         request.rel_path.clone()
     };
     let target = path(&target_rel)?;
-    let temp = folder.join(format!(".{}.gg-edit.{}", file_name(&target_rel), format.extension()));
+    // Each exiftool step writes a new file (REQ-021-16): the rendered photo, then with the metadata, then with the
+    // regions moved.
+    let rendered = crate::replace::beside(&target, "edit");
+    let tagged = crate::replace::beside(&target, "meta");
+    let turned = crate::replace::beside(&target, "regions");
     let mut made_backup = None;
     let written = (|| {
         let encoded = render_file(
@@ -120,7 +126,7 @@ pub fn save(tools: &Tools, request: &SaveRequest) -> Result<String, EditError> {
             format,
             request.sidecar_orientation,
         )?;
-        write_synced(&temp, &encoded)?;
+        write_synced(&rendered, &encoded)?;
         // Replacing an unedited original: keep it first (REQ-021-10). A file already edited keeps its first backup;
         // a copy saved over has its source elsewhere.
         if !request.copy && source_rel == request.rel_path {
@@ -132,17 +138,32 @@ pub fn save(tools: &Tools, request: &SaveRequest) -> Result<String, EditError> {
             }
             source = backup;
         }
-        copy_metadata(tools, &source, &temp, &request.recipe, &source_rel)?;
-        move_regions(tools, &source, &temp, &request.recipe, request.sidecar_orientation)?;
+        copy_metadata(tools, &source, &rendered, &tagged, &request.recipe, &source_rel)?;
+        let _ = std::fs::remove_file(&rendered);
+        let new = if move_regions(
+            tools,
+            &source,
+            &tagged,
+            &turned,
+            &request.recipe,
+            request.sidecar_orientation,
+        )? {
+            let _ = std::fs::remove_file(&tagged);
+            &turned
+        } else {
+            &tagged
+        };
         if request.mtime == MtimeOnSave::Keep {
-            set_mtime(&temp, original_mtime)?;
+            set_mtime(new, original_mtime)?;
         }
-        // Atomic: the old file or the new one is in place, never a partial one (REQ-021-16).
-        std::fs::rename(&temp, &target)?;
+        // The old file or the new one is in place, never an empty or partial one (REQ-021-16).
+        crate::replace::replace(new, &target)?;
         Ok::<_, EditError>(())
     })();
     if let Err(error) = written {
-        let _ = std::fs::remove_file(&temp);
+        for temp in [&rendered, &tagged, &turned] {
+            let _ = std::fs::remove_file(temp);
+        }
         // The file wasn't replaced, so a backup made for it isn't needed (and won't be mistaken for its original).
         if let Some(backup) = made_backup {
             let _ = std::fs::remove_file(&backup);
@@ -163,20 +184,16 @@ pub fn revert(library: &Path, rel_path: &str, mtime: MtimeOnSave) -> Result<(), 
     if !backup.is_file() {
         return Err(EditError::NoOriginal);
     }
-    if std::fs::rename(&backup, &file).is_err() {
-        // Another volume (a mount inside the library): copy, then replace atomically.
-        let temp = file.with_file_name(format!(".{}.gg-revert", file_name(rel_path)));
-        let modified = std::fs::metadata(&backup)?.modified()?;
-        let copied = std::fs::copy(&backup, &temp)
-            .and_then(|_| std::fs::File::options().write(true).open(&temp)?.sync_all())
-            .and_then(|()| set_mtime(&temp, modified))
-            .and_then(|()| std::fs::rename(&temp, &file));
-        if let Err(error) = copied {
-            let _ = std::fs::remove_file(&temp);
-            return Err(error.into());
-        }
-        std::fs::remove_file(&backup)?;
+    // A copy takes the edited file's place, so the backup stays until the original is back (REQ-021-16).
+    let temp = crate::replace::beside(&file, "revert");
+    let modified = std::fs::metadata(&backup)?.modified()?;
+    let copied = std::fs::copy(&backup, &temp).and_then(|_| set_mtime(&temp, modified));
+    if let Err(error) = copied {
+        let _ = std::fs::remove_file(&temp);
+        return Err(error.into());
     }
+    crate::replace::replace(&temp, &file)?;
+    std::fs::remove_file(&backup)?;
     if mtime == MtimeOnSave::Update {
         set_mtime(&file, SystemTime::now())?;
     }
@@ -215,28 +232,23 @@ fn set_mtime(path: &Path, time: SystemTime) -> std::io::Result<()> {
     std::fs::File::options().write(true).open(path)?.set_modified(time)
 }
 
-/// Copies `file` to `backup` (complete and on disk before it counts, with its date modified), and hides the backup
-/// folder on Windows.
-fn make_backup(file: &Path, backup: &Path, library: &Path) -> std::io::Result<()> {
+/// Copies `file` to `backup` (complete, on disk and read back before it counts, with its date modified), and hides
+/// the backup folder on Windows.
+fn make_backup(file: &Path, backup: &Path, library: &Path) -> Result<(), EditError> {
     let folder = backup.parent().expect("a backup has a folder");
     std::fs::create_dir_all(folder)?;
     hide(&library.join(domain::edit::BACKUP_DIR.split('/').next().unwrap_or_default()));
-    let name = backup.file_name().unwrap_or_default().to_string_lossy();
-    let temp = folder.join(format!(".{name}.gg-backup"));
+    let temp = crate::replace::beside(backup, "backup");
     let modified = std::fs::metadata(file)?.modified()?;
-    let copied = std::fs::copy(file, &temp)
-        .and_then(|_| std::fs::File::options().write(true).open(&temp)?.sync_all())
-        .and_then(|()| set_mtime(&temp, modified))
-        .and_then(|()| {
-            if std::fs::metadata(&temp)?.len() != std::fs::metadata(file)?.len() {
-                return Err(std::io::Error::other("the backup is incomplete"));
-            }
-            std::fs::rename(&temp, backup)
-        });
-    if copied.is_err() {
+    let made = std::fs::copy(file, &temp)
+        .and_then(|_| set_mtime(&temp, modified))
+        .map_err(EditError::from)
+        .and_then(|()| crate::replace::replace(&temp, backup).map_err(EditError::from));
+    if made.is_err() {
         let _ = std::fs::remove_file(&temp);
+        remove_empty_backup_folders(library, backup);
     }
-    copied
+    made
 }
 
 #[cfg(windows)]
@@ -314,14 +326,6 @@ impl Format {
             "png" => Some(Self::Png),
             "webp" => Some(Self::Webp),
             _ => None,
-        }
-    }
-
-    fn extension(self) -> &'static str {
-        match self {
-            Self::Jpeg => "jpg",
-            Self::Png => "png",
-            Self::Webp => "webp",
         }
     }
 }
@@ -524,9 +528,9 @@ fn encode(decoded: &Decoded, format: Format) -> Result<Vec<u8>, EditError> {
     Ok(out)
 }
 
-/// The arguments that copy `source`'s metadata into `target` and record the edit: everything but embedded previews
+/// The arguments that copy `source`'s metadata into a photo and record the edit: everything but embedded previews
 /// (they would show the unedited photo), the color profile, orientation 1 (the pixels are upright).
-fn metadata_args(source: &Path, target: &Path, recipe: &Recipe, source_rel: &str) -> Vec<String> {
+fn metadata_args(source: &Path, recipe: &Recipe, source_rel: &str) -> Vec<String> {
     let path = |path: &Path| path.to_string_lossy().into_owned();
     vec![
         "-charset".into(),
@@ -541,35 +545,41 @@ fn metadata_args(source: &Path, target: &Path, recipe: &Recipe, source_rel: &str
         "-Orientation#=1".into(),
         format!("-XMP-gg:EditRecipe={}", recipe.to_json()),
         format!("-XMP-gg:EditSource={source_rel}"),
-        "-overwrite_original".into(),
         "-ignoreMinorErrors".into(),
-        path(target),
     ]
 }
 
-/// Copies the metadata with exiftool, writing the recipe (REQ-011-09).
+/// Writes `from` with `source`'s metadata and the recipe into the new file `to` with exiftool (REQ-011-09).
 fn copy_metadata(
     tools: &Tools,
     source: &Path,
-    target: &Path,
+    from: &Path,
+    to: &Path,
     recipe: &Recipe,
     source_rel: &str,
 ) -> Result<(), EditError> {
-    let args = metadata_args(source, target, recipe, source_rel);
-    crate::exiftool::run_once(&tools.exiftool, Some(&tools.config), &args)
-        .map(drop)
-        .map_err(EditError::Metadata)
+    let args = metadata_args(source, recipe, source_rel);
+    crate::replace::exiftool_into(&tools.exiftool, Some(&tools.config), &args, from, to).map_err(metadata_error)
 }
 
-/// Moves the regions just copied from `source` onto `target`'s pixels, which were turned upright and through the
-/// recipe's crop and turns (REQ-029-08, REQ-021-14). A person who loses every region keeps their People tag.
+fn metadata_error(error: crate::replace::Error) -> EditError {
+    match error {
+        crate::replace::Error::Exiftool(error) => EditError::Metadata(error),
+        error => error.into(),
+    }
+}
+
+/// Moves the regions just copied from `source` into `from` onto its pixels, which were turned upright and through the
+/// recipe's crop and turns (REQ-029-08, REQ-021-14), writing the new file `to`; `false` if nothing had to move. A
+/// person who loses every region keeps their People tag.
 fn move_regions(
     tools: &Tools,
     source: &Path,
-    target: &Path,
+    from: &Path,
+    to: &Path,
     recipe: &Recipe,
     sidecar_orientation: Option<u8>,
-) -> Result<(), EditError> {
+) -> Result<bool, EditError> {
     let path = |path: &Path| path.to_string_lossy().into_owned();
     let read = crate::exiftool::run_once(
         &tools.exiftool,
@@ -589,7 +599,7 @@ fn move_regions(
     let parsed: serde_json::Value =
         serde_json::from_str(&read).map_err(|error| EditError::Metadata(error.to_string()))?;
     let Some(tags) = parsed.get(0).and_then(serde_json::Value::as_object) else {
-        return Ok(());
+        return Ok(false);
     };
     let orientation = tags
         .get("Orientation")
@@ -599,11 +609,11 @@ fn move_regions(
         .unwrap_or(1);
     let geometry = recipe.geometry();
     if geometry.is_identity() && orientation == 1 {
-        return Ok(());
+        return Ok(false);
     }
-    let size = image::image_dimensions(target).map_err(|error| EditError::Encode(error.to_string()))?;
+    let size = image::image_dimensions(from).map_err(|error| EditError::Encode(error.to_string()))?;
     let Some(regions) = meta::rules::regions_on_output(tags, orientation, &geometry, size) else {
-        return Ok(());
+        return Ok(false);
     };
     let mut args = vec![
         "-charset".to_string(),
@@ -611,7 +621,7 @@ fn move_regions(
         "-XMP-MP:RegionInfoMP=".into(),
     ];
     // Through a file, so names need no escaping for exiftool's struct syntax.
-    let file = target.with_extension("gg-regions.json");
+    let file = from.with_extension("gg-regions.json");
     match &regions.info {
         Some(info) => {
             let json = serde_json::json!([{ "SourceFile": "*", "RegionInfo": info }]);
@@ -625,10 +635,10 @@ fn move_regions(
         args.push(format!("-XMP-iptcExt:PersonInImage-={name}"));
         args.push(format!("-XMP-iptcExt:PersonInImage+={name}"));
     }
-    args.extend(["-overwrite_original".into(), "-ignoreMinorErrors".into(), path(target)]);
-    let written = crate::exiftool::run_once(&tools.exiftool, Some(&tools.config), &args);
+    args.push("-ignoreMinorErrors".into());
+    let written = crate::replace::exiftool_into(&tools.exiftool, Some(&tools.config), &args, from, to);
     let _ = std::fs::remove_file(&file);
-    written.map(drop).map_err(EditError::Metadata)
+    written.map(|()| true).map_err(metadata_error)
 }
 
 #[cfg(test)]
@@ -1179,6 +1189,68 @@ mod tests {
             save(&lib.tools, &lib.request("../a.jpg", brighter(), true)),
             Err(EditError::UnsafePath)
         ));
+    }
+
+    /// REQ-021-16: a file system that loses the saved file while it says it renamed it into place (#140) leaves the
+    /// original, without a backup or temporary files.
+    #[test]
+    fn req_021_16_a_lost_replacement_leaves_the_original() {
+        let Some(lib) = library() else { return };
+        jpeg_file(&lib, "a.jpg");
+        let original = std::fs::read(lib.path("a.jpg")).unwrap();
+
+        let saved =
+            crate::replace::tests::losing_renames(|| save(&lib.tools, &lib.request("a.jpg", brighter(), false)));
+        assert!(saved.is_err());
+        assert_eq!(std::fs::read(lib.path("a.jpg")).unwrap(), original);
+        let names: Vec<_> = std::fs::read_dir(lib.root())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names, ["a.jpg"], "no temporary file, no backup left");
+
+        // Saved again from its backup, only the edited file is renamed into place.
+        save(&lib.tools, &lib.request("a.jpg", brighter(), false)).unwrap();
+        let edited = std::fs::read(lib.path("a.jpg")).unwrap();
+        let mut again = lib.request("a.jpg", brighter(), false);
+        again.source = ".good-gallery/originals/a.jpg".into();
+        let saved = crate::replace::tests::losing_renames(|| save(&lib.tools, &again));
+        assert!(
+            matches!(saved, Err(EditError::Replace(crate::replace::Error::Lost))),
+            "{saved:?}"
+        );
+        assert_eq!(std::fs::read(lib.path("a.jpg")).unwrap(), edited);
+        assert_eq!(
+            std::fs::read(lib.path(".good-gallery/originals/a.jpg")).unwrap(),
+            original
+        );
+        let mut names: Vec<_> = std::fs::read_dir(lib.root())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        names.sort();
+        assert_eq!(names, [".good-gallery", "a.jpg"], "no temporary file");
+    }
+
+    /// REQ-021-16: a revert whose file is lost keeps the edited file and the backup.
+    #[test]
+    fn req_021_16_reverting_never_loses_the_backup() {
+        let Some(lib) = library() else { return };
+        jpeg_file(&lib, "a.jpg");
+        let original = std::fs::read(lib.path("a.jpg")).unwrap();
+        save(&lib.tools, &lib.request("a.jpg", brighter(), false)).unwrap();
+        let edited = std::fs::read(lib.path("a.jpg")).unwrap();
+
+        let reverted = crate::replace::tests::losing_renames(|| revert(&lib.root(), "a.jpg", MtimeOnSave::Keep));
+        assert!(reverted.is_err());
+        assert_eq!(std::fs::read(lib.path("a.jpg")).unwrap(), edited);
+        assert_eq!(
+            std::fs::read(lib.path(".good-gallery/originals/a.jpg")).unwrap(),
+            original
+        );
+
+        revert(&lib.root(), "a.jpg", MtimeOnSave::Keep).unwrap();
+        assert_eq!(std::fs::read(lib.path("a.jpg")).unwrap(), original);
     }
 
     #[test]

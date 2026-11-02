@@ -117,6 +117,7 @@ Add every pitfall you hit. A trap in a tool, library, OS or our tests that we ca
 
 ## Index and metadata
 
+* **Never rename a file over an existing one in a library** (#140): an rclone mount on Windows (`--vfs-cache-mode full`) fails to rename its cache file, reports success anyway and uploads an empty file under the name; right afterwards the file even reports its new size, but reads return nothing. exiftool's `-overwrite_original` does exactly that rename, and when its rename fails it deletes the original and renames again. Write metadata with `media::replace` (exiftool `-o` into a new file, the original moved aside, the result read back), never with `-overwrite_original` or `std::fs::rename` over a file.
 * **Folder mtimes** (quick scans) only change when direct children are added, removed or renamed, not on in-place edits or changes deeper down. Don't use them to skip whole subtrees or file stats outside `quick` scans.
 * **Watching on Windows reports last-access changes** too, so the indexer's own reads cause events; `changes` scans must keep stating only reported files. Expect the same from `notify` (ReadDirectoryChangesW).
 * **Timing SQLite through an aggregate undercounts:** `SELECT count(*), sum(id) FROM (…)` lets SQLite skip the columns the outer query doesn't use, and with them the row lookups. Time the real query, e.g. with `cargo xtask search-bench`.
