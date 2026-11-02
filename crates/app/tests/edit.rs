@@ -368,9 +368,11 @@ fn req_029_04_a_pick_lands_on_the_same_spot_of_the_photo() {
     open(&mut harness, "a.jpg");
     edit(&mut harness);
     settle_all(&mut harness);
-    let mut recipe = Recipe::default();
-    recipe.crop = Some([0.5, 0.0, 0.5, 0.5]);
-    recipe.quarter_turns = 1;
+    let recipe = Recipe {
+        crop: Some([0.5, 0.0, 0.5, 0.5]),
+        quarter_turns: 1,
+        ..Default::default()
+    };
     set_recipe(&mut harness, recipe);
 
     let session = harness.state_mut().viewer.as_mut().unwrap().editing_mut().unwrap();
