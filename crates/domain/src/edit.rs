@@ -1153,7 +1153,11 @@ impl Params {
             let nodes = choice.look.hue_nodes();
             (strength > 0.0 && nodes != [[0.0, 1.0, 0.0]; crate::look::HUE_NODES]).then(|| {
                 nodes.map(|[turn, chroma, light]| {
-                    [turn.to_radians() * strength, 1.0 + (chroma - 1.0) * strength, light * strength]
+                    [
+                        turn.to_radians() * strength,
+                        1.0 + (chroma - 1.0) * strength,
+                        light * strength,
+                    ]
                 })
             })
         });
