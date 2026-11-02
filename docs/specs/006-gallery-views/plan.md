@@ -34,7 +34,7 @@ Records the approach that was taken. Lasting decisions are under _Decisions_ at 
 - [x] List view (REQ-006-05)
 - [x] `gallery-bench --originals`: measure scrolling while thumbnails render; render threads at below-normal priority (REQ-006-15)
 - [ ] Measure REQ-006-15 on an integrated laptop GPU
-- [ ] Measure the glass pass's per-frame cost at 12 columns with `gallery-bench` (it rebuilds tile bind groups every frame)
+- [x] Measure the glass pass's per-frame cost at 12 columns with `gallery-bench` (it rebuilds tile bind groups every frame): within budget, recorded in spec 013's plan (#14)
 
 ## Decisions
 

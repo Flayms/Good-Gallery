@@ -29,7 +29,7 @@ Records the approach that was taken. Lasting decisions are under _Decisions_ at 
 - [x] Video frames and AVIF through ffmpeg (REQ-005-05)
 - [x] `ThumbnailService`: priority queue, background feeding, failures, full cache (REQ-005-07, -08, -09, -12)
 - [ ] Automated tile tests for placeholders and failed items (REQ-005-06, -14; need the GPU texture streamer)
-- [ ] Apply ICC profiles, if real photos show it matters
+- [x] Check whether ICC profiles matter on real photos: they don't, not applied (#22, see Decisions)
 
 ## Decisions
 
@@ -43,3 +43,8 @@ Records the approach that was taken. Lasting decisions are under _Decisions_ at 
 **Decided:** `media::thumbnail::Renderer`: one decode per file, upright by its EXIF orientation, fit into 800 × 2400 without enlarging (Lanczos3, `fast_image_resize`), each width from that, WebP quality 80 through libwebp, ThumbHash at ≤ 100 px. JPEGs decode through `jpeg-decoder` with DCT scaling (shrink-on-load); other formats through `image`. Embedded previews (exiftool `PreviewImage`) replace large camera JPEGs when they are large enough and have the same shape. Video frames and **AVIF** come from ffmpeg (`media::ffmpeg`), since `image` decodes AVIF only through dav1d, a C library with a meson build.
 **Deviation:** ICC profiles are ignored, so wide-gamut photos may come out slightly less saturated.
 **Service:** `indexer::thumbnails::ThumbnailService`: `io_concurrency` render threads, one priority queue (requests newest first above background jobs), background batches of 100 pending items, its own write connection. Requests are answered through a callback, which the texture streamer uses. Each render runs under `catch_unwind`.
+
+### 2026-11-02 · No ICC conversion
+
+**Decided:** thumbnails and the viewer keep ignoring embedded ICC profiles (#22). In a random sample of 1,000 of the 17,471 images in a real library, 974 had no profile, 23 sRGB, 3 Display P3 and none Adobe RGB, so 0.3 % would change, and only by a slight loss of saturation.
+**Rejected:** converting through `moxcms` (already in `Cargo.lock`). It would cost a conversion step in thumbnails, the viewer and the editing preview, which would need a final pass to match, for almost no photos. Revisit if libraries with camera or editor exports (Adobe RGB, ProPhoto) turn up.

@@ -30,7 +30,7 @@ Records the approach that was taken. Tokens and surfaces are in `docs/design.md`
 - [x] Scrollbars (REQ-013-15)
 - [x] Tinted chrome, tile ↔ viewer transition, controls stepping aside (REQ-013-10 … -12)
 - [x] `gallery-bench --viewer`, `--no-glass` and `--glass-matrix` to measure the glass pass (#14)
-- [ ] Run `gallery-bench --thumbs <cache copy> --glass-matrix` on the integrated laptop GPU and record the cost here (#14)
+- [x] Run `gallery-bench --thumbs <cache copy> --glass-matrix` on the integrated laptop GPU and record the cost here (#14)
 
 ## Decisions
 
@@ -53,3 +53,18 @@ Records the approach that was taken. Tokens and surfaces are in `docs/design.md`
 **Decided:** `app::glass` draws each surface's **backdrop** (tiles with their thumbnail texture views, placeholders and the page / sidebar as solids, recorded while drawing) into an offscreen chain at half resolution and blurs and composites it in a paint callback. Surfaces record nothing for each other, except that the viewer's scrim also sees the toolbar; the viewer records the scrim's darkening and the photo (its texture view, as far as it is drawn) over them, which menus over the viewer blur. Its chrome composites from the scrim's blur; only while the photo grows from its tile, the one time it lies under the chrome, it composites from one shared blur of the window, the darkening and the photo (one extra pass during that animation). Without the pass (no wgpu render state, as in kittest) or with Windows' transparency effects off, surfaces are opaque; snapshots show that fallback, the pass is checked with screenshots of the running app. A paint callback ignores the painter's opacity, so surfaces pass it themselves.
 **Title bar:** `app::titlebar` (the module with the window `unsafe`): `WM_NCCALCSIZE` drops the caption, `WM_NCHITTEST` answers the top edge and the three caption buttons natively. Empty caption areas take the drag in egui and send `ViewportCommand::StartDrag` (a native caption drag, so Aero snap works).
 **Rejected:** reading back egui's framebuffer for the blur (a callback runs inside egui's render pass), `HTCAPTION` drag rects (the window procedure can't know which parts of the toolbar are empty), Windows' `GetDateFormatEx` (no medium length).
+
+### 2026-11-02 · Glass pass cost
+
+**Measured** (#14): `cargo xtask gallery-bench --thumbs <3,000 thumbnails of a real cache> --glass-matrix`, 100,000 items, 12 columns, vsync off, AMD Radeon iGPU (Vulkan), mains power, two runs of 20 s per combination. Frame interval in ms:
+
+| | p50 | p95 | p99 |
+| --- | --- | --- | --- |
+| gallery, glass | 7.6 / 7.2 | 9.8 / 11.6 | 11.5 / 19.2 |
+| gallery, no glass | 4.6 / 5.8 | 6.9 / 8.1 | 8.5 / 9.6 |
+| viewer open, glass | 9.2 / 9.6 | 13.6 / 12.5 | 16.1 / 14.9 |
+| viewer open, no glass | 5.9 / 5.0 | 8.8 / 7.1 | 12.4 / 8.5 |
+
+The pass costs ≈ 2–4 ms per frame at p50, ≈ 5 ms at p95 with the viewer's scrim open. The first run's gallery-with-glass pass stalled once for 117 s (max, left out); every other max was below 235 ms.
+**Decided:** keep rebuilding the per-tile bind groups and buffers every frame and keep slot textures until exit. With the viewer open, p95 stays below the 16 ms budget (REQ-006-12), the threshold #14 set for reusing them.
+**Noticed:** frame times are higher than spec 006's measurement of 2026-10-27 (gallery with glass p95 4.4 ms), and thumbnail textures peaked at 866–895 MB of the 512 MB budget. Eviction keeps textures used in this or the last frame (REQ-006-13), so the peak depends on the window size and on the widths of the linked thumbnails; not investigated here.
