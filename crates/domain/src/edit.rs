@@ -3,6 +3,7 @@
 //! saving runs them here. Also the undo [`History`], the name of a saved copy and where backups of originals go.
 
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// The recipe format. Recipes of a newer version than this are not read (a newer app wrote them).
 pub const RECIPE_VERSION: u32 = 1;
@@ -343,6 +344,9 @@ pub struct Recipe {
     /// The background's own light and color.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub background: Option<Box<Recipe>>,
+    /// What brush and freeform masks painted; their shapes name these by place (REQ-030-12, REQ-030-13).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub paintings: Vec<crate::paint::Painting>,
     /// Masks with their own light and color, on top of the rest, in order (REQ-030-02).
     #[serde(skip_serializing_if = "Vec::is_empty", deserialize_with = "masks_known")]
     pub masks: Vec<LocalMask>,
@@ -390,6 +394,7 @@ impl Default for Recipe {
             blur_focus: [0.5, 0.5],
             subject: None,
             background: None,
+            paintings: Vec::new(),
             masks: Vec::new(),
             look: None,
             quarter_turns: 0,
@@ -477,6 +482,37 @@ impl Recipe {
         for mask in &mut self.masks {
             *mask.recipe = light_and_color(&mask.recipe);
         }
+        self.tidy_paintings();
+    }
+
+    /// Drops the paintings no mask's shape uses any more, and has the shapes name the rest by their new places.
+    fn tidy_paintings(&mut self) {
+        let used: Vec<usize> = (0..self.paintings.len())
+            .filter(|&layer| {
+                self.masks.iter().any(|mask| {
+                    (0..mask.shapes()).any(|i| {
+                        matches!(mask.shape_at(i), MaskShape::Painted { layer: at, .. } if usize::from(at) == layer)
+                    })
+                })
+            })
+            .collect();
+        if used.len() == self.paintings.len() {
+            return;
+        }
+        for mask in &mut self.masks {
+            for i in 0..mask.shapes() {
+                if let MaskShape::Painted { layer, .. } = mask.shape_mut(i)
+                    && let Some(place) = used.iter().position(|&at| at == usize::from(*layer))
+                {
+                    *layer = place as u8;
+                }
+            }
+        }
+        let mut layer = 0;
+        self.paintings.retain(|_| {
+            layer += 1;
+            used.contains(&(layer - 1))
+        });
     }
 
     /// Compact JSON, as stored in a saved file (`gg:EditRecipe`) and the index.
@@ -496,6 +532,15 @@ impl Recipe {
             part.sanitize();
         }
         recipe.masks.truncate(MAX_MASKS);
+        crate::paint::sanitize(&mut recipe.paintings);
+        // A painted shape without its painting selects nothing it could ever show: it goes, and a mask made of it too.
+        let paintings = recipe.paintings.len();
+        let known =
+            |shape: MaskShape| !matches!(shape, MaskShape::Painted { layer, .. } if usize::from(layer) >= paintings);
+        recipe.masks.retain(|mask| known(mask.shape));
+        for mask in &mut recipe.masks {
+            mask.more.retain(|part| known(part.shape));
+        }
         for mask in &mut recipe.masks {
             mask.recipe.sanitize();
             mask.shape.sanitize();
@@ -707,6 +752,11 @@ pub enum MaskShape {
     Subject,
     /// All but the photo's subject.
     Background,
+    /// A painting of the recipe, by its place: brushed strokes, or a filled outline if `freeform`.
+    Painted {
+        layer: u8,
+        freeform: bool,
+    },
 }
 
 impl MaskShape {
@@ -735,6 +785,8 @@ impl MaskShape {
             Self::Color { .. } => "Color",
             Self::Subject => "Subject",
             Self::Background => "Background",
+            Self::Painted { freeform: false, .. } => "Brush",
+            Self::Painted { freeform: true, .. } => "Freeform",
         }
     }
 
@@ -746,7 +798,7 @@ impl MaskShape {
     /// The panel's sliders of this shape: name, value, range, unit (REQ-030-04, REQ-030-05). A gradient has handles.
     pub fn sliders(self) -> Vec<(&'static str, f32, (f32, f32), &'static str)> {
         match self {
-            Self::Linear { .. } | Self::Subject | Self::Background => Vec::new(),
+            Self::Linear { .. } | Self::Subject | Self::Background | Self::Painted { .. } => Vec::new(),
             Self::Luminance { low, high, feather } => vec![
                 ("From", low, (0.0, 100.0), " %"),
                 ("To", high, (0.0, 100.0), " %"),
@@ -763,7 +815,7 @@ impl MaskShape {
     /// Sets slider `i` of [`Self::sliders`].
     pub fn set_slider(&mut self, i: usize, value: f32) {
         match self {
-            Self::Linear { .. } | Self::Subject | Self::Background => {}
+            Self::Linear { .. } | Self::Subject | Self::Background | Self::Painted { .. } => {}
             Self::Luminance { low, high, feather } => *[low, high, feather][i] = value,
             Self::Color { hue, range, feather } => *[hue, range, feather][i] = value,
         }
@@ -790,7 +842,7 @@ impl MaskShape {
                 fit(range, 0.0, 180.0, 30.0);
                 fit(feather, 0.0, 90.0, 0.0);
             }
-            Self::Subject | Self::Background => {}
+            Self::Subject | Self::Background | Self::Painted { .. } => {}
         }
     }
 
@@ -821,6 +873,8 @@ impl MaskShape {
             }
             Self::Subject => subject.unwrap_or(0.0),
             Self::Background => subject.map_or(0.0, |subject| 1.0 - subject),
+            // `MaskParams::weight` reads the painting.
+            Self::Painted { .. } => 0.0,
         }
     }
 
@@ -832,6 +886,7 @@ impl MaskShape {
             Self::Color { hue, range, feather } => [2.0, hue, range, feather, 0.0],
             Self::Subject => [3.0, 0.0, 0.0, 0.0, 0.0],
             Self::Background => [4.0, 0.0, 0.0, 0.0, 0.0],
+            Self::Painted { layer, .. } => [5.0, f32::from(layer), 0.0, 0.0, 0.0],
         }
     }
 }
@@ -947,17 +1002,23 @@ pub struct MaskParams {
     pub more: Vec<MaskPart>,
     pub invert: bool,
     pub params: Box<Params>,
+    /// What the recipe's paintings select, once [`Params::with_paintings`] drew them.
+    pub paintings: Vec<Arc<Mask>>,
 }
 
 impl MaskParams {
     /// How much of the pixel this mask selects (REQ-030-02, REQ-030-06).
     pub fn weight(&self, rgb: [f32; 3], uv: [f32; 2], size: [f32; 2], subject: Option<f32>) -> f32 {
-        let weight = self
-            .more
-            .iter()
-            .fold(self.shape.weight(rgb, uv, size, subject), |so_far, part| {
-                part.op.combine(so_far, part.shape.weight(rgb, uv, size, subject))
-            });
+        let shape_weight = |shape: MaskShape| match shape {
+            MaskShape::Painted { layer, .. } => self
+                .paintings
+                .get(usize::from(layer))
+                .map_or(0.0, |painting| painting.sample(uv)),
+            shape => shape.weight(rgb, uv, size, subject),
+        };
+        let weight = self.more.iter().fold(shape_weight(self.shape), |so_far, part| {
+            part.op.combine(so_far, shape_weight(part.shape))
+        });
         if self.invert { 1.0 - weight } else { weight }
     }
 }
@@ -1526,6 +1587,7 @@ impl Params {
                     more: mask.more.clone(),
                     invert: mask.invert,
                     params: Box::new(Params::new(&mask.recipe)),
+                    paintings: Vec::new(),
                 })
                 .collect(),
             halation: recipe_look.map_or(0.0, |choice| choice.look.halation() * choice.strength / 100.0),
@@ -1542,6 +1604,15 @@ impl Params {
             subject: recipe.subject.as_deref().map(|part| Box::new(Self::new(part))),
             background: recipe.background.as_deref().map(|part| Box::new(Self::new(part))),
         }
+    }
+
+    /// These numbers with `paintings`, what the recipe's paintings select (REQ-030-12). [`Self::new`] leaves them out, as
+    /// it runs every frame: without them, painted shapes select nothing.
+    pub fn with_paintings(mut self, paintings: &[Arc<Mask>]) -> Self {
+        for mask in &mut self.masks {
+            mask.paintings = paintings.to_vec();
+        }
+        self
     }
 
     /// One pixel: `rgb` as stored (sRGB-encoded, 0–1), at `uv` (0–1 across the photo) of a photo `size` pixels large
@@ -2648,6 +2719,62 @@ mod tests {
         );
     }
 
+    /// REQ-030-14: paintings survive saving, and one no shape uses any more goes, with the others' places following.
+    #[test]
+    fn req_030_14_paintings_are_saved_and_tidied() {
+        use crate::paint::{Painting, Stroke};
+        let painting = |x: f32| Painting {
+            strokes: vec![Stroke {
+                points: vec![[x, 0.5]],
+                size: 5.0,
+                softness: 50.0,
+                erase: false,
+                closed: false,
+            }],
+        };
+        let painted = |layer: u8| LocalMask::new(MaskShape::Painted { layer, freeform: false });
+        let mut recipe = Recipe {
+            paintings: vec![painting(0.1), painting(0.2)],
+            masks: vec![painted(0), painted(1)],
+            ..Recipe::default()
+        };
+        assert_eq!(Recipe::from_json(&recipe.to_json()), Some(recipe.clone()));
+        assert!(!Recipe::default().to_json().contains("paintings"));
+
+        recipe.masks.remove(0);
+        recipe.tidy();
+        assert_eq!(recipe.paintings, vec![painting(0.2)]);
+        assert_eq!(
+            recipe.masks[0].shape,
+            MaskShape::Painted {
+                layer: 0,
+                freeform: false
+            }
+        );
+    }
+
+    /// REQ-030-12: a painted shape selects what its grid says, and nothing without one or beyond them.
+    #[test]
+    fn req_030_12_a_painted_shape_reads_its_painting() {
+        let shape = |layer| MaskShape::Painted { layer, freeform: false };
+        let recipe = |layer| Recipe {
+            masks: vec![LocalMask::new(shape(layer))],
+            ..Recipe::default()
+        };
+        let weight = |params: &Params| params.masks[0].weight(GREY, MID, SIZE, None);
+        assert_eq!(weight(&Params::new(&recipe(0))), 0.0, "not drawn");
+        let grid = Arc::new(Mask::new(2, 2, vec![0.25; 4]).unwrap());
+        assert_eq!(
+            weight(&Params::new(&recipe(0)).with_paintings(std::slice::from_ref(&grid))),
+            0.25
+        );
+        assert_eq!(
+            weight(&Params::new(&recipe(3)).with_paintings(&[grid])),
+            0.0,
+            "no such painting"
+        );
+    }
+
     /// REQ-030-08: masks survive saving; values from a file stay in range; an unknown kind is left out, not the recipe.
     #[test]
     fn req_030_08_masks_are_saved_and_values_stay_in_range() {
@@ -2688,6 +2815,11 @@ mod tests {
                 from: [2.0, -1.0],
                 to: [0.0, 0.0]
             }
+        );
+        let dangling = r#"{"version":1,"masks":[{"shape":{"kind":"painted","layer":9,"freeform":false}}]}"#;
+        assert!(
+            Recipe::from_json(dangling).unwrap().masks.is_empty(),
+            "no such painting"
         );
         let many = format!(
             r#"{{"version":1,"masks":[{}]}}"#,

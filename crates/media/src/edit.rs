@@ -455,7 +455,13 @@ fn render_file(
             Some(&found)
         }
     };
-    render(&Params::new(recipe), &mut decoded.image, subject);
+    let size = [decoded.image.width() as f32, decoded.image.height() as f32];
+    let paintings = domain::paint::draw_all(&recipe.paintings, size);
+    render(
+        &Params::new(recipe).with_paintings(&paintings),
+        &mut decoded.image,
+        subject,
+    );
     // Last, so pixels outside the crop still feed the blur (REQ-029-04).
     decoded.image = apply_geometry(decoded.image, &recipe.geometry());
     encode(&decoded, format)
@@ -1057,6 +1063,46 @@ mod tests {
             "the subject is brighter"
         );
         assert_eq!(saved.get_pixel(3, 3), disc.get_pixel(3, 3), "the background stays");
+    }
+
+    /// REQ-030-14: as much painting as a photo can have fits its saved metadata, and comes back whole.
+    #[test]
+    fn req_030_14_a_full_painting_fits_the_saved_file() {
+        let Some(lib) = library() else { return };
+        // A wide spread of points, each with all four decimals.
+        let points: Vec<[f32; 2]> = (0..domain::paint::MAX_POINTS)
+            .map(|i| {
+                let t = i as f32 / domain::paint::MAX_POINTS as f32;
+                [0.1234 + t * 0.7531, 0.1357 + (t * 97.0).fract() * 0.7].map(|c| (c * 10_000.0).round() / 10_000.0)
+            })
+            .collect();
+        let mut mask = domain::edit::LocalMask::new(domain::edit::MaskShape::Painted {
+            layer: 0,
+            freeform: false,
+        });
+        Adjustment::Exposure.set(&mut mask.recipe, 0.5);
+        let recipe = Recipe {
+            paintings: vec![domain::paint::Painting {
+                strokes: vec![domain::paint::Stroke {
+                    points,
+                    size: 2.5,
+                    softness: 50.0,
+                    erase: false,
+                    closed: false,
+                }],
+            }],
+            masks: vec![mask],
+            ..Recipe::default()
+        };
+        assert!(recipe.to_json().len() < 40_000, "{}", recipe.to_json().len());
+        jpeg_file(&lib, "a.jpg");
+        let written = save(&lib.tools, &lib.request("a.jpg", recipe.clone(), true)).unwrap();
+        let tags = lib.read(&written);
+        assert_eq!(
+            Recipe::from_json(tags["XMP-gg:EditRecipe"].as_str().unwrap()),
+            Some(recipe),
+            "the whole painting comes back"
+        );
     }
 
     /// REQ-030-08: saving applies the masks: the gradient's side changes, the other side doesn't.
