@@ -443,9 +443,12 @@ impl Recipe {
         Geometry::new(self.crop, self.quarter_turns)
     }
 
-    /// Whether rendering needs the photo's subject: for the parts' adjustments or a background blur.
+    /// Whether rendering needs the photo's subject: for the parts' adjustments, a background blur, or a mask made with
+    /// it.
     pub fn needs_subject(&self) -> bool {
-        self.has_parts() || (self.blur_kind == BlurKind::Background && self.blur > 0.0)
+        self.has_parts()
+            || (self.blur_kind == BlurKind::Background && self.blur > 0.0)
+            || self.masks.iter().any(LocalMask::uses_subject)
     }
 
     /// Whether the subject or the background has adjustments of its own.
@@ -496,6 +499,10 @@ impl Recipe {
         for mask in &mut recipe.masks {
             mask.recipe.sanitize();
             mask.shape.sanitize();
+            mask.more.truncate(MAX_MASK_SHAPES - 1);
+            for part in &mut mask.more {
+                part.shape.sanitize();
+            }
         }
         recipe.tidy();
         Some(recipe)
@@ -672,6 +679,8 @@ impl Part {
 
 /// Masks a recipe can have (REQ-030-01).
 pub const MAX_MASKS: usize = 8;
+/// Shapes a mask can be made of (REQ-030-10).
+pub const MAX_MASK_SHAPES: usize = 4;
 
 /// What a mask selects (REQ-030-03 … REQ-030-05). Positions are fractions of the upright, unturned original, as the
 /// crop's are; brightness and softness in percent of the encoded scale, hue, range and color softness in degrees of
@@ -694,6 +703,10 @@ pub enum MaskShape {
         range: f32,
         feather: f32,
     },
+    /// The photo's subject, found by the app (spec 022).
+    Subject,
+    /// All but the photo's subject.
+    Background,
 }
 
 impl MaskShape {
@@ -720,13 +733,20 @@ impl MaskShape {
             Self::Linear { .. } => "Gradient",
             Self::Luminance { .. } => "Luminance",
             Self::Color { .. } => "Color",
+            Self::Subject => "Subject",
+            Self::Background => "Background",
         }
+    }
+
+    /// Whether it needs the photo's subject to select anything (REQ-030-11).
+    pub fn uses_subject(self) -> bool {
+        matches!(self, Self::Subject | Self::Background)
     }
 
     /// The panel's sliders of this shape: name, value, range, unit (REQ-030-04, REQ-030-05). A gradient has handles.
     pub fn sliders(self) -> Vec<(&'static str, f32, (f32, f32), &'static str)> {
         match self {
-            Self::Linear { .. } => Vec::new(),
+            Self::Linear { .. } | Self::Subject | Self::Background => Vec::new(),
             Self::Luminance { low, high, feather } => vec![
                 ("From", low, (0.0, 100.0), " %"),
                 ("To", high, (0.0, 100.0), " %"),
@@ -743,7 +763,7 @@ impl MaskShape {
     /// Sets slider `i` of [`Self::sliders`].
     pub fn set_slider(&mut self, i: usize, value: f32) {
         match self {
-            Self::Linear { .. } => {}
+            Self::Linear { .. } | Self::Subject | Self::Background => {}
             Self::Luminance { low, high, feather } => *[low, high, feather][i] = value,
             Self::Color { hue, range, feather } => *[hue, range, feather][i] = value,
         }
@@ -770,11 +790,13 @@ impl MaskShape {
                 fit(range, 0.0, 180.0, 30.0);
                 fit(feather, 0.0, 90.0, 0.0);
             }
+            Self::Subject | Self::Background => {}
         }
     }
 
-    /// How much of the pixel `rgb` as stored, at `uv` of a photo `size` pixels large, this selects: 0 to 1.
-    pub fn weight(self, rgb: [f32; 3], uv: [f32; 2], size: [f32; 2]) -> f32 {
+    /// How much of the pixel `rgb` as stored, at `uv` of a photo `size` pixels large, this selects: 0 to 1. `subject` is
+    /// how much the pixel belongs to the subject; without one, neither it nor the background selects anything.
+    pub fn weight(self, rgb: [f32; 3], uv: [f32; 2], size: [f32; 2], subject: Option<f32>) -> f32 {
         match self {
             Self::Linear { from, to } => {
                 let along = [(to[0] - from[0]) * size[0], (to[1] - from[1]) * size[1]];
@@ -797,6 +819,8 @@ impl MaskShape {
                 let away = ((b.atan2(a).to_degrees() - hue + 180.0).rem_euclid(360.0) - 180.0).abs();
                 (1.0 - smoothstep(range, range + feather.max(0.5), away)) * smoothstep(0.02, 0.06, chroma)
             }
+            Self::Subject => subject.unwrap_or(0.0),
+            Self::Background => subject.map_or(0.0, |subject| 1.0 - subject),
         }
     }
 
@@ -806,14 +830,65 @@ impl MaskShape {
             Self::Linear { from, to } => [0.0, from[0], from[1], to[0], to[1]],
             Self::Luminance { low, high, feather } => [1.0, low / 100.0, high / 100.0, feather / 100.0, 0.0],
             Self::Color { hue, range, feather } => [2.0, hue, range, feather, 0.0],
+            Self::Subject => [3.0, 0.0, 0.0, 0.0, 0.0],
+            Self::Background => [4.0, 0.0, 0.0, 0.0, 0.0],
         }
     }
+}
+
+/// How a further shape changes what a mask selects so far (REQ-030-10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MaskOp {
+    Add,
+    Subtract,
+    Intersect,
+}
+
+impl MaskOp {
+    pub const ALL: [MaskOp; 3] = [Self::Add, Self::Subtract, Self::Intersect];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Add => "Add",
+            Self::Subtract => "Subtract",
+            Self::Intersect => "Intersect",
+        }
+    }
+
+    /// Its number in the shader.
+    pub fn number(self) -> f32 {
+        match self {
+            Self::Add => 0.0,
+            Self::Subtract => 1.0,
+            Self::Intersect => 2.0,
+        }
+    }
+
+    /// What is selected after this: `so_far`, with a shape that selects `shape`.
+    pub fn combine(self, so_far: f32, shape: f32) -> f32 {
+        match self {
+            Self::Add => so_far.max(shape),
+            Self::Subtract => so_far.min(1.0 - shape),
+            Self::Intersect => so_far.min(shape),
+        }
+    }
+}
+
+/// A further shape of a mask, and how it combines.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct MaskPart {
+    pub op: MaskOp,
+    pub shape: MaskShape,
 }
 
 /// A mask of a recipe: what it selects, and the light and color it gives that (REQ-030-02).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LocalMask {
     pub shape: MaskShape,
+    /// The further shapes it is made of, in order (REQ-030-10).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub more: Vec<MaskPart>,
     #[serde(default)]
     pub invert: bool,
     #[serde(default)]
@@ -824,9 +899,35 @@ impl LocalMask {
     pub fn new(shape: MaskShape) -> Self {
         Self {
             shape,
+            more: Vec::new(),
             invert: false,
             recipe: Box::default(),
         }
+    }
+
+    /// How many shapes it is made of.
+    pub fn shapes(&self) -> usize {
+        1 + self.more.len()
+    }
+
+    /// Shape `i` of them; the first without one past the end.
+    pub fn shape_at(&self, i: usize) -> MaskShape {
+        i.checked_sub(1)
+            .and_then(|i| self.more.get(i))
+            .map_or(self.shape, |part| part.shape)
+    }
+
+    /// Shape `i` of them to change; the first without one past the end.
+    pub fn shape_mut(&mut self, i: usize) -> &mut MaskShape {
+        match i.checked_sub(1) {
+            Some(i) if i < self.more.len() => &mut self.more[i].shape,
+            _ => &mut self.shape,
+        }
+    }
+
+    /// Whether any of its shapes needs the photo's subject (REQ-030-11).
+    pub fn uses_subject(&self) -> bool {
+        self.shape.uses_subject() || self.more.iter().any(|part| part.shape.uses_subject())
     }
 }
 
@@ -843,14 +944,20 @@ fn masks_known<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<
 #[derive(Debug, Clone, PartialEq)]
 pub struct MaskParams {
     pub shape: MaskShape,
+    pub more: Vec<MaskPart>,
     pub invert: bool,
     pub params: Box<Params>,
 }
 
 impl MaskParams {
     /// How much of the pixel this mask selects (REQ-030-02, REQ-030-06).
-    pub fn weight(&self, rgb: [f32; 3], uv: [f32; 2], size: [f32; 2]) -> f32 {
-        let weight = self.shape.weight(rgb, uv, size);
+    pub fn weight(&self, rgb: [f32; 3], uv: [f32; 2], size: [f32; 2], subject: Option<f32>) -> f32 {
+        let weight = self
+            .more
+            .iter()
+            .fold(self.shape.weight(rgb, uv, size, subject), |so_far, part| {
+                part.op.combine(so_far, part.shape.weight(rgb, uv, size, subject))
+            });
         if self.invert { 1.0 - weight } else { weight }
     }
 }
@@ -1416,6 +1523,7 @@ impl Params {
                 .iter()
                 .map(|mask| MaskParams {
                     shape: mask.shape,
+                    more: mask.more.clone(),
                     invert: mask.invert,
                     params: Box::new(Params::new(&mask.recipe)),
                 })
@@ -1464,7 +1572,7 @@ impl Params {
             lin = std::array::from_fn(|c| outside[c] + (inside[c] - outside[c]) * subject);
         }
         for mask in &self.masks {
-            let weight = mask.weight(rgb, uv, size);
+            let weight = mask.weight(rgb, uv, size, subject);
             let developed = mask.params.develop(lin);
             lin = std::array::from_fn(|c| lin[c] + (developed[c] - lin[c]) * weight);
         }
@@ -2334,7 +2442,7 @@ mod tests {
             from: [0.2, 0.5],
             to: [0.8, 0.5],
         };
-        let weight = |u: f32| shape.weight(GREY, [u, 0.5], SIZE);
+        let weight = |u: f32| shape.weight(GREY, [u, 0.5], SIZE, None);
         assert_eq!(weight(0.1), 1.0);
         assert_eq!(weight(0.2), 1.0);
         assert_eq!(weight(0.8), 0.0);
@@ -2345,7 +2453,11 @@ mod tests {
             from: [0.5, 0.5],
             to: [0.5, 0.5],
         };
-        assert_eq!(same.weight(GREY, [0.1, 0.9], SIZE), 0.0, "no direction selects nothing");
+        assert_eq!(
+            same.weight(GREY, [0.1, 0.9], SIZE, None),
+            0.0,
+            "no direction selects nothing"
+        );
     }
 
     /// REQ-030-04: what is that bright as stored, whatever the photo's own sliders do.
@@ -2356,7 +2468,7 @@ mod tests {
             high: 60.0,
             feather: 10.0,
         };
-        let weight = |v: f32| shape.weight([v; 3], MID, SIZE);
+        let weight = |v: f32| shape.weight([v; 3], MID, SIZE, None);
         assert_eq!(weight(0.5), 1.0);
         assert_eq!(weight(0.2), 0.0);
         assert_eq!(weight(0.8), 0.0);
@@ -2373,7 +2485,7 @@ mod tests {
     /// REQ-030-05: the chosen hues, and no greys.
     #[test]
     fn req_030_05_a_color_mask_selects_hues_and_no_greys() {
-        let weight = |shape: MaskShape, rgb: [f32; 3]| shape.weight(rgb, MID, SIZE);
+        let weight = |shape: MaskShape, rgb: [f32; 3]| shape.weight(rgb, MID, SIZE, None);
         let greens = MaskShape::COLOR;
         let (green, red) = ([0.2, 0.6, 0.2], [0.7, 0.15, 0.15]);
         assert_eq!(weight(greens, green), 1.0);
@@ -2414,6 +2526,128 @@ mod tests {
         );
     }
 
+    /// REQ-030-10: each further shape adds to, takes from, or narrows what was selected before it.
+    #[test]
+    fn req_030_10_shapes_combine_in_order() {
+        // Full on the left half's edge, nothing beyond the middle.
+        let left = MaskShape::Linear {
+            from: [0.0, 0.0],
+            to: [0.5, 0.0],
+        };
+        let bright = MaskShape::Luminance {
+            low: 60.0,
+            high: 100.0,
+            feather: 0.0,
+        };
+        let weight = |op: MaskOp, rgb: [f32; 3], u: f32| {
+            let mut mask = LocalMask::new(left);
+            mask.more.push(MaskPart { op, shape: bright });
+            let recipe = Recipe {
+                masks: vec![mask],
+                ..Recipe::default()
+            };
+            Params::new(&recipe).masks[0].weight(rgb, [u, 0.5], SIZE, None)
+        };
+        let (light, dark) = ([0.9; 3], [0.1; 3]);
+        // Left and bright, left and dark, right and bright, right and dark.
+        let cases = |op: MaskOp| {
+            [
+                weight(op, light, 0.0),
+                weight(op, dark, 0.0),
+                weight(op, light, 0.9),
+                weight(op, dark, 0.9),
+            ]
+        };
+        assert_eq!(cases(MaskOp::Add), [1.0, 1.0, 1.0, 0.0]);
+        assert_eq!(cases(MaskOp::Subtract), [0.0, 1.0, 0.0, 0.0]);
+        assert_eq!(cases(MaskOp::Intersect), [1.0, 0.0, 0.0, 0.0]);
+
+        // In order: the left, plus what is bright, then without what is bright; invert swaps the result.
+        let mut mask = LocalMask::new(left);
+        mask.more.push(MaskPart {
+            op: MaskOp::Add,
+            shape: bright,
+        });
+        mask.more.push(MaskPart {
+            op: MaskOp::Subtract,
+            shape: bright,
+        });
+        mask.invert = true;
+        let recipe = Recipe {
+            masks: vec![mask],
+            ..Recipe::default()
+        };
+        let params = Params::new(&recipe);
+        assert_eq!(
+            params.masks[0].weight(light, [0.0, 0.5], SIZE, None),
+            1.0,
+            "bright goes again"
+        );
+        assert_eq!(
+            params.masks[0].weight(dark, [0.0, 0.5], SIZE, None),
+            0.0,
+            "the left stays"
+        );
+    }
+
+    /// REQ-030-11: the subject and the background select nothing until the subject is found, and rendering asks for it.
+    #[test]
+    fn req_030_11_the_subject_in_a_mask_waits_until_it_is_found() {
+        assert_eq!(MaskShape::Subject.weight(GREY, MID, SIZE, Some(0.75)), 0.75);
+        assert_eq!(MaskShape::Background.weight(GREY, MID, SIZE, Some(0.75)), 0.25);
+        assert_eq!(MaskShape::Subject.weight(GREY, MID, SIZE, None), 0.0);
+        assert_eq!(MaskShape::Background.weight(GREY, MID, SIZE, None), 0.0);
+
+        let mut recipe = masked(MaskShape::LINEAR, Adjustment::Exposure, 1.0);
+        assert!(!recipe.needs_subject());
+        recipe.masks[0].more.push(MaskPart {
+            op: MaskOp::Subtract,
+            shape: MaskShape::Subject,
+        });
+        assert!(recipe.needs_subject());
+
+        // A gradient without the subject: where the subject is, the photo stays; beside it, it changes.
+        let params = Params::new(&recipe);
+        let top = [0.5, 0.0];
+        let plain = Params::new(&Recipe::default()).pixel(GREY, top, SIZE);
+        assert_eq!(params.pixel_masked(GREY, top, SIZE, 1.0), plain);
+        assert_ne!(params.pixel_masked(GREY, top, SIZE, 0.0), plain);
+    }
+
+    /// REQ-030-10: the shapes survive saving, at most four, and a mask from before them reads as it was.
+    #[test]
+    fn req_030_10_shapes_are_saved_and_limited() {
+        let mut recipe = masked(MaskShape::LINEAR, Adjustment::Exposure, 0.5);
+        recipe.masks[0].more.push(MaskPart {
+            op: MaskOp::Intersect,
+            shape: MaskShape::Background,
+        });
+        assert_eq!(Recipe::from_json(&recipe.to_json()), Some(recipe));
+        assert!(
+            !masked(MaskShape::LINEAR, Adjustment::Exposure, 0.5)
+                .to_json()
+                .contains("more"),
+            "a mask of one shape stays as it was"
+        );
+
+        let part = r#"{"op":"add","shape":{"kind":"luminance","low":-5,"high":500,"feather":0}}"#;
+        let json = format!(
+            r#"{{"version":1,"masks":[{{"shape":{{"kind":"subject"}},"more":[{}]}}]}}"#,
+            [part; 9].join(",")
+        );
+        let read = Recipe::from_json(&json).unwrap();
+        assert_eq!(read.masks[0].shapes(), MAX_MASK_SHAPES);
+        assert_eq!(
+            read.masks[0].shape_at(1),
+            MaskShape::Luminance {
+                low: 0.0,
+                high: 100.0,
+                feather: 0.0
+            },
+            "further shapes come into their ranges too"
+        );
+    }
+
     /// REQ-030-08: masks survive saving; values from a file stay in range; an unknown kind is left out, not the recipe.
     #[test]
     fn req_030_08_masks_are_saved_and_values_stay_in_range() {
@@ -2421,6 +2655,7 @@ mod tests {
         recipe.masks.push(LocalMask {
             shape: MaskShape::LUMINANCE,
             invert: true,
+            more: Vec::new(),
             recipe: Box::default(),
         });
         assert_eq!(Recipe::from_json(&recipe.to_json()), Some(recipe));

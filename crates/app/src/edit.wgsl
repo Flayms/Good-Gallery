@@ -10,12 +10,18 @@ struct Part {
     turn: vec4<f32>,
 }
 
-// A mask (spec 030): its light and color, then its kind (x: 0 gradient, 1 luminance, 2 color), inverted (y), and the
-// shape's numbers (`domain::edit::MaskShape::numbers`).
+// A shape of a mask (spec 030): its kind (x: 0 gradient, 1 luminance, 2 color, 3 subject, 4 background), how it combines
+// (y: 0 add, 1 subtract, 2 intersect), and its numbers (`domain::edit::MaskShape::numbers`).
+struct MaskShape {
+    kind: vec4<f32>,
+    numbers: vec4<f32>,
+}
+
+// A mask: its light and color, inverted (info.x), how many shapes (info.y), and those.
 struct LocalMask {
     part: Part,
-    kind: vec4<f32>,
-    shape: vec4<f32>,
+    info: vec4<f32>,
+    shapes: array<MaskShape, 4>,
 }
 
 struct Edit {
@@ -184,6 +190,11 @@ fn value_noise(p: vec2<f32>) -> f32 {
     return mix(top, bottom, s.y);
 }
 
+// Channel `c`'s curve on linear light.
+fn curve(c: u32, value: f32) -> f32 {
+    return to_linear(lookup(c, min(to_encoded(max(value, 0.0)), 1.0)));
+}
+
 // White balance, exposure, tone, curves (if `curves`) and chroma of one part, on linear light.
 fn core(linear: vec3<f32>, p: Part, curves: bool) -> vec3<f32> {
     var lin = linear * p.gains.xyz;
@@ -195,9 +206,8 @@ fn core(linear: vec3<f32>, p: Part, curves: bool) -> vec3<f32> {
         lin = vec3<f32>(toned);
     }
     if curves {
-        for (var c = 0u; c < 3u; c++) {
-            lin[c] = to_linear(lookup(c, min(to_encoded(max(lin[c], 0.0)), 1.0)));
-        }
+        // Not a loop writing `lin[c]`: FXC must unroll a loop with such a write, and any loop around it (X3550, X3511).
+        lin = vec3<f32>(curve(0u, lin.r), curve(1u, lin.g), curve(2u, lin.b));
     }
     if p.color.y != 0.0 || p.color.z != 0.0 || p.turn.y != 0.0 || p.turn.x != 1.0 {
         lin = chroma(lin, p);
@@ -229,44 +239,58 @@ fn part(lin: vec3<f32>, p: Part) -> vec3<f32> {
     return lin;
 }
 
-// `domain::edit::MaskShape::weight` and `MaskParams::weight`, `rgb` as stored. No `switch` and no copy of the mask:
-// Windows' shader compiler (FXC) has to unroll what it can't address.
-fn mask_weight(i: u32, rgb: vec3<f32>, uv: vec2<f32>) -> f32 {
-    let kind = edit.masks[i].kind;
-    let shape = edit.masks[i].shape;
-    var weight = 0.0;
+// `domain::edit::MaskShape::weight`, `rgb` as stored.
+fn shape_weight(i: u32, j: u32, rgb: vec3<f32>, uv: vec2<f32>, subject: f32) -> f32 {
+    let kind = edit.masks[i].shapes[j].kind;
+    let numbers = edit.masks[i].shapes[j].numbers;
+    if kind.x > 2.5 {
+        // Without a subject, neither it nor the background selects anything.
+        if (u32(edit.size.w) & 4u) == 0u {
+            return 0.0;
+        }
+        if kind.x < 3.5 {
+            return subject;
+        }
+        return 1.0 - subject;
+    }
     if kind.x < 0.5 {
-        let along = (shape.xy - kind.zw) * edit.size.xy;
+        let along = (numbers.xy - kind.zw) * edit.size.xy;
         let length_squared = dot(along, along);
         if length_squared > 0.0 {
-            weight = 1.0 - smoothstep(0.0, 1.0, dot((uv - kind.zw) * edit.size.xy, along) / length_squared);
+            return 1.0 - smoothstep(0.0, 1.0, dot((uv - kind.zw) * edit.size.xy, along) / length_squared);
         }
-    } else {
-        let lin = vec3<f32>(to_linear(rgb.r), to_linear(rgb.g), to_linear(rgb.b));
-        if kind.x < 1.5 {
-            let value = to_encoded(max(luminance(lin), 0.0));
-            let feather = max(shape.x, 0.005);
-            weight = smoothstep(kind.z - feather, kind.z, value) * (1.0 - smoothstep(kind.w, kind.w + feather, value));
+        return 0.0;
+    }
+    let lin = vec3<f32>(to_linear(rgb.r), to_linear(rgb.g), to_linear(rgb.b));
+    if kind.x < 1.5 {
+        let value = to_encoded(max(luminance(lin), 0.0));
+        let feather = max(numbers.x, 0.005);
+        return smoothstep(kind.z - feather, kind.z, value) * (1.0 - smoothstep(kind.w, kind.w + feather, value));
+    }
+    let lab = to_oklab(lin);
+    let turned = degrees(atan2(lab.z, lab.y)) - kind.z + 180.0;
+    let away = abs(turned - 360.0 * floor(turned / 360.0) - 180.0);
+    return (1.0 - smoothstep(kind.w, kind.w + max(numbers.x, 0.5), away)) * smoothstep(0.02, 0.06, length(lab.yz));
+}
+
+// `domain::edit::MaskParams::weight`: its shapes combined by `MaskOp::combine`.
+fn mask_weight(i: u32, rgb: vec3<f32>, uv: vec2<f32>, subject: f32) -> f32 {
+    var weight = shape_weight(i, 0u, rgb, uv, subject);
+    for (var j = 1u; j < u32(edit.masks[i].info.y); j++) {
+        let shape = shape_weight(i, j, rgb, uv, subject);
+        let op = edit.masks[i].shapes[j].kind.y;
+        if op < 0.5 {
+            weight = max(weight, shape);
+        } else if op < 1.5 {
+            weight = min(weight, 1.0 - shape);
         } else {
-            let lab = to_oklab(lin);
-            let turned = degrees(atan2(lab.z, lab.y)) - kind.z + 180.0;
-            let away = abs(turned - 360.0 * floor(turned / 360.0) - 180.0);
-            weight = (1.0 - smoothstep(kind.w, kind.w + max(shape.x, 0.5), away))
-                * smoothstep(0.02, 0.06, length(lab.yz));
+            weight = min(weight, shape);
         }
     }
-    if kind.y > 0.5 {
+    if edit.masks[i].info.x > 0.5 {
         return 1.0 - weight;
     }
     return weight;
-}
-
-// Mask `i` on `lin`, if there is one. Called once per mask instead of in a loop, which FXC can't unroll (X3511).
-fn apply_mask(i: u32, lin: vec3<f32>, rgb: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
-    if f32(i) >= edit.mask_count.x {
-        return lin;
-    }
-    return mix(lin, part(lin, edit.masks[i].part), mask_weight(i, rgb, uv));
 }
 
 // `domain::edit::Params::halation_glow`.
@@ -283,14 +307,9 @@ fn develop(rgb: vec3<f32>, uv: vec2<f32>, subject: f32, glow: vec3<f32>) -> vec3
     if (u32(edit.size.w) & 4u) != 0u {
         lin = mix(part(lin, edit.background), part(lin, edit.subject), subject);
     }
-    lin = apply_mask(0u, lin, rgb, uv);
-    lin = apply_mask(1u, lin, rgb, uv);
-    lin = apply_mask(2u, lin, rgb, uv);
-    lin = apply_mask(3u, lin, rgb, uv);
-    lin = apply_mask(4u, lin, rgb, uv);
-    lin = apply_mask(5u, lin, rgb, uv);
-    lin = apply_mask(6u, lin, rgb, uv);
-    lin = apply_mask(7u, lin, rgb, uv);
+    for (var i = 0u; i < u32(edit.mask_count.x); i++) {
+        lin = mix(lin, part(lin, edit.masks[i].part), mask_weight(i, rgb, uv, subject));
+    }
     lin += glow;
     let vignette = edit.fx.x;
     if vignette != 0.0 {
@@ -436,7 +455,7 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     }
     // The chosen mask (index + 1) tinted (REQ-030-07).
     if (flags >> 8u) != 0u {
-        rgb = mix(rgb, vec3<f32>(1.0, 0.25, 0.25), 0.45 * mask_weight((flags >> 8u) - 1u, stored, uv));
+        rgb = mix(rgb, vec3<f32>(1.0, 0.25, 0.25), 0.45 * mask_weight((flags >> 8u) - 1u, stored, uv, subject));
     }
     if (flags & 2u) != 0u {
         rgb = vec3<f32>(to_linear(rgb.r), to_linear(rgb.g), to_linear(rgb.b));

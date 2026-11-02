@@ -7,7 +7,7 @@ use common::{Fixture, settle};
 use db::libraries::LibraryStatus;
 use db::rusqlite::Connection;
 use db::writer::{IndexWriter, IndexedFile};
-use domain::edit::{Adjustment, BlurKind, Channel, MaskShape, Part, Recipe, SavedEdit};
+use domain::edit::{Adjustment, BlurKind, Channel, MaskOp, MaskShape, Part, Recipe, SavedEdit};
 use domain::look::{Look, LookChoice};
 use domain::media::{MediaKind, MediaMetadata};
 use eframe::egui::accesskit::Role;
@@ -939,4 +939,67 @@ fn req_030_03_drags_a_gradients_handle() {
     harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
     harness.run_steps(3);
     assert_eq!(session(&harness).unwrap().recipe().masks[0].shape, MaskShape::LINEAR);
+}
+
+/// REQ-030-10, REQ-030-11: a mask gets further shapes, each with its controls and how it combines, as undo steps.
+#[test]
+fn req_030_10_req_030_11_makes_a_mask_of_several_shapes() {
+    let fixture = Fixture::new();
+    let (mut harness, _dir) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    settle_all(&mut harness);
+    open_masks(&mut harness);
+
+    harness.get_by_role_and_label(Role::Button, "Add gradient").click();
+    harness.run_steps(2);
+    let mask = |harness: &App| session(harness).unwrap().recipe().masks[0].clone();
+    assert_eq!(mask(&harness).shapes(), 1);
+
+    // A further shape intersects at first, and shows its own controls.
+    harness.get_by_role_and_label(Role::Button, "+ Luminance").click();
+    harness.run_steps(2);
+    assert_eq!(mask(&harness).more[0].op, MaskOp::Intersect);
+    assert_eq!(mask(&harness).more[0].shape, MaskShape::LUMINANCE);
+    assert!(harness.query_by_label("From").is_some());
+    harness.snapshot(common::snapshot_name("edit_mask_shapes"));
+
+    harness.get_by_role_and_label(Role::Button, "Subtract").click();
+    harness.run_steps(2);
+    assert_eq!(mask(&harness).more[0].op, MaskOp::Subtract);
+
+    // Its slider changes it, not the first shape.
+    harness.get_by_role_and_label(Role::Slider, "From").focus();
+    harness.run_steps(1);
+    harness.key_press(Key::ArrowLeft);
+    harness.run_steps(2);
+    assert_eq!(mask(&harness).shape, MaskShape::LINEAR);
+    match mask(&harness).more[0].shape {
+        MaskShape::Luminance { low, .. } => assert_eq!(low, 59.0),
+        other => panic!("{other:?}"),
+    }
+
+    // The first shape is chosen again: its handles, no way to combine or remove it.
+    harness.get_by_role_and_label(Role::Button, "1. Gradient").click();
+    harness.run_steps(2);
+    assert!(session(&harness).unwrap().is_on_gradient());
+    assert!(harness.query_by_label("Subtract").is_none() && harness.query_by_label("Remove shape").is_none());
+
+    // The subject among them; four at most.
+    harness.get_by_role_and_label(Role::Button, "+ Subject").click();
+    harness.run_steps(2);
+    assert!(session(&harness).unwrap().recipe().needs_subject());
+    harness.get_by_role_and_label(Role::Button, "+ Background").click();
+    harness.run_steps(2);
+    assert_eq!(mask(&harness).shapes(), 4);
+    harness.get_by_role_and_label(Role::Button, "+ Color").click();
+    harness.run_steps(2);
+    assert_eq!(mask(&harness).shapes(), 4, "no room for a fifth");
+
+    harness.get_by_role_and_label(Role::Button, "Remove shape").click();
+    harness.run_steps(2);
+    assert_eq!(mask(&harness).shapes(), 3);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run_steps(2);
+    assert_eq!(mask(&harness).shapes(), 4);
 }

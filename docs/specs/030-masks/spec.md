@@ -4,7 +4,7 @@
 
 ## Goal
 
-Users who edit a photo (spec 021) sometimes need to change a part that isn't its subject or background (spec 022): darken a bright sky with a gradient, lift only the shadows, or calm one color. Masks select such a part by its position, its brightness or its color, with adjustable parameters, and give it its own light and color. This is the first phase of #139; combining masks and painted masks come later.
+Users who edit a photo (spec 021) sometimes need to change a part that isn't its subject or background (spec 022): darken a bright sky with a gradient, lift only the shadows, or calm one color. Masks select such a part by its position, its brightness or its color, with adjustable parameters, and give it its own light and color. A mask can be made of several shapes, so _the sky, but not the person_ works too. Painted masks come later (#139).
 
 ## Requirements
 
@@ -68,10 +68,23 @@ Users who edit a photo (spec 021) sometimes need to change a part that isn't its
 - **When** it is shown
 - **Then** there are no masks, as there is no editing
 
+### REQ-030-10 · A mask of several shapes
+
+- **Given** a chosen mask
+- **When** the user adds a further shape (up to 4 in a mask) and picks _Add_, _Subtract_ or _Intersect_ for it
+- **Then** the mask selects what the shapes before it selected together with that shape, without it, or only where both select
+- **And** the panel shows the chosen shape's own controls, a shape can be taken out again, and each of these is one undo step
+
+### REQ-030-11 · The subject and background in a mask
+
+- **Given** a mask with _Subject_ or _Background_ among its shapes
+- **When** the photo is shown or saved
+- **Then** that shape selects the subject the app found (REQ-022-02), or all but it; while there is none it selects nothing, and the panel says so
+- **And** the _Subject_ and _Background_ switch (REQ-022-01) stays as it is
+
 ## Out of scope
 
-- Combining masks (add, subtract, intersect), and using the subject or background as part of a mask: the next phase of #139.
-- Brush and freeform masks: the phase after that.
+- Brush and freeform masks: the next phase of #139.
 - Radial gradients, depth or object masks, an eyedropper for the color mask, moving masks within the list, renaming them.
 - Moving a gradient's handles by keyboard (the crop's frame has none either), or with the photo zoomed in: a chosen gradient shows the whole photo.
 - Curves, looks and effects per mask, as for the subject and background.
@@ -93,4 +106,6 @@ Users who edit a photo (spec 021) sometimes need to change a part that isn't its
 | REQ-030-06 | `crates/domain/src/edit.rs` › req_030_06_invert_swaps_the_selection; `crates/app/tests/edit.rs` › req_030_01_req_030_06_req_030_07_adds_changes_and_removes_masks | pass |
 | REQ-030-07 | `crates/app/tests/edit.rs` › req_030_01_req_030_06_req_030_07_adds_changes_and_removes_masks; `crates/app/src/edit.rs` › req_030_07_req_030_08_the_gpu_preview_of_masks_matches_the_cpu_render | pass |
 | REQ-030-08 | `crates/domain/src/edit.rs` › req_030_08_masks_are_saved_and_values_stay_in_range; `crates/media/src/edit.rs` › req_030_08_saving_applies_the_masks; `crates/app/src/edit.rs` › req_030_07_req_030_08_the_gpu_preview_of_masks_matches_the_cpu_render | pass |
+| REQ-030-10 | `crates/domain/src/edit.rs` › req_030_10_shapes_combine_in_order, req_030_10_shapes_are_saved_and_limited; `crates/app/src/edit.rs` › req_030_10_req_030_11_the_gpu_preview_of_combined_masks_matches_the_cpu_render; `crates/app/tests/edit.rs` › req_030_10_req_030_11_makes_a_mask_of_several_shapes | pass |
+| REQ-030-11 | `crates/domain/src/edit.rs` › req_030_11_the_subject_in_a_mask_waits_until_it_is_found; `crates/app/src/edit.rs` › req_030_10_req_030_11_the_gpu_preview_of_combined_masks_matches_the_cpu_render; `crates/app/tests/edit.rs` › req_030_10_req_030_11_makes_a_mask_of_several_shapes | pass |
 | REQ-030-09 | by inspection: masks are part of editing, which is photos on the desktop only (REQ-021-01, REQ-019-13) | no test |
