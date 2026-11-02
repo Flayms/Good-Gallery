@@ -31,6 +31,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [025-selection](025-selection/spec.md)                   | Select several items in the gallery and rate them at once        | Implemented |
 | [026-tagging](026-tagging/spec.md)                       | Add and remove tags, People and Places; tag a selection          | Implemented |
 | [027-open-with](027-open-with/spec.md)                   | Open a photo or video with Good Gallery from the file manager    | Implemented |
+| [028-film-looks](028-film-looks/spec.md)                 | Film looks: one click for a film's colors and grain, with strength | Implemented |
 
 ## Conventions
 

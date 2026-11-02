@@ -343,6 +343,9 @@ pub struct Recipe {
     /// The background's own light and color.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub background: Option<Box<Recipe>>,
+    /// A film look under the adjustments (REQ-028-01); one only a newer version knows reads as none.
+    #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "look_or_none")]
+    pub look: Option<crate::look::LookChoice>,
 }
 
 impl Default for Recipe {
@@ -373,6 +376,7 @@ impl Default for Recipe {
             blur_focus: [0.5, 0.5],
             subject: None,
             background: None,
+            look: None,
         }
     }
 }
@@ -387,6 +391,7 @@ impl Recipe {
             .filter(|adjustment| **adjustment != Adjustment::Blur || self.blur_kind != BlurKind::None)
             .all(|adjustment| adjustment.get(self) == adjustment.neutral())
             && self.curves.is_identity()
+            && self.look.is_none()
             && [&self.subject, &self.background]
                 .into_iter()
                 .all(|part| part.as_ref().is_none_or(|part| part.is_neutral()))
@@ -474,6 +479,9 @@ impl Recipe {
         self.blur_focus = self
             .blur_focus
             .map(|c| if c.is_finite() { c.clamp(0.0, 1.0) } else { 0.5 });
+        if let Some(look) = &mut self.look {
+            look.sanitize();
+        }
     }
 }
 
@@ -573,6 +581,13 @@ impl BlurKind {
     pub fn has_focus(self) -> bool {
         matches!(self, Self::TiltShift | Self::Radial)
     }
+}
+
+fn look_or_none<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<crate::look::LookChoice>, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
 }
 
 fn blur_kind_or_none<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<BlurKind, D::Error> {
@@ -982,12 +997,20 @@ pub struct Params {
 
 impl Params {
     pub fn new(recipe: &Recipe) -> Self {
-        let curves = (!recipe.curves.is_identity()).then(|| {
+        // A film look adds to the adjustments, and its curves go before the recipe's own (REQ-028-04).
+        let (folded, look_curves) = crate::look::fold(recipe);
+        let recipe = &folded;
+        let curves = (!recipe.curves.is_identity() || look_curves.is_some()).then(|| {
             let c = &recipe.curves;
+            let channel = |curves: &Curves, x: f32| {
+                let all = curves.all.eval(x);
+                [curves.red.eval(all), curves.green.eval(all), curves.blue.eval(all)]
+            };
             (0..CURVE_SAMPLES)
                 .map(|i| {
-                    let all = c.all.eval(i as f32 / (CURVE_SAMPLES - 1) as f32);
-                    [c.red.eval(all), c.green.eval(all), c.blue.eval(all)]
+                    let x = i as f32 / (CURVE_SAMPLES - 1) as f32;
+                    let looked = look_curves.as_ref().map_or([x; 3], |look| channel(look, x));
+                    std::array::from_fn(|k| channel(c, looked[k])[k])
                 })
                 .collect()
         });

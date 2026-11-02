@@ -12,6 +12,7 @@ pub mod edit;
 pub mod faces;
 pub mod folders;
 pub mod layout;
+pub mod look;
 pub mod media;
 pub mod rating;
 pub mod search;

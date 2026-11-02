@@ -10,6 +10,7 @@ use domain::edit::{
     Adjustment, BlurKind, CURVE_SAMPLES, Channel, HISTOGRAM_BINS, Histogram, History, Mask, Params, Part, Pyramid,
     Recipe, SavedEdit, Section, blur_lod,
 };
+use domain::look::{Look, LookChoice};
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2, pos2, vec2};
 use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, ScreenDescriptor, wgpu};
 use std::path::PathBuf;
@@ -133,6 +134,8 @@ pub struct EditSession {
     /// Reading the small copy back from the viewer's texture.
     reading: Option<Receiver<Result<image::RgbaImage, String>>>,
     open: [bool; 4],
+    /// Whether the _Look_ section is open.
+    look_open: bool,
     channel: Channel,
     dragging_point: Option<usize>,
     picking: bool,
@@ -167,6 +170,7 @@ impl EditSession {
             base: Base::Waiting,
             reading: None,
             open: [true, false, true, false],
+            look_open: true,
             channel: Channel::All,
             dragging_point: None,
             picking: false,
@@ -779,27 +783,20 @@ impl EditSession {
         if !self.parts(ui) {
             return;
         }
+        // A film look, under all other adjustments; the subject and background have none (REQ-028-01).
+        if self.part == Part::Photo {
+            section_header(ui, "Look", &mut self.look_open);
+            if self.look_open {
+                self.looks(ui);
+                ui.add_space(8.0);
+            }
+        }
         for (i, section) in Section::ALL.into_iter().enumerate() {
             // The subject and the background have light and color only (REQ-022-01).
             if self.part != Part::Photo && matches!(section, Section::Curves | Section::Effects) {
                 continue;
             }
-            let open = &mut self.open[i];
-            let icon = if *open { Icon::ChevronDown } else { Icon::ChevronRight };
-            let header = ui.add(
-                egui::Button::image_and_text(
-                    icon.image(14.0, theme::muted()),
-                    egui::RichText::new(section.label()).font(egui::FontId::new(theme::SIZE_BODY, theme::semibold())),
-                )
-                .frame(false),
-            );
-            let label = section.label();
-            let expanded = *open;
-            let header = header.on_hover_text(if expanded { "Collapse" } else { "Expand" });
-            header.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, expanded, label));
-            if header.clicked() {
-                *open = !*open;
-            }
+            section_header(ui, section.label(), &mut self.open[i]);
             if !self.open[i] {
                 continue;
             }
@@ -929,11 +926,65 @@ impl EditSession {
         }
     }
 
+    /// The looks to pick from, and the chosen one's strength and grain (REQ-028-01 … REQ-028-03).
+    fn looks(&mut self, ui: &mut egui::Ui) {
+        let chosen = self.draft.look;
+        ui.horizontal_wrapped(|ui| {
+            let none = ui.add(egui::Button::selectable(chosen.is_none(), "None"));
+            if none.clicked() && chosen.is_some() {
+                let mut recipe = self.draft.clone();
+                recipe.look = None;
+                self.commit(recipe);
+            }
+            for look in Look::ALL {
+                let selected = chosen.is_some_and(|choice| choice.look == look);
+                if ui.add(egui::Button::selectable(selected, look.label())).clicked() && !selected {
+                    let mut recipe = self.draft.clone();
+                    // Another look keeps the strength and grain set for the last one.
+                    recipe.look =
+                        Some(chosen.map_or_else(|| LookChoice::new(look), |choice| LookChoice { look, ..choice }));
+                    self.commit(recipe);
+                }
+            }
+        });
+        if chosen.is_some() {
+            ui.add_space(4.0);
+            self.look_slider(ui, "Strength", LookChoice::STRENGTH, |choice| &mut choice.strength);
+            self.look_slider(ui, "Grain", LookChoice::GRAIN, |choice| &mut choice.grain);
+        }
+    }
+
+    /// _Strength_ or _Grain_ of the chosen look, in percent; a double-click goes back to 100 %.
+    fn look_slider(
+        &mut self,
+        ui: &mut egui::Ui,
+        label: &str,
+        (low, high): (f32, f32),
+        value: fn(&mut LookChoice) -> &mut f32,
+    ) {
+        let Some(mut choice) = self.draft.look else { return };
+        let mut current = f64::from(*value(&mut choice));
+        let text = format!("{current:.0} %");
+        let response = slider_row(ui, label, &text, &mut current, (low, high), 1.0);
+        if response.double_clicked() {
+            *value(&mut choice) = 100.0;
+            let mut recipe = self.draft.clone();
+            recipe.look = Some(choice);
+            self.commit(recipe);
+            return;
+        }
+        if response.changed() {
+            *value(&mut choice) = current as f32;
+            self.draft.look = Some(choice);
+        }
+        if response.drag_stopped() || response.clicked() || (response.changed() && !response.dragged()) {
+            let recipe = self.draft.clone();
+            self.commit(recipe);
+        }
+    }
+
     /// One adjustment: its name and value, and a slider. A double-click resets it (REQ-021-07).
     fn slider(&mut self, ui: &mut egui::Ui, adjustment: Adjustment) {
-        // Clear of the scroll bar, which floats over the content.
-        let width = ui.available_width() - SCROLL_BAR_ROOM;
-        let (row, _) = ui.allocate_exact_size(vec2(width, ROW_HEIGHT + SLIDER_HEIGHT), egui::Sense::hover());
         let part = self.part;
         let value = self
             .draft
@@ -952,35 +1003,9 @@ impl EditSession {
         } else {
             format!("{value:+.0}")
         };
-        let label_rect = Rect::from_min_size(row.min, vec2(width, ROW_HEIGHT));
-        let painter = ui.painter();
-        let font = egui::FontId::proportional(theme::SIZE_BODY);
-        painter.text(
-            label_rect.left_center(),
-            egui::Align2::LEFT_CENTER,
-            adjustment.label(),
-            font,
-            theme::text(),
-        );
-        painter.text(
-            label_rect.right_center(),
-            egui::Align2::RIGHT_CENTER,
-            text,
-            egui::FontId::new(theme::SIZE_BODY, theme::numbers()),
-            theme::muted(),
-        );
-        let track = Rect::from_min_size(pos2(row.left(), label_rect.bottom()), vec2(width, SLIDER_HEIGHT));
-        let (low, high) = adjustment.range();
         let step = if adjustment == Adjustment::Exposure { 0.05 } else { 1.0 };
         let mut current = f64::from(value);
-        let response = crate::widgets::slider(
-            ui,
-            track,
-            &mut current,
-            f64::from(low)..=f64::from(high),
-            step,
-            adjustment.label(),
-        );
+        let response = slider_row(ui, adjustment.label(), &text, &mut current, adjustment.range(), step);
         if response.double_clicked() {
             let mut recipe = self.draft.clone();
             adjustment.set(recipe.part_mut(part), adjustment.neutral());
@@ -1083,6 +1108,56 @@ impl EditSession {
             painter.circle_filled(to_screen(point), 4.0, color);
         }
     }
+}
+
+/// A collapsible section's header; a click opens or closes it.
+fn section_header(ui: &mut egui::Ui, label: &str, open: &mut bool) {
+    let icon = if *open { Icon::ChevronDown } else { Icon::ChevronRight };
+    let header = ui.add(
+        egui::Button::image_and_text(
+            icon.image(14.0, theme::muted()),
+            egui::RichText::new(label).font(egui::FontId::new(theme::SIZE_BODY, theme::semibold())),
+        )
+        .frame(false),
+    );
+    let expanded = *open;
+    let header = header.on_hover_text(if expanded { "Collapse" } else { "Expand" });
+    header.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, expanded, label));
+    if header.clicked() {
+        *open = !*open;
+    }
+}
+
+/// A slider's row: its name and `text` above, the slider below, as wide as the panel allows.
+fn slider_row(
+    ui: &mut egui::Ui,
+    label: &str,
+    text: &str,
+    value: &mut f64,
+    (low, high): (f32, f32),
+    step: f64,
+) -> egui::Response {
+    // Clear of the scroll bar, which floats over the content.
+    let width = ui.available_width() - SCROLL_BAR_ROOM;
+    let (row, _) = ui.allocate_exact_size(vec2(width, ROW_HEIGHT + SLIDER_HEIGHT), egui::Sense::hover());
+    let label_rect = Rect::from_min_size(row.min, vec2(width, ROW_HEIGHT));
+    let painter = ui.painter();
+    painter.text(
+        label_rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(theme::SIZE_BODY),
+        theme::text(),
+    );
+    painter.text(
+        label_rect.right_center(),
+        egui::Align2::RIGHT_CENTER,
+        text,
+        egui::FontId::new(theme::SIZE_BODY, theme::numbers()),
+        theme::muted(),
+    );
+    let track = Rect::from_min_size(pos2(row.left(), label_rect.bottom()), vec2(width, SLIDER_HEIGHT));
+    crate::widgets::slider(ui, track, value, f64::from(low)..=f64::from(high), step, label)
 }
 
 /// The recipe's steps before the curves, which alone shape the histogram behind the curve.
@@ -1823,6 +1898,33 @@ mod tests {
                 }
             }
             eprintln!("worst difference: {worst}");
+        }
+    }
+
+    /// REQ-028-05: a film look previews as saving renders it (within two levels), at any strength and grain, with
+    /// other adjustments and curves on top.
+    #[test]
+    fn req_028_05_the_gpu_preview_of_a_look_matches_the_cpu_render() {
+        let (_gpu, render_state) = render_state();
+        let image = pattern();
+        for (i, look) in domain::look::Look::ALL.into_iter().enumerate() {
+            let mut recipe = recipes()[i % recipes().len()].clone();
+            recipe.look = Some(domain::look::LookChoice {
+                look,
+                strength: [100.0, 70.0, 35.0][i % 3],
+                grain: [100.0, 200.0, 0.0][i % 3],
+            });
+            let gpu = render_gpu(&render_state, &image, &recipe, None, 0);
+            let cpu = cpu_preview(&image, &recipe, [SIZE, SIZE], None, 0);
+            for (i, (gpu, cpu)) in gpu.chunks_exact(4).zip(cpu.pixels.iter()).enumerate() {
+                for c in 0..3 {
+                    let diff = (i32::from(gpu[c]) - i32::from(cpu.to_array()[c])).abs();
+                    assert!(
+                        diff <= 2,
+                        "pixel {i} channel {c}: GPU {gpu:?}, CPU {cpu:?} with {recipe:?}"
+                    );
+                }
+            }
         }
     }
 
