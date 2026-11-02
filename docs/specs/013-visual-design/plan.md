@@ -1,6 +1,6 @@
 # 013 · Visual design · Plan
 
-Records the approach that was taken. Tokens and surfaces are in `docs/design.md`; decisions that outlive this spec are in `docs/architecture.md`.
+Records the approach that was taken. Tokens and surfaces are in `docs/design.md`; lasting decisions are under _Decisions_ at the end.
 
 ## Approach
 
@@ -29,3 +29,25 @@ Records the approach that was taken. Tokens and surfaces are in `docs/design.md`
 - [x] Title bar, caption buttons, drag areas, minimum size (REQ-013-02, -08)
 - [x] Scrollbars (REQ-013-15)
 - [x] Tinted chrome, tile ↔ viewer transition, controls stepping aside (REQ-013-10 … -12)
+
+## Decisions
+
+### 2026-10-26 · Glass
+
+**Decided:** glass surfaces render what lies below them into an offscreen target at half resolution, blur it with a dual-Kawase chain (4 passes) and composite saturate + tint + rounded corners in an `egui_wgpu` paint callback. ≈ 0.4 ms per surface. Raised is the fallback. Details in spec 013's plan.
+
+### 2026-10-26 · Font and title bar
+
+**Decided:** Atkinson Hyperlegible Next as the variable TTF from google/fonts (OFL), weights via `FontTweak::coords`; a second copy with `tnum` baked in (`pyftfeatfreeze`) for numbers, since egui can't request OpenType features. Title bar: content runs into the caption, own caption buttons, and a window subclass answers `WM_NCHITTEST` with the native codes (`HTMAXBUTTON` etc.), so shadow, resize, Aero snap and snap layouts stay native.
+**Rejected:** native caption (a second bar above the toolbar), undecorated window (no snap layouts, no top-edge resize).
+
+### 2026-10-26 · Icons
+
+**Decided:** lucide icons (ISC, `crates/app/assets/icons/LICENSE.lucide.txt`) as SVG files with `stroke="#fff"` and `stroke-width="1.75"`, embedded with `include_bytes!` (`app::icons::Icon`) and rendered by `egui_extras`' SVG loader (resvg) at the size they are drawn, tinted per use. A new icon is a line in `icons!`; `cargo xtask icons` writes its SVG from a pinned lucide-static release.
+**Rejected:** an icon font (lucide's font drops the stroke-width control), hand-drawn shapes (doesn't scale to ~40 icons).
+
+### 2026-10-28 · Glass, title bar, focus and OS preferences
+
+**Decided:** `app::glass` draws each surface's **backdrop** (tiles with their thumbnail texture views, placeholders and the page / sidebar as solids, recorded while drawing) into an offscreen chain at half resolution and blurs and composites it in a paint callback. Surfaces record nothing for each other, except that the viewer's scrim also sees the toolbar; the viewer records the scrim's darkening and the photo (its texture view, as far as it is drawn) over them, which menus over the viewer blur. Its chrome composites from the scrim's blur; only while the photo grows from its tile, the one time it lies under the chrome, it composites from one shared blur of the window, the darkening and the photo (one extra pass during that animation). Without the pass (no wgpu render state, as in kittest) or with Windows' transparency effects off, surfaces are opaque; snapshots show that fallback, the pass is checked with screenshots of the running app. A paint callback ignores the painter's opacity, so surfaces pass it themselves.
+**Title bar:** `app::titlebar` (the module with the window `unsafe`): `WM_NCCALCSIZE` drops the caption, `WM_NCHITTEST` answers the top edge and the three caption buttons natively. Empty caption areas take the drag in egui and send `ViewportCommand::StartDrag` (a native caption drag, so Aero snap works).
+**Rejected:** reading back egui's framebuffer for the blur (a callback runs inside egui's render pass), `HTCAPTION` drag rects (the window procedure can't know which parts of the toolbar are empty), Windows' `GetDateFormatEx` (no medium length).

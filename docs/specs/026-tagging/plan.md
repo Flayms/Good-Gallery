@@ -38,3 +38,10 @@ Taken without asking, as the user said to go ahead:
 - [x] Info panel and sheet: chips with ×, _Add_ with suggestions; viewer keys while typing; UI tests and snapshot (REQ-026-01 to REQ-026-05)
 - [x] Spec changes to 004, 009; glossary, architecture
 - [x] Tag the selection: _Tag_ menu, shared batch job, confirmation, toasts (REQ-026-06)
+
+## Decisions
+
+### 2026-11-01 · Tags written by hand, read back by indexing
+
+**Decided:** adding or removing a tag (spec 026) reads the file's keyword fields with a one-shot exiftool, changes the lists in `domain::tagging` and writes back only the fields that changed (`media::tagging`), into the same targets as ratings. A removal also takes the tag out of the sidecar, and its hierarchy's unused levels out of the flat lists. The index isn't written directly: the row is marked for reading (`db::media::mark_for_reading`) and a changes scan of the path reads the file with indexing's own rules. The viewer ignores its shortcuts while a text field has the keyboard, also in the frame after, since egui drops the focus before a frame with Escape.
+**Rejected:** writing tags into the index directly (indexing's normalization and one-hierarchy-per-name rules would have to be repeated), appending with exiftool's `+=`/`-=` per field (it can't express "this name in any field, and the hierarchy's levels"), removing names from face regions (other programs' drawings).

@@ -1,6 +1,6 @@
 # 014 · CI and release · Plan
 
-Records the approach that was taken. Decisions that outlive this spec are in `docs/architecture.md`.
+Records the approach that was taken. Lasting decisions are under _Decisions_ at the end.
 
 ## Approach
 
@@ -19,3 +19,21 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 - [x] `cargo xtask dist`: staging, portable zip, NSIS installer (REQ-014-08, -09)
 - [ ] Publish the first release (the release workflow has never run on GitHub; REQ-014-08 partial)
 - [ ] Branch protection on `main` requiring CI (REQ-014-02, a repository setting)
+
+## Decisions
+
+### 2026-10-28 · Packaging and releases
+
+**Decided:**
+- *Data folder:* the packaged app (feature `packaged`, set by `cargo xtask dist`) uses `%APPDATA%\good-gallery`, the folder every earlier version used; every other build uses `%APPDATA%\good-gallery-rust`, so `cargo run` (also `--release`) never touches the real index (`app::startup::default_data_dir`).
+- *The packaged app* has no console (`windows_subsystem = "windows"`); a startup failure shows a message box and panics are logged. The app logs which helpers it found.
+- *Icon:* `crates/app/assets/app-icon.svg`, rendered into `app-icon.ico` (16–256 px PNG entries; exe icon and version info through `winresource` in `crates/app/build.rs`, needs `rc.exe` from the Windows SDK) and `app-icon.png` (window icon). `cargo xtask icons` renders both again when the SVG changes.
+- *Helpers:* `packaging/fetch-helpers.ps1` downloads pinned versions (exiftool 13.59, ffmpeg-static b6.1.1, libmpv 20261021) and checks their SHA-256. The folder layout is one set of constants (`media::helpers::{EXIFTOOL,FFMPEG,MPV}_BUNDLED`) used by the app's lookup and by `cargo xtask dist`. PowerShell, not xtask, so no HTTP client enters the workspace (REQ-011-11).
+- *Package and releases:* `cargo xtask dist` (NSIS installer, portable zip), `cargo xtask release` (git-cliff with `cliff.toml`, version in `[workspace.package]`), `.github/workflows/release.yml`. Details in spec 014's plan.
+- *README screenshots:* `cargo xtask screenshots` generates a demo library (landscapes drawn with `image`, tags through exiftool, two ffmpeg videos) on a `subst` drive, indexes it and runs the app with `--screenshot` per view.
+**Rejected:** `cargo-packager` (another tool for one NSIS script, and its resource layout would differ from the folders the app looks in), WiX / MSI (per-machine by habit), a separate portable data folder (out of scope in spec 014), an HTTP client in xtask for the helpers.
+
+### 2026-10-31 · Faster CI
+
+**Decided:** CI runs the tests with cargo-nextest (`.config/nextest.toml`, profile `ci`): the test binaries run in parallel instead of one after another, and every test in its own process, so the `GPU` lock of the UI tests (one wgpu harness per process at a time) still holds. A test that hangs fails after 5 minutes. nextest skips doctests, so `cargo test --workspace --doc` runs them. Only `main` saves the Rust cache (pull requests restore it; a tag's cache can't be restored by any other ref). `cargo test --workspace` stays the local command.
+**Rejected:** skipping wasm-opt in CI's web build (the browser tests would check a different build than the one published), a different linker on the Windows runners (CI would link differently from the release), a Dev Drive there (another third-party action for a gain not measured yet), skipping CI for documentation changes (the spec check reads `docs/specs`).

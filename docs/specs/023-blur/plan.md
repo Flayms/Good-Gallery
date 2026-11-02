@@ -26,3 +26,10 @@ The issue left the kinds of blur open; decided as follows (to review in the PR):
 - [x] 4. Shader: blur before developing; GPU / CPU parity deep into the pyramid (REQ-023-04)
 - [x] 5. Panel: kind, strength, focus size, transition, _Place focus_; snapshot (REQ-023-01 … REQ-023-03)
 - [x] 6. Glossary, architecture, README
+
+## Decisions
+
+### 2026-10-31 · Blur from an image pyramid
+
+**Decided:** blurs (spec 023) sample a pyramid of the photo, halved by 2 × 2 boxes as the GPU texture's mip chain, with a cubic B-spline at the level of each spot's blur (σ ≈ 0.65 · 2^level), mixing two levels in between. The shader uses the texture's own mips (four bilinear taps per level), saving builds the same levels in 32-bit float (`domain::edit::Pyramid`). The blur comes before the other adjustments, as a lens's would.
+**Rejected:** a convolution per pixel with a varying kernel (too slow live on large photos), blurring on the GPU into extra textures per change (a readback or a second pipeline, and a different result when saving).

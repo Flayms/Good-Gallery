@@ -33,3 +33,10 @@
 - [x] `db::media::set_rating`
 - [x] App: keys, stars, background write, index update, toast; UI tests and snapshots (REQ-024-01, REQ-024-02, REQ-024-04, REQ-024-05)
 - [x] Spec changes to 004 and 009, glossary, architecture note
+
+## Decisions
+
+### 2026-11-01 · Ratings written where they are read
+
+**Decided:** a rating set by hand (spec 024) is written by a one-shot exiftool (`media::rating`, sharing `exiftool::run_once` with saving edits) where `meta` reads it first: into photos, and into a video's sidecar (an existing one, else `<file name>.xmp`) unless the video has a rating of its own; an existing sidecar with a rating is kept in agreement. `-Rating=N -XMP-xmp:Rating=N` updates every rating the file has and makes sure the XMP one exists, the date modified is restored to the exact time afterwards (exiftool's `-P` keeps whole seconds), and 0 means unrated, so no other source takes its place. The index is updated (`db::media::set_rating`) only after the file, because with the date kept the file's size may not change and a scan wouldn't read it again; the row is marked for reading again anyway, since a new sidecar is only noted then.
+**Rejected:** writing into videos (slow over a network, impossible for WebM and Matroska), the Lightroom sidecar name `clip.xmp` (also read as the sidecar of a `clip.mov` beside it), keeping ratings in the index only (lost with the index, unseen by other tools).

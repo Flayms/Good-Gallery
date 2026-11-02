@@ -130,7 +130,7 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org) (`fea
 
 ### Further reading
 
-- [docs/architecture.md](docs/architecture.md): how it is built, and why
+- [docs/architecture.md](docs/architecture.md): how it is built; the decisions behind it are in the specs' plans and [docs/decisions.md](docs/decisions.md)
 - [docs/design.md](docs/design.md): visual design
 - [docs/glossary.md](docs/glossary.md): terms
 - [docs/specs/](docs/specs/): feature specs

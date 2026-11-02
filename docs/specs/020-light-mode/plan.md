@@ -78,3 +78,10 @@ The setting is stored as `appearance` (`"system"`, `"light"`, `"dark"`) with the
 - [x] Light snapshots (`gallery_light`, `view_menu_light`, `settings_light`, `viewer_light`) and a light browser screenshot
 - [ ] README screenshot in light (`cargo xtask screenshots`)
 - [x] `docs/design.md`: light values next to the dark ones; `docs/architecture.md`: the palette
+
+## Decisions
+
+### 2026-10-30 · Appearance: light, dark or the system's
+
+**Decided:** `theme` holds two `Palette`s (`DARK`, `LIGHT`) named by role (`base`, `recess`, `raised`, `text`, `muted`, …). egui gets a style for each theme in `theme::install`; the _Appearance_ setting maps onto egui's `ThemePreference` (System follows eframe's report of the OS or browser preference, dark where there is none), and egui's own `ViewportCommand::SetTheme` sets the native window frame. Each frame, `theme::begin_frame` sets a per-thread current palette from `ctx.theme()`; call sites read `theme::text()` and so on. The viewer draws inside `theme::with_palette(&DARK, …)` and its area gets egui's dark style; menus apply the current palette's style themselves (egui builds popups from the global style). Details in spec 020's plan.
+**Rejected:** passing the context to every color lookup (the same result, threaded through ~170 call sites), a global (tests draw in parallel on their own threads, with different appearances).

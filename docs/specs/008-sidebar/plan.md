@@ -1,6 +1,6 @@
 # 008 · Sidebar · Plan
 
-Records the approach that was taken. Decisions that outlive this spec are in `docs/architecture.md`.
+Records the approach that was taken. Lasting decisions are under _Decisions_ at the end.
 
 ## Approach
 
@@ -15,3 +15,9 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 - [x] Category, popular, rating and folder queries (REQ-008-02 … -05)
 - [x] Libraries and folder tree in the sidebar (REQ-008-01, -02)
 - [x] People, Places, Ratings, Tags; clicking tags; collapsed groups remembered (REQ-008-03 … -07)
+
+## Decisions
+
+### 2026-10-27 · Search bar, filters and sidebar
+
+**Decided:** the gallery owns the search (`Gallery::set_search` reloads from the top). _Filters_ and _View_ are `egui::Popup`s under fixed ids: a button's automatic id changes with its look and with the widgets drawn before it, which closed the menus. The sidebar is a fixed 256 px left panel; collapsed groups are stored as `sidebar.group.<id>` in `settings`. The groups' order and which of them show (`domain::sidebar::SidebarLayout`) are stored once for the app as `sidebar.groups`, a list of `{group, shown}`; reading it repairs what an older or newer version left behind instead of rejecting it.

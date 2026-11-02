@@ -1,6 +1,6 @@
 # 003 · Change detection · Plan
 
-Records the approach that was taken. Decisions that outlive this spec are in `docs/architecture.md`.
+Records the approach that was taken. Lasting decisions are under _Decisions_ at the end.
 
 ## Approach
 
@@ -21,3 +21,9 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 - [x] Watcher with debounce and filtering (REQ-003-01 … -03, -05, -06)
 - [x] Changes scans and changes during a scan (REQ-003-04, -07)
 - [x] Schedule: startup and periodic quick scans, metadata version upgrades, offline re-checks (REQ-003-08 … -10)
+
+## Decisions
+
+### 2026-10-27 · Change detection and schedule
+
+**Decided:** the indexer owns the watchers (`notify` recursive, 2 s debounce, 10 s at most). A completed scan starts one for its library, an offline result or a removed library stops it. `indexer::schedule::Scheduler` is its own thread with a read connection: quick scans at startup and every quick check interval, offline libraries every minute. Details in spec 003's plan.

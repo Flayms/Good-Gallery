@@ -1,6 +1,6 @@
 # 002 · Indexing · Plan
 
-Records the approach that was taken. Decisions that outlive this spec are in `docs/architecture.md`.
+Records the approach that was taken. Lasting decisions are under _Decisions_ at the end.
 
 ## Approach
 
@@ -22,3 +22,16 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 - [ ] Show the progress as a sidebar footer row and test the library's spinner (REQ-002-08)
 - [x] Unreadable files: `media.meta_error` (migration 0014, partial index), the writer keeps a known file's metadata on a failed read, scans re-read files with a `meta_error` and quick scans re-list their folders, without touching `meta_version` (REQ-002-12, -15)
 - [x] Toolbar notice with the list and _Read again_ / _Read all again_ through changes scans of the paths (REQ-002-16, -17)
+
+## Decisions
+
+### 2026-10-26 · Indexer runs as a thread
+
+**Decided:** the indexer runs on threads inside the app process, not as a child process. Its API is message-based (commands in, events out over `crossbeam-channel`), and every job runs under `catch_unwind`, so a panic fails that job instead of the app.
+**Why:** exiftool and ffmpeg already run as separate processes; the in-process decoders (libwebp, the `image` crate) are mature. A child process would need an IPC layer, a second process to supervise and a second copy of the decoders in memory.
+**Revisit if** a C decoder crashes in practice: because the API is message-based, it can move behind a pipe to `app --indexer` without changing callers.
+
+### 2026-10-26 · Scans on threads
+
+**Decided:** `indexer::scan::scan_root` walks on the calling thread, which owns all index access (lookups, batched writes, removals at the end); `io_concurrency` scoped worker threads stat files and read metadata, connected by a bounded channel (backpressure) and a result channel. Cancelling (library removed) and "offline" are atomic flags. A panic while reading one file costs that file; a panic anywhere else ends the scan as `Failed`, and the next scan runs (REQ-002-13).
+**Indexer:** `indexer::Indexer` holds the scan queue behind a mutex (commands are method calls from any thread, merged per library) and one thread with the write connection that runs the scans; it reports `IndexerEvent`s over a channel and wakes the UI through a callback. It implements `ScanRequests`, so library operations queue real scans. The app keeps its own connection for library rows; SQLite's busy timeout serializes the writers.

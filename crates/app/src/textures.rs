@@ -1,4 +1,4 @@
-//! Thumbnail textures for the tiles (`docs/architecture.md`): worker threads read thumbnails from the cache, decode
+//! Thumbnail textures for the tiles (spec 006's plan): worker threads read thumbnails from the cache, decode
 //! them with libwebp, build the mip chain and create the `wgpu::Texture` themselves; the UI thread only registers
 //! finished textures, within a time budget per frame. An LRU with a byte budget keeps GPU memory bounded (REQ-006-13).
 

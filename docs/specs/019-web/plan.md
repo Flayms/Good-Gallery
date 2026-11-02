@@ -74,3 +74,16 @@ Logic stays native-tested (`domain`, `db`, `meta`, `app`'s kittest UI tests). `w
 - [x] 12. Release workflow deploys to Pages; README, architecture decision, pitfalls (REQ-019-14)
 - [ ] 13. By hand in Chrome / Edge with a GPU (WebGPU): the directory picker, permission on the next visit, video playback with sound; Firefox and Safari smoke test
 - [ ] 14. Set the repository's Pages source to "GitHub Actions" before the next release (#45 closes with this PR)
+
+## Decisions
+
+### 2026-10-29 · Browser version
+
+**Decided:** the app also builds for `wasm32-unknown-unknown` and runs as a static page on GitHub Pages (spec 019; details in its plan).
+- *One wasm instance on the main thread.* No wasm threads (nightly and COOP / COEP headers, which Pages can't send). Slow work is the browser's (decoding, encoding, file reads); our own is sliced by `app::web::Slice`, which yields after 8 ms.
+- *Seams:* desktop-only code sits behind `cfg(not(target_arch = "wasm32"))` in `app`, `indexer` and the crate graph (`media` is desktop only); `app::web` implements the same seams the desktop fills (`ScanRequests`, `IndexerEvent`s, `ThumbnailReady`s, `video::Playback`). `app::WEB` hides desktop-only actions. The desktop entry point is `crates/app/src/desktop.rs`.
+- *Index:* `db` on `sqlite-wasm-rs`'s in-memory file system, with a snapshot in the Origin Private File System, saved after changes and when the page is hidden. *Thumbnails:* OPFS files under `thumbs/<library>/`, the desktop cache's names, size limit and LRU.
+- *Metadata without exiftool:* `meta`'s readers produce exiftool-shaped tags, including `-use MWG`'s keyword reconciliation; a test compares them with exiftool on the same files.
+- *Privacy:* a content security policy without inline scripts (`cargo xtask web` moves Trunk's start script into a file); `no_network.rs` checks the `web-sys` features and the page's scripts.
+- *Tests:* Playwright (`web/tests`, `cargo xtask web-test`) in Chromium with SwiftShader, clicking by position in a fixed viewport and comparing screenshots; npm only there.
+**Rejected:** an index worker with SQLite on OPFS (`sahpool`), a separate web UI, sql.js / IndexedDB, `image` + libwebp in wasm, a DOM `<video>` over the canvas, Chromium only.

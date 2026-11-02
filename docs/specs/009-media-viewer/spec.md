@@ -140,7 +140,7 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 
 ## Assumptions
 
-- The video backend (libmpv, see `docs/architecture.md`) plays all supported containers and their common codecs, including HEVC.
+- The video backend (libmpv, see the plan) plays all supported containers and their common codecs, including HEVC.
 - Originals are read straight from the library, so viewing needs the library to be reachable (thumbnails don't).
 
 ## Verification

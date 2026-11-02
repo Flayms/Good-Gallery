@@ -40,3 +40,16 @@ The code already keeps most Windows calls behind `cfg(windows)` with stubs elsew
 - [ ] 11. `xtask screenshots` and `xtask dist` on Linux; `.desktop` file (REQ-018-09)
 - [ ] 12. CI and release workflows: Linux jobs; `workflows.rs` checks them (REQ-018-01, REQ-018-09)
 - [ ] 13. Run the app on Xvfb (X11) and a headless Wayland compositor if available; screenshots; README (Linux section, system packages), architecture, issues, pitfalls
+
+## Decisions
+
+### 2026-10-28 · Linux
+
+**Decided:** Linux is a supported platform (spec 018), built and tested in CI beside Windows. Platform code stays behind `cfg(windows)` / `cfg(target_os = "linux")` (not `unix`: macOS will need its own answers); POSIX path rules (`indexer::libraries`, `db::libraries::find_by_path`) branch on `cfg!(windows)`.
+- *Data folder:* `$XDG_DATA_HOME/good-gallery` (else `~/.local/share`), `good-gallery-rust` for development builds (`app::startup::data_home`).
+- *Helpers* come from the distribution: exiftool and ffmpeg on `PATH`, libmpv by its soname `libmpv.so.2` through the dynamic loader. Every helper starts through `media::helpers::spawn_helper`: on Linux from one long-lived thread with `PR_SET_PDEATHSIG = SIGKILL`, the counterpart of the Windows job object.
+- *Title bar:* the window is undecorated; `app::titlebar` draws GNOME-style round caption buttons (`Area`s on the `Foreground` order, so the content below gets no presses) and 4 px resize handles (12 px corners, on top of the `Middle` order: above the viewer, below menus) that send `ViewportCommand::BeginResize`, which winit hands to the compositor on X11 and Wayland.
+- *Desktop services* run processes, not a D-Bus crate: _Show in folder_ is `org.freedesktop.FileManager1.ShowItems` through `gdbus` / `dbus-send`, else `xdg-open`; reduced motion reads `gsettings` / `kreadconfig` on a background thread every 2 s. Decode threads get nice 10.
+- *Package:* `cargo xtask dist` writes a `.tar.gz` (app, `.desktop` file, icon, `install.sh` into `~/.local`), built on `ubuntu-latest` for an older glibc. Snapshot tests keep a Linux set (`*_linux.png`, lavapipe renders like WARP otherwise), checked in CI in an `ubuntu:26.04` container.
+- *Video:* mpv gets `video-rotate=no` and the UI reads `video-dec-params/rotate`, since mpv 0.41's software renderer aborts on rotated videos.
+**Rejected:** winit's client-side decorations (a bar above the toolbar, so the search isn't in the title bar), zbus (its async runtime trips REQ-011-11's guard), bundling the helpers on Linux (distributions ship them; an AppImage can bundle them later).

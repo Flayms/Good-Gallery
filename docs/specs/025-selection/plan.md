@@ -33,3 +33,10 @@
 - [x] Selection bar (REQ-025-06)
 - [x] Rating the selection: keys, menu, confirmation, background job, toast (REQ-025-07)
 - [x] UI tests and snapshot; spec changes to 009, glossary, architecture
+
+## Decisions
+
+### 2026-11-01 · Selection as "these" or "all except these"
+
+**Decided:** the gallery's selection (spec 025) is `domain::selection::Selection`: a set of ids, or the ids left out of "all of the search", plus the anchor for Shift-click. Ctrl+A on 500,000 items is free; the ids are made from the layout, which already holds every id of the search, only when an action runs. A new search clears the selection and a new layout trims it to the items still there. Rating a selection runs `media::rating::write` per file on one background thread and updates each index row after its file (`db::media::files_of` gives the files).
+**Rejected:** selected ids in the index (a write per click, and stale after a crash), materializing all ids on Ctrl+A (megabytes per press on large searches), keeping the selection across searches (hidden items would be changed).

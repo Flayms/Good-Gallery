@@ -7,7 +7,8 @@ A desktop gallery for large photo and video libraries (50k–500k files). Media 
 | Document                 | Why                                                                                                               |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
 | `README.md`              | User facing description. Keep up to date with screenshots (`cargo xtask screenshots`).                            |
-| `docs/architecture.md`   | Architecture overview and the decisions behind it                                                                 |
+| `docs/architecture.md`   | Architecture overview: crates, threads, storage, rendering, platforms                                             |
+| `docs/decisions.md`      | Project-wide decisions; a feature's decisions are in its spec's `plan.md`                                          |
 | `docs/design.md`         | Visual design: principles, tokens, surfaces, type, motion, writing. Read before any UI work                       |
 | `docs/glossary.md`       | Definitions of domain terms                                                                                       |
 | `docs/known-pitfalls.md` | if you encounter problems or pitfalls add them here, either to avoid them in the future or for us to fix later on |
@@ -43,7 +44,7 @@ A desktop gallery for large photo and video libraries (50k–500k files). Media 
 `docs/specs/NNN-name/`. IDs are `REQ-NNN-XX`: never reused, deprecated rather than deleted, and referenced in tests. Spec and code change together.
 
 - `spec.md`: Status, Goal, Requirements (Given/When/Then), Out of scope, Assumptions, Verification (REQ | test | result). No implementation details.
-- `plan.md`: Approach, Tasks (linked to REQs). Lasting decisions also go into `docs/architecture.md`.
+- `plan.md`: Approach, Tasks (linked to REQs), Decisions (what was decided, why, what was rejected). Decisions that belong to no spec go into `docs/decisions.md`; keep `docs/architecture.md` describing the current state.
 - Tests reference REQs at the start of their name (`fn req_007_01_filters_by_tag()`) or in a doc comment directly above them (`/// REQ-007-01, REQ-007-02: …`). `cargo xtask check-specs` enforces it.
 
 ## Issues

@@ -1,6 +1,6 @@
 # 005 · Thumbnails · Plan
 
-Records the approach that was taken. Decisions that outlive this spec are in `docs/architecture.md`.
+Records the approach that was taken. Lasting decisions are under _Decisions_ at the end.
 
 ## Approach
 
@@ -30,3 +30,16 @@ Records the approach that was taken. Decisions that outlive this spec are in `do
 - [x] `ThumbnailService`: priority queue, background feeding, failures, full cache (REQ-005-07, -08, -09, -12)
 - [ ] Automated tile tests for placeholders and failed items (REQ-005-06, -14; need the GPU texture streamer)
 - [ ] Apply ICC profiles, if real photos show it matters
+
+## Decisions
+
+### 2026-10-27 · Thumbnail cache layout
+
+**Decided:** one WebP file per thumbnail and width, `<data>/thumbs/<h0h1>/<h2h3>/<sha1>.webp` with `sha1` of `[rootId, relPath, size, mtime, width]` serialized as `JSON.stringify` does (`serde_json` matches it for integers and strings; a test pins hashes computed with Node). This is the layout existing caches use, so they keep working (REQ-005-15). Writes are atomic (temp file + rename), `*.tmp` leftovers are removed at startup, eviction is LRU by file mtime down to 90 % of the limit, reading bumps the mtime at most once an hour.
+**Rejected (for now):** a pack file. Cold reads would be ≈ 100× faster under Defender's first-read scan (≈ 13 ms per file), but it needs a new format and a migration of existing caches, and the cost only shows while scrolling fast through thumbnails not read for minutes.
+
+### 2026-10-27 · Thumbnail rendering
+
+**Decided:** `media::thumbnail::Renderer`: one decode per file, upright by its EXIF orientation, fit into 800 × 2400 without enlarging (Lanczos3, `fast_image_resize`), each width from that, WebP quality 80 through libwebp, ThumbHash at ≤ 100 px. JPEGs decode through `jpeg-decoder` with DCT scaling (shrink-on-load); other formats through `image`. Embedded previews (exiftool `PreviewImage`) replace large camera JPEGs when they are large enough and have the same shape. Video frames and **AVIF** come from ffmpeg (`media::ffmpeg`), since `image` decodes AVIF only through dav1d, a C library with a meson build.
+**Deviation:** ICC profiles are ignored, so wide-gamut photos may come out slightly less saturated.
+**Service:** `indexer::thumbnails::ThumbnailService`: `io_concurrency` render threads, one priority queue (requests newest first above background jobs), background batches of 100 pending items, its own write connection. Requests are answered through a callback, which the texture streamer uses. Each render runs under `catch_unwind`.

@@ -67,7 +67,7 @@ Deprecated 2026-10-26: there is no message transport. Cancelling indexer work wh
 - Code signing and auto-updates (see #29, #28).
 - Protection against a malicious user with access to the user profile or the libraries.
 - Sandboxing the indexer (it needs file system access to read libraries).
-- Isolating crashes inside native decoders (C code) in a separate process; see the indexer decision in `docs/architecture.md`.
+- Isolating crashes inside native decoders (C code) in a separate process; see the indexer decision in spec 002's plan.
 
 ## Assumptions
 
