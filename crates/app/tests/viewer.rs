@@ -517,6 +517,10 @@ impl app::state::FileManager for RecordedExplorer {
         self.0.lock().unwrap().push(file.to_path_buf());
         Ok(())
     }
+
+    fn open_in_browser(&self, _url: &str) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 fn indexed(i: i64, name: &str, kind: MediaKind, tags: &[&[&str]], rating: Option<i64>) -> IndexedFile {
