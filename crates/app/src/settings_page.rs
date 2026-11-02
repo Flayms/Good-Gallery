@@ -83,6 +83,8 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
                         ui.add_space(theme::SPACE * 10.0);
                     }
                     thumbnail_cache(ui, state);
+                    ui.add_space(theme::SPACE * 10.0);
+                    about(ui, state);
                     ui.add_space(24.0);
                 });
             });
@@ -97,6 +99,7 @@ const QUICK_CHECK_INTERVALS: [u32; 7] = [0, 15, 30, 60, 180, 360, 1440];
 /// Thumbnail cache sizes offered, in GB (REQ-010-05).
 const CACHE_SIZES_GIB: [f64; 7] = [1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0];
 const MAX_CONCURRENCY: u32 = 16;
+const LATEST_RELEASE: &str = "https://github.com/Flayms/Good-Gallery/releases/latest";
 const SLIDER_WIDTH: f32 = 160.0;
 
 /// "Only at startup", "Every 15 minutes", "Every hour", "Every 3 hours", "Daily".
@@ -433,6 +436,32 @@ fn thumbnail_cache(ui: &mut egui::Ui, state: &mut AppState) {
     }
     if settings != state.settings {
         state.update_settings(settings);
+    }
+}
+
+/// _About_: the app's version and a way to the latest release, through the browser (REQ-010-07).
+fn about(ui: &mut egui::Ui, state: &mut AppState) {
+    section_title(ui, "About");
+    let mut open = false;
+    group(ui, |ui| {
+        setting_row(
+            ui,
+            "Good Gallery",
+            concat!("Version ", env!("CARGO_PKG_VERSION")),
+            180.0,
+            |ui| {
+                open = ui
+                    .add(egui::Button::new("See the latest release").stroke(Stroke::new(1.0, theme::rim())))
+                    .clicked();
+            },
+        );
+    });
+    if open {
+        if crate::WEB {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(LATEST_RELEASE));
+        } else {
+            state.open_in_browser(LATEST_RELEASE);
+        }
     }
 }
 

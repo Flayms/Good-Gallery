@@ -176,6 +176,49 @@ pub fn show_in_explorer(file: &std::path::Path) -> std::io::Result<()> {
     })
 }
 
+/// Opens `url` in the default browser, which makes the connection, not the app (REQ-010-07, REQ-011-11). Started
+/// outside the app's job object, so the browser stays when the app ends.
+#[cfg(windows)]
+pub fn open_in_browser(url: &str) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    let start = |flags: u32| {
+        std::process::Command::new("explorer.exe")
+            .arg(url)
+            .creation_flags(flags)
+            .spawn()
+            .map(drop)
+    };
+    start(CREATE_BREAKAWAY_FROM_JOB).or_else(|error| match error.kind() {
+        std::io::ErrorKind::PermissionDenied => start(0),
+        _ => Err(error),
+    })
+}
+
+/// Opens `url` in the default browser, which makes the connection, not the app (REQ-010-07, REQ-011-11).
+#[cfg(target_os = "linux")]
+pub fn open_in_browser(url: &str) -> std::io::Result<()> {
+    let status = std::process::Command::new("xdg-open")
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(std::io::Error::other(format!("xdg-open: {status}")))
+    }
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+pub fn open_in_browser(_url: &str) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "not on this platform",
+    ))
+}
+
 /// Opens the desktop's file manager on the folder of `file` with the file selected (REQ-018-05): the freedesktop
 /// `FileManager1.ShowItems` D-Bus call (Nautilus, Dolphin, Nemo, …) through `gdbus` or `dbus-send`, else `xdg-open` on
 /// the folder.

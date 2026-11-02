@@ -325,3 +325,64 @@ fn req_013_05_rings_the_focused_control_but_not_a_focused_text_input() {
     harness.run_steps(2);
     assert_eq!(app::theme::focus_ring_rect(&harness.ctx), None);
 }
+
+/// Records the pages the browser was asked to open; fails if `fails`.
+#[derive(Default)]
+struct RecordedBrowser {
+    opened: Mutex<Vec<String>>,
+    fails: bool,
+}
+
+impl app::state::FileManager for RecordedBrowser {
+    fn show_in_folder(&self, _file: &std::path::Path) -> std::io::Result<()> {
+        Ok(())
+    }
+
+    fn open_in_browser(&self, url: &str) -> std::io::Result<()> {
+        if self.fails {
+            return Err(std::io::Error::other("no browser"));
+        }
+        self.opened.lock().unwrap().push(url.to_owned());
+        Ok(())
+    }
+}
+
+fn with_browser(fixture: &Fixture, browser: Arc<RecordedBrowser>) -> Harness<'static, AppState> {
+    let state = fixture.state(db::open_in_memory().unwrap()).with_file_manager(browser);
+    let mut harness = common::harness(state);
+    harness.set_size(eframe::egui::vec2(900.0, 1800.0));
+    harness.state_mut().page = Page::Settings;
+    settle(&mut harness);
+    harness
+}
+
+#[test]
+fn req_010_07_shows_the_version_and_opens_the_latest_release() {
+    let fixture = Fixture::new();
+    let browser = Arc::new(RecordedBrowser::default());
+    let mut harness = with_browser(&fixture, browser.clone());
+
+    harness.get_by_label(&format!("Version {}", env!("CARGO_PKG_VERSION")));
+    harness.get_by_label("See the latest release").click();
+    settle(&mut harness);
+
+    assert_eq!(
+        *browser.opened.lock().unwrap(),
+        ["https://github.com/Flayms/Good-Gallery/releases/latest"]
+    );
+}
+
+#[test]
+fn req_010_07_says_why_the_browser_didnt_open() {
+    let fixture = Fixture::new();
+    let browser = Arc::new(RecordedBrowser {
+        fails: true,
+        ..Default::default()
+    });
+    let mut harness = with_browser(&fixture, browser);
+
+    harness.get_by_label("See the latest release").click();
+    settle(&mut harness);
+
+    harness.get_by_label("Couldn't open the browser: no browser");
+}
