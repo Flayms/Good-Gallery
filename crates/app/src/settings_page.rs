@@ -187,7 +187,8 @@ fn divider(ui: &mut egui::Ui) {
         .hline(rect.x_range(), rect.top(), Stroke::new(1.0, theme::rim()));
 }
 
-/// _Appearance_: light, dark or the system's, applied from the next frame on (REQ-020-01).
+/// _Appearance_: light, dark or the system's (REQ-020-01) and reduced transparency (REQ-013-17), applied from the next
+/// frame on.
 fn appearance(ui: &mut egui::Ui, state: &mut AppState) {
     section_title(ui, "Appearance");
     let mut settings = state.settings;
@@ -210,6 +211,18 @@ fn appearance(ui: &mut egui::Ui, state: &mut AppState) {
                         });
                     });
                 name_combo(&combo.response, "Appearance", current.label().to_owned());
+            },
+        );
+        divider(ui);
+        setting_row(
+            ui,
+            "Reduce transparency",
+            "Menus and the toolbar are solid, without photos showing through. Always on if your computer or browser asks for it.",
+            24.0,
+            |ui| {
+                let on = settings.reduce_transparency;
+                ui.checkbox(&mut settings.reduce_transparency, "")
+                    .widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, on, "Reduce transparency"));
             },
         );
     });
