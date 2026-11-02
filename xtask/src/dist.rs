@@ -434,7 +434,11 @@ mod tests {
         }
         let entry = std::fs::read_to_string(out.join("good-gallery.desktop")).unwrap();
         // The window's app id (`crates/app/src/main.rs`) and the icon's name, so docks match the window to the entry.
-        for line in ["Exec=good-gallery", "Icon=good-gallery", "StartupWMClass=good-gallery"] {
+        for line in [
+            "Exec=good-gallery %f",
+            "Icon=good-gallery",
+            "StartupWMClass=good-gallery",
+        ] {
             assert!(entry.lines().any(|l| l == line), "{line}");
         }
     }

@@ -77,6 +77,31 @@ Function .onInit
     Call OwnFolder
 FunctionEnd
 
+; The formats the app indexes (domain::media::IMAGE_EXTENSIONS, VIDEO_EXTENSIONS) offer Good Gallery under _Open with_,
+; without making it the default app (REQ-027-05).
+!define PROGID "GoodGallery.Media"
+!define APP_KEY "Software\Classes\Applications\${EXE}"
+!macro ForEachExtension MACRO
+  !insertmacro ${MACRO} ".jpg"
+  !insertmacro ${MACRO} ".jpeg"
+  !insertmacro ${MACRO} ".png"
+  !insertmacro ${MACRO} ".webp"
+  !insertmacro ${MACRO} ".gif"
+  !insertmacro ${MACRO} ".avif"
+  !insertmacro ${MACRO} ".mp4"
+  !insertmacro ${MACRO} ".m4v"
+  !insertmacro ${MACRO} ".mov"
+  !insertmacro ${MACRO} ".webm"
+  !insertmacro ${MACRO} ".mkv"
+!macroend
+!macro OpenWith EXT
+  WriteRegStr HKCU "Software\Classes\${EXT}\OpenWithProgids" "${PROGID}" ""
+  WriteRegStr HKCU "${APP_KEY}\SupportedTypes" "${EXT}" ""
+!macroend
+!macro NoOpenWith EXT
+  DeleteRegValue HKCU "Software\Classes\${EXT}\OpenWithProgids" "${PROGID}"
+!macroend
+
 Section "Install"
   SetOutPath "$INSTDIR"
   ; An update replaces the helper folders as a whole, so no file of an older version stays behind. The folder is the
@@ -98,6 +123,15 @@ Section "Install"
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "EstimatedSize" $0
+
+  WriteRegStr HKCU "Software\Classes\${PROGID}" "" "Photo or video"
+  WriteRegStr HKCU "Software\Classes\${PROGID}\DefaultIcon" "" "$INSTDIR\${EXE},0"
+  WriteRegStr HKCU "Software\Classes\${PROGID}\shell\open\command" "" '"$INSTDIR\${EXE}" "%1"'
+  WriteRegStr HKCU "${APP_KEY}" "FriendlyAppName" "${PRODUCT}"
+  WriteRegStr HKCU "${APP_KEY}\shell\open\command" "" '"$INSTDIR\${EXE}" "%1"'
+  !insertmacro ForEachExtension OpenWith
+  ; SHCNE_ASSOCCHANGED: Explorer reads the associations again.
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd
 
 Section "Uninstall"
@@ -112,4 +146,8 @@ Section "Uninstall"
   Delete "$INSTDIR\${UNINSTALLER}"
   RMDir "$INSTDIR"
   DeleteRegKey HKCU "${UNINSTALL_KEY}"
+  !insertmacro ForEachExtension NoOpenWith
+  DeleteRegKey HKCU "Software\Classes\${PROGID}"
+  DeleteRegKey HKCU "${APP_KEY}"
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd

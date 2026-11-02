@@ -355,6 +355,28 @@ pub struct AppState {
     pending_copy: Option<(i64, String)>,
     /// Files whose metadata couldn't be read, for the toolbar's notice (REQ-002-16).
     pub unreadable: crate::unreadable::Unreadable,
+    /// Files later starts of the app ask it to show (REQ-027-02).
+    #[cfg(not(target_arch = "wasm32"))]
+    open_requests: Option<Receiver<crate::instance::Request>>,
+    /// A later start asked for the window: it comes to the front in the next frame (REQ-027-02).
+    pub bring_to_front: bool,
+    /// A file opened with the app, shown in the viewer once the gallery lists it (REQ-027-01).
+    pending_open: Option<PendingOpen>,
+    /// A file outside every library, waiting for the user to add its folder or not (REQ-027-03).
+    pub confirm_add_folder: Option<PathBuf>,
+    /// A file whose folder is being added as a library, opened once the library is there (REQ-027-03).
+    #[cfg(not(target_arch = "wasm32"))]
+    open_when_added: Option<PathBuf>,
+}
+
+/// A file opened with the app (REQ-027-01): where it is, and its media item once the index has it.
+#[derive(Debug, Clone)]
+struct PendingOpen {
+    library: i64,
+    rel_path: String,
+    id: Option<i64>,
+    /// A changes scan of the file was asked for, since the index didn't have it.
+    scanned: bool,
 }
 
 impl AppState {
@@ -760,6 +782,119 @@ impl AppState {
         }
     }
 
+    /// Takes the files later starts of the app hand over (REQ-027-02).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_open_requests(mut self, requests: Receiver<crate::instance::Request>) -> Self {
+        self.open_requests = Some(requests);
+        self
+    }
+
+    /// Shows a file opened with the app (REQ-027-01): in the viewer if it is in a library, after indexing it if the
+    /// index doesn't have it yet; outside every library it offers to add its folder (REQ-027-03); anything else is an
+    /// error message (REQ-027-04).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn open_file(&mut self, file: PathBuf) {
+        let name = file.file_name().map_or_else(
+            || file.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
+        let problem = match std::fs::metadata(&file) {
+            Err(_) => Some("it doesn't exist"),
+            Ok(metadata) if !metadata.is_file() => Some("it isn't a file"),
+            Ok(_) if domain::media::media_kind(&name).is_none() => Some("it isn't a photo or video Good Gallery shows"),
+            Ok(_) => None,
+        };
+        if let Some(problem) = problem {
+            self.toasts.error(format!("Couldn't open {name}: {problem}"));
+            return;
+        }
+        let path = file.to_string_lossy();
+        let found = self
+            .libraries
+            .iter()
+            .filter_map(|library| {
+                let rel_path = domain::media::rel_path_in(&library.path, &path, cfg!(windows))?;
+                Some((library.path.len(), library.id, rel_path))
+            })
+            .max();
+        let Some((_, library, rel_path)) = found else {
+            self.confirm_add_folder = Some(file);
+            return;
+        };
+        self.page = Page::Gallery;
+        self.viewer = None;
+        self.info_sheet = None;
+        if let Some(gallery) = &mut self.gallery {
+            let search = domain::search::GallerySearch {
+                library: Some(library),
+                sort_by: gallery.search().sort_by,
+                descending: gallery.search().descending,
+                ..Default::default()
+            };
+            if search != *gallery.search() {
+                gallery.set_search(search);
+            }
+        }
+        self.pending_open = Some(PendingOpen {
+            library,
+            rel_path,
+            id: None,
+            scanned: false,
+        });
+        self.find_pending_open();
+    }
+
+    /// Adds the folder of a file outside every library, and shows the file once it is indexed (REQ-027-03).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn add_folder_of(&mut self, file: PathBuf) {
+        let Some(folder) = file.parent() else { return };
+        self.add_library(folder.to_string_lossy().into_owned());
+        self.open_when_added = Some(file);
+    }
+
+    /// Looks up the media item of the file opened with the app; asks for a scan of it the first time the index
+    /// doesn't have it, and gives up once that scan found nothing (a skipped folder).
+    fn find_pending_open(&mut self) {
+        let (Some(pending), Some(db)) = (&mut self.pending_open, &self.db) else {
+            return;
+        };
+        if pending.id.is_some() {
+            return;
+        }
+        if let Ok(Some(id)) = db::media::id_of(&lock(db), pending.library, &pending.rel_path) {
+            pending.id = Some(id);
+            return;
+        }
+        let library = pending.library;
+        if !pending.scanned {
+            pending.scanned = true;
+            self.scans.request_paths(library, vec![pending.rel_path.clone()]);
+            return;
+        }
+        let waiting = self.indexer_status.current.is_some_and(|scan| scan.library == library)
+            || self.indexer_status.queue.contains(&library);
+        if !waiting {
+            let name = pending.rel_path.rsplit('/').next().unwrap_or_default().to_owned();
+            self.pending_open = None;
+            self.toasts.error(format!("Couldn't open {name}: it wasn't indexed"));
+        }
+    }
+
+    /// Opens the viewer on the file opened with the app once the gallery lists it (REQ-027-01). Called every frame.
+    pub fn show_pending_open(&mut self) {
+        let (Some(PendingOpen { id: Some(id), .. }), Some(gallery)) = (&self.pending_open, &self.gallery) else {
+            return;
+        };
+        if gallery.is_loading() {
+            return;
+        }
+        let Some(index) = gallery.position_of(*id) else { return };
+        if let Some(viewer) = crate::viewer::Viewer::open(gallery, index) {
+            self.viewer = Some(viewer);
+            self.pending_open = None;
+        }
+    }
+
     /// The index couldn't be opened: the app shows `error` instead of the gallery.
     pub fn failed(error: String) -> Self {
         let mut state = Self::empty(Arc::new(indexer::NoScans), Arc::new(NoFolderPicker));
@@ -806,6 +941,13 @@ impl AppState {
             confirm_revert: None,
             confirm_many: None,
             pending_copy: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            open_requests: None,
+            bring_to_front: false,
+            pending_open: None,
+            confirm_add_folder: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            open_when_added: None,
             unreadable: Default::default(),
         }
     }
@@ -979,6 +1121,29 @@ impl AppState {
         while let Ok(event) = self.events.1.try_recv() {
             self.apply(event);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let requests: Vec<_> = self.open_requests.iter().flat_map(|rx| rx.try_iter()).collect();
+            for request in requests {
+                self.bring_to_front = true;
+                if let crate::instance::Request::Open(file) = request {
+                    self.open_file(file);
+                }
+            }
+            // The added folder is a library now (REQ-027-03).
+            if let Some(file) = &self.open_when_added {
+                let path = file.to_string_lossy();
+                if self
+                    .libraries
+                    .iter()
+                    .any(|library| domain::media::rel_path_in(&library.path, &path, cfg!(windows)).is_some())
+                {
+                    let file = file.clone();
+                    self.open_when_added = None;
+                    self.open_file(file);
+                }
+            }
+        }
         let events: Vec<IndexerEvent> = self.indexer_events.iter().flat_map(|rx| rx.try_iter()).collect();
         for event in events {
             self.apply_indexer(event);
@@ -1010,6 +1175,13 @@ impl AppState {
                 self.last_written_refresh = None;
                 self.refresh();
                 self.show_pending_copy();
+                if self
+                    .pending_open
+                    .as_ref()
+                    .is_some_and(|pending| pending.library == library)
+                {
+                    self.find_pending_open();
+                }
             }
         }
     }
@@ -1020,6 +1192,7 @@ impl AppState {
             || self.indexer_status.current.is_some()
             || self.written_since_refresh
             || self.gallery.as_ref().is_some_and(Gallery::is_loading)
+            || self.pending_open.is_some()
     }
 
     /// Waits for all background jobs and applies them (tests, before stepping the UI).

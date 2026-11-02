@@ -57,15 +57,23 @@ fn extension(file_name: &str) -> Option<String> {
     (dot > 0).then(|| file_name[dot..].to_ascii_lowercase())
 }
 
+/// Extensions of the photos the app indexes (REQ-002-01), lower case.
+pub const IMAGE_EXTENSIONS: [&str; 6] = [".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"];
+/// Extensions of the videos the app indexes (REQ-002-01), lower case.
+pub const VIDEO_EXTENSIONS: [&str; 5] = [".mp4", ".m4v", ".mov", ".webm", ".mkv"];
+
 /// The kind of a supported media file, by extension in any letter case. Dotfiles (macOS `._IMG_1.jpg`) aren't media.
 pub fn media_kind(file_name: &str) -> Option<MediaKind> {
     if file_name.starts_with('.') {
         return None;
     }
-    match extension(file_name)?.as_str() {
-        ".jpg" | ".jpeg" | ".png" | ".webp" | ".gif" | ".avif" => Some(MediaKind::Image),
-        ".mp4" | ".m4v" | ".mov" | ".webm" | ".mkv" => Some(MediaKind::Video),
-        _ => None,
+    let extension = extension(file_name)?;
+    if IMAGE_EXTENSIONS.contains(&extension.as_str()) {
+        Some(MediaKind::Image)
+    } else if VIDEO_EXTENSIONS.contains(&extension.as_str()) {
+        Some(MediaKind::Video)
+    } else {
+        None
     }
 }
 
@@ -118,6 +126,36 @@ pub fn is_safe_rel_path(rel_path: &str) -> bool {
         && rel_path
             .split('/')
             .all(|part| !part.is_empty() && part != "." && part != ".." && !part.contains(forbidden))
+}
+
+/// The path of `file` relative to the library folder `root`, `/`-separated, if the file lies inside it
+/// (REQ-027-01). With `windows`, `\` separates too and letter case doesn't matter, as on Windows' file systems.
+pub fn rel_path_in(root: &str, file: &str, windows: bool) -> Option<String> {
+    let normalize = |path: &str| {
+        if windows {
+            path.replace('\\', "/")
+        } else {
+            path.to_owned()
+        }
+    };
+    let (root, file) = (normalize(root), normalize(file));
+    let root = root.trim_end_matches('/');
+    let mut rest = file.as_str();
+    for wanted in root.chars() {
+        let mut chars = rest.chars();
+        let found = chars.next()?;
+        let same = if windows {
+            found.to_lowercase().eq(wanted.to_lowercase())
+        } else {
+            found == wanted
+        };
+        if !same {
+            return None;
+        }
+        rest = chars.as_str();
+    }
+    let rel_path = rest.strip_prefix('/')?;
+    is_safe_rel_path(rel_path).then(|| rel_path.to_owned())
 }
 
 #[cfg(test)]
@@ -220,5 +258,38 @@ mod tests {
     fn sidecars_are_xmp_files() {
         assert!(is_sidecar("IMG_1.XMP"));
         assert!(!is_sidecar("IMG_1.jpg"));
+    }
+
+    #[test]
+    fn req_027_01_finds_a_files_path_inside_its_library() {
+        assert_eq!(
+            rel_path_in("/home/a/Photos", "/home/a/Photos/2021/beach.jpg", false).as_deref(),
+            Some("2021/beach.jpg")
+        );
+        assert_eq!(
+            rel_path_in("/home/a/Photos/", "/home/a/Photos/beach.jpg", false).as_deref(),
+            Some("beach.jpg")
+        );
+        // Another folder that starts with the same name, the folder itself, and letter case on Linux.
+        assert_eq!(rel_path_in("/home/a/Photos", "/home/a/Photos2/beach.jpg", false), None);
+        assert_eq!(rel_path_in("/home/a/Photos", "/home/a/Photos", false), None);
+        assert_eq!(rel_path_in("/home/a/Photos", "/home/a/photos/beach.jpg", false), None);
+        assert_eq!(
+            rel_path_in("/home/a/Photos", "/home/a/Photos/../b/beach.jpg", false),
+            None
+        );
+    }
+
+    #[test]
+    fn req_027_01_matches_windows_paths_in_any_letter_case() {
+        assert_eq!(
+            rel_path_in("D:\\Photos", "d:\\photos\\Trip\\IMG_1.JPG", true).as_deref(),
+            Some("Trip/IMG_1.JPG")
+        );
+        assert_eq!(
+            rel_path_in("\\\\nas\\Fotos\\", "\\\\NAS\\fotos\\Ä.jpg", true).as_deref(),
+            Some("Ä.jpg")
+        );
+        assert_eq!(rel_path_in("D:\\Photos", "D:\\Photos2\\a.jpg", true), None);
     }
 }
