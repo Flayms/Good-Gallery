@@ -15,6 +15,7 @@ pub mod folders;
 pub mod layout;
 pub mod look;
 pub mod media;
+pub mod paint;
 pub mod rating;
 pub mod search;
 pub mod selection;

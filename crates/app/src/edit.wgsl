@@ -10,7 +10,7 @@ struct Part {
     turn: vec4<f32>,
 }
 
-// A shape of a mask (spec 030): its kind (x: 0 gradient, 1 luminance, 2 color, 3 subject, 4 background), how it combines
+// A shape of a mask (spec 030): its kind (x: 0 gradient, 1 luminance, 2 color, 3 subject, 4 background, 5 painted), how it combines
 // (y: 0 add, 1 subtract, 2 intersect), and its numbers (`domain::edit::MaskShape::numbers`).
 struct MaskShape {
     kind: vec4<f32>,
@@ -67,6 +67,8 @@ struct Edit {
 @group(0) @binding(2) var<uniform> edit: Edit;
 // How much each spot belongs to the subject (red); 1 × 1 while there is none.
 @group(0) @binding(3) var subject_mask: texture_2d<f32>;
+// What the recipe's paintings select (spec 030), one layer each.
+@group(0) @binding(4) var paintings: texture_2d_array<f32>;
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
@@ -243,6 +245,9 @@ fn part(lin: vec3<f32>, p: Part) -> vec3<f32> {
 fn shape_weight(i: u32, j: u32, rgb: vec3<f32>, uv: vec2<f32>, subject: f32) -> f32 {
     let kind = edit.masks[i].shapes[j].kind;
     let numbers = edit.masks[i].shapes[j].numbers;
+    if kind.x > 4.5 {
+        return textureSampleLevel(paintings, photo_sampler, uv, i32(kind.z + 0.5), 0.0).r;
+    }
     if kind.x > 2.5 {
         // Without a subject, neither it nor the background selects anything.
         if (u32(edit.size.w) & 4u) == 0u {

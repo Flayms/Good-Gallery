@@ -14,9 +14,19 @@
 - [x] Saving (REQ-030-08)
 - [x] Panel and handles (REQ-030-01, REQ-030-03, REQ-030-06, REQ-030-07)
 - [x] Shapes combined in a mask; the subject and background among them (REQ-030-10, REQ-030-11)
-- [ ] Phase after that: brush and freeform
+- [x] Brush and freeform: `domain::paint`, a texture array in the shader, the panel and drawing on the photo (REQ-030-12 … REQ-030-14)
 
 ## Decisions
+
+### 2026-11-02 · Painted masks as points, drawn into a texture
+
+**Decided:** strokes and outlines are points in the recipe (`Recipe::paintings`, four decimals, thinned when the user lets go), and the shapes name a painting by its place, which keeps `MaskShape` a plain copyable value. They are drawn into a grid of at most 1024 px on the longer side: the same `domain::paint` code for the preview's texture array, kept up to date per added segment while painting, and for saving, where `Params::with_paintings` hands the grids over (`Params::new` runs every frame, so it can't draw them). Painting is `max` and erasing `min`, so it gives the same result however many segments are drawn at a time. Mirrors the subject's mask: one layer per painting, bilinear on both sides.
+**Rejected:** storing a bitmap (a compressed one would still be far above what JPEG's XMP segment holds), a mask image beside the file (the app keeps all of an edit in the file, spec 021), a limit per stroke (it's the total that has to fit).
+
+### 2026-11-02 · 1,500 points
+
+**Decided:** at four decimals a point takes about 16 bytes of JSON, so 1,500 points are about 24 KB, well inside the roughly 64 KB of a JPEG's XMP segment with room for the rest of the recipe and the file's own XMP. A test saves a full painting through exiftool and reads it back.
+**Rejected:** relying on extended XMP (not every program reads it).
 
 ### 2026-11-02 · A mask keeps its first shape and adds `more`
 

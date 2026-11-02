@@ -13,6 +13,7 @@ use domain::edit::{
     blur_lod,
 };
 use domain::look::{Look, LookChoice};
+use domain::paint::{MAX_PAINTINGS, MAX_POINTS, Painting, Stroke};
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2, pos2, vec2};
 use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, ScreenDescriptor, wgpu};
 use std::path::PathBuf;
@@ -159,6 +160,12 @@ pub struct EditSession {
     gradient_area: Option<Rect>,
     /// Which shape of the chosen mask the panel changes (REQ-030-10).
     mask_shape: usize,
+    /// The brush's radius and softness, in percent, and whether it erases (REQ-030-12).
+    brush: (f32, f32, bool),
+    /// Whether a stroke is being drawn on the photo.
+    stroking: bool,
+    /// What the preview samples of the recipe's paintings.
+    paint_texture: Option<PaintTexture>,
     channel: Channel,
     dragging_point: Option<usize>,
     picking: bool,
@@ -204,6 +211,9 @@ impl EditSession {
             gradient_drag: None,
             gradient_area: None,
             mask_shape: 0,
+            brush: (5.0, 50.0, false),
+            stroking: false,
+            paint_texture: None,
             channel: Channel::All,
             dragging_point: None,
             picking: false,
@@ -723,6 +733,157 @@ impl EditSession {
         }
     }
 
+    /// The chosen shape's painting, if it is painted: its place, and whether it's an outline.
+    fn painted(&self) -> Option<(usize, bool)> {
+        let Part::Mask(i) = self.part else { return None };
+        match self.draft.masks.get(i)?.shape_at(self.mask_shape) {
+            MaskShape::Painted { layer, freeform } => Some((usize::from(layer), freeform)),
+            _ => None,
+        }
+    }
+
+    /// Whether the chosen shape is used on the photo itself: a gradient's handles or painting (REQ-030-03, REQ-030-12).
+    pub fn has_photo_tool(&self) -> bool {
+        self.is_on_gradient() || self.painted().is_some()
+    }
+
+    /// Whether a handle or a stroke is being dragged.
+    pub fn is_using_photo_tool(&self) -> bool {
+        self.gradient_drag.is_some() || self.stroking
+    }
+
+    /// Takes drags on the photo at `area` for the chosen shape.
+    pub fn photo_tool_input(&mut self, ui: &egui::Ui, backdrop: &egui::Response, area: Rect) {
+        if self.painted().is_some() {
+            self.paint_input(ui, backdrop, area);
+        } else {
+            self.gradient_input(ui, backdrop, area);
+        }
+    }
+
+    /// What the chosen shape shows over the photo at `area`.
+    pub fn paint_photo_tool(&self, painter: &egui::Painter, area: Rect) {
+        self.paint_gradient(painter, area);
+        self.paint_brush(painter, area);
+    }
+
+    /// Draws strokes and outlines on the photo at `area` (REQ-030-12, REQ-030-13). A stroke ends thinned, as one undo step.
+    fn paint_input(&mut self, ui: &egui::Ui, backdrop: &egui::Response, area: Rect) {
+        let Some((layer, freeform)) = self.painted() else {
+            return;
+        };
+        if layer >= self.draft.paintings.len() {
+            return;
+        }
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        let geometry = self.shown_geometry(false);
+        let point = |pos: Pos2| {
+            geometry
+                .to_original([
+                    (pos.x - area.left()) / area.width(),
+                    (pos.y - area.top()) / area.height(),
+                ])
+                .map(|c| c.clamp(0.0, 1.0))
+        };
+        let room = domain::paint::total_points(&self.draft.paintings) < MAX_POINTS;
+        let (size, softness, erase) = self.brush;
+        let new_stroke = |first: [f32; 2]| Stroke {
+            points: vec![first],
+            size,
+            softness,
+            erase,
+            closed: freeform,
+        };
+        let origin = ui.input(|input| input.pointer.press_origin());
+        if backdrop.drag_started()
+            && room
+            && let Some(origin) = origin
+        {
+            self.draft.paintings[layer].strokes.push(new_stroke(point(origin)));
+            self.stroking = true;
+        }
+        if self.stroking
+            && room
+            && let Some(pos) = backdrop.interact_pointer_pos()
+            && let Some(stroke) = self.draft.paintings[layer].strokes.last_mut()
+        {
+            let next = point(pos);
+            let moved = stroke.points.last().is_none_or(|last| {
+                let (x, y) = (next[0] - last[0], next[1] - last[1]);
+                x * x + y * y > 0.002 * 0.002
+            });
+            if moved {
+                stroke.points.push(next);
+            }
+            ui.ctx().request_repaint();
+        }
+        if backdrop.drag_stopped() && std::mem::take(&mut self.stroking) {
+            let strokes = &mut self.draft.paintings[layer].strokes;
+            if let Some(stroke) = strokes.last_mut() {
+                stroke.points = domain::paint::thin(&stroke.points);
+            }
+            if freeform && strokes.last().is_some_and(|stroke| stroke.points.len() < 3) {
+                strokes.pop();
+            }
+            self.commit(self.draft.clone());
+        }
+        // A click is a dot.
+        if backdrop.clicked()
+            && !freeform
+            && room
+            && let Some(pos) = backdrop.interact_pointer_pos()
+        {
+            let mut recipe = self.draft.clone();
+            let mut stroke = new_stroke(point(pos));
+            stroke.points = domain::paint::thin(&stroke.points);
+            recipe.paintings[layer].strokes.push(stroke);
+            self.commit(recipe);
+        }
+    }
+
+    /// The brush's reach around the pointer, and the outline being drawn, over the photo at `area`.
+    fn paint_brush(&self, painter: &egui::Painter, area: Rect) {
+        let Some((layer, freeform)) = self.painted() else {
+            return;
+        };
+        let painter = painter.with_clip_rect(area);
+        let dark = egui::Stroke::new(3.0, Color32::from_black_alpha(120));
+        let white = egui::Stroke::new(1.0, Color32::WHITE);
+        if freeform && self.stroking {
+            let points: Vec<Pos2> = self
+                .draft
+                .paintings
+                .get(layer)
+                .and_then(|painting| painting.strokes.last())
+                .map(|stroke| stroke.points.iter().map(|&point| self.on_photo(point, area)).collect())
+                .unwrap_or_default();
+            for stroke in [dark, white] {
+                painter.add(egui::Shape::closed_line(points.clone(), stroke));
+            }
+        }
+        if !freeform && let Some(pos) = painter.ctx().input(|input| input.pointer.hover_pos()) {
+            // The photo's longer side as shown, cropped or not.
+            let (corner, other) = (self.on_photo([0.0, 0.0], area), self.on_photo([1.0, 1.0], area));
+            let longer = (other.x - corner.x).abs().max((other.y - corner.y).abs());
+            let radius = self.brush.0 / 100.0 * longer;
+            painter.circle_stroke(pos, radius, dark);
+            painter.circle_stroke(pos, radius, white);
+        }
+    }
+
+    /// Keeps the preview's texture of the paintings up to date, once the recipe has any.
+    fn sync_paintings(&mut self) {
+        let Some(render_state) = &self.render_state else { return };
+        if self.draft.paintings.is_empty() && self.paint_texture.is_none() {
+            return;
+        }
+        let size = self.target.full_size.map(|side| side.max(1) as f32);
+        let texture = self
+            .paint_texture
+            .get_or_insert_with(|| PaintTexture::new(&render_state.device, size));
+        texture.sync(&render_state.queue, &self.draft.paintings);
+    }
+
     /// The chosen mask's gradient, if it is one: its handles.
     fn gradient(&self) -> Option<([f32; 2], [f32; 2])> {
         let Part::Mask(i) = self.part else { return None };
@@ -916,6 +1077,8 @@ impl EditSession {
     /// while `compare` (REQ-021-02, REQ-021-07). False while there is nothing to draw yet.
     pub fn paint(&mut self, ui: &egui::Ui, rect: Rect, uv: Rect, clip: Rect, compare: bool, opacity: f32) -> bool {
         let geometry = self.shown_geometry(compare);
+        self.sync_paintings();
+        let paintings_view = self.paint_texture.as_ref().map(|texture| texture.view.clone());
         let Base::Loaded(loaded) = &mut self.base else {
             return false;
         };
@@ -963,6 +1126,7 @@ impl EditSession {
                         PreviewCallback {
                             view: view.clone(),
                             mask: mask_view,
+                            paintings: paintings_view,
                             uniform,
                             group: std::sync::OnceLock::new(),
                         },
@@ -1268,10 +1432,21 @@ impl EditSession {
         ui.add_space(4.0);
     }
 
-    /// One button per kind of mask (REQ-030-01).
+    /// One button per kind of mask (REQ-030-01, REQ-030-12, REQ-030-13).
     fn add_mask(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             let room = self.draft.masks.len() < MAX_MASKS;
+            let paint_room = room && self.draft.paintings.len() < MAX_PAINTINGS;
+            for (label, freeform) in [("Add brush", false), ("Add freeform", true)] {
+                if ui.add_enabled(paint_room, egui::Button::new(label)).clicked() {
+                    let mut recipe = self.draft.clone();
+                    let shape = new_painting(&mut recipe, freeform);
+                    recipe.masks.push(LocalMask::new(shape));
+                    let chosen = Part::Mask(recipe.masks.len() - 1);
+                    self.commit(recipe);
+                    self.choose_part(chosen);
+                }
+            }
             for (label, shape) in [
                 ("Add gradient", MaskShape::LINEAR),
                 ("Add luminance", MaskShape::LUMINANCE),
@@ -1286,6 +1461,59 @@ impl EditSession {
                 }
             }
         });
+    }
+
+    /// The chosen painted shape's brush, and clearing it (REQ-030-12 … REQ-030-14).
+    fn paint_controls(&mut self, ui: &mut egui::Ui, layer: usize, freeform: bool) {
+        let hint = if freeform {
+            "Draw around what the mask should select, on the photo."
+        } else {
+            "Paint over what the mask should select, on the photo."
+        };
+        ui.add(egui::Label::new(hint).wrap());
+        ui.add_space(4.0);
+        let (size, softness, erase) = self.brush;
+        if !freeform {
+            let mut current = f64::from(size);
+            let response = slider_row(ui, "Size", &format!("{size:.1} %"), &mut current, (0.2, 25.0), 0.1);
+            if response.changed() {
+                self.brush.0 = current as f32;
+            }
+        }
+        let mut current = f64::from(softness);
+        let response = slider_row(
+            ui,
+            "Softness",
+            &format!("{softness:.0} %"),
+            &mut current,
+            (0.0, 100.0),
+            1.0,
+        );
+        if response.changed() {
+            self.brush.1 = current as f32;
+        }
+        ui.horizontal_wrapped(|ui| {
+            for (label, erases) in [("Paint", false), ("Erase", true)] {
+                if ui.add(egui::Button::selectable(erase == erases, label)).clicked() {
+                    self.brush.2 = erases;
+                }
+            }
+            let has_any = self
+                .draft
+                .paintings
+                .get(layer)
+                .is_some_and(|painting| !painting.strokes.is_empty());
+            if ui.add_enabled(has_any, egui::Button::new("Clear")).clicked() {
+                let mut recipe = self.draft.clone();
+                recipe.paintings[layer].strokes.clear();
+                self.commit(recipe);
+            }
+        });
+        if domain::paint::total_points(&self.draft.paintings) >= MAX_POINTS {
+            let full = "This photo has as much painting as a saved edit can hold. Clear some to paint more.";
+            ui.add(egui::Label::new(full).wrap());
+        }
+        ui.add_space(4.0);
     }
 
     /// What the chosen mask is made of and selects, and turning it around, showing or removing it
@@ -1345,6 +1573,9 @@ impl EditSession {
                 }
             }
         }
+        if let MaskShape::Painted { layer, freeform } = shape {
+            self.paint_controls(ui, usize::from(layer), freeform);
+        }
         for (slider, (label, value, range, unit)) in shape.sliders().into_iter().enumerate() {
             let mut current = f64::from(value);
             let response = slider_row(ui, label, &format!("{value:.0}{unit}"), &mut current, range, 1.0);
@@ -1357,6 +1588,16 @@ impl EditSession {
         }
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
+            let paint_room = count < MAX_MASK_SHAPES && self.draft.paintings.len() < MAX_PAINTINGS;
+            for (label, freeform) in [("+ Brush", false), ("+ Freeform", true)] {
+                if ui.add_enabled(paint_room, egui::Button::new(label)).clicked() {
+                    let mut recipe = self.draft.clone();
+                    let shape = new_painting(&mut recipe, freeform);
+                    recipe.masks[i].more.push(MaskPart { op: MaskOp::Add, shape });
+                    self.commit(recipe);
+                    self.mask_shape = count;
+                }
+            }
             for (label, shape) in [
                 ("+ Gradient", MaskShape::LINEAR),
                 ("+ Luminance", MaskShape::LUMINANCE),
@@ -1903,10 +2144,11 @@ fn cpu_preview(
     mask: Option<&Mask>,
     flags: u32,
 ) -> egui::ColorImage {
-    let params = Params::new(recipe);
+    let size = full_size.map(|side| side.max(1) as f32);
+    let paintings = domain::paint::draw_all(&recipe.paintings, size);
+    let params = Params::new(recipe).with_paintings(&paintings);
     let mask_given = mask.is_some();
     let (width, height) = small.dimensions();
-    let size = full_size.map(|side| side.max(1) as f32);
     // A background blur waits for the subject (REQ-023-02).
     let blurs = params.blur > 0.0 && flags & 1 == 0 && (params.blur_kind != BlurKind::Background || flags & 4 != 0);
     let glows = params.halation > 0.0 && flags & 1 == 0;
@@ -2072,6 +2314,8 @@ struct EditResources {
     sampler: wgpu::Sampler,
     /// The mask while there is no subject: nothing is.
     no_subject: wgpu::TextureView,
+    /// The paintings while there are none.
+    no_paintings: wgpu::TextureView,
 }
 
 impl EditResources {
@@ -2115,6 +2359,16 @@ impl EditResources {
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
                         multisampled: false,
                     },
                     count: None,
@@ -2164,6 +2418,7 @@ impl EditResources {
             layout,
             sampler,
             no_subject,
+            no_paintings: PaintTexture::new(device, [1.0, 1.0]).view,
         }
     }
 
@@ -2172,6 +2427,7 @@ impl EditResources {
         device: &wgpu::Device,
         view: &wgpu::TextureView,
         mask: Option<&wgpu::TextureView>,
+        paintings: Option<&wgpu::TextureView>,
         uniform: &[f32],
     ) -> wgpu::BindGroup {
         let buffer = wgpu::util::DeviceExt::create_buffer_init(
@@ -2202,8 +2458,129 @@ impl EditResources {
                     binding: 3,
                     resource: wgpu::BindingResource::TextureView(mask.unwrap_or(&self.no_subject)),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(paintings.unwrap_or(&self.no_paintings)),
+                },
             ],
         })
+    }
+}
+
+/// What the preview samples of a recipe's paintings: a layer per painting, kept up to date with what changed.
+struct PaintTexture {
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    size: (u32, u32),
+    /// What each layer shows, and its values.
+    drawn: Vec<(Painting, Vec<f32>)>,
+}
+
+impl PaintTexture {
+    fn new(device: &wgpu::Device, photo_size: [f32; 2]) -> Self {
+        let size = domain::paint::grid_size(photo_size);
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("edit paintings"),
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: MAX_PAINTINGS as u32,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
+        });
+        let empty = vec![0.0; size.0 as usize * size.1 as usize];
+        Self {
+            texture,
+            view,
+            size,
+            drawn: vec![(Painting::default(), empty); MAX_PAINTINGS],
+        }
+    }
+
+    /// Draws what changed since the last time and uploads those layers. While the user paints, that's the stroke's new
+    /// segments; a thinned stroke, an undo or a removed shape draws the layer anew.
+    fn sync(&mut self, queue: &wgpu::Queue, paintings: &[Painting]) {
+        let (width, height) = self.size;
+        let nothing = Painting::default();
+        for layer in 0..MAX_PAINTINGS {
+            let target = paintings.get(layer).unwrap_or(&nothing);
+            let (shown, values) = &mut self.drawn[layer];
+            if shown == target {
+                continue;
+            }
+            match added_to(shown, target) {
+                Some((stroke, from)) => domain::paint::draw_stroke(values, width, height, stroke, from),
+                None => {
+                    values.fill(0.0);
+                    for stroke in &target.strokes {
+                        domain::paint::draw_stroke(values, width, height, stroke, 0);
+                    }
+                }
+            }
+            shown.clone_from(target);
+            let bytes: Vec<u8> = values
+                .iter()
+                .map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8)
+                .collect();
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: 0,
+                        y: 0,
+                        z: layer as u32,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &bytes,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width),
+                    rows_per_image: Some(height),
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+    }
+}
+
+/// What `target` adds to `shown`, if that's all that changed: the stroke to draw and from which of its segments.
+fn added_to<'a>(shown: &Painting, target: &'a Painting) -> Option<(&'a Stroke, usize)> {
+    let done = shown.strokes.len();
+    match target.strokes.len().checked_sub(done)? {
+        1 if target.strokes[..done] == shown.strokes[..] => Some((target.strokes.last()?, 0)),
+        0 if done > 0 && target.strokes[..done - 1] == shown.strokes[..done - 1] => {
+            let (before, now) = (&shown.strokes[done - 1], &target.strokes[done - 1]);
+            let same = Stroke {
+                points: now.points.get(..before.points.len())?.to_vec(),
+                ..now.clone()
+            };
+            (same == *before && !now.closed).then_some((now, before.points.len()))
+        }
+        _ => None,
+    }
+}
+
+/// A new painting of `recipe`, and the shape that shows it.
+fn new_painting(recipe: &mut Recipe, freeform: bool) -> MaskShape {
+    recipe.paintings.push(Painting::default());
+    MaskShape::Painted {
+        layer: (recipe.paintings.len() - 1) as u8,
+        freeform,
     }
 }
 
@@ -2277,6 +2654,8 @@ struct PreviewCallback {
     view: wgpu::TextureView,
     /// The subject's mask, if found.
     mask: Option<wgpu::TextureView>,
+    /// The recipe's paintings, if it has any.
+    paintings: Option<wgpu::TextureView>,
     uniform: Vec<f32>,
     /// Made in `prepare`; dropped with the frame, so the photo's texture isn't kept alive after editing ends.
     group: std::sync::OnceLock<wgpu::BindGroup>,
@@ -2292,9 +2671,13 @@ impl CallbackTrait for PreviewCallback {
         resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         if let Some(res) = resources.get::<EditResources>() {
-            let _ = self
-                .group
-                .set(res.bind(device, &self.view, self.mask.as_ref(), &self.uniform));
+            let _ = self.group.set(res.bind(
+                device,
+                &self.view,
+                self.mask.as_ref(),
+                self.paintings.as_ref(),
+                &self.uniform,
+            ));
         }
         Vec::new()
     }
@@ -2407,7 +2790,9 @@ mod tests {
             flags as f32,
         );
         let mask = mask.map(|mask| upload_mask(render_state, mask));
-        let group = resources.bind(device, &view, mask.as_ref(), &uniform);
+        let mut paint = PaintTexture::new(device, [width as f32, height as f32]);
+        paint.sync(queue, &recipe.paintings);
+        let group = resources.bind(device, &view, mask.as_ref(), Some(&paint.view), &uniform);
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("edit test"),
             size: wgpu::Extent3d {
@@ -2813,6 +3198,150 @@ mod tests {
         }
     }
 
+    /// REQ-030-12, REQ-030-13: brushed and outlined shapes preview as saving renders them, also combined.
+    #[test]
+    fn req_030_12_req_030_13_the_gpu_preview_of_paintings_matches_the_cpu_render() {
+        let (_gpu, render_state) = render_state();
+        let image = pattern();
+        let brushed = Painting {
+            strokes: vec![
+                Stroke {
+                    points: vec![[0.1, 0.2], [0.5, 0.6], [0.9, 0.3]],
+                    size: 8.0,
+                    softness: 60.0,
+                    erase: false,
+                    closed: false,
+                },
+                Stroke {
+                    points: vec![[0.5, 0.0], [0.5, 1.0]],
+                    size: 4.0,
+                    softness: 0.0,
+                    erase: true,
+                    closed: false,
+                },
+            ],
+        };
+        let outlined = Painting {
+            strokes: vec![Stroke {
+                points: vec![[0.2, 0.2], [0.8, 0.3], [0.6, 0.9], [0.1, 0.7]],
+                size: 0.0,
+                softness: 40.0,
+                erase: false,
+                closed: true,
+            }],
+        };
+        let mut first = LocalMask::new(MaskShape::Painted {
+            layer: 0,
+            freeform: false,
+        });
+        Adjustment::Exposure.set(&mut first.recipe, 1.0);
+        let mut second = LocalMask::new(MaskShape::Painted {
+            layer: 1,
+            freeform: true,
+        });
+        second.more.push(MaskPart {
+            op: MaskOp::Subtract,
+            shape: MaskShape::LUMINANCE,
+        });
+        Adjustment::Saturation.set(&mut second.recipe, -90.0);
+        let recipe = Recipe {
+            paintings: vec![brushed, outlined],
+            masks: vec![first, second],
+            ..Recipe::default()
+        };
+        let plain = render_gpu(&render_state, &image, &Recipe::default(), None, 0);
+        for flags in [0, 1 << 8, 2 << 8] {
+            let gpu = render_gpu(&render_state, &image, &recipe, None, flags);
+            let cpu = cpu_preview(&image, &recipe, recipe.geometry(), [SIZE, SIZE], None, flags);
+            for (i, (gpu, cpu)) in gpu.chunks_exact(4).zip(cpu.pixels.iter()).enumerate() {
+                for c in 0..3 {
+                    let diff = (i32::from(gpu[c]) - i32::from(cpu.to_array()[c])).abs();
+                    assert!(
+                        diff <= 2,
+                        "pixel {i} channel {c}: GPU {gpu:?}, CPU {cpu:?} with flags {flags}"
+                    );
+                }
+            }
+            assert_ne!(gpu, plain, "the paintings change the photo");
+        }
+    }
+
+    /// REQ-030-12: the layer the preview keeps up to date while the user paints holds what drawing it anew gives.
+    #[test]
+    fn req_030_12_the_texture_kept_up_to_date_equals_one_drawn_anew() {
+        let (_gpu, render_state) = render_state();
+        let (device, queue) = (&render_state.device, &render_state.queue);
+        let points = [[0.1, 0.2], [0.3, 0.7], [0.6, 0.4], [0.9, 0.8]];
+        let stroke = |count: usize, erase: bool| Stroke {
+            points: points[..count].to_vec(),
+            // The eraser is narrower, so that some of the stroke stays.
+            size: if erase { 1.0 } else { 4.0 },
+            softness: 40.0,
+            erase,
+            closed: false,
+        };
+        let full = Painting {
+            strokes: vec![stroke(4, false), stroke(4, true)],
+        };
+        let mut live = PaintTexture::new(device, [400.0, 300.0]);
+        for count in 1..=4 {
+            let painting = Painting {
+                strokes: vec![stroke(count, false)],
+            };
+            live.sync(queue, std::slice::from_ref(&painting));
+        }
+        for count in 1..=4 {
+            let painting = Painting {
+                strokes: vec![stroke(4, false), stroke(count, true)],
+            };
+            live.sync(queue, std::slice::from_ref(&painting));
+        }
+        let mut anew = PaintTexture::new(device, [400.0, 300.0]);
+        anew.sync(queue, std::slice::from_ref(&full));
+        assert_eq!(live.drawn[0].1, anew.drawn[0].1);
+        assert!(live.drawn[0].1.iter().any(|&value| value > 0.5));
+
+        // Taken away again, the layer is empty.
+        live.sync(queue, &[]);
+        assert!(live.drawn[0].1.iter().all(|&value| value == 0.0));
+    }
+
+    /// REQ-030-12: the texture kept up to date stroke by stroke shows what drawing it all at once shows.
+    #[test]
+    fn req_030_12_the_preview_adds_only_whats_new() {
+        let stroke = |count: usize| Stroke {
+            points: [[0.1, 0.1], [0.5, 0.2], [0.8, 0.8]][..count].to_vec(),
+            size: 5.0,
+            softness: 50.0,
+            erase: false,
+            closed: false,
+        };
+        let painting = |strokes: Vec<Stroke>| Painting { strokes };
+        let one = stroke(1);
+        let two = stroke(2);
+        assert_eq!(
+            added_to(&painting(vec![]), &painting(vec![one.clone()])),
+            Some((&one, 0)),
+            "a new stroke"
+        );
+        let longer = painting(vec![two.clone()]);
+        assert_eq!(
+            added_to(&painting(vec![one.clone()]), &longer),
+            Some((&two, 1)),
+            "more of it"
+        );
+        // Anything else is drawn anew: fewer strokes, another one before it, thinned, or an outline.
+        assert_eq!(added_to(&longer, &painting(vec![])), None);
+        let moved = Stroke {
+            points: vec![[0.9, 0.9], [0.5, 0.2]],
+            ..two.clone()
+        };
+        assert_eq!(added_to(&painting(vec![one.clone()]), &painting(vec![moved])), None);
+        let outline = Stroke { closed: true, ..two };
+        let shorter = Stroke { closed: true, ..one };
+        assert_eq!(added_to(&painting(vec![shorter]), &painting(vec![outline])), None);
+    }
+
     #[test]
     fn req_021_07_req_021_08_tracks_changes_undo_and_asks_before_leaving() {
         let target = Target {
@@ -2890,6 +3419,7 @@ mod tests {
         let callback = PreviewCallback {
             view,
             mask: None,
+            paintings: None,
             uniform: uniform(
                 &Params::new(&Recipe::default()),
                 Geometry::new(None, 0),

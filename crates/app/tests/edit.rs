@@ -1003,3 +1003,115 @@ fn req_030_10_req_030_11_makes_a_mask_of_several_shapes() {
     harness.run_steps(2);
     assert_eq!(mask(&harness).shapes(), 4);
 }
+
+/// REQ-030-12: a drag paints a stroke, thinned, as one undo step; a click a dot; _Erase_ and _Clear_ do as they say.
+#[test]
+fn req_030_12_paints_and_erases_on_the_photo() {
+    let fixture = Fixture::new();
+    let (mut harness, _dir) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    settle_all(&mut harness);
+    open_masks(&mut harness);
+
+    harness.get_by_role_and_label(Role::Button, "Add brush").click();
+    harness.run_steps(3);
+    let strokes = |harness: &App| session(harness).unwrap().recipe().paintings[0].strokes.clone();
+    assert!(strokes(&harness).is_empty());
+    assert!(session(&harness).unwrap().has_photo_tool());
+    harness.snapshot(common::snapshot_name("edit_brush"));
+    let area = session(&harness).unwrap().gradient_area().expect("the photo is drawn");
+    let at = |u: f32, v: f32| area.min + egui::vec2(u * area.width(), v * area.height());
+
+    harness.drag_at(at(0.2, 0.5));
+    harness.run_steps(2);
+    for u in [0.3, 0.4, 0.5, 0.6] {
+        harness.hover_at(at(u, 0.5));
+        harness.run_steps(2);
+    }
+    harness.drop_at(at(0.7, 0.5));
+    harness.run_steps(3);
+    let drawn = strokes(&harness);
+    assert_eq!(drawn.len(), 1);
+    assert!(!drawn[0].erase && !drawn[0].closed);
+    assert_eq!(
+        drawn[0].points.len(),
+        2,
+        "a straight line is two points: {:?}",
+        drawn[0].points
+    );
+    let first = drawn[0].points[0];
+    assert!(
+        (first[0] - 0.2).abs() < 0.03 && (first[1] - 0.5).abs() < 0.03,
+        "{first:?}"
+    );
+
+    harness.get_by_role_and_label(Role::Button, "Erase").click();
+    harness.run_steps(2);
+    harness.drag_at(at(0.5, 0.5));
+    harness.run_steps(2);
+    harness.drop_at(at(0.5, 0.5));
+    harness.run_steps(3);
+    let drawn = strokes(&harness);
+    assert_eq!(drawn.len(), 2, "a click is a dot");
+    assert!(drawn[1].erase);
+    assert_eq!(drawn[1].points.len(), 1);
+
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run_steps(2);
+    assert_eq!(strokes(&harness).len(), 1, "one undo step");
+    harness.get_by_role_and_label(Role::Button, "Clear").click();
+    harness.run_steps(2);
+    assert!(strokes(&harness).is_empty());
+
+    // Removing the mask takes its painting along.
+    harness.get_by_role_and_label(Role::Button, "Remove mask").click();
+    harness.run_steps(2);
+    assert!(session(&harness).unwrap().recipe().paintings.is_empty());
+}
+
+/// REQ-030-13: a drag draws an outline; one too short to enclose anything is dropped.
+#[test]
+fn req_030_13_draws_an_outline_on_the_photo() {
+    let fixture = Fixture::new();
+    let (mut harness, _dir) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    settle_all(&mut harness);
+    open_masks(&mut harness);
+
+    harness.get_by_role_and_label(Role::Button, "Add freeform").click();
+    harness.run_steps(3);
+    assert_eq!(
+        session(&harness).unwrap().recipe().masks[0].shape,
+        MaskShape::Painted {
+            layer: 0,
+            freeform: true
+        }
+    );
+    assert!(harness.query_by_label("Size").is_none(), "an outline has no brush size");
+    let area = session(&harness).unwrap().gradient_area().expect("the photo is drawn");
+    let at = |u: f32, v: f32| area.min + egui::vec2(u * area.width(), v * area.height());
+
+    harness.drag_at(at(0.2, 0.2));
+    harness.run_steps(2);
+    for (u, v) in [(0.8, 0.2), (0.8, 0.8), (0.2, 0.8)] {
+        harness.hover_at(at(u, v));
+        harness.run_steps(2);
+    }
+    harness.drop_at(at(0.2, 0.8));
+    harness.run_steps(3);
+    let strokes = session(&harness).unwrap().recipe().paintings[0].strokes.clone();
+    assert_eq!(strokes.len(), 1);
+    assert!(strokes[0].closed);
+    assert_eq!(strokes[0].points.len(), 4, "{:?}", strokes[0].points);
+
+    // A straight line encloses nothing.
+    harness.drag_at(at(0.3, 0.3));
+    harness.run_steps(2);
+    harness.hover_at(at(0.5, 0.3));
+    harness.run_steps(2);
+    harness.drop_at(at(0.7, 0.3));
+    harness.run_steps(3);
+    assert_eq!(session(&harness).unwrap().recipe().paintings[0].strokes.len(), 1);
+}
