@@ -21,6 +21,10 @@ Taken without asking, as the user said to go ahead:
 - `db::media::mark_for_reading`.
 - `app`: `info` (chips with ×, _Add_ field, suggestions), `state::{TagChange, tag}`, `viewer::Action::Tag`, `gallery::TagPaths`.
 
+### Tagging a selection (REQ-026-06)
+
+8. **Rating and tagging a selection share one path:** `state::ChangeMany { ids, what: Many::Rate | Many::Tag }` replaces the rating-only version, with one confirmation dialog, one background job (`media::rating::write` or `media::tagging::write` per file) and one pair of toasts. The selection bar's _Tag_ menu chooses People, Places or Tags and reuses the info panel's field and suggestions (`info::{Group, add_field}`). Only adding: removing a tag from many items is rarer and out of scope.
+
 ### Changes to other specs
 
 - **REQ-009-08**: in the desktop app the tag groups offer _Add_ and remove buttons.
@@ -33,3 +37,4 @@ Taken without asking, as the user said to go ahead:
 - [x] `db::media::mark_for_reading`
 - [x] Info panel and sheet: chips with ×, _Add_ with suggestions; viewer keys while typing; UI tests and snapshot (REQ-026-01 to REQ-026-05)
 - [x] Spec changes to 004, 009; glossary, architecture
+- [x] Tag the selection: _Tag_ menu, shared batch job, confirmation, toasts (REQ-026-06)

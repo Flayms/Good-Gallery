@@ -351,8 +351,8 @@ pub struct Gallery {
     opened: Option<usize>,
     /// The selected items (spec 025).
     selection: domain::selection::Selection,
-    /// A rating asked for the selection this frame (REQ-025-07): stars, or `None` to remove it.
-    rate_selection: Option<Option<i64>>,
+    /// A rating or tag asked for the selection this frame (REQ-025-07, REQ-026-06).
+    selection_change: Option<crate::state::Many>,
     /// The item shown in the viewer: kept in view (REQ-016-06), its thumbnail wanted first (REQ-009-14).
     viewed: Option<(usize, i64)>,
     /// Positions shown in the viewer's filmstrip: their thumbnails are wanted after the viewer's own (REQ-015-05).
@@ -420,7 +420,7 @@ impl Gallery {
             view_height: 0.0,
             opened: None,
             selection: Default::default(),
-            rate_selection: None,
+            selection_change: None,
             viewed: None,
             strip: 0..0,
             detail: None,
@@ -663,13 +663,20 @@ impl Gallery {
     /// Asks to rate the selection (REQ-025-07): stars, or `None` to remove the rating.
     pub fn rate_selection(&mut self, rating: Option<i64>) {
         if self.selected_count() > 0 {
-            self.rate_selection = Some(rating);
+            self.selection_change = Some(crate::state::Many::Rate(rating));
         }
     }
 
-    /// The rating asked for the selection this frame, if any (REQ-025-07).
-    pub fn take_rate_selection(&mut self) -> Option<Option<i64>> {
-        self.rate_selection.take()
+    /// Asks to add the tag with this path to the selection (REQ-026-06).
+    pub fn tag_selection(&mut self, path: Vec<String>) {
+        if self.selected_count() > 0 {
+            self.selection_change = Some(crate::state::Many::Tag(path));
+        }
+    }
+
+    /// The rating or tag asked for the selection this frame, if any (REQ-025-07, REQ-026-06).
+    pub fn take_selection_change(&mut self) -> Option<crate::state::Many> {
+        self.selection_change.take()
     }
 
     /// The gallery's own keys while it is in front (no viewer, no focused text field): Ctrl+A selects all, Escape
@@ -698,7 +705,7 @@ impl Gallery {
                 ];
                 for (rating, key) in (1..).zip(stars) {
                     if input.consume_key(egui::Modifiers::NONE, key) {
-                        self.rate_selection = Some(Some(rating));
+                        self.selection_change = Some(crate::state::Many::Rate(Some(rating)));
                     }
                 }
             }

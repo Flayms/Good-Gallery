@@ -4,7 +4,7 @@
 
 ## Goal
 
-Users add the tags, People and Places a photo lacks, and take back wrong ones, while they look at it, without another program. Like ratings (spec 024), the changes go into the file's metadata, in the fields Lightroom, digiKam and Windows read, so they survive a rebuilt index and show in other tools. This is the second part of manual tagging (#32); tagging a selection follows.
+Users add the tags, People and Places a photo lacks, and take back wrong ones, while they look at it, without another program. Like ratings (spec 024), the changes go into the file's metadata, in the fields Lightroom, digiKam and Windows read, so they survive a rebuilt index and show in other tools. This finishes manual tagging (#32), together with ratings (spec 024) and the selection (spec 025).
 
 ## Requirements
 
@@ -42,10 +42,17 @@ Users add the tags, People and Places a photo lacks, and take back wrong ones, w
 - **When** the info panel shows an item's tags
 - **Then** they show as before, without _Add_ or remove buttons
 
+### REQ-026-06 · Tag the selection
+
+- **Given** a selection in the gallery (spec 025), in the desktop app
+- **When** the user picks _Tag_ in the selection bar, chooses People, Places or Tags, and adds a tag as in REQ-026-01
+- **Then** every selected item gets that tag, written as for one item (REQ-026-03), in the background
+- **And** more than 100 items are written only after the user confirms (`Tag 2,345 items with Rome?`), and files that can't be written are counted in a toast that names the first one and why, as for ratings (REQ-025-07)
+
 ## Out of scope
 
 - Renaming, moving or merging tags across the library.
-- Tagging a selection (next part of #32).
+- Removing a tag from a selection.
 - Drawing or naming face regions.
 - `XMP-mwg-kw` keyword structures.
 
@@ -63,3 +70,4 @@ Users add the tags, People and Places a photo lacks, and take back wrong ones, w
 | REQ-026-03 | `crates/domain/src/tagging.rs` › req_026_03_adds_the_hierarchy_and_the_name, req_026_03_removes_the_tag_from_every_field; `crates/media/src/tagging.rs` › req_026_03_…; `crates/db/src/media.rs` › req_026_03_marks_a_retagged_file_for_reading; `crates/app/tests/tagging.rs` › req_026_01_req_026_03_adds_suggested_and_new_tags | pass |
 | REQ-026-04 | `crates/media/src/tagging.rs` › req_026_04_leaves_a_read_only_file_as_it_was; `crates/app/tests/tagging.rs` › req_026_04_keeps_the_tags_of_a_file_it_cant_write | pass |
 | REQ-026-05 | by inspection: `crate::WEB` turns off _Add_ and the remove buttons (`info.rs`); `cargo clippy -p app --target wasm32-unknown-unknown` | no test |
+| REQ-026-06 | `crates/app/tests/tagging.rs` › req_026_06_tags_the_selection, req_026_06_asks_before_tagging_many | pass |

@@ -29,7 +29,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [023-blur](023-blur/spec.md)                             | Blur behind the subject, tilt-shift and radial blur              | Implemented |
 | [024-rating](024-rating/spec.md)                         | Rate items in the viewer and info views, written into the files  | Implemented |
 | [025-selection](025-selection/spec.md)                   | Select several items in the gallery and rate them at once        | Implemented |
-| [026-tagging](026-tagging/spec.md)                       | Add and remove tags, People and Places in the info views         | Implemented |
+| [026-tagging](026-tagging/spec.md)                       | Add and remove tags, People and Places; tag a selection          | Implemented |
 
 ## Conventions
 

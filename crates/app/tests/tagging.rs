@@ -289,3 +289,53 @@ fn req_026_04_keeps_the_tags_of_a_file_it_cant_write() {
     );
     assert!(!reread(&fixture, "a.png"));
 }
+
+/// REQ-026-06: _Tag_ in the selection bar adds a tag of the chosen group to every selected item.
+#[test]
+fn req_026_06_tags_the_selection() {
+    let Some(exiftool) = exiftool() else { return };
+    let fixture = Fixture::new();
+    let (mut harness, dir) = app(&fixture, Some(&exiftool));
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, Key::A);
+    settle(&mut harness);
+
+    harness.get_by_label("Tag the selection").click();
+    harness.run_steps(3);
+    // The menu's, drawn after the sidebar's group of the same name.
+    harness.query_all_by_label("People").last().unwrap().click();
+    harness.run_steps(2);
+    harness.get_by_label("New tag for People").click();
+    harness.run_steps(2);
+    type_text(&mut harness, "ann");
+    harness.get_by_label("People › Anna").click();
+    settle(&mut harness);
+
+    assert_eq!(
+        keywords(&exiftool, &dir.join("b.png")),
+        json!({ "HierarchicalSubject": "People|Anna", "Subject": "Anna" })
+    );
+    assert_eq!(
+        keywords(&exiftool, &dir.join("a.png"))["HierarchicalSubject"],
+        json!(["People|Anna", "Places|Italy|Rome"]),
+        "not twice"
+    );
+    assert!(reread(&fixture, "a.png") && reread(&fixture, "b.png"));
+    let toasts = harness.state().toasts.current();
+    assert!(
+        toasts
+            .last()
+            .is_some_and(|toast| toast.text == "Tagged 2 items with Anna"),
+        "{toasts:?}"
+    );
+}
+
+/// REQ-026-06: tagging many items asks first, naming the tag.
+#[test]
+fn req_026_06_asks_before_tagging_many() {
+    let tag = app::state::Many::Tag(path(&["Places", "Italy", "Rome"]));
+    assert_eq!(tag.question("2,345"), ("Tag 2,345 items with Rome?".to_owned(), "Tag"));
+    assert_eq!(
+        app::state::Many::Rate(Some(4)).question("101"),
+        ("Rate 101 items with 4 stars?".to_owned(), "Rate")
+    );
+}
