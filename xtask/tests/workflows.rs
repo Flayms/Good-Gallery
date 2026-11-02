@@ -152,8 +152,8 @@ fn req_018_01_req_018_09_ci_and_the_release_cover_linux() {
     }
     let release = workflow("release.yml");
     let linux = &release[release.find("  linux:").expect("no linux job")..release.find("  pages:").unwrap()];
-    assert!(linux.contains("runs-on: ubuntu-latest") && linux.contains("needs: checks"));
-    assert!(commands(linux).contains(&"cargo xtask dist"));
+    assert!(linux.contains("uses: ./.github/workflows/linux-packages.yml") && linux.contains("needs: checks"));
+    assert!(commands(&workflow("linux-packages.yml")).contains(&"cargo xtask dist"));
     assert!(release.contains("needs: [checks, linux]"));
 }
 
@@ -182,5 +182,32 @@ fn req_019_14_ci_tests_the_page_and_the_release_publishes_it() {
         "actions/deploy-pages",
     ] {
         assert!(pages.contains(step), "release.yml's pages job lacks {step}");
+    }
+}
+
+/// REQ-018-12: every pull request touching the packages and every release builds them, installs each into a clean
+/// system and only then attaches them.
+#[test]
+fn req_018_12_the_release_tests_and_attaches_the_packages() {
+    let packages = workflow("linux-packages.yml");
+    for part in [
+        "workflow_call:",
+        "pull_request:",
+        "packaging/linux/**",
+        "ubuntu:24.04",
+        "ubuntu:26.04",
+        "fedora:latest",
+        "smoke-test.sh",
+    ] {
+        assert!(packages.contains(part), "linux-packages.yml lacks {part}");
+    }
+    let release = workflow("release.yml");
+    let create = &release[release.find("gh release create").expect("no gh release create")..];
+    for part in [
+        "good-gallery-$VERSION-linux-x64.deb",
+        "good-gallery-$VERSION-linux-x64.rpm",
+    ] {
+        assert!(create.contains(part), "the release doesn't attach {part}");
+        assert!(release.contains(&format!("**{part}**")), "the notes don't list {part}");
     }
 }

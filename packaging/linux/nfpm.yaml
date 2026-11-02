@@ -1,0 +1,40 @@
+# The .deb and .rpm (REQ-018-12), built by `cargo xtask dist` from the staged package, which is nfpm's working folder.
+name: good-gallery
+version: ${VERSION}
+arch: amd64
+platform: linux
+section: graphics
+priority: optional
+maintainer: Flayms <Flayms@users.noreply.github.com>
+homepage: https://github.com/Flayms/Good-Gallery
+license: GPL-3.0-only
+description: A gallery for large photo and video libraries.
+contents:
+  - src: good-gallery
+    dst: /usr/bin/good-gallery
+    file_info:
+      mode: 0755
+  - src: good-gallery.desktop
+    dst: /usr/share/applications/good-gallery.desktop
+  - src: good-gallery.png
+    dst: /usr/share/icons/hicolor/256x256/apps/good-gallery.png
+  - src: LICENSE.txt
+    dst: /usr/share/doc/good-gallery/LICENSE.txt
+  - src: THIRD-PARTY-NOTICES.txt
+    dst: /usr/share/doc/good-gallery/THIRD-PARTY-NOTICES.txt
+overrides:
+  deb:
+    depends:
+      - libimage-exiftool-perl
+      - ffmpeg
+      - libmpv2
+    recommends:
+      - mesa-vulkan-drivers
+  rpm:
+    depends:
+      - perl-Image-ExifTool
+      # Fedora's ffmpeg-free provides it, and RPM Fusion's ffmpeg too.
+      - /usr/bin/ffmpeg
+      - mpv-libs
+    recommends:
+      - mesa-vulkan-drivers
