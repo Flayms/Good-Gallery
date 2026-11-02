@@ -475,3 +475,90 @@ fn req_008_10_req_008_11_orders_and_hides_groups_from_the_settings_and_remembers
     assert!(row_top(&harness, "5 stars") < row_top(&harness, "Beach"));
     assert!(disabled(&harness, "Reset to default"));
 }
+
+/// Whether the sidebar shows: its _Hide sidebar_ button is in it.
+fn sidebar_shows(harness: &App) -> bool {
+    harness.query_by_role_and_label(Role::Button, "Hide sidebar").is_some()
+}
+
+#[test]
+fn req_019_15_a_narrow_window_opens_the_sidebar_over_the_gallery() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture);
+    harness.set_size(egui::vec2(400.0, 800.0));
+    settle(&mut harness);
+    // A resized gallery lays out again once the width has stayed the same for a moment (real time).
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    settle(&mut harness);
+    let search_left = |harness: &App| {
+        harness
+            .get_by_role_and_label(Role::TextInput, app::search_bar::LABEL)
+            .rect()
+            .left()
+    };
+    assert!(!sidebar_shows(&harness), "the sidebar takes room on a narrow screen");
+    let gallery_left = search_left(&harness);
+    assert!(gallery_left < 100.0, "the gallery doesn't use the whole width");
+    harness.snapshot(common::snapshot_name("narrow_gallery"));
+
+    // Opened, it lies over the gallery; picking something closes it.
+    harness.get_by_role_and_label(Role::Button, "Show sidebar").click();
+    settle(&mut harness);
+    assert!(sidebar_shows(&harness));
+    assert_eq!(search_left(&harness), gallery_left, "the sidebar narrows the gallery");
+    harness.snapshot(common::snapshot_name("narrow_sidebar"));
+    harness.get_by_role_and_label(Role::Button, "Beach").click();
+    settle(&mut harness);
+    assert_eq!(count(&harness), Some(3));
+    assert!(!sidebar_shows(&harness), "picking a tag leaves the sidebar open");
+
+    // A click beside it closes it, and so does Ctrl + B.
+    harness.get_by_role_and_label(Role::Button, "Show sidebar").click();
+    settle(&mut harness);
+    harness.hover_at(egui::pos2(380.0, 500.0));
+    harness.event(egui::Event::PointerButton {
+        pos: egui::pos2(380.0, 500.0),
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.event(egui::Event::PointerButton {
+        pos: egui::pos2(380.0, 500.0),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    settle(&mut harness);
+    assert!(!sidebar_shows(&harness), "a click beside the sidebar leaves it open");
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::B);
+    settle(&mut harness);
+    assert!(sidebar_shows(&harness));
+    harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::B);
+    settle(&mut harness);
+    assert!(!sidebar_shows(&harness));
+
+    // None of it is stored: a wide window shows the sidebar as before (REQ-008-09).
+    let db = harness.state().db().unwrap();
+    assert_eq!(
+        db::settings::value(&db.lock().unwrap(), "sidebar.hidden").unwrap(),
+        None
+    );
+    harness.set_size(egui::vec2(900.0, 800.0));
+    settle(&mut harness);
+    assert!(sidebar_shows(&harness));
+}
+
+#[test]
+fn req_019_15_the_info_sheet_fits_a_narrow_window() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture);
+    harness.set_size(egui::vec2(300.0, 800.0));
+    settle(&mut harness);
+    let gallery = harness.state().gallery.as_ref().unwrap();
+    let id = gallery.id_at(0);
+    harness.state_mut().info_sheet = id;
+    settle(&mut harness);
+    let title = harness.get_by_label("Information").rect();
+    assert!(title.left() >= 0.0, "the info sheet starts left of the window");
+    assert!(title.right() <= 300.0, "the info sheet starts right of the window");
+}

@@ -1654,7 +1654,8 @@ impl Layout {
             Rect::from_min_max(
                 // Below the window controls (REQ-013-02).
                 pos2(
-                    screen.right() - INSET - info::WIDTH,
+                    // Never wider than the window (REQ-019-15).
+                    (screen.right() - INSET - info::WIDTH).max(screen.left() + INSET),
                     screen.top() + crate::titlebar::HEIGHT + INSET,
                 ),
                 pos2(screen.right() - INSET, screen.bottom() - INSET),
