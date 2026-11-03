@@ -32,6 +32,8 @@ overrides:
       - libxkbcommon-x11-0
     recommends:
       - mesa-vulkan-drivers
+      # The update check (REQ-031-01); without it the app just doesn't check.
+      - curl
   rpm:
     depends:
       - perl-Image-ExifTool
@@ -41,3 +43,5 @@ overrides:
       - libxkbcommon-x11
     recommends:
       - mesa-vulkan-drivers
+      # The update check (REQ-031-01); without it the app just doesn't check.
+      - curl

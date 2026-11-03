@@ -20,6 +20,8 @@ pub struct Settings {
     pub mtime_on_save: MtimeOnSave,
     /// Glass is opaque, whatever the OS says (REQ-013-17).
     pub reduce_transparency: bool,
+    /// Asks GitHub for a newer version (REQ-031-01).
+    pub check_for_updates: bool,
 }
 
 impl Default for Settings {
@@ -31,6 +33,7 @@ impl Default for Settings {
             appearance: Appearance::System,
             mtime_on_save: MtimeOnSave::Keep,
             reduce_transparency: false,
+            check_for_updates: true,
         }
     }
 }
@@ -41,6 +44,7 @@ const IO_CONCURRENCY: &str = "ioConcurrency";
 const APPEARANCE: &str = "appearance";
 const MTIME_ON_SAVE: &str = "editingMtime";
 const REDUCE_TRANSPARENCY: &str = "reduceTransparency";
+const CHECK_FOR_UPDATES: &str = "checkForUpdates";
 const MAX_QUICK_CHECK: u32 = 7 * 24 * 60;
 
 fn thumb_cache(value: &Value) -> Option<f64> {
@@ -102,6 +106,7 @@ pub fn load(conn: &Connection) -> Result<Settings> {
             REDUCE_TRANSPARENCY => {
                 settings.reduce_transparency = value.as_bool().unwrap_or(settings.reduce_transparency)
             }
+            CHECK_FOR_UPDATES => settings.check_for_updates = value.as_bool().unwrap_or(settings.check_for_updates),
             _ => {}
         }
     }
@@ -119,6 +124,7 @@ pub fn save(conn: &Connection, settings: &Settings) -> Result<()> {
         (APPEARANCE, Value::from(settings.appearance.key())),
         (MTIME_ON_SAVE, Value::from(settings.mtime_on_save.as_str())),
         (REDUCE_TRANSPARENCY, Value::from(settings.reduce_transparency)),
+        (CHECK_FOR_UPDATES, Value::from(settings.check_for_updates)),
     ] {
         tx.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
@@ -173,6 +179,7 @@ mod tests {
                 appearance: Appearance::System,
                 mtime_on_save: MtimeOnSave::Keep,
                 reduce_transparency: false,
+                check_for_updates: true,
             }
         );
 
@@ -183,6 +190,7 @@ mod tests {
             appearance: Appearance::Dark,
             mtime_on_save: MtimeOnSave::Update,
             reduce_transparency: true,
+            check_for_updates: false,
         };
         save(&conn, &changed).unwrap();
 

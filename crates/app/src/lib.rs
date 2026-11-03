@@ -25,6 +25,7 @@ pub mod titlebar;
 pub mod toasts;
 pub mod toolbar;
 pub mod unreadable;
+pub mod updates;
 pub mod video;
 pub mod viewer;
 #[cfg(target_arch = "wasm32")]
@@ -59,6 +60,16 @@ pub fn setup(ctx: &egui::Context) {
 pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     state.poll();
     let ctx = ui.ctx().clone();
+    // The installer waits for the window to close (REQ-031-05); an idle window wakes up for the daily check.
+    if std::mem::take(&mut state.updates.close) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+    if let Some(wake) = state
+        .updates
+        .wake_in(state.settings.check_for_updates, web_time::Instant::now())
+    {
+        ctx.request_repaint_after(wake);
+    }
     // A later start of the app handed over a file or asked for the window (REQ-027-02).
     if std::mem::take(&mut state.bring_to_front) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
@@ -452,7 +463,11 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
         &mut state.search_bar,
         sidebar_hidden,
         &state.unreadable,
+        &state.updates,
     );
+    if let Some(update) = asked.update {
+        state.answer_update(update, ui.ctx());
+    }
     if asked.show_sidebar {
         state.sidebar.set_hidden(false, state.db.as_ref());
     }

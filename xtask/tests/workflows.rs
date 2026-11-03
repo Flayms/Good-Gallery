@@ -57,6 +57,7 @@ fn only_main_saves_the_rust_cache() {
     for (name, save_if) in [
         ("ci.yml", "save-if: ${{ github.ref == 'refs/heads/main' }}"),
         ("release-cache.yml", "save-if: ${{ github.ref == 'refs/heads/main' }}"),
+        ("windows-packages.yml", "save-if: false"),
         // A tag's cache can't be restored by any other ref.
         ("release.yml", "save-if: false"),
     ] {
@@ -98,8 +99,8 @@ fn release_publishes_both_downloads_after_the_checks() {
     assert!(release.contains("uses: ./.github/workflows/ci.yml"));
     assert!(release.contains("needs: checks"));
     // The Windows job; the Linux archive's job runs `cargo xtask dist` too, without NSIS.
-    let windows = &release[release.find("\n  windows:").expect("no windows job")..];
-    let commands = commands(windows);
+    let windows = workflow("windows-packages.yml");
+    let commands = commands(&windows);
     let dist = commands.iter().position(|line| *line == "cargo xtask dist");
     // windows-2025 images don't come with NSIS, and the installer can't be built without it.
     let nsis = commands.iter().position(|line| line.starts_with("choco install nsis"));
@@ -160,9 +161,7 @@ fn req_014_14_the_builds_run_side_by_side_and_publish_waits_for_them() {
 #[test]
 fn req_014_14_main_warms_the_cache_the_release_builds_restore() {
     const SHARED_KEY: &str = "shared-key: release";
-    let release = workflow("release.yml");
-    let windows =
-        &release[release.find("\n  windows:").expect("no windows job")..release.find("\n  publish:").unwrap()];
+    let windows = workflow("windows-packages.yml");
     assert!(
         windows.contains(SHARED_KEY),
         "the Windows build doesn't restore the cache"
@@ -276,7 +275,8 @@ fn req_018_12_the_release_tests_and_attaches_the_packages() {
         "good-gallery-$VERSION-linux-x64.rpm",
     ] {
         assert!(create.contains(part), "the release doesn't attach {part}");
-        assert!(release.contains(&format!("**{part}**")), "the notes don't list {part}");
+        let notes = workflow("windows-packages.yml");
+        assert!(notes.contains(&format!("**{part}**")), "the notes don't list {part}");
     }
 }
 
@@ -306,7 +306,30 @@ fn req_019_16_the_release_attaches_the_page_as_a_zip() {
         "the release doesn't attach the zip"
     );
     assert!(
-        release.contains("**good-gallery-$VERSION-web.zip**"),
+        workflow("windows-packages.yml").contains("**good-gallery-$VERSION-web.zip**"),
         "the notes' download table doesn't list the zip"
     );
+}
+
+/// REQ-031-09: a release attaches the installer's signature, made after the checks, with the secret key.
+#[test]
+fn req_031_09_the_release_signs_the_installer() {
+    let release = workflow("release.yml");
+    let publish = &release[release.find("\n  publish:").expect("no publish job")..];
+    let sign = publish
+        .find("packaging/sign-update.sh")
+        .expect("the release doesn't sign");
+    let create = publish.find("gh release create").expect("no gh release create");
+    assert!(sign < create, "the release is published before it is signed");
+    assert!(publish.contains("UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}"));
+    assert!(publish[create..].contains("good-gallery-$VERSION-windows-x64-setup.exe.sig"));
+}
+
+/// REQ-031-08: pull requests that touch the installer run its smoke test, which updates over a running app.
+#[test]
+fn req_031_08_the_installer_is_tested_before_a_release() {
+    let packages = workflow("windows-packages.yml");
+    for part in ["pull_request:", "packaging/windows/**", "smoke-test.ps1"] {
+        assert!(packages.contains(part), "windows-packages.yml lacks {part}");
+    }
 }

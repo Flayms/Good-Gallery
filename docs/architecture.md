@@ -107,7 +107,7 @@ Platform code sits behind `cfg(windows)`, `cfg(target_os = "linux")` and `cfg(ta
 ## Conventions
 
 - **Errors:** `thiserror` enums in library crates, `anyhow` in `app` and `xtask`. **Logging:** `tracing`, to stderr and `logs/app.log`.
-- **No network:** the app makes no network requests (REQ-011-11); `xtask/tests/no_network.rs` keeps network crates out.
+- **No network:** the app makes no network requests of its own (REQ-011-11); `xtask/tests/no_network.rs` keeps network crates out. The one exception is the update check and download (spec 031), which `media::update` leaves to the system's `curl`.
 - **Specs and tests:** every test that covers a REQ names it (`fn req_007_01_…` or a doc comment); `cargo xtask check-specs` checks it.
 - **Visual checks:** `egui_kittest` snapshots (`UPDATE_SNAPSHOTS=1`), and `cargo run -p app -- --screenshot <file.png>` for the real window with glass.
 - **Pinned UI crates:** egui, eframe, egui_kittest and wgpu are pinned to exact versions.

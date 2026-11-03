@@ -14,3 +14,4 @@ pub mod replace;
 pub mod subject;
 pub mod tagging;
 pub mod thumbnail;
+pub mod update;
