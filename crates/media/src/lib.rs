@@ -6,6 +6,7 @@ const _: Option<&str> = option_env!("GOOD_GALLERY_WORKTREE");
 pub mod edit;
 pub mod exiftool;
 pub mod face_models;
+pub mod face_regions;
 pub mod face_store;
 pub mod ffmpeg;
 pub mod helpers;
