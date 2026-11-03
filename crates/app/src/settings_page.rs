@@ -479,7 +479,9 @@ const FACE_MODELS_PAGE: &str = "https://github.com/Flayms/Good-Gallery/blob/main
 #[cfg(not(target_arch = "wasm32"))]
 fn megabytes(bytes: u64) -> String {
     let megabytes = bytes as f64 / 1_000_000.0;
-    if megabytes < 10.0 {
+    if megabytes < 1.0 {
+        format!("{:.0} KB", megabytes * 1000.0)
+    } else if megabytes < 10.0 {
         format!("{megabytes:.1} MB")
     } else {
         format!("{megabytes:.0} MB")
@@ -505,9 +507,15 @@ fn model_row(
         state.faces.recognizer.as_deref() == Some(sha256)
     };
     let mut command = None;
-    setting_row(ui, name, description, 220.0, |ui| {
+    // Short on screen, with the model's name for screen readers.
+    let button = |ui: &mut egui::Ui, text: &str, spoken: String, selected: bool| {
+        let response = ui.add(egui::Button::new(text).selected(selected));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &spoken));
+        response.clicked()
+    };
+    setting_row(ui, name, description, 180.0, |ui| {
         if let Some(arriving) = &arriving {
-            if ui.button(format!("Cancel {name}")).clicked() {
+            if button(ui, "Cancel", format!("Cancel {name}"), false) {
                 command = Some("cancel");
             }
             let share = arriving
@@ -515,18 +523,18 @@ fn model_row(
                 .map_or(0.0, |total| arriving.bytes as f32 / total.max(1) as f32);
             ui.add(egui::ProgressBar::new(share).desired_width(90.0).show_percentage());
         } else if present {
-            if ui.button(format!("Delete {name}")).clicked() {
+            if button(ui, "Delete", format!("Delete {name}"), false) {
                 command = Some("delete");
             }
-            let label = if chosen {
-                format!("Using {name}")
+            let (text, spoken) = if chosen {
+                ("In use", format!("Using {name}"))
             } else {
-                format!("Use {name}")
+                ("Use", format!("Use {name}"))
             };
-            if ui.add(egui::Button::new(label).selected(chosen)).clicked() {
+            if button(ui, text, spoken, chosen) {
                 command = Some(if chosen { "none" } else { "use" });
             }
-        } else if catalog.is_some() && ui.button(format!("Download {name}")).clicked() {
+        } else if catalog.is_some() && button(ui, "Download", format!("Download {name}"), false) {
             command = Some("download");
         }
     });

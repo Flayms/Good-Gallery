@@ -24,18 +24,28 @@ pub struct PeoplePage {
     pub confirm: Option<NamingGroup>,
 }
 
+/// The square of a thumbnail `size` pixels large around a face (fractions of the photo), a little wider than its box, so
+/// the face isn't stretched by a box that isn't square. Moved inside the photo where it would reach past its edge.
+fn crop_uv([x, y, w, h]: [f32; 4], size: [u32; 2]) -> Rect {
+    const WIDER: f32 = 1.5;
+    let (width, height) = (size[0].max(1) as f32, size[1].max(1) as f32);
+    let side = (w * width).max(h * height) * WIDER;
+    let side = side.min(width).min(height);
+    let (half_u, half_v) = (side / width / 2.0, side / height / 2.0);
+    let center = pos2(
+        (x + w / 2.0).clamp(half_u, 1.0 - half_u),
+        (y + h / 2.0).clamp(half_v, 1.0 - half_v),
+    );
+    Rect::from_center_size(center, vec2(half_u * 2.0, half_v * 2.0))
+}
+
 /// One face, cropped out of its thumbnail, a little wider than its box.
 fn crop(ui: &mut egui::Ui, state: &mut AppState, media: i64, rect: [f32; 4]) -> egui::Response {
     let (area, response) = ui.allocate_exact_size(Vec2::splat(CROP), Sense::hover());
     ui.painter().rect_filled(area, theme::RADIUS_CONTROL, theme::selected());
     let texture = state.gallery.as_mut().and_then(|gallery| gallery.thumbnail(media));
     if let Some(texture) = texture {
-        let [x, y, w, h] = rect;
-        let margin = 0.25;
-        let uv = Rect::from_min_max(
-            pos2((x - w * margin).max(0.0), (y - h * margin).max(0.0)),
-            pos2((x + w * (1.0 + margin)).min(1.0), (y + h * (1.0 + margin)).min(1.0)),
-        );
+        let uv = crop_uv(rect, texture.size);
         egui::Image::new((texture.id, area.size()))
             .uv(uv)
             .corner_radius(theme::RADIUS_CONTROL)
@@ -116,10 +126,12 @@ fn group_card(ui: &mut egui::Ui, state: &mut AppState, group: &crate::gallery::F
                     // A wrong face: out of the group, as ignored faces are (REQ-031-15).
                     let corner = Rect::from_min_size(shown.rect.right_top() + vec2(-22.0, 2.0), Vec2::splat(20.0));
                     let spoken = format!("Take face {} out of the group", face.id);
-                    let take_out = ui.put(
-                        corner,
-                        egui::Button::image(Icon::X.image(12.0, theme::text())).fill(theme::selected()),
-                    );
+                    let take_out = ui.interact(corner, ui.make_persistent_id(("take out", face.id)), Sense::click());
+                    ui.painter()
+                        .rect_filled(corner, 4.0, egui::Color32::from_black_alpha(153));
+                    Icon::X
+                        .image(12.0, egui::Color32::WHITE)
+                        .paint_at(ui, Rect::from_center_size(corner.center(), Vec2::splat(12.0)));
                     take_out.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &spoken));
                     if take_out.on_hover_text("Not one of them").clicked() {
                         action = Some(FaceAction::Ignore { faces: vec![face.id] });
@@ -180,5 +192,29 @@ fn confirm_naming(ctx: &egui::Context, state: &mut AppState) {
             name: naming.name,
             places: naming.places,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// REQ-031-15: a crop is square in pixels, whatever the box and the photo's shape, and stays on the photo.
+    #[test]
+    fn req_031_15_crops_faces_without_stretching_them() {
+        let uv = crop_uv([0.4, 0.4, 0.1, 0.2], [800, 400]);
+        let (pixels_wide, pixels_high) = (uv.width() * 800.0, uv.height() * 400.0);
+        assert!((pixels_wide - pixels_high).abs() < 0.5, "{uv:?}");
+        assert!(pixels_wide > 80.0, "wider than the box: {uv:?}");
+        assert!(
+            (uv.center().x - 0.45).abs() < 1e-4 && (uv.center().y - 0.5).abs() < 1e-4,
+            "{uv:?}"
+        );
+
+        let corner = crop_uv([0.0, 0.0, 0.1, 0.1], [400, 400]);
+        assert!(corner.min.x >= 0.0 && corner.min.y >= 0.0, "{corner:?}");
+        let huge = crop_uv([0.0, 0.0, 1.0, 1.0], [400, 300]);
+        assert!(huge.max.x <= 1.0 && huge.max.y <= 1.0, "{huge:?}");
+        assert!((huge.width() * 400.0 - huge.height() * 300.0).abs() < 0.5, "{huge:?}");
     }
 }

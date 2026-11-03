@@ -155,7 +155,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
     if let Some(db) = &input.db {
         state.load(db);
     }
-    let on_settings = *input.page == Page::Settings;
+    // On another page, no library counts as shown.
+    let on_settings = *input.page != Page::Gallery;
     ui.spacing_mut().item_spacing.y = 2.0;
     // The header is part of the title bar: it moves the window (REQ-013-02).
     let header = egui::Rect::from_min_size(ui.ctx().content_rect().min, vec2(WIDTH, crate::titlebar::HEIGHT));

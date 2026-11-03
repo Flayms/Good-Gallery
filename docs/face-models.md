@@ -23,7 +23,7 @@ Changing the recognition model means reading every face again, which can take ma
 
 | Model | Download | Finds faces in WIDER FACE (easy / medium / hard) | Speed | Memory | License |
 | --- | --- | --- | --- | --- | --- |
-| YuNet (2023) | 232 KB | 88.4% / 86.6% / 75.0% | not measured | not measured | MIT |
+| YuNet (2023) | 233 KB | 88.4% / 86.6% / 75.0% | not measured | not measured | MIT |
 | RetinaFace, MobileNetV2 | 12.5 MB | 94.0% / 92.3% / 83.6% | not measured | not measured | MIT (_open_) |
 | RetinaFace, ResNet34 | 88.5 MB | 95.1% / 93.5% / 84.4% | not measured | not measured | MIT (_open_) |
 

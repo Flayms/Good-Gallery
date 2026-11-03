@@ -10,9 +10,12 @@ use image::imageops::FilterType;
 use std::path::Path;
 use tract_onnx::prelude::*;
 
+/// One output of a model: its shape and values.
+pub type Output = (Vec<usize>, Vec<f32>);
+
 /// A loaded model: a batch of one in, every output with its shape.
 pub trait Net: Send + Sync {
-    fn run(&self, input: Vec<f32>, side: usize) -> Result<Vec<(Vec<usize>, Vec<f32>)>, String>;
+    fn run(&self, input: Vec<f32>, side: usize) -> Result<Vec<Output>, String>;
 }
 
 struct TractNet {
@@ -31,7 +34,7 @@ fn load_tract(file: &Path, side: usize) -> Result<TractNet, String> {
 }
 
 impl Net for TractNet {
-    fn run(&self, input: Vec<f32>, side: usize) -> Result<Vec<(Vec<usize>, Vec<f32>)>, String> {
+    fn run(&self, input: Vec<f32>, side: usize) -> Result<Vec<Output>, String> {
         let tensor: Tensor = tract_ndarray::Array4::from_shape_vec((1, 3, side, side), input)
             .map_err(|error| error.to_string())?
             .into();
@@ -333,7 +336,7 @@ mod tests {
     /// A net that repeats back what it was given, to look at the prepared input.
     struct Echo;
     impl Net for Echo {
-        fn run(&self, input: Vec<f32>, _side: usize) -> Result<Vec<(Vec<usize>, Vec<f32>)>, String> {
+        fn run(&self, input: Vec<f32>, _side: usize) -> Result<Vec<Output>, String> {
             Ok(vec![(vec![1, 64], input.into_iter().take(64).collect())])
         }
     }

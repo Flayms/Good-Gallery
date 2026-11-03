@@ -258,14 +258,14 @@ fn req_031_13_the_people_tags_remove_button_takes_the_region() {
         .args([
             "-q",
             "-overwrite_original",
-            "-XMP-mwg-rs:RegionInfo={RegionList=[{Area={X=0.2,Y=0.25,W=0.2,H=0.3,Unit=normalized},Name=Ben,Type=Face}]}",
+            "-XMP-mwg-rs:RegionInfo={RegionList=[{Area={X=0.2,Y=0.25,W=0.2,H=0.3,Unit=normalized},Name=Anna,Type=Face}]}",
         ])
         .arg(dir.join("a.png"))
         .status()
         .unwrap();
     assert!(status.success());
     open_info(&mut harness, "a.png");
-    harness.get_by_label("Remove Ben").click();
+    harness.get_by_label("Remove Anna").click();
     settle(&mut harness);
     let output = Command::new(&exiftool)
         .args(["-json", "-struct", "-XMP-mwg-rs:RegionInfo"])

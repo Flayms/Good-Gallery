@@ -443,7 +443,7 @@ fn req_031_01_lists_the_models_with_their_licenses() {
             model.name
         );
     }
-    harness.get_by_label("0.2 MB. MIT");
+    harness.get_by_label("233 KB. MIT");
     harness.get_by_label("Choose a detection model to start.");
 }
 
@@ -559,4 +559,40 @@ fn req_031_17_warns_when_the_model_tells_nobody_apart() {
     settle(&mut harness);
     settle(&mut harness);
     harness.get_by_label_contains("doesn't tell your named people apart");
+}
+
+/// REQ-031-01, REQ-031-09, REQ-031-15: how the section, a face's popup and the People page look.
+#[test]
+fn req_031_01_settings_section_looks_as_designed() {
+    let fixture = Fixture::new();
+    let mut harness = settings(&fixture, false);
+    harness.state_mut().faces.added_kind = app::state::faces::AddedKind::Yunet;
+    harness.state_mut().add_face_file_at(yunet());
+    settle(&mut harness);
+    harness.get_by_label("Use YuNet").click();
+    settle(&mut harness);
+    harness.snapshot(common::snapshot_name("settings_faces"));
+}
+
+#[test]
+fn req_031_09_a_faces_popup_looks_as_designed() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    harness.set_size(egui::vec2(1000.0, 700.0));
+    open_with_faces(&mut harness, "a.png");
+    harness.get_by_label("Unknown face: Ben?").click();
+    settle(&mut harness);
+    harness.run_steps(20);
+    harness.snapshot(common::snapshot_name("viewer_face_popup"));
+}
+
+#[test]
+fn req_031_15_people_page_looks_as_designed() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    harness.set_size(egui::vec2(1000.0, 700.0));
+    settle(&mut harness);
+    harness.get_by_label("Unknown faces").click();
+    settle(&mut harness);
+    harness.snapshot(common::snapshot_name("people_page"));
 }

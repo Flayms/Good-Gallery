@@ -31,6 +31,9 @@ pub trait FaceWork: Send {
         photo: &FacePhoto,
         faces: &[[[f32; 2]; 5]],
     ) -> Result<Vec<Vec<f32>>, WorkError>;
+
+    /// Nothing is left to do for now: what's only kept for the next question can go.
+    fn rest(&mut self) {}
 }
 
 #[derive(Debug, PartialEq)]
@@ -174,6 +177,8 @@ fn run(shared: &Shared, mut deps: FaceDeps) {
         if more {
             continue;
         }
+        // A large model takes hundreds of megabytes, which an idle search shouldn't hold.
+        deps.work.rest();
         let control = shared.lock();
         if !control.kicked && !control.shutdown {
             drop(
@@ -348,6 +353,12 @@ impl RunModels {
 }
 
 impl FaceWork for RunModels {
+    fn rest(&mut self) {
+        self.detectors.clear();
+        self.recognizers.clear();
+        self.photo = None;
+    }
+
     fn detect(&mut self, detector: &str, photo: &FacePhoto) -> Result<Vec<Detection>, WorkError> {
         self.detector(detector)?;
         self.decoded(photo)?;
@@ -572,6 +583,58 @@ mod tests {
         service.kick();
         service.wait_idle();
         assert_eq!(fake.recognized.load(Ordering::SeqCst), 2);
+    }
+
+    /// REQ-031-05, REQ-031-06: everything for real but the network: a model in the store, a photo stored on its side, and
+    /// the search finding its face where the upright photo shows it.
+    #[test]
+    fn req_031_06_finds_the_face_of_a_turned_photo_with_the_real_model() {
+        let data = tempfile::tempdir().unwrap();
+        let library = tempfile::tempdir().unwrap();
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../media/tests/fixtures/faces");
+        let store = FaceStore::in_data_folder(data.path());
+        let kind = ModelKind::Detect(DetectorFormat::YuNet);
+        let model = store
+            .add_file(
+                &fixtures.join("face_detection_yunet_2023mar.onnx"),
+                kind,
+                &|_| Ok(()),
+                &mut |_, _| true,
+            )
+            .unwrap();
+        // The pixels turned a quarter to the left, with the tag saying how to turn them back.
+        let upright = image::open(fixtures.join("astronaut.jpg")).unwrap();
+        upright.rotate270().save(library.path().join("turned.jpg")).unwrap();
+        let Some(exiftool) = media::exiftool::find_exiftool() else {
+            return;
+        };
+        let tagged = std::process::Command::new(exiftool)
+            .args(["-q", "-overwrite_original", "-Orientation#=6"])
+            .arg(library.path().join("turned.jpg"))
+            .status()
+            .unwrap();
+        assert!(tagged.success());
+
+        let path = data.path().join("gallery.db");
+        let conn = db::open(&path).unwrap();
+        libraries::insert(&conn, library.path().to_str().unwrap(), "Photos", LibraryStatus::Online).unwrap();
+        add_photo(&conn, "turned.jpg");
+        choose(&conn, faces::DETECTOR_KEY, &model.sha256);
+        let service = FaceService::start(FaceDeps {
+            conn: db::open(&path).unwrap(),
+            work: Box::new(RunModels::new(data.path(), None)),
+            is_reachable: Arc::new(|_| true),
+            on_change: Box::new(|| {}),
+        });
+        service.wait_idle();
+        assert_eq!(service.status().problem, None);
+
+        let found = faces::unknown_faces_on(&conn, 1, &model.sha256, "").unwrap();
+        assert_eq!(found.len(), 1, "{found:?}");
+        // By eye, her face's center is at about 225, 95 of the upright photo's 512 × 512 pixels.
+        let [x, y, w, h] = found[0].rect;
+        let (cx, cy) = ((x + w / 2.0) * 512.0, (y + h / 2.0) * 512.0);
+        assert!((cx - 225.0).abs() < 40.0 && (cy - 95.0).abs() < 40.0, "{cx}, {cy}");
     }
 
     #[test]

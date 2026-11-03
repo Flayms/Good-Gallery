@@ -5,6 +5,7 @@ use domain::face_models::{CATALOG, CatalogModel, DetectorFormat, InputStyle, Mod
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// A model on this computer.
 #[derive(Debug, Clone, PartialEq)]
@@ -167,7 +168,14 @@ impl FaceStore {
         check: &dyn Fn(&Path) -> Result<(), String>,
         progress: Progress,
     ) -> Result<StoredModel, StoreError> {
+        const CONNECT: Duration = Duration::from_secs(30);
         let response = ureq::get(url)
+            .config()
+            // A link that asked for https doesn't get redirected out of it.
+            .https_only(url.starts_with("https://"))
+            .timeout_connect(Some(CONNECT))
+            .timeout_recv_response(Some(CONNECT))
+            .build()
             .call()
             .map_err(|error| StoreError::Failed(format!("can't download: {error}")))?;
         let total = response
@@ -365,6 +373,21 @@ mod tests {
         let failed = store.download(&catalog_model(url, BODY_HASH), &mut |_, _| true);
         assert!(matches!(failed, Err(StoreError::Failed(_))), "{failed:?}");
         assert_eq!(leftovers(&store), 0);
+    }
+
+    /// REQ-031-02: the catalog's real links, over real TLS, give the published files. `cargo test -- --ignored`.
+    #[test]
+    #[ignore = "downloads from the internet"]
+    fn req_031_02_downloads_a_small_real_model_over_https() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FaceStore::in_data_folder(dir.path());
+        for name in ["YuNet", "RetinaFace (MobileNetV2)"] {
+            let model = CATALOG.iter().find(|model| model.name == name).unwrap();
+            let stored = store.download(model, &mut |_, _| true).unwrap();
+            assert_eq!(stored.sha256, model.sha256);
+            assert_eq!(std::fs::metadata(store.file(model.sha256)).unwrap().len(), model.bytes);
+        }
+        assert_eq!(store.models().len(), 2);
     }
 
     #[test]
