@@ -44,6 +44,8 @@ Both include exiftool, ffmpeg and libmpv. The downloads aren't code-signed yet, 
 
 Your index, settings and thumbnails live in `%APPDATA%\good-gallery`. Updates reuse it, and uninstalling leaves it in place.
 
+The app asks GitHub once a day whether there is a newer version and shows a notice if there is. Nothing is downloaded until you press _Update and restart_ (or use the release page, for the portable zip and on Linux). You can turn the check off in the settings.
+
 ### Linux
 
 On Ubuntu 24.04 or newer and on Fedora (x86-64, X11 or Wayland), download the package and install it, which also brings exiftool, ffmpeg and libmpv:

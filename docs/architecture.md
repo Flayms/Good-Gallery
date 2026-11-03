@@ -110,7 +110,7 @@ Platform code sits behind `cfg(windows)`, `cfg(target_os = "linux")` and `cfg(ta
 ## Conventions
 
 - **Errors:** `thiserror` enums in library crates, `anyhow` in `app` and `xtask`. **Logging:** `tracing`, to stderr and `logs/app.log`.
-- **Network:** the desktop app connects only to download a face model the user asked for (spec 032). The browser version sends nothing (REQ-019-12); `xtask/tests/no_network.rs` keeps it that way.
+- **Network:** the desktop app connects only for what the user allowed: the update check and download (spec 031), through the system's `curl`, and a face model they asked for (spec 032). The browser version sends nothing (REQ-019-12); `xtask/tests/no_network.rs` keeps it that way.
 - **Specs and tests:** every test that covers a REQ names it (`fn req_007_01_…` or a doc comment); `cargo xtask check-specs` checks it.
 - **Visual checks:** `egui_kittest` snapshots (`UPDATE_SNAPSHOTS=1`), and `cargo run -p app -- --screenshot <file.png>` for the real window with glass.
 - **Pinned UI crates:** egui, eframe, egui_kittest and wgpu are pinned to exact versions.

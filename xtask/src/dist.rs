@@ -410,6 +410,12 @@ mod tests {
     /// REQ-014-08, REQ-014-10: the release attaches setup.exe and the portable zip named after the version, the system
     /// and the architecture.
     #[test]
+    fn req_031_05_the_updater_downloads_the_file_the_release_has() {
+        let version = domain::update::Version::parse("1.2.3").unwrap();
+        assert_eq!(version.installer_name(), artifact_names("1.2.3").0);
+    }
+
+    #[test]
     fn req_014_10_names_say_the_system_and_the_architecture() {
         assert_eq!(
             artifact_names("1.2.3"),

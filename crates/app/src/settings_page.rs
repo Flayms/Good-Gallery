@@ -450,6 +450,8 @@ fn thumbnail_cache(ui: &mut egui::Ui, state: &mut AppState) {
 fn about(ui: &mut egui::Ui, state: &mut AppState) {
     section_title(ui, "About");
     let mut open = false;
+    let mut update = None;
+    let mut settings = state.settings;
     group(ui, |ui| {
         setting_row(
             ui,
@@ -462,7 +464,35 @@ fn about(ui: &mut egui::Ui, state: &mut AppState) {
                     .clicked();
             },
         );
+        // The browser version is always the latest (REQ-031-01).
+        if !crate::WEB {
+            divider(ui);
+            setting_row(
+                ui,
+                "Check for updates",
+                "Asks GitHub once a day whether there is a newer version. Nothing is downloaded until you choose to update.",
+                24.0,
+                |ui| {
+                    let on = settings.check_for_updates;
+                    ui.checkbox(&mut settings.check_for_updates, "").widget_info(|| {
+                        egui::WidgetInfo::selected(egui::Role::CheckBox, true, on, "Check for updates")
+                    });
+                },
+            );
+            if state.updates.phase != crate::updates::Phase::Unknown {
+                divider(ui);
+                Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
+                    update = crate::updates::offer(ui, &state.updates);
+                });
+            }
+        }
     });
+    if settings != state.settings {
+        state.update_settings(settings);
+    }
+    if let Some(update) = update {
+        state.answer_update(update, ui.ctx());
+    }
     if open {
         if crate::WEB {
             ui.ctx().open_url(egui::OpenUrl::new_tab(LATEST_RELEASE));

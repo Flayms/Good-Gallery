@@ -28,6 +28,8 @@ jobs:
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
+          # What release-cache.yml saves on main (REQ-014-14).
+          shared-key: release
           # A tag's cache can only be restored by the same tag, so saving it is wasted time.
           save-if: false
       - name: Install nfpm

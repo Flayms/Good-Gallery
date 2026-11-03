@@ -71,3 +71,87 @@ fn req_027_05_the_desktop_file_lists_every_indexed_format() {
         "install.sh drops the file argument"
     );
 }
+
+/// REQ-031-08: the installer waits for the app before it touches anything, and starts the new version.
+#[test]
+fn req_031_08_an_update_waits_for_the_app_and_restarts_it() {
+    let installer = read("packaging/windows/installer.nsi");
+    let section = &installer[installer.find("Section \"Install\"").unwrap()..];
+    let wait = section.find("Call WaitForApp").expect("the installer doesn't wait");
+    assert!(
+        wait < section.find("RMDir").unwrap(),
+        "it removes files before the app ended"
+    );
+    assert!(section.contains("Call RestartApp"));
+    assert!(
+        installer.contains("SetErrorLevel 2"),
+        "giving up has to look like a failure"
+    );
+    let smoke = read("packaging/smoke-test.ps1");
+    assert!(
+        smoke.contains("'/UPDATE'"),
+        "the smoke test doesn't update over a running app"
+    );
+}
+
+/// REQ-031-01: the Linux packages recommend what the update check needs.
+#[test]
+fn req_031_01_the_linux_packages_recommend_curl() {
+    assert_eq!(read("packaging/linux/nfpm.yaml").matches("- curl").count(), 2);
+}
+
+/// REQ-031-09: what the release's script signs, the app verifies. `openssl` makes a key like `new-update-key.sh` does.
+#[cfg(unix)]
+#[test]
+fn req_031_09_the_app_verifies_what_the_release_signs() {
+    use std::process::Command;
+    if Command::new("openssl").arg("version").output().is_err() {
+        assert!(std::env::var_os("GG_REQUIRE_HELPERS").is_none(), "openssl is missing");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let key = Command::new("openssl")
+        .args(["genpkey", "-algorithm", "ed25519"])
+        .output()
+        .unwrap();
+    assert!(key.status.success());
+    let key = String::from_utf8(key.stdout).unwrap();
+    let pem = dir.path().join("key.pem");
+    std::fs::write(&pem, &key).unwrap();
+    let public = Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "openssl pkey -in {} -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \\n'",
+            pem.display()
+        ))
+        .output()
+        .unwrap();
+    let public = String::from_utf8(public.stdout).unwrap();
+    let public_file = dir.path().join("public.txt");
+    std::fs::write(&public_file, &public).unwrap();
+
+    let name = "good-gallery-1.2.3-windows-x64-setup.exe";
+    let installer = dir.path().join(name);
+    std::fs::write(&installer, b"installer").unwrap();
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../packaging/sign-update.sh");
+    let run = |key: &str, public_file: &std::path::Path| {
+        Command::new("bash")
+            .arg(&script)
+            .arg(&installer)
+            .arg(public_file)
+            .env("UPDATE_SIGNING_KEY", key)
+            .output()
+            .unwrap()
+    };
+    let signed = run(&key, &public_file);
+    assert!(signed.status.success(), "{}", String::from_utf8_lossy(&signed.stderr));
+    let signature = std::fs::read(dir.path().join(format!("{name}.sig"))).unwrap();
+    assert!(media::update::verify(name, b"installer", &signature, &public));
+    assert!(!media::update::verify(name, b"replaced", &signature, &public));
+
+    // Without the key, or with another one, nothing gets signed.
+    assert!(!run("", &public_file).status.success());
+    let other = dir.path().join("other.txt");
+    std::fs::write(&other, "00".repeat(32)).unwrap();
+    assert!(!run(&key, &other).status.success());
+}

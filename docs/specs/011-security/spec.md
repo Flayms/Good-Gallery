@@ -63,10 +63,11 @@ Deprecated: face models are downloaded (spec 032). The browser version still sen
 - **Given** the app running
 - **When** it indexes, renders, searches or shows media
 - **Then** it opens no network connections of its own. Libraries on network shares are read through the operating system's file access only
+- **And** the one exception is the update check and download, which the system's `curl` makes and the user can turn off (REQ-031-10)
 
 ## Out of scope
 
-- Code signing and auto-updates (see #29, #28).
+- Code signing (see #29).
 - Protection against a malicious user with access to the user profile or the libraries.
 - Sandboxing the indexer (it needs file system access to read libraries).
 - Isolating crashes inside native decoders (C code) in a separate process; see the indexer decision in spec 002's plan.

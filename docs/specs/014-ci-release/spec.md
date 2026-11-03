@@ -92,11 +92,24 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 - **Then** it writes the new downloads under a temporary name and replaces the old ones as soon as they are free
 - **And** if they stay locked, it keeps the new file and says which file is locked and that `--out` writes elsewhere
 
+### REQ-014-14 · A release doesn't wait for itself
+
+- **Given** a pushed `vX.Y.Z` tag
+- **When** the release workflow runs
+- **Then** the checks, the Windows build and the Linux build run at the same time, and the release is published only after all of them passed
+- **And** the browser version goes live only after the release is published
+- **Given** dependencies unchanged since `main` last built the downloads
+- **When** the release workflow builds them
+- **Then** both builds reuse those compiled dependencies, and the release is published within 15 minutes
+- **Given** no such cache exists
+- **When** the release workflow runs
+- **Then** the release still succeeds, only slower
+
 ## Out of scope
 
 - Code signing (Windows SmartScreen warns about unsigned downloads). Free option for later: SignPath Foundation.
 - Keeping the portable version's data next to the executable: it uses the same user data folder as an installed app.
-- Auto-updates in the app.
+- Auto-updates in the app: spec 031.
 - Builds for macOS or Linux.
 - Pre-releases and release branches.
 
@@ -123,3 +136,4 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 | REQ-014-11 | `xtask/src/release.rs` › req_014_11_finds_the_versions_that_werent_published, req_014_11_release_notes_bring_the_unpublished_changes; `xtask/tests/workflows.rs` › release_publishes_both_downloads_after_the_checks; `cargo xtask release-notes v0.2.1 v0.1.2` on this repository lists 0.2.0's changes | pass |
 | REQ-014-12 | `crates/media/src/helpers.rs` › req_014_12_development_builds_find_the_fetched_helpers | pass |
 | REQ-014-13 | `xtask/src/dist.rs` › req_014_13_replaces_a_locked_download_once_it_is_free, req_014_13_names_a_download_that_stays_locked | pass |
+| REQ-014-14 | `xtask/tests/workflows.rs` › req_014_14_the_builds_run_side_by_side_and_publish_waits_for_them, req_014_14_main_warms_the_cache_the_release_builds_restore; the 15 minutes are measured by the next release | partial |

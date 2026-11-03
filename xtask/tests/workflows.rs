@@ -56,6 +56,8 @@ const DOCTESTS: &str = "cargo test --workspace --doc";
 fn only_main_saves_the_rust_cache() {
     for (name, save_if) in [
         ("ci.yml", "save-if: ${{ github.ref == 'refs/heads/main' }}"),
+        ("release-cache.yml", "save-if: ${{ github.ref == 'refs/heads/main' }}"),
+        ("windows-packages.yml", "save-if: false"),
         // A tag's cache can't be restored by any other ref.
         ("release.yml", "save-if: false"),
     ] {
@@ -97,8 +99,8 @@ fn release_publishes_both_downloads_after_the_checks() {
     assert!(release.contains("uses: ./.github/workflows/ci.yml"));
     assert!(release.contains("needs: checks"));
     // The Windows job; the Linux archive's job runs `cargo xtask dist` too, without NSIS.
-    let windows = &release[release.find("\n  release:").expect("no release job")..];
-    let commands = commands(windows);
+    let windows = workflow("windows-packages.yml");
+    let commands = commands(&windows);
     let dist = commands.iter().position(|line| *line == "cargo xtask dist");
     // windows-2025 images don't come with NSIS, and the installer can't be built without it.
     let nsis = commands.iter().position(|line| line.starts_with("choco install nsis"));
@@ -131,6 +133,71 @@ fn release_publishes_both_downloads_after_the_checks() {
     assert!(!release.contains("continue-on-error"));
 }
 
+/// REQ-014-14: the builds don't wait for the checks or for each other, and nothing goes out until all of them passed.
+#[test]
+fn req_014_14_the_builds_run_side_by_side_and_publish_waits_for_them() {
+    let release = workflow("release.yml");
+    let job = |from: &str, to: &str| {
+        let start = release.find(from).unwrap_or_else(|| panic!("no job {from}"));
+        let end = release[start..].find(to).unwrap_or_else(|| panic!("no job {to}"));
+        release[start..start + end].to_string()
+    };
+    assert!(
+        !job("\n  linux:", "\n  web:").contains("needs:"),
+        "Linux waits for another job"
+    );
+    assert!(
+        !job("\n  windows:", "\n  publish:").contains("needs:"),
+        "Windows waits for another job"
+    );
+    let publish = &release[release.find("\n  publish:").expect("no publish job")..];
+    assert!(publish.contains("needs: [checks, linux, windows, web]"));
+    assert!(publish.contains("gh release create"));
+    assert!(job("\n  pages:", "\n  windows:").contains("needs: [web, publish]"));
+}
+
+/// REQ-014-14: `main` builds exactly what the release builds, into the cache the release's build jobs restore. A tag
+/// can't restore what another tag saved, and the cache key holds the job's name unless a shared key replaces it.
+#[test]
+fn req_014_14_main_warms_the_cache_the_release_builds_restore() {
+    const SHARED_KEY: &str = "shared-key: release";
+    let windows = workflow("windows-packages.yml");
+    assert!(
+        windows.contains(SHARED_KEY),
+        "the Windows build doesn't restore the cache"
+    );
+    let packages = workflow("linux-packages.yml");
+    assert!(
+        packages.contains(SHARED_KEY),
+        "the Linux build doesn't restore the cache"
+    );
+
+    let warm = workflow("release-cache.yml");
+    assert!(warm.contains(SHARED_KEY));
+    assert!(warm.contains("save-if: ${{ github.ref == 'refs/heads/main' }}"));
+    // Both systems the release builds on, and the image the Linux downloads need (REQ-018-12).
+    assert!(packages.contains("runs-on: ubuntu-24.04"));
+    assert!(warm.contains("os: [windows-latest, ubuntu-24.04]"));
+    // When the dependencies change, and before GitHub evicts a cache unused for 7 days.
+    for part in ["Cargo.lock", "rust-toolchain.toml", "schedule:", "workflow_dispatch:"] {
+        assert!(warm.contains(part), "release-cache.yml lacks {part}");
+    }
+    // rust-cache hashes the CARGO variables into the key, so these have to match the release's.
+    assert!(warm.contains("CARGO_TERM_COLOR: always"));
+    // What `cargo xtask` compiles, then what `cargo xtask dist` builds.
+    let commands = commands(&warm);
+    assert!(commands.contains(&"cargo build -p xtask"), "{commands:?}");
+    assert!(
+        commands.contains(&"cargo build --release --locked -p app --features packaged"),
+        "{commands:?}"
+    );
+    let dist = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/dist.rs")).unwrap();
+    assert!(
+        dist.contains(r#"["build", "--release", "--locked", "-p", "app", "--features", "packaged"]"#),
+        "cargo xtask dist builds something else than release-cache.yml warms"
+    );
+}
+
 /// REQ-018-01, REQ-018-09: CI checks Linux as well as Windows, and the release builds the Linux archive there.
 #[test]
 fn req_018_01_req_018_09_ci_and_the_release_cover_linux() {
@@ -152,9 +219,9 @@ fn req_018_01_req_018_09_ci_and_the_release_cover_linux() {
     }
     let release = workflow("release.yml");
     let linux = &release[release.find("  linux:").expect("no linux job")..release.find("  web:").unwrap()];
-    assert!(linux.contains("uses: ./.github/workflows/linux-packages.yml") && linux.contains("needs: checks"));
+    assert!(linux.contains("uses: ./.github/workflows/linux-packages.yml"));
     assert!(commands(&workflow("linux-packages.yml")).contains(&"cargo xtask dist"));
-    assert!(release.contains("needs: [checks, linux, web]"));
+    assert!(release.contains("needs: [checks, linux, windows, web]"));
 }
 
 /// REQ-019-14: CI builds the page and runs its browser tests; a release publishes it to GitHub Pages.
@@ -176,7 +243,7 @@ fn req_019_14_ci_tests_the_page_and_the_release_publishes_it() {
     let release = workflow("release.yml");
     let pages = &release[release.find("\n  pages:").expect("release.yml has no pages job")..];
     for step in [
-        "needs: web",
+        "needs: [web, publish]",
         "actions/download-artifact",
         "actions/upload-pages-artifact",
         "actions/deploy-pages",
@@ -208,7 +275,8 @@ fn req_018_12_the_release_tests_and_attaches_the_packages() {
         "good-gallery-$VERSION-linux-x64.rpm",
     ] {
         assert!(create.contains(part), "the release doesn't attach {part}");
-        assert!(release.contains(&format!("**{part}**")), "the notes don't list {part}");
+        let notes = workflow("windows-packages.yml");
+        assert!(notes.contains(&format!("**{part}**")), "the notes don't list {part}");
     }
 }
 
@@ -227,9 +295,9 @@ fn req_019_16_the_release_attaches_the_page_as_a_zip() {
     ] {
         assert!(web.contains(part), "release.yml's web job lacks {part}");
     }
-    let publish = &release[release.find("\n  release:").expect("no release job")..];
+    let publish = &release[release.find("\n  publish:").expect("no publish job")..];
     assert!(
-        publish.contains("needs: [checks, linux, web]"),
+        publish.contains("needs: [checks, linux, windows, web]"),
         "the release doesn't wait for the zip"
     );
     let create = &publish[publish.find("gh release create").expect("no gh release create")..];
@@ -238,7 +306,30 @@ fn req_019_16_the_release_attaches_the_page_as_a_zip() {
         "the release doesn't attach the zip"
     );
     assert!(
-        publish.contains("**good-gallery-$VERSION-web.zip**"),
+        workflow("windows-packages.yml").contains("**good-gallery-$VERSION-web.zip**"),
         "the notes' download table doesn't list the zip"
     );
+}
+
+/// REQ-031-09: a release attaches the installer's signature, made after the checks, with the secret key.
+#[test]
+fn req_031_09_the_release_signs_the_installer() {
+    let release = workflow("release.yml");
+    let publish = &release[release.find("\n  publish:").expect("no publish job")..];
+    let sign = publish
+        .find("packaging/sign-update.sh")
+        .expect("the release doesn't sign");
+    let create = publish.find("gh release create").expect("no gh release create");
+    assert!(sign < create, "the release is published before it is signed");
+    assert!(publish.contains("UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}"));
+    assert!(publish[create..].contains("good-gallery-$VERSION-windows-x64-setup.exe.sig"));
+}
+
+/// REQ-031-08: pull requests that touch the installer run its smoke test, which updates over a running app.
+#[test]
+fn req_031_08_the_installer_is_tested_before_a_release() {
+    let packages = workflow("windows-packages.yml");
+    for part in ["pull_request:", "packaging/windows/**", "smoke-test.ps1"] {
+        assert!(packages.contains(part), "windows-packages.yml lacks {part}");
+    }
 }

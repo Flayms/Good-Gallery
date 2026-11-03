@@ -4,6 +4,7 @@
 ;   SOURCE   the staged package folder (good-gallery.exe, helpers, licenses)
 ;   OUTFILE  the installer to write
 ;   ICON     the app icon (.ico)
+; The app starts it as `/S /UPDATE /D=<folder>` (REQ-031-08): it waits for the app to close and starts the new version.
 ; Uninstalling removes the program, its shortcut and its registry entry, never the data folder
 ; (%APPDATA%\good-gallery: index, settings, thumbnails, logs).
 
@@ -102,7 +103,44 @@ FunctionEnd
   DeleteRegValue HKCU "Software\Classes\${EXT}\OpenWithProgids" "${PROGID}"
 !macroend
 
+; An update started by the app, which is closing: nothing is touched until the running executable is free, for at most
+; 30 seconds (REQ-031-08). The old version stays if it never is.
+Function WaitForApp
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "/UPDATE" $1
+  IfErrors done
+  StrCpy $2 0
+  retry:
+    IfFileExists "$INSTDIR\${EXE}" 0 done
+    ClearErrors
+    FileOpen $1 "$INSTDIR\${EXE}" a
+    IfErrors locked
+    FileClose $1
+    Goto done
+  locked:
+    IntOp $2 $2 + 1
+    IntCmp $2 60 0 0 give_up
+    Sleep 500
+    Goto retry
+  give_up:
+    SetErrorLevel 2
+    Quit
+  done:
+FunctionEnd
+
+; Starts the new version after an update (REQ-031-08).
+Function RestartApp
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "/UPDATE" $1
+  IfErrors done
+  Exec '"$INSTDIR\${EXE}"'
+  done:
+FunctionEnd
+
 Section "Install"
+  Call WaitForApp
   SetOutPath "$INSTDIR"
   ; An update replaces the helper folders as a whole, so no file of an older version stays behind. The folder is the
   ; app's own (OwnFolder).
@@ -132,6 +170,7 @@ Section "Install"
   !insertmacro ForEachExtension OpenWith
   ; SHCNE_ASSOCCHANGED: Explorer reads the associations again.
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+  Call RestartApp
 SectionEnd
 
 Section "Uninstall"
