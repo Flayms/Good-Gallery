@@ -1,6 +1,81 @@
 # Changelog
 
 All notable changes to Good Gallery. Versions follow [Semantic Versioning](https://semver.org), entries are generated from [Conventional Commits](https://www.conventionalcommits.org).
+## [0.4.0](https://github.com/Flayms/Good-Gallery/releases/tag/v0.4.0) · 2026-11-03
+
+### ✨ Features
+
+- **design:** Fill the stars of a rating (#92) ([`2ec8e8d`](https://github.com/Flayms/Good-Gallery/commit/2ec8e8d1a204ce51eb17fe6394f7e61097c17a94))
+- **viewer:** Show embedded face regions on the photo (#93) ([`93a9c25`](https://github.com/Flayms/Good-Gallery/commit/93a9c2583809a5e86940bdf3be8f760cf905f068))
+- **linux:** Follow the desktop's caption button layout (#95) ([`2415ee4`](https://github.com/Flayms/Good-Gallery/commit/2415ee4ee559b0d6435533688ac10227f3466a78))
+- **video:** Time video to the measured display rate on Linux (#97) ([`7af502c`](https://github.com/Flayms/Good-Gallery/commit/7af502ce95f44c4c036dba7eb889de4624110d56))
+- **indexing:** Read unreadable files again and list them in the toolbar (#105) ([`d717705`](https://github.com/Flayms/Good-Gallery/commit/d7177056ff15752170f22ae5792d85c4656414ae))
+- **viewer:** Keep the titles of details an item lacks in the info panel (#114) ([`572bc65`](https://github.com/Flayms/Good-Gallery/commit/572bc65601df92040c8b92b1f024fd0effb9a22c))
+- **edit:** Add a hue slider to the color section (#115) ([`44563f2`](https://github.com/Flayms/Good-Gallery/commit/44563f22b92ac9be3ea884ebc8ab77a00e55e5c8))
+- **viewer:** Rate items with 1–5 and the info panel's stars (#120) ([`46a06a6`](https://github.com/Flayms/Good-Gallery/commit/46a06a66e299363a33fbef349fe46e23f92e0f31))
+- **gallery:** Select several items and rate them at once (#123) ([`dc5b67a`](https://github.com/Flayms/Good-Gallery/commit/dc5b67af7102153cf2862b7b09859935901eec03))
+- **viewer:** Add and remove tags, People and Places in the info views (#124) ([`1bdf52b`](https://github.com/Flayms/Good-Gallery/commit/1bdf52be81583581d3608b2c3213a083acdc0f63))
+- **gallery:** Tag the selection (#125) ([`88c0de6`](https://github.com/Flayms/Good-Gallery/commit/88c0de6c848b6f0ada4b54b1f63f2687badc25b2))
+- **web:** Fit the layout to narrow screens such as phones (#127) ([`5ddbcaa`](https://github.com/Flayms/Good-Gallery/commit/5ddbcaacf8e07ddb08b26cbe083486f906030aaa))
+- **app:** Open photos and videos with Good Gallery from the file manager (#129) ([`3a83457`](https://github.com/Flayms/Good-Gallery/commit/3a83457e8930145a552561568a9957bcfd837c00))
+- **edit:** Film looks with strength and grain (#131) ([`df88120`](https://github.com/Flayms/Good-Gallery/commit/df8812058d5210a5bffd6aee5b6527e154834e12))
+- **web:** Attach the page to releases as a zip for self-hosting (#132) ([`71ea63c`](https://github.com/Flayms/Good-Gallery/commit/71ea63c0d29e815d59e6b1ce834a49da8ebd5437))
+- **settings:** Add a Reduce transparency setting (#133) ([`3a7508f`](https://github.com/Flayms/Good-Gallery/commit/3a7508f21b1e5bca8a79523d4e28c5532e3dfb7f))
+- **edit:** Save crops and quarter turns, with face regions moved along (#134) ([`982c8c3`](https://github.com/Flayms/Good-Gallery/commit/982c8c31c9d7d447afbd368b8dbe9853c861ea9f))
+- **linux:** Build .deb and .rpm packages for releases (#135) ([`80620b8`](https://github.com/Flayms/Good-Gallery/commit/80620b8bf85cf1b4564dfa49eb8f8bfb258adfba))
+- **edit:** Rotate photos in the editor by quarter turns (#137) ([`31277a5`](https://github.com/Flayms/Good-Gallery/commit/31277a588511456e808808041c451df2445076f1))
+- **edit:** Crop photos in the editor with a frame and fixed shapes (#138) ([`b15749d`](https://github.com/Flayms/Good-Gallery/commit/b15749dba00957e48dba8d4e00be233a18825721))
+- **settings:** Show the version and a link to the latest release (#141) ([`7678691`](https://github.com/Flayms/Good-Gallery/commit/7678691525f5da92921743d5c557aa7268aa71f1))
+- **edit:** Film grain for looks, and a Superia 200 look (#142) ([`a558b85`](https://github.com/Flayms/Good-Gallery/commit/a558b85440a4ce60f7d832a46a0234dfc8c2aefd))
+- **xtask:** Measure the glass pass with the viewer open and glass off (#143) ([`de355f5`](https://github.com/Flayms/Good-Gallery/commit/de355f5a07a3330bf4b49363287610f92f820dd6))
+- **edit:** Looks change colors per hue (#144) ([`3aea3da`](https://github.com/Flayms/Good-Gallery/commit/3aea3dad9ee5471baf2ae88dcdd00b97faf6a733))
+- **edit:** Bright lights glow red in film looks (#145) ([`50d5311`](https://github.com/Flayms/Good-Gallery/commit/50d5311da596ff99fa5a642d535efae3eee0d84a))
+- **edit:** Gradient, luminance and color masks (#147) ([`18f2231`](https://github.com/Flayms/Good-Gallery/commit/18f22314041ad18e2b332321cff1a599f65f66cd))
+- **edit:** Masks made of several shapes, with the subject among them (#148) ([`a6d094e`](https://github.com/Flayms/Good-Gallery/commit/a6d094e3c121d0a9e7c56c19448bb773ea8889b5))
+- **edit:** Brush and freeform masks (#149) ([`132db5d`](https://github.com/Flayms/Good-Gallery/commit/132db5d206355328b7526456153afd532eb50dff))
+- **edit:** What to edit comes first, and a mask has one shape (#154) ([`df71f0d`](https://github.com/Flayms/Good-Gallery/commit/df71f0d9235e8b26079a188d1f359ebcca52a334))
+
+### 🐛 Bug fixes
+
+- **release:** List the changes of unpublished versions in the release notes (#82) ([`bc37189`](https://github.com/Flayms/Good-Gallery/commit/bc3718922e4849aec4a95921231ca39102e69a42))
+- **indexer:** Give a reconnecting network share time before it counts as offline (#83) ([`42b3d28`](https://github.com/Flayms/Good-Gallery/commit/42b3d28b999912b7471870a06629813ba53ac149))
+- **viewer:** Let Tab move focus into the viewer and its filmstrip (#84) ([`42db6b5`](https://github.com/Flayms/Good-Gallery/commit/42db6b5fb2cb22cf2b962d8a433c5fb3cd21316a))
+- **metadata:** Turn photos oriented only in XMP upright (#85) ([`4f2d971`](https://github.com/Flayms/Good-Gallery/commit/4f2d97167013a60263baf97c70f6d50f0d4186ab))
+- **thumbnails:** Retry renames on Windows while Defender holds the file (#86) ([`071fd9e`](https://github.com/Flayms/Good-Gallery/commit/071fd9e7086d184284205729ffdf7b7111db90e8))
+- **design:** Make the date picker popups glass (#87) ([`92ea2de`](https://github.com/Flayms/Good-Gallery/commit/92ea2de288c89e9890d4a90a0b0e521bf231bccc))
+- **viewer:** Blur the photo under the viewer's chrome and menus (#88) ([`fc6cca8`](https://github.com/Flayms/Good-Gallery/commit/fc6cca8cc7bc4c8c9ac6aaeda05f137342a3fdaf))
+- **dist:** Replace downloads that another process still holds (#119) ([`29b98e9`](https://github.com/Flayms/Good-Gallery/commit/29b98e9c7831eae7d0cca2d0d712b38126f7d76b))
+- **video:** Keep libmpv loaded, and wait out a toast in the web test (#122) ([`de65299`](https://github.com/Flayms/Good-Gallery/commit/de652992482de741621b80a286b53891f5d3de18))
+- **media:** Never rename over a library file, and read writes back (#140) (#146) ([`ec8ebf7`](https://github.com/Flayms/Good-Gallery/commit/ec8ebf77bbba9e6b718ffff32d3a806d580d608f))
+- **viewer:** Keep showing an item that leaves the search (#150) (#153) ([`bc49670`](https://github.com/Flayms/Good-Gallery/commit/bc4967035e4ecebbfbea192037c46cc81b7726cd))
+- **edit:** Show the saved file until the subject is found again (#151) (#156) ([`557cc8a`](https://github.com/Flayms/Good-Gallery/commit/557cc8aaa4114b494a320fa59a927437023bd6c7))
+
+### ⚡ Performance
+
+- **search:** Drive broad tag and file name searches by their matches (#89) ([`c205bb0`](https://github.com/Flayms/Good-Gallery/commit/c205bb0f0c94982f125ea10f0e5fac6a562d1fb9))
+- **search:** Meet the search speed budget, with its own for broad results (#94) ([`9b38540`](https://github.com/Flayms/Good-Gallery/commit/9b38540318b339bb931f82c954c0995c5005a6b3))
+- **thumbnails:** Render thumbnails below the UI's priority (#106) ([`3b657d4`](https://github.com/Flayms/Good-Gallery/commit/3b657d421f9bfe470341df9f66201dc0a3882785))
+- **edit:** Open editing at once with the viewer's original (#113) ([`018395c`](https://github.com/Flayms/Good-Gallery/commit/018395c18cf6a8e4c7d77d880be603ac4bfba4e9))
+
+### 📝 Documentation
+
+- Tidy up the known pitfalls (#104) ([`4e24672`](https://github.com/Flayms/Good-Gallery/commit/4e2467287f64f51e4b6d398ba270d8be15b08dfc))
+- Sort the known pitfalls into notes and issues to fix (#111) ([`461f920`](https://github.com/Flayms/Good-Gallery/commit/461f920de5e0b0a283596c953ba72b75e33b21e5))
+- Rewrite the architecture as an overview, decisions into the plans (#128) ([`1cd36fe`](https://github.com/Flayms/Good-Gallery/commit/1cd36fe4c92d00472e4f1421eacc99ff93807d76))
+- Record the glass pass cost and the ICC profile count (#14, #22) (#155) ([`77cab66`](https://github.com/Flayms/Good-Gallery/commit/77cab660c6f2decb88132858117474d0ff34d717))
+
+### 🔧 Maintenance
+
+- **indexing:** Cover folders that can't be listed (REQ-002-11) (#91) ([`da0f57f`](https://github.com/Flayms/Good-Gallery/commit/da0f57ffd55ad7b3973633b0d6a1ff1c8bcfb100))
+- **xtask:** Add cargo xtask icons (#100) ([`11c3d56`](https://github.com/Flayms/Good-Gallery/commit/11c3d560818ed9a64bf05089b1a9bc7ddc501f46))
+- Rebuild workspace crates when another worktree built into the shared target (#112) ([`cab2f11`](https://github.com/Flayms/Good-Gallery/commit/cab2f11150c5f6b581f1b462fc348c5edfa4d9aa))
+- **startup:** Start once on an empty data folder (#116) ([`b2876af`](https://github.com/Flayms/Good-Gallery/commit/b2876af50358cefbc97230e209f8365a6360c96f))
+- **ui:** Keep fixture folders under /tmp whatever TMPDIR is (#117) ([`6d36ee8`](https://github.com/Flayms/Good-Gallery/commit/6d36ee8ee48fa6a59c0862c5a8f840bc32ea5e3f))
+- **helpers:** Find fetched helpers in development builds (#118) ([`9317653`](https://github.com/Flayms/Good-Gallery/commit/93176531d1edd5031a689fe7837f3837b2cf88de))
+- **ui:** Line up the Linux caption buttons in snapshots as in the app (#126) ([`3f739f3`](https://github.com/Flayms/Good-Gallery/commit/3f739f30ea8221503cf9e12be7df0ddb4cf714a3))
+- **web:** Update the narrow-screen snapshots for the whole-window harness (#130) ([`8ae51b8`](https://github.com/Flayms/Good-Gallery/commit/8ae51b88d7bb4d5bc16b6eb952228a6c9dad7544))
+
+**Full changelog:** [v0.3.0...v0.4.0](https://github.com/Flayms/Good-Gallery/compare/v0.3.0...v0.4.0)
 ## [0.3.0](https://github.com/Flayms/Good-Gallery/releases/tag/v0.3.0) · 2026-10-31
 
 ### ✨ Features
