@@ -119,6 +119,7 @@ fn req_010_01_shows_the_defaults_and_keeps_changes_across_restarts() {
             appearance: domain::appearance::Appearance::System,
             mtime_on_save: domain::edit::MtimeOnSave::Keep,
             reduce_transparency: false,
+            check_for_updates: true,
         }
     );
 }

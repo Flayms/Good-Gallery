@@ -56,6 +56,26 @@ foreach ($helper in 'exiftool\exiftool.exe', 'ffmpeg\ffmpeg.exe', 'mpv\libmpv-2.
 }
 Assert (-not ($log -match ' ERROR ')) 'the log has no errors'
 
+# An update while the app runs (REQ-031-08): the installer waits for the app to end, then starts the new version.
+$running = Start-Process $exe -PassThru -ArgumentList '--data-dir', "`"$DataDir`""
+Start-Sleep -Seconds 5
+$update = Start-Process $Installer -ArgumentList '/S', '/UPDATE', "/D=$target" -PassThru
+Start-Sleep -Seconds 3
+Assert (-not $update.HasExited) 'the update waits for the running app'
+$running.Kill()
+$running.WaitForExit()
+if (-not $update.WaitForExit(120000)) { throw 'Smoke test failed: the update did not finish within 2 minutes' }
+Assert ($update.ExitCode -eq 0) "the update exits with 0 (got $($update.ExitCode))"
+$restarted = $null
+foreach ($attempt in 1..20) {
+    $restarted = Get-Process good-gallery -ErrorAction SilentlyContinue
+    if ($restarted) { break }
+    Start-Sleep -Milliseconds 500
+}
+Assert ([bool]$restarted) 'the update starts the new version'
+$restarted | Stop-Process -Force
+$restarted | Wait-Process -ErrorAction SilentlyContinue
+
 # _?= keeps the uninstaller in place and makes it wait (it copies itself to a temp folder otherwise).
 $uninstaller = Join-Path $target 'Uninstall Good Gallery.exe'
 $uninstall = Start-Process $uninstaller -ArgumentList '/S', "_?=$target" -Wait -PassThru

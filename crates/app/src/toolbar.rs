@@ -29,6 +29,8 @@ pub struct Asked {
     pub show_sidebar: bool,
     /// _Read again_ in the list of unreadable files (REQ-002-17).
     pub read_again: Option<ReadAgain>,
+    /// _Update and restart_ or _See what's new_ in the update's menu (REQ-031-04).
+    pub update: Option<crate::updates::Asked>,
 }
 
 /// Draws the toolbar over the top of `area`; without a gallery (no libraries yet) it stays empty.
@@ -39,6 +41,7 @@ pub fn show(
     bar_state: &mut SearchBar,
     sidebar_hidden: bool,
     unreadable: &Unreadable,
+    updates: &crate::updates::Updates,
 ) -> Asked {
     let bar = Rect::from_min_size(area.min, vec2(area.width(), TOOLBAR_HEIGHT));
     // Tiles scrolled under the bar don't react to the pointer; its empty space moves the window.
@@ -68,6 +71,10 @@ pub fn show(
             if let Some(gallery) = gallery.as_deref_mut() {
                 view_button(ui, gallery);
                 filters_button(ui, gallery);
+            }
+            // Also without a gallery: the first thing a new install could show.
+            asked.update = crate::updates::notice(ui, updates);
+            if gallery.is_some() {
                 asked.read_again = crate::unreadable::notice(ui, unreadable);
                 ui.add_space(8.0);
             }

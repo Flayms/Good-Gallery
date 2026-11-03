@@ -38,6 +38,7 @@ icons! {
     ChevronRight => "chevron-right",
     ChevronUp => "chevron-up",
     Circle => "circle",
+    Download => "download",
     FileSearch => "file-search",
     File => "file",
     Film => "film",

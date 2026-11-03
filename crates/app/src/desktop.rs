@@ -674,6 +674,10 @@ fn run(options: Options) -> anyhow::Result<()> {
             if single {
                 state = state.with_open_requests(watch_open_requests(options.data_dir.clone(), cc.egui_ctx.clone()));
             }
+            // Not for development builds and automated runs, which must not reach out (REQ-031-01).
+            if cfg!(feature = "packaged") && !automated {
+                state = state.with_updater(Arc::new(app::updates::GitHub::new(options.data_dir.join("updates"))));
+            }
             if let Some(file) = options.open.clone() {
                 state.open_file(file);
             }

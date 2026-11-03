@@ -127,6 +127,27 @@ fn req_011_11_the_app_has_no_network_code() {
     }
 }
 
+/// REQ-031-10: the one connection is the system's `curl`, started from one file.
+#[test]
+fn req_031_10_only_the_updater_starts_curl() {
+    let mut files = Vec::new();
+    for krate in ["domain", "db", "media", "meta", "indexer", "app"] {
+        sources(&workspace().join("crates").join(krate).join("src"), &mut files);
+    }
+    let updater = workspace().join("crates/media/src/update.rs");
+    assert!(
+        std::fs::read_to_string(&updater)
+            .unwrap()
+            .contains(r#"PathBuf::from("curl")"#)
+    );
+    for file in files.iter().filter(|file| **file != updater) {
+        let text = std::fs::read_to_string(file).unwrap();
+        for program in ["\"curl", "curl.exe"] {
+            assert!(!text.contains(program), "{} starts curl", file.display());
+        }
+    }
+}
+
 /// `web-sys` features that make requests or open connections.
 const NETWORK_WEB_APIS: [&str; 9] = [
     "Request",

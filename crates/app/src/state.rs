@@ -272,6 +272,10 @@ struct Written {
 /// some never happen there.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 enum Event {
+    /// The latest published version, or `None` if the check failed (REQ-031-03).
+    UpdateChecked(Option<domain::update::Version>),
+    /// The installer runs, or why it doesn't (REQ-031-05, REQ-031-06).
+    UpdateInstalled(Result<(), String>),
     LibraryAdded(Result<Library, String>),
     /// The browser's folder picker closed: the library it added or made readable again, or `None` when cancelled
     /// (REQ-019-02, REQ-019-09).
@@ -350,6 +354,8 @@ pub struct AppState {
     /// The media item whose details the info sheet beside the gallery shows (REQ-009-11).
     pub info_sheet: Option<i64>,
     pub file_manager: Arc<dyn FileManager>,
+    /// A newer version, if there is one (spec 031).
+    pub updates: crate::updates::Updates,
     /// Loads the viewer's originals; made with egui textures on first use unless set with [`Self::with_originals`].
     pub originals: Option<crate::originals::Originals>,
     /// Plays the viewer's videos (REQ-009-06); unavailable unless set with [`Self::with_videos`].
@@ -457,6 +463,9 @@ impl AppState {
             return;
         }
         let old = std::mem::replace(&mut self.settings, settings);
+        if old.check_for_updates != settings.check_for_updates {
+            self.updates.enabled_changed();
+        }
         let Some(targets) = &self.settings_targets else { return };
         if old.quick_check_interval_minutes != settings.quick_check_interval_minutes {
             targets.set_quick_check_interval(settings.quick_check_interval_minutes);
@@ -521,14 +530,57 @@ impl AppState {
     }
 
     /// Opens `url` in the default browser, or says why it can't (REQ-010-07).
-    pub fn open_in_browser(&mut self, url: &'static str) {
+    pub fn open_in_browser(&mut self, url: impl Into<String>) {
         let file_manager = self.file_manager.clone();
+        let url = url.into();
         self.spawn(move || {
-            Event::ExplorerFailed(file_manager.open_in_browser(url).err().map(|error| {
+            Event::ExplorerFailed(file_manager.open_in_browser(&url).err().map(|error| {
                 tracing::error!("can't open {url}: {error}");
                 format!("Couldn't open the browser: {error}")
             }))
         });
+    }
+
+    /// Checks for updates through `updater` (REQ-031-01).
+    pub fn with_updater(mut self, updater: Arc<dyn crate::updates::Updater>) -> Self {
+        self.updates = crate::updates::Updates::new(updater);
+        self
+    }
+
+    /// Asks for the latest version when it is due, without blocking (REQ-031-01).
+    fn check_for_updates(&mut self) {
+        if !self
+            .updates
+            .start_check(self.settings.check_for_updates, Instant::now())
+        {
+            return;
+        }
+        let Some(updater) = self.updates.updater() else { return };
+        self.spawn(move || {
+            Event::UpdateChecked(
+                updater
+                    .latest()
+                    .map_err(|error| tracing::info!("update check: {error}"))
+                    .ok(),
+            )
+        });
+    }
+
+    /// The user asked to see the update, or to install it (REQ-031-04, REQ-031-05).
+    pub fn answer_update(&mut self, asked: crate::updates::Asked, ctx: &eframe::egui::Context) {
+        use crate::updates::{Asked, Phase};
+        let Phase::Available(version) = self.updates.phase else {
+            return;
+        };
+        match asked {
+            Asked::SeeWhatsNew if crate::WEB => ctx.open_url(eframe::egui::OpenUrl::new_tab(version.release_url())),
+            Asked::SeeWhatsNew => self.open_in_browser(version.release_url()),
+            Asked::Install => {
+                let Some(updater) = self.updates.updater() else { return };
+                self.updates.phase = Phase::Installing(version);
+                self.spawn(move || Event::UpdateInstalled(updater.install(&version)));
+            }
+        }
     }
 
     /// The file of the media item at gallery position `index`, if its data is loaded.
@@ -959,6 +1011,7 @@ impl AppState {
             viewer: None,
             info_sheet: None,
             file_manager: Arc::new(Explorer),
+            updates: Default::default(),
             originals: None,
             videos: crate::video::Videos::default(),
             settings: Default::default(),
@@ -1169,6 +1222,7 @@ impl AppState {
 
     /// Applies finished background jobs. Called every frame.
     pub fn poll(&mut self) {
+        self.check_for_updates();
         while let Ok(event) = self.events.1.try_recv() {
             self.apply(event);
         }
@@ -1301,6 +1355,20 @@ impl AppState {
                 self.settings_page.picking = false;
                 if let Some(folder) = folder {
                     self.add_library(folder.to_string_lossy().into_owned());
+                }
+            }
+            Event::UpdateChecked(latest) => self.updates.checked(latest, self.settings.check_for_updates),
+            Event::UpdateInstalled(result) => {
+                use crate::updates::Phase;
+                match result {
+                    Ok(()) => self.updates.close = true,
+                    Err(error) => {
+                        tracing::error!("can't install the update: {error}");
+                        self.toasts.error(format!("Couldn't install the update: {error}"));
+                        if let Phase::Installing(version) = self.updates.phase {
+                            self.updates.phase = Phase::Available(version);
+                        }
+                    }
                 }
             }
             Event::ExplorerFailed(error) => {

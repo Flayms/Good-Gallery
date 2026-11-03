@@ -109,7 +109,7 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 
 - Code signing (Windows SmartScreen warns about unsigned downloads). Free option for later: SignPath Foundation.
 - Keeping the portable version's data next to the executable: it uses the same user data folder as an installed app.
-- Auto-updates in the app.
+- Auto-updates in the app: spec 031.
 - Builds for macOS or Linux.
 - Pre-releases and release branches.
 
