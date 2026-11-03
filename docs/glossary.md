@@ -40,7 +40,7 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Index**            | The local database of libraries, media items, folders and tags. Lives in the user profile, separate from the libraries.                                                         |
 | **Indexer**          | The background threads that scan libraries, reads metadata and renders thumbnails.                                                                                          |
-| **Scan**             | One sync of a library with the index. At most one scan runs at a time. Further scans wait in the **scan queue**, one per library.                                              |
+| **Scan**             | One sync of a library with the index. At most one scan runs at a time. Further scans wait in the **scan queue**, one per library; a scan of files the user waits for goes first and pauses a running one.                                              |
 | **Full scan**        | Lists every folder and checks every file. Runs when a library is added, on manual _Rescan_, and once after a metadata version change. Shown as _Indexing_.                       |
 | **Quick scan**       | Only lists folders whose contents (added, removed or renamed entries) changed since the last scan. Runs at startup and periodically. Shown as _Checking_.                    |
 | **Changes scan**     | Checks only the paths that the watcher reported.                                                                                                                             |

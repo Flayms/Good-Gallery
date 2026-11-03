@@ -28,6 +28,8 @@ pub struct RecordedScans {
     pub scans: Mutex<Vec<(i64, ScanKind)>>,
     /// Changes scans of named files, which are also recorded in `scans`.
     pub paths: Mutex<Vec<(i64, Vec<String>)>>,
+    /// Changes scans that go ahead of the others (REQ-002-18), which are also recorded in `paths`.
+    pub first: Mutex<Vec<(i64, Vec<String>)>>,
     pub removed: Mutex<Vec<i64>>,
 }
 
@@ -39,6 +41,11 @@ impl ScanRequests for RecordedScans {
     fn request_paths(&self, library: i64, paths: Vec<String>) {
         self.paths.lock().unwrap().push((library, paths));
         self.request_scan(library, ScanKind::Changes);
+    }
+
+    fn request_paths_first(&self, library: i64, paths: Vec<String>) {
+        self.first.lock().unwrap().push((library, paths.clone()));
+        self.request_paths(library, paths);
     }
 
     fn remove_library(&self, library: i64) {

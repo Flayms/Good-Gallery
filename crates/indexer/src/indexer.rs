@@ -43,12 +43,16 @@ pub fn merge_scopes(a: ScanScope, b: ScanScope) -> ScanScope {
 struct Job {
     library: i64,
     scope: ScanScope,
+    /// Files someone waits for: ahead of the other scans (REQ-002-18).
+    first: bool,
 }
 
 struct Running {
     library: i64,
     kind: ScanKind,
+    first: bool,
     cancel: Arc<AtomicBool>,
+    pause: Arc<AtomicBool>,
     progress: ScanProgress,
 }
 
@@ -70,6 +74,25 @@ impl State {
             }),
             queue: self.jobs.iter().map(|job| job.library).collect(),
         }
+    }
+
+    /// Where jobs that go first end.
+    fn after_first(&self) -> usize {
+        self.jobs.iter().take_while(|job| job.first).count()
+    }
+
+    /// Queues a paused scan again, right after the jobs that go first; a scan of the library that was asked for
+    /// meanwhile merges into it (REQ-002-18).
+    fn resume(&mut self, mut job: Job) {
+        if let Some(queued) = self
+            .jobs
+            .iter()
+            .position(|queued| !queued.first && queued.library == job.library)
+        {
+            job.scope = merge_scopes(job.scope, self.jobs.remove(queued).scope);
+        }
+        let at = self.after_first();
+        self.jobs.insert(at, job);
     }
 }
 
@@ -95,12 +118,47 @@ impl Shared {
         {
             return;
         }
-        if let Some(queued) = state.jobs.iter_mut().find(|job| job.library == library) {
+        if let Some(queued) = state.jobs.iter_mut().find(|job| !job.first && job.library == library) {
             let current = std::mem::replace(&mut queued.scope, ScanScope::Full);
             queued.scope = merge_scopes(current, scope);
             return;
         }
-        state.jobs.push(Job { library, scope });
+        state.jobs.push(Job {
+            library,
+            scope,
+            first: false,
+        });
+        let status = state.status();
+        drop(state);
+        self.wake.notify_all();
+        self.send(IndexerEvent::Status(status));
+    }
+
+    /// Queues a changes scan of files someone waits for ahead of the other scans, and pauses a running full or quick
+    /// scan for it (REQ-002-18).
+    fn enqueue_first(&self, library: i64, paths: Vec<String>) {
+        let mut state = self.lock();
+        if let Some(queued) = state.jobs.iter_mut().find(|job| job.first && job.library == library) {
+            let current = std::mem::replace(&mut queued.scope, ScanScope::Full);
+            queued.scope = merge_scopes(current, ScanScope::Changes(paths));
+            return;
+        }
+        let at = state.after_first();
+        state.jobs.insert(
+            at,
+            Job {
+                library,
+                scope: ScanScope::Changes(paths),
+                first: true,
+            },
+        );
+        // Changes scans are short; pausing one would only repeat its work.
+        if let Some(running) = &state.running
+            && !running.first
+            && running.kind != ScanKind::Changes
+        {
+            running.pause.store(true, Ordering::Relaxed);
+        }
         let status = state.status();
         drop(state);
         self.wake.notify_all();
@@ -262,6 +320,10 @@ impl ScanRequests for Indexer {
         self.request(library, ScanScope::Changes(paths));
     }
 
+    fn request_paths_first(&self, library: i64, paths: Vec<String>) {
+        self.shared.enqueue_first(library, paths);
+    }
+
     fn request_scan(&self, library: i64, kind: ScanKind) {
         match kind {
             ScanKind::Full => self.request(library, ScanScope::Full),
@@ -328,7 +390,7 @@ fn run(
     reconnect_grace: Duration,
 ) {
     loop {
-        let (job, cancel) = {
+        let (job, cancel, pause) = {
             let mut state = shared.lock();
             loop {
                 if state.shutdown {
@@ -341,10 +403,13 @@ fn run(
             }
             let job = state.jobs.remove(0);
             let cancel = Arc::new(AtomicBool::new(false));
+            let pause = Arc::new(AtomicBool::new(false));
             state.running = Some(Running {
                 library: job.library,
                 kind: job.scope.kind(),
+                first: job.first,
                 cancel: cancel.clone(),
+                pause: pause.clone(),
                 progress: ScanProgress {
                     library: job.library,
                     ..Default::default()
@@ -353,7 +418,7 @@ fn run(
             let status = state.status();
             drop(state);
             shared.send(IndexerEvent::Status(status));
-            (job, cancel)
+            (job, cancel, pause)
         };
 
         let mut last_indexed = 0;
@@ -381,12 +446,26 @@ fn run(
             };
             let mut options = ScanOptions::new(concurrency, &cancel, &mut on_progress);
             options.reconnect_grace = reconnect_grace;
+            options.pause = &pause;
             scan_root(deps, job.library, &job.scope, options)
         }));
         let result = match outcome {
             Ok(Ok(ScanOutcome::Completed)) => ScanResult::Completed,
             Ok(Ok(ScanOutcome::Offline)) => ScanResult::Offline,
             Ok(Ok(ScanOutcome::Cancelled)) => ScanResult::Cancelled,
+            // Not done yet: it continues after the files someone waits for (REQ-002-18).
+            Ok(Ok(ScanOutcome::Paused)) => {
+                let status = {
+                    let mut state = shared.lock();
+                    state.running = None;
+                    state.resume(job);
+                    state.status()
+                };
+                shared.wake.notify_all();
+                (shared.on_written)();
+                shared.send(IndexerEvent::Status(status));
+                continue;
+            }
             Ok(Err(error)) => ScanResult::Failed(error.to_string()),
             Err(panic) => ScanResult::Failed(panic_message(&panic)),
         };
@@ -457,11 +536,14 @@ mod tests {
     struct Scripted {
         panic_on: Mutex<Option<String>>,
         gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+        /// The files read, in order.
+        reads: Mutex<Vec<std::path::PathBuf>>,
     }
 
     impl MetadataSource for Scripted {
         fn read(&self, file: &Path, _: Option<&Path>) -> Result<MediaMetadata, ExifToolError> {
             let name = file.file_name().unwrap().to_string_lossy().into_owned();
+            self.reads.lock().unwrap().push(file.to_path_buf());
             if self.panic_on.lock().unwrap().as_deref() == Some(name.as_str()) {
                 panic!("decoder crashed on {name}");
             }
@@ -723,6 +805,52 @@ mod tests {
             .shared
             .on_watch_event(library, WatchEvent::Changed(Some(vec!["a.jpg".into()])));
         assert_eq!(started_kinds(&f, 1), [ScanKind::Changes]);
+    }
+
+    /// Waits until a scan runs.
+    fn wait_for_a_scan(f: &Fixture) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while f.indexer.status().current.is_none() {
+            assert!(std::time::Instant::now() < deadline, "the scan didn't start");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn req_002_18_urgent_paths_go_first_and_pause_the_running_scan() {
+        let f = Fixture::new(3);
+        let (first, waiting, opened) = (f.libraries[0], f.libraries[1], f.libraries[2]);
+        // One reader, stuck on slow.jpg: the walk of the first library waits for it with more files to go.
+        f.indexer.set_concurrency(1);
+        let (tx, rx) = std::sync::mpsc::channel();
+        *f.metadata.gate.lock().unwrap() = Some(rx);
+        std::fs::write(f.dirs[0].path().join("slow.jpg"), "x").unwrap();
+        std::fs::create_dir(f.dirs[0].path().join("z")).unwrap();
+        for i in 0..20 {
+            std::fs::write(f.dirs[0].path().join("z").join(format!("{i}.jpg")), "x").unwrap();
+        }
+        f.indexer.request(first, ScanScope::Full);
+        wait_for_a_scan(&f);
+        f.indexer.request(waiting, ScanScope::Full);
+        std::fs::write(f.dirs[2].path().join("b.jpg"), "x").unwrap();
+
+        f.indexer.request_paths_first(opened, vec!["b.jpg".into()]);
+        tx.send(()).unwrap();
+
+        assert_eq!(
+            f.done(3),
+            [
+                (opened, ScanResult::Completed),
+                (first, ScanResult::Completed),
+                (waiting, ScanResult::Completed)
+            ]
+        );
+        assert_eq!(f.media_count(), 22 + 1 + 2);
+        let reads = f.metadata.reads.lock().unwrap();
+        let mut once = reads.clone();
+        once.sort();
+        once.dedup();
+        assert_eq!(reads.len(), once.len(), "the paused scan read files again: {reads:?}");
     }
 
     /// REQ-003-07: changes reported while the library is being scanned queue a changes scan after it.
