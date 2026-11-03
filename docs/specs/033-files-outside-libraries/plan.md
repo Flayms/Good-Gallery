@@ -13,7 +13,7 @@ The viewer is built on a `Gallery`: positions, ids, tile data, details and origi
 
 ## Tasks
 
-- [ ] 1. `ScanScope::Folder`: one folder, no subfolders; scan tests (REQ-033-02)
+- [x] 1. `ScanScope::Folder`: one folder, no subfolders; scan tests (REQ-033-02)
 - [ ] 2. Scratch index: create, fill in two steps on a worker, delete on close and at startup; tests in `app` with a temp data folder (REQ-033-01, REQ-033-05)
 - [ ] 3. `AppState::open_file` outside every library opens the scratch gallery and the viewer at the file; `lib.rs` routes the viewer to its gallery; kittest: shown at once, nothing in `gallery.db` (REQ-033-01)
 - [ ] 4. Stepping in name order through the folder; kittest (REQ-033-02)
@@ -32,5 +32,5 @@ The viewer is built on a `Gallery`: positions, ids, tile data, details and origi
 
 ### 2026-11-03 · The folder only, in name order
 
-**Decided:** stepping goes through the file's folder without subfolders, by file name in natural order, as Windows' Photos app does by default.
+**Decided:** stepping goes through the file's folder without subfolders, by file name (the gallery's _Name_ sort), as Windows' Photos app does by default. Its natural order of numbers (`IMG_2` before `IMG_10`) is left out: the _Name_ sort uses an index on the lowercase name, and a natural collation can't use it, which slows sorting a large library.
 **Rejected:** Explorer's current sort order (Windows doesn't pass it to the app opened with a file); date order (a folder of downloads has no meaningful dates; name order is what users see in Explorer by default); subfolders (a file on a drive's top level would pull in the whole drive).

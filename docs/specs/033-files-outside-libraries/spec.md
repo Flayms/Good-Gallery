@@ -1,6 +1,6 @@
 # 033 · Files outside libraries
 
-**Status:** Draft
+**Status:** Approved
 
 ## Goal
 
@@ -19,7 +19,7 @@ Users who open a photo or video with Good Gallery from Explorer (spec 027) want 
 
 - **Given** the viewer showing a file outside every library
 - **When** the user steps to the previous or next item (←/→, the viewer's buttons)
-- **Then** it moves through the photos and videos of the file's folder, without its subfolders, in file name order as Explorer sorts it (`IMG_2` before `IMG_10`)
+- **Then** it moves through the photos and videos of the file's folder, without its subfolders, in the gallery's _Name_ order (REQ-007-12)
 - **And** files the app doesn't index (REQ-002-01) and housekeeping files (REQ-002-02) are skipped, as in a library
 
 ### REQ-033-03 · What the viewer shows for it
@@ -57,6 +57,7 @@ Users who open a photo or video with Good Gallery from Explorer (spec 027) want 
 
 - Rating, tagging, editing, faces and the filmstrip for files outside a library; they need the index. Adding the folder (REQ-033-04) gives all of them.
 - Subfolders, other sort orders than by file name, and Explorer's own sort order or selection (Windows doesn't hand it to the app).
+- Natural order of numbers in names (`IMG_2` before `IMG_10`): the gallery's _Name_ sort compares letters, and a natural order for it is a change of its own.
 - Opening several files at once, or a folder.
 - The browser version: it can't be started with a file.
 

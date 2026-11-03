@@ -31,6 +31,11 @@ pub enum ScanScope {
     /// Paths (relative, `/`-separated) the watcher reported: re-lists their folders, stats new files and the
     /// reported ones, and walks new subfolders.
     Changes(Vec<String>),
+    /// The library's top folder without its subfolders: a file outside every library and its neighbours (spec 033).
+    Folder,
+    /// Just these files (relative, `/`-separated): stats and reads them, lists nothing else and takes nothing as
+    /// removed (spec 033).
+    Files(Vec<String>),
 }
 
 impl ScanScope {
@@ -38,7 +43,8 @@ impl ScanScope {
         match self {
             Self::Full => crate::ScanKind::Full,
             Self::Quick => crate::ScanKind::Quick,
-            Self::Changes(_) => crate::ScanKind::Changes,
+            Self::Changes(_) | Self::Files(_) => crate::ScanKind::Changes,
+            Self::Folder => crate::ScanKind::Quick,
         }
     }
 }
@@ -291,8 +297,15 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
     } else {
         writer.folders(root_id)?
     };
-    // Without folder data (new library, or no scan completed since) only a full scan finds everything.
-    let scope = if stored.is_empty() { &ScanScope::Full } else { requested };
+    // Without folder data (new library, or no scan completed since) only a full scan finds everything; a folder or
+    // files scan looks at no more than it names anyway.
+    let scope = if stored.is_empty() && matches!(requested, ScanScope::Quick | ScanScope::Changes(_)) {
+        &ScanScope::Full
+    } else {
+        requested
+    };
+    // Only the named files: nothing else is read, and nothing counts as removed.
+    let files_only = matches!(scope, ScanScope::Files(_));
     let full = *scope == ScanScope::Full;
     let children = child_index(&stored);
     // Unreadable files are read again by every scan (REQ-002-15): quick scans list their folders though unchanged.
@@ -302,7 +315,7 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
         HashSet::new()
     };
     let touched: Option<HashSet<String>> = match scope {
-        ScanScope::Changes(paths) => Some(paths.iter().map(|p| p.to_lowercase()).collect()),
+        ScanScope::Changes(paths) | ScanScope::Files(paths) => Some(paths.iter().map(|p| p.to_lowercase()).collect()),
         _ => None,
     };
 
@@ -356,7 +369,7 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
             .collect()
     };
     let from = match scope {
-        ScanScope::Changes(paths) => {
+        ScanScope::Changes(paths) | ScanScope::Files(paths) => {
             let mut parents: Vec<String> = Vec::new();
             for path in paths {
                 let parent = parent_dir(path).to_string();
@@ -373,6 +386,8 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
         ScanScope::Full => walk,
         ScanScope::Quick => walk.skip(skip_quick),
         ScanScope::Changes(_) => walk.descend(descend_new),
+        // No subfolders (spec 033).
+        ScanScope::Folder | ScanScope::Files(_) => walk.descend(&|_| Vec::new()),
     };
 
     let result: db::Result<()> = std::thread::scope(|threads| {
@@ -442,7 +457,8 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
                         format!("{}/{name}", listing.rel_dir)
                     };
                     let known = unseen.get(&rel_path).cloned();
-                    if known.is_some()
+                    // Changes scans skip known files nobody touched; files scans every file they don't name.
+                    if (known.is_some() || files_only)
                         && let Some(touched) = &touched
                         && !is_touched(touched, &rel_path)
                     {
@@ -526,6 +542,11 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
     // Not every file was seen, so nothing counts as removed yet; the scan that continues this one finds out.
     if paused {
         return Ok(ScanOutcome::Paused);
+    }
+    // The named files are written; their folder wasn't looked at as a whole.
+    if files_only {
+        (sink.on_progress)(sink.progress);
+        return Ok(ScanOutcome::Completed);
     }
 
     let stale: Vec<i64> = unseen
@@ -813,6 +834,41 @@ mod tests {
 
         assert_eq!(f.scan(ScanScope::Full), ScanOutcome::Completed);
         assert_eq!(f.paths(), ["new/c.jpg", "trip/b.jpg"]);
+    }
+
+    /// REQ-033-02: a folder scan indexes one folder without its subfolders, and forgets files that left it.
+    #[test]
+    fn req_033_02_a_folder_scan_stays_in_its_folder() {
+        let mut f = Fixture::new();
+        f.touch("a.jpg", "x");
+        f.touch("b.png", "x");
+        f.touch("notes.txt", "x");
+        f.touch("sub/c.jpg", "x");
+        assert_eq!(f.scan(ScanScope::Folder), ScanOutcome::Completed);
+        assert_eq!(f.paths(), ["a.jpg", "b.png"]);
+
+        fs::remove_file(f.path("b.png")).unwrap();
+        assert_eq!(f.scan(ScanScope::Folder), ScanOutcome::Completed);
+        assert_eq!(f.paths(), ["a.jpg"]);
+    }
+
+    /// REQ-033-01: a files scan reads just the named files, so one can be shown before its folder is read; it takes
+    /// nothing else as removed.
+    #[test]
+    fn req_033_01_a_files_scan_reads_only_the_named_files() {
+        let mut f = Fixture::new();
+        f.touch("a.jpg", "x");
+        f.touch("b.jpg", "x");
+        f.touch("sub/c.jpg", "x");
+        assert_eq!(f.scan(ScanScope::Files(vec!["b.jpg".into()])), ScanOutcome::Completed);
+        assert_eq!(f.paths(), ["b.jpg"]);
+        assert_eq!(f.metadata.take_reads(), ["b.jpg"]);
+
+        assert_eq!(f.scan(ScanScope::Folder), ScanOutcome::Completed);
+        assert_eq!(f.paths(), ["a.jpg", "b.jpg"]);
+        assert_eq!(f.metadata.take_reads(), ["a.jpg"], "b.jpg isn't read twice");
+        assert_eq!(f.scan(ScanScope::Files(vec!["a.jpg".into()])), ScanOutcome::Completed);
+        assert_eq!(f.paths(), ["a.jpg", "b.jpg"], "nothing else is removed");
     }
 
     #[test]
