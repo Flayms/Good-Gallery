@@ -565,9 +565,18 @@ fn req_032_17_warns_when_the_model_tells_nobody_apart() {
 #[test]
 fn req_032_01_settings_section_looks_as_designed() {
     let fixture = Fixture::new();
-    let mut harness = settings(&fixture, false);
-    harness.state_mut().faces.added_kind = app::state::faces::AddedKind::Yunet;
-    harness.state_mut().add_face_file_at(yunet());
+    // Already on this computer, so no toast fades over the picture.
+    let kind = domain::face_models::ModelKind::Detect(domain::face_models::DetectorFormat::YuNet);
+    media::face_store::FaceStore::in_data_folder(&fixture.dir.path().join("data"))
+        .add_file(&yunet(), kind, &|_| Ok(()), &mut |_, _| true)
+        .unwrap();
+    // No library: its path lies in a temporary folder named differently on every run.
+    let state = fixture
+        .state(db::open_in_memory().unwrap())
+        .with_faces(&fixture.dir.path().join("data"), None);
+    let mut harness = common::harness_with_step(state, 1.0 / 60.0);
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+    harness.state_mut().page = Page::Settings;
     settle(&mut harness);
     harness.get_by_label("Use YuNet").click();
     settle(&mut harness);
