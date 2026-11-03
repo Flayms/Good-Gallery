@@ -24,7 +24,6 @@ jobs:
 
   linux:
     name: Build and test the Linux downloads
-    needs: checks
     uses: ./.github/workflows/linux-packages.yml
 
   web:
@@ -55,7 +54,8 @@ jobs:
 
   pages:
     name: Publish the page
-    needs: web
+    # Not before the release exists, so the page never goes live for a version whose release failed (REQ-014-14).
+    needs: [web, publish]
     runs-on: ubuntu-latest
     permissions:
       pages: write
@@ -74,12 +74,9 @@ jobs:
       - id: deploy
         uses: actions/deploy-pages@v4
 
-  release:
-    name: Build and publish
-    needs: [checks, linux, web]
+  windows:
+    name: Build and test the Windows downloads
     runs-on: windows-latest
-    permissions:
-      contents: write
     env:
       TAG: ${{ github.ref_name }}
     defaults:
@@ -93,6 +90,8 @@ jobs:
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
         with:
+          # What release-cache.yml saves on main (REQ-014-14).
+          shared-key: release
           # A tag's cache can only be restored by the same tag, so saving it is wasted time.
           save-if: false
       - uses: taiki-e/install-action@v2
@@ -128,15 +127,7 @@ jobs:
         shell: pwsh
         run: ./packaging/smoke-test.ps1 -Installer "target/dist/good-gallery-$env:VERSION-windows-x64-setup.exe"
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: linux
-          path: target/dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: page-zip
-          path: target/dist
-
+      # Here, since this job has already compiled xtask.
       - name: Write the release notes
         env:
           GH_TOKEN: ${{ github.token }}
@@ -163,10 +154,50 @@ jobs:
           NOTES
           cat release-notes.md
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            target/dist/*-setup.exe
+            target/dist/*-portable.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+
+  publish:
+    name: Publish the release
+    needs: [checks, linux, windows, web]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows
+          path: target/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux
+          path: target/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: page-zip
+          path: target/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
+          VERSION="${TAG#v}"
           gh release create "$TAG" \
             "target/dist/good-gallery-$VERSION-windows-x64-setup.exe" \
             "target/dist/good-gallery-$VERSION-windows-x64-portable.zip" \
