@@ -55,6 +55,11 @@ pub trait ScanRequests: Send + Sync {
         let _ = paths;
         self.request_scan(library, ScanKind::Changes);
     }
+    /// [`Self::request_paths`] for files the user waits for, e.g. one opened with the app: scanned before every other
+    /// scan, pausing a running one (REQ-002-18).
+    fn request_paths_first(&self, library: i64, paths: Vec<String>) {
+        self.request_paths(library, paths);
+    }
     /// Drops the library's queued scan, cancels its running scan (and waits until it has stopped) and stops its
     /// watcher.
     fn remove_library(&self, library: i64);

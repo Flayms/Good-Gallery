@@ -1025,8 +1025,8 @@ impl AppState {
         self.open_when_added = Some(file);
     }
 
-    /// Looks up the media item of the file opened with the app; asks for a scan of it the first time the index
-    /// doesn't have it, and gives up once that scan found nothing (a skipped folder).
+    /// Looks up the media item of the file opened with the app; asks for a scan of it ahead of the others the first
+    /// time the index doesn't have it, and gives up once that scan found nothing (a skipped folder).
     fn find_pending_open(&mut self) {
         let (Some(pending), Some(db)) = (&mut self.pending_open, &self.db) else {
             return;
@@ -1041,7 +1041,10 @@ impl AppState {
         let library = pending.library;
         if !pending.scanned {
             pending.scanned = true;
-            self.scans.request_paths(library, vec![pending.rel_path.clone()]);
+            // Ahead of other scans, e.g. the library's own first scan (REQ-002-18).
+            self.scans.request_paths_first(library, vec![pending.rel_path.clone()]);
+            let name = pending.rel_path.rsplit('/').next().unwrap_or_default();
+            self.toasts.success(format!("{name} opens once it's indexed"));
             return;
         }
         let waiting = self.indexer_status.current.is_some_and(|scan| scan.library == library)
