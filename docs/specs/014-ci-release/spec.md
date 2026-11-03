@@ -62,8 +62,8 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 - **Given** the installer or the portable zip of a release
 - **When** a user installs it (for their own user, without admin rights, into a folder they can change) or extracts the zip
 - **Then** the app runs without anything else installed: exiftool, ffmpeg and the video player come with it
-- **And** the installer adds a Start menu shortcut and an entry under Windows' installed apps
-- **And** uninstalling removes the program, its shortcut and its entry, but keeps the data folder (index, settings, thumbnails)
+- **And** the installer adds an entry under Windows' installed apps, and the shortcuts and _Open with_ entries chosen on its options page (REQ-014-15)
+- **And** uninstalling removes the program, its shortcuts and its entries, but keeps the data folder (index, settings, thumbnails)
 
 ### REQ-014-10 · Download names
 
@@ -105,6 +105,13 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 - **When** the release workflow runs
 - **Then** the release still succeeds, only slower
 
+### REQ-014-15 · Installer options
+
+- **Given** the Windows installer
+- **When** a user installs the app
+- **Then** a page after the folder offers: _Start menu shortcut_ (on), _Desktop shortcut_ (off) and _Show under "Open with"_ for photos and videos (on, REQ-027-05), each with a line saying what it does
+- **And** installing again or updating, also silently from the app (REQ-031-08), starts from the choices made last time, including a later change in the settings (REQ-027-06): an update brings back nothing the user turned off, and a choice turned off now is removed
+
 ## Out of scope
 
 - Code signing (Windows SmartScreen warns about unsigned downloads). Free option for later: SignPath Foundation.
@@ -136,4 +143,5 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 | REQ-014-11 | `xtask/src/release.rs` › req_014_11_finds_the_versions_that_werent_published, req_014_11_release_notes_bring_the_unpublished_changes; `xtask/tests/workflows.rs` › release_publishes_both_downloads_after_the_checks; `cargo xtask release-notes v0.2.1 v0.1.2` on this repository lists 0.2.0's changes | pass |
 | REQ-014-12 | `crates/media/src/helpers.rs` › req_014_12_development_builds_find_the_fetched_helpers | pass |
 | REQ-014-13 | `xtask/src/dist.rs` › req_014_13_replaces_a_locked_download_once_it_is_free, req_014_13_names_a_download_that_stays_locked | pass |
+| REQ-014-15 | `xtask/tests/packaging.rs` › req_014_15_the_installer_offers_and_remembers_its_options; `packaging/smoke-test.ps1` (Windows packages workflow: the defaults of a silent install, an update keeping changed choices) | pass |
 | REQ-014-14 | `xtask/tests/workflows.rs` › req_014_14_the_builds_run_side_by_side_and_publish_waits_for_them, req_014_14_main_warms_the_cache_the_release_builds_restore; the 15 minutes are measured by the next release | partial |

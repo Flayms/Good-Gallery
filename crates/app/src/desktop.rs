@@ -696,6 +696,11 @@ fn run(options: Options) -> anyhow::Result<()> {
             if cfg!(feature = "packaged") && !automated {
                 state = state.with_updater(Arc::new(app::updates::GitHub::new(options.data_dir.join("updates"))));
             }
+            // The installed app can switch its _Open with_ entries (REQ-027-06); the portable one has none.
+            #[cfg(windows)]
+            if let Some(entries) = app::open_with::Registry::installed() {
+                state = state.with_open_with(Arc::new(entries));
+            }
             if let Some(file) = options.open.clone() {
                 state.open_file(file);
             }

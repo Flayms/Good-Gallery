@@ -37,7 +37,7 @@ Good Gallery doesn't write tags or ratings. It only writes files when you save o
 
 Download from the [releases](https://github.com/Flayms/Good-Gallery/releases) (Windows 10 or 11, 64-bit):
 
-- **`good-gallery-<version>-windows-x64-setup.exe`** installs for your user, without admin rights.
+- **`good-gallery-<version>-windows-x64-setup.exe`** installs for your user, without admin rights. You choose a Start menu shortcut, a desktop shortcut and whether Explorer offers Good Gallery under _Open with_; the last one can be changed later in the settings.
 - **`good-gallery-<version>-windows-x64-portable.zip`** runs from wherever you extract it.
 
 Both include exiftool, ffmpeg and libmpv. The downloads aren't code-signed yet, so SmartScreen may warn: choose _More info_ → _Run anyway_ (for the zip: _Properties_ → _Unblock_ before extracting).

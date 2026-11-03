@@ -87,6 +87,11 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
                         editing(ui, state);
                         ui.add_space(theme::SPACE * 10.0);
                     }
+                    // Only the installed Windows app has entries to switch (REQ-027-06).
+                    if let Some(on) = state.open_with() {
+                        windows(ui, state, on);
+                        ui.add_space(theme::SPACE * 10.0);
+                    }
                     thumbnail_cache(ui, state);
                     ui.add_space(theme::SPACE * 10.0);
                     about(ui, state);
@@ -326,6 +331,28 @@ fn editing(ui: &mut egui::Ui, state: &mut AppState) {
     });
     if settings != state.settings {
         state.update_settings(settings);
+    }
+}
+
+/// _Windows_: whether Explorer offers the app under _Open with_ (REQ-027-06).
+fn windows(ui: &mut egui::Ui, state: &mut AppState, on: bool) {
+    section_title(ui, "Windows");
+    let mut checked = on;
+    group(ui, |ui| {
+        setting_row(
+            ui,
+            "Show under \"Open with\"",
+            "Right-click a photo or video in Explorer and open it with Good Gallery. It doesn't become your default app.",
+            24.0,
+            |ui| {
+                ui.checkbox(&mut checked, "").widget_info(|| {
+                    egui::WidgetInfo::selected(egui::Role::CheckBox, true, on, "Show under \"Open with\"")
+                });
+            },
+        );
+    });
+    if checked != on {
+        state.set_open_with(checked);
     }
 }
 
