@@ -127,6 +127,13 @@ Every library is mirrored in a local index, so browsing and searching 50k–500k
 - **Then** those files are read again right away, and their buttons show _Reading…_ until the scan is done
 - **And** files read successfully leave the list, and the toolbar's count goes down
 
+### REQ-002-18 · Files someone is waiting for go first
+
+- **Given** scans running or waiting, e.g. a library's first scan
+- **When** a file the user wants to see right away (one opened with the app, REQ-027-01) is asked to be indexed
+- **Then** its changes scan runs next, before the waiting scans
+- **And** a running full or quick scan pauses for it: what it has read so far is kept, and it continues right after, without reading those files again
+
 ## Out of scope
 
 - File types beyond those in REQ-002-01: HEIC, RAW, PSD and similar.
@@ -162,3 +169,4 @@ Every library is mirrored in a local index, so browsing and searching 50k–500k
 | REQ-002-15 | `crates/indexer/src/scan.rs` › quick_scans_read_unreadable_files_again, changes_scans_read_an_unreadable_file_again (the metadata version stays, so `schedule::scan_all` keeps quick scans); `crates/db/src/lib.rs` › marks_media_indexed_without_dimensions_unreadable | pass |
 | REQ-002-16 | `crates/app/tests/indexing.rs` › lists_unreadable_files_with_their_library_folder_and_reason (snapshot `unreadable_files`), shows_nothing_without_unreadable_files; `crates/app/src/unreadable.rs` › names_the_library_and_folder | pass |
 | REQ-002-17 | `crates/app/tests/indexing.rs` › reads_files_again_and_drops_those_read_successfully; `crates/indexer/src/scan.rs` › changes_scans_read_an_unreadable_file_again | pass |
+| REQ-002-18 | `crates/indexer/src/indexer.rs` › urgent_paths_go_first_and_pause_the_running_scan; `crates/indexer/src/scan.rs` › an_interrupted_scan_keeps_what_it_read | pass |

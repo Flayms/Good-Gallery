@@ -48,6 +48,9 @@ pub enum ScanOutcome {
     Completed,
     Offline,
     Cancelled,
+    /// Stopped early for a file someone is waiting for (REQ-002-18): what was read is written, nothing is taken as
+    /// removed, and the scan runs again afterwards.
+    Paused,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -71,6 +74,9 @@ pub struct ScanOptions<'a> {
     pub reconnect_grace: Duration,
     /// Set when the library is removed: the scan stops and writes nothing more.
     pub cancel: &'a AtomicBool,
+    /// Set when a file someone is waiting for must be indexed first: the scan stops early, keeping what it read
+    /// (REQ-002-18).
+    pub pause: &'a AtomicBool,
     pub on_progress: &'a mut dyn FnMut(ScanProgress),
 }
 
@@ -83,10 +89,14 @@ impl<'a> ScanOptions<'a> {
             progress_interval: Duration::from_millis(250),
             reconnect_grace: crate::reachability::RECONNECT_GRACE,
             cancel,
+            pause: &NEVER,
             on_progress,
         }
     }
 }
+
+/// A pause flag nobody sets.
+static NEVER: AtomicBool = AtomicBool::new(false);
 
 pub struct ScanDeps<'a> {
     pub writer: &'a mut IndexWriter,
@@ -152,7 +162,8 @@ enum JobResult {
 }
 
 fn read_file(job: Job, deps: &WorkerDeps, root_path: &Path) -> JobResult {
-    if deps.aborted() {
+    // A paused scan reads these files when it continues (REQ-002-18).
+    if deps.aborted() || deps.pause.load(Ordering::Relaxed) {
         return JobResult::Skipped;
     }
     let stats = match with_retry(deps.cancel, || std::fs::metadata(&job.abs_path)) {
@@ -214,6 +225,7 @@ struct WorkerDeps<'a> {
     metadata: &'a dyn MetadataSource,
     is_reachable: &'a (dyn Fn(&Path) -> bool + Sync),
     cancel: &'a AtomicBool,
+    pause: &'a AtomicBool,
     offline: AtomicBool,
     /// Serializes reachability probes and remembers when the library last answered.
     last_reachable: std::sync::Mutex<Option<Instant>>,
@@ -298,6 +310,7 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
         metadata,
         is_reachable,
         cancel: options.cancel,
+        pause: options.pause,
         offline: AtomicBool::new(false),
         last_reachable: std::sync::Mutex::new(None),
     };
@@ -311,6 +324,8 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
     let mut failed_dirs: Vec<String> = Vec::new();
     let mut removed_dirs: Vec<String> = Vec::new();
     let mut listed: HashMap<String, i64> = HashMap::new();
+    // The walk stopped early for a pause.
+    let mut paused = false;
     let mut sink = Sink {
         writer,
         root_id,
@@ -385,10 +400,15 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
         }
         drop(result_tx);
         let mut in_flight = 0usize;
+        // Checked between files, so a pause doesn't wait for a whole folder of reads (REQ-002-18).
+        let stop = |paused: &mut bool| {
+            *paused |= options.pause.load(Ordering::Relaxed);
+            *paused || worker_deps.aborted()
+        };
 
         let walked = (|| -> db::Result<()> {
             for item in walk {
-                if worker_deps.aborted() {
+                if stop(&mut paused) {
                     return Ok(());
                 }
                 let listing = match item {
@@ -439,7 +459,7 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
                     };
                     // Backpressure: wait for the workers instead of queueing a whole share up front.
                     loop {
-                        if worker_deps.aborted() {
+                        if stop(&mut paused) {
                             return Ok(());
                         }
                         match job_tx.try_send(job) {
@@ -502,6 +522,10 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
     if worker_deps.offline.load(Ordering::Relaxed) {
         sink.writer.set_root_status(root_id, LibraryStatus::Offline, None)?;
         return Ok(ScanOutcome::Offline);
+    }
+    // Not every file was seen, so nothing counts as removed yet; the scan that continues this one finds out.
+    if paused {
+        return Ok(ScanOutcome::Paused);
     }
 
     let stale: Vec<i64> = unseen
@@ -714,6 +738,21 @@ mod tests {
             self.scan_with(scope, 2, Duration::from_secs(2)).0
         }
 
+        /// A scan asked to pause before it started.
+        fn scan_paused(&mut self, scope: ScanScope) -> ScanOutcome {
+            let (cancel, pause) = (AtomicBool::new(false), AtomicBool::new(true));
+            let mut on_progress = |_: ScanProgress| {};
+            let is_reachable = |_: &Path| true;
+            let mut options = ScanOptions::new(2, &cancel, &mut on_progress);
+            options.pause = &pause;
+            let deps = ScanDeps {
+                writer: &mut self.writer,
+                metadata: &self.metadata,
+                is_reachable: &is_reachable,
+            };
+            scan_root(deps, self.root, &scope, options).unwrap()
+        }
+
         fn paths(&self) -> Vec<String> {
             let mut paths: Vec<String> = self.writer.existing(self.root).unwrap().into_keys().collect();
             paths.sort();
@@ -753,6 +792,27 @@ mod tests {
             taken_at: Some(taken_at),
             ..Default::default()
         }
+    }
+
+    /// REQ-002-18: a paused scan hasn't seen every file, so it takes nothing as removed and remembers no folders; the
+    /// scan that continues it does.
+    #[test]
+    fn req_002_18_a_paused_scan_removes_nothing_and_saves_no_folders() {
+        let mut f = Fixture::new();
+        f.touch("a.jpg", "x");
+        f.touch("trip/b.jpg", "x");
+        assert_eq!(f.scan(ScanScope::Full), ScanOutcome::Completed);
+        let scanned_at: i64 = f.value("SELECT last_scan_at FROM library_roots");
+        fs::remove_file(f.path("a.jpg")).unwrap();
+        f.touch("new/c.jpg", "x");
+
+        assert_eq!(f.scan_paused(ScanScope::Full), ScanOutcome::Paused);
+        assert_eq!(f.paths(), ["a.jpg", "trip/b.jpg"]);
+        assert_eq!(f.folders(), ["", "trip"]);
+        assert_eq!(f.value::<i64>("SELECT last_scan_at FROM library_roots"), scanned_at);
+
+        assert_eq!(f.scan(ScanScope::Full), ScanOutcome::Completed);
+        assert_eq!(f.paths(), ["new/c.jpg", "trip/b.jpg"]);
     }
 
     #[test]
