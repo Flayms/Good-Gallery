@@ -538,7 +538,7 @@ fn start_thumbnails(
     })
 }
 
-/// A write connection for the search for faces (spec 031). Without it, no faces are looked for.
+/// A write connection for the search for faces (spec 032). Without it, no faces are looked for.
 fn open_faces_connection(data_dir: &Path) -> Option<db::rusqlite::Connection> {
     db::open(&data_dir.join("gallery.db"))
         .inspect_err(|error| tracing::error!("can't open the index for faces: {error}"))

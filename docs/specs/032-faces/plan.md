@@ -1,4 +1,4 @@
-# 031 · Faces · Plan
+# 032 · Faces · Plan
 
 ## Approach
 
@@ -7,20 +7,20 @@
 - **`media::face_store`:** the model folder, downloads.
 - **`media::face_regions`:** writing regions with exiftool.
 - **`db`:** `detected_faces`, `face_embeddings`, `face_rejections`, `faces_scanned` (migration), one more write connection as the thumbnail service has.
-- **`indexer::faces`:** the background service (REQ-031-05, REQ-031-16).
+- **`indexer::faces`:** the background service (REQ-032-05, REQ-032-16).
 - **`app`:** the settings section, the viewer's boxes and actions, the People page.
 
 ## Tasks
 
 - [x] Spec, `docs/face-models.md`, REQ-011-11 deprecated
-- [x] `domain::face_models`: geometry, decoding, alignment, catalog, similarity (REQ-031-06, REQ-031-07)
-- [x] `media::face_models`, `media::face_store`: engine, store, download (REQ-031-02, REQ-031-03, REQ-031-06, REQ-031-07)
-- [x] `db::faces` tables and queries (REQ-031-04, REQ-031-05, REQ-031-16)
-- [x] `indexer::faces` (REQ-031-05, REQ-031-08, REQ-031-16)
-- [x] Settings section (REQ-031-01 … REQ-031-04, REQ-031-17)
-- [x] `media::face_regions`: writing regions (REQ-031-12 … REQ-031-14)
-- [x] Viewer (REQ-031-09 … REQ-031-13)
-- [x] People page and groups (REQ-031-15)
+- [x] `domain::face_models`: geometry, decoding, alignment, catalog, similarity (REQ-032-06, REQ-032-07)
+- [x] `media::face_models`, `media::face_store`: engine, store, download (REQ-032-02, REQ-032-03, REQ-032-06, REQ-032-07)
+- [x] `db::faces` tables and queries (REQ-032-04, REQ-032-05, REQ-032-16)
+- [x] `indexer::faces` (REQ-032-05, REQ-032-08, REQ-032-16)
+- [x] Settings section (REQ-032-01 … REQ-032-04, REQ-032-17)
+- [x] `media::face_regions`: writing regions (REQ-032-12 … REQ-032-14)
+- [x] Viewer (REQ-032-09 … REQ-032-13)
+- [x] People page and groups (REQ-032-15)
 - [ ] Benchmark, after this feature: speed and memory for `docs/face-models.md`, thresholds per model, detection and recognition rates on a real library
 
 ## Decisions

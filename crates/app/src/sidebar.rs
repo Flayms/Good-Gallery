@@ -146,7 +146,7 @@ pub struct SidebarInput<'a> {
     pub scanning: Option<i64>,
     pub page: &'a mut Page,
     pub db: Option<Arc<Mutex<Connection>>>,
-    /// Faces are recognized, so the People page has something to show (REQ-031-15).
+    /// Faces are recognized, so the People page has something to show (REQ-032-15).
     pub people: bool,
 }
 

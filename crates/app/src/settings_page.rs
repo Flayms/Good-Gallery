@@ -472,7 +472,7 @@ fn about(ui: &mut egui::Ui, state: &mut AppState) {
     }
 }
 
-/// The page comparing the models (REQ-031-01).
+/// The page comparing the models (REQ-032-01).
 #[cfg(not(target_arch = "wasm32"))]
 const FACE_MODELS_PAGE: &str = "https://github.com/Flayms/Good-Gallery/blob/main/docs/face-models.md";
 
@@ -552,7 +552,7 @@ fn model_row(
     }
 }
 
-/// _Faces_: the models, how far the search has come, and the user's data (REQ-031-01 … REQ-031-05, REQ-031-17).
+/// _Faces_: the models, how far the search has come, and the user's data (REQ-032-01 … REQ-032-05, REQ-032-17).
 #[cfg(not(target_arch = "wasm32"))]
 fn faces(ui: &mut egui::Ui, state: &mut AppState) {
     use crate::state::faces::AddedKind;
@@ -703,7 +703,7 @@ fn faces(ui: &mut egui::Ui, state: &mut AppState) {
     });
 }
 
-/// "Delete what the app stored about faces?" (REQ-031-04).
+/// "Delete what the app stored about faces?" (REQ-032-04).
 #[cfg(not(target_arch = "wasm32"))]
 fn confirm_delete_faces(ctx: &egui::Context, state: &mut AppState) {
     if !state.faces.confirm_delete {

@@ -1,4 +1,4 @@
-//! The People page (REQ-031-15): groups of similar faces nobody has named yet, largest first.
+//! The People page (REQ-032-15): groups of similar faces nobody has named yet, largest first.
 
 use crate::icons::Icon;
 use crate::state::{AppState, FaceAction};
@@ -123,7 +123,7 @@ fn group_card(ui: &mut egui::Ui, state: &mut AppState, group: &crate::gallery::F
             ui.horizontal_wrapped(|ui| {
                 for (face, _) in group.iter().take(SHOWN_FACES) {
                     let shown = crop(ui, state, face.media, face.rect);
-                    // A wrong face: out of the group, as ignored faces are (REQ-031-15).
+                    // A wrong face: out of the group, as ignored faces are (REQ-032-15).
                     let corner = Rect::from_min_size(shown.rect.right_top() + vec2(-22.0, 2.0), Vec2::splat(20.0));
                     let spoken = format!("Take face {} out of the group", face.id);
                     let take_out = ui.interact(corner, ui.make_persistent_id(("take out", face.id)), Sense::click());
@@ -174,7 +174,7 @@ fn clean_name(name: &str) -> Option<String> {
     (!name.is_empty()).then_some(name)
 }
 
-/// Naming a group writes to many files, so it asks first (REQ-031-15).
+/// Naming a group writes to many files, so it asks first (REQ-032-15).
 fn confirm_naming(ctx: &egui::Context, state: &mut AppState) {
     let Some(naming) = &state.people_page.confirm else {
         return;
@@ -199,9 +199,9 @@ fn confirm_naming(ctx: &egui::Context, state: &mut AppState) {
 mod tests {
     use super::*;
 
-    /// REQ-031-15: a crop is square in pixels, whatever the box and the photo's shape, and stays on the photo.
+    /// REQ-032-15: a crop is square in pixels, whatever the box and the photo's shape, and stays on the photo.
     #[test]
-    fn req_031_15_crops_faces_without_stretching_them() {
+    fn req_032_15_crops_faces_without_stretching_them() {
         let uv = crop_uv([0.4, 0.4, 0.1, 0.2], [800, 400]);
         let (pixels_wide, pixels_high) = (uv.width() * 800.0, uv.height() * 400.0);
         assert!((pixels_wide - pixels_high).abs() < 0.5, "{uv:?}");

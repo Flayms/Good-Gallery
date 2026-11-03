@@ -20,7 +20,7 @@ Users add the tags, People and Places a photo lacks, and take back wrong ones, w
 - **Given** a tag of the item in the info panel or info sheet, in the desktop app
 - **When** the user clicks its remove button (×)
 - **Then** the item no longer has that tag
-- **And** a person named by a face region loses the region too, or the name would come back from it (REQ-031-13)
+- **And** a person named by a face region loses the region too, or the name would come back from it (REQ-032-13)
 
 ### REQ-026-03 · Written into the metadata
 
@@ -59,7 +59,7 @@ Users add the tags, People and Places a photo lacks, and take back wrong ones, w
 
 - Renaming, moving or merging tags across the library.
 - Removing a tag from a selection.
-- Drawing or naming face regions (spec 031).
+- Drawing or naming face regions (spec 032).
 - `XMP-mwg-kw` keyword structures.
 
 ## Assumptions

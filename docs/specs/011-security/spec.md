@@ -58,7 +58,7 @@ Deprecated 2026-10-26: there is no message transport. Cancelling indexer work wh
 
 ### ~~REQ-011-11 · No network access~~
 
-Deprecated: face models are downloaded (spec 031). The browser version still sends nothing (REQ-019-12).
+Deprecated: face models are downloaded (spec 032). The browser version still sends nothing (REQ-019-12).
 
 - **Given** the app running
 - **When** it indexes, renders, searches or shows media

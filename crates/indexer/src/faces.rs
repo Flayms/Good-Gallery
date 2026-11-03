@@ -1,6 +1,6 @@
-//! Looking for faces in the background (spec 031): one thread works through the photos the chosen detection model
+//! Looking for faces in the background (spec 032): one thread works through the photos the chosen detection model
 //! hasn't seen, then the faces the chosen recognition model hasn't. It reads the choice from the settings each round,
-//! so changing models needs only a [`FaceService::kick`] (REQ-031-16).
+//! so changing models needs only a [`FaceService::kick`] (REQ-032-16).
 
 use db::faces::{self, FacePhoto, FaceProgress};
 use db::rusqlite::Connection;
@@ -476,7 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_04_looks_for_nothing_without_a_chosen_model() {
+    fn req_032_04_looks_for_nothing_without_a_chosen_model() {
         let (_dir, conn, path) = index();
         add_photo(&conn, "a.jpg");
         let fake = Fake::default();
@@ -490,7 +490,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_05_works_through_all_photos_and_a_bad_file_costs_only_itself() {
+    fn req_032_05_works_through_all_photos_and_a_bad_file_costs_only_itself() {
         let (_dir, conn, path) = index();
         for name in ["a.jpg", "bad.jpg", "c.jpg"] {
             add_photo(&conn, name);
@@ -516,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_05_stops_for_an_unreachable_share_or_when_paused() {
+    fn req_032_05_stops_for_an_unreachable_share_or_when_paused() {
         let (_dir, conn, path) = index();
         add_photo(&conn, "a.jpg");
         choose(&conn, faces::DETECTOR_KEY, "d");
@@ -538,7 +538,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_05_a_model_that_cant_run_says_so_and_a_panic_costs_only_that_file() {
+    fn req_032_05_a_model_that_cant_run_says_so_and_a_panic_costs_only_that_file() {
         let (_dir, conn, path) = index();
         add_photo(&conn, "a.jpg");
         choose(&conn, faces::DETECTOR_KEY, "d");
@@ -563,7 +563,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_16_another_recognition_model_recognizes_again_and_going_back_repeats_nothing() {
+    fn req_032_16_another_recognition_model_recognizes_again_and_going_back_repeats_nothing() {
         let (_dir, conn, path) = index();
         add_photo(&conn, "a.jpg");
         choose(&conn, faces::DETECTOR_KEY, "d");
@@ -585,10 +585,10 @@ mod tests {
         assert_eq!(fake.recognized.load(Ordering::SeqCst), 2);
     }
 
-    /// REQ-031-05, REQ-031-06: everything for real but the network: a model in the store, a photo stored on its side, and
+    /// REQ-032-05, REQ-032-06: everything for real but the network: a model in the store, a photo stored on its side, and
     /// the search finding its face where the upright photo shows it.
     #[test]
-    fn req_031_06_finds_the_face_of_a_turned_photo_with_the_real_model() {
+    fn req_032_06_finds_the_face_of_a_turned_photo_with_the_real_model() {
         let data = tempfile::tempdir().unwrap();
         let library = tempfile::tempdir().unwrap();
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../media/tests/fixtures/faces");
@@ -638,7 +638,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_06_detections_become_fractions_of_the_upright_photo() {
+    fn req_032_06_detections_become_fractions_of_the_upright_photo() {
         let face = Detection {
             rect: [-10.0, 50.0, 110.0, 100.0],
             landmarks: [[50.0, 100.0]; 5],

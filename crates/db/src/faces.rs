@@ -1,5 +1,5 @@
-//! Faces found in photos (spec 031). Names live in the files and `media_faces`: a face overlapping a named region is
-//! that person, worked out here when read, so a change by another program needs no syncing (REQ-031-08).
+//! Faces found in photos (spec 032). Names live in the files and `media_faces`: a face overlapping a named region is
+//! that person, worked out here when read, so a change by another program needs no syncing (REQ-032-08).
 
 use crate::Result;
 use domain::face_models::{Detection, group, same_face, suggest, tells_nobody_apart};
@@ -118,8 +118,8 @@ fn vector_from_blob(blob: &[u8]) -> Vec<f32> {
 }
 
 /// Stores what `detector` found in `photo` (`faces` in fractions of the upright photo), replacing what it found before.
-/// What the user decided about a box carries over to a new box overlapping it, also from another detector (REQ-031-11,
-/// REQ-031-16).
+/// What the user decided about a box carries over to a new box overlapping it, also from another detector (REQ-032-11,
+/// REQ-032-16).
 pub fn store_scan(conn: &mut Connection, photo: &FacePhoto, detector: &str, faces: &[Detection]) -> Result<()> {
     let tx = conn.transaction()?;
     let earlier = {
@@ -294,7 +294,7 @@ fn regions(conn: &Connection, media: Option<i64>) -> Result<HashMap<i64, Vec<Fac
     Ok(named)
 }
 
-/// The named region a detected box lies on (REQ-031-08).
+/// The named region a detected box lies on (REQ-032-08).
 fn region_of(rect: [f32; 4], regions: Option<&Vec<FaceRegion>>) -> Option<&FaceRegion> {
     regions?
         .iter()
@@ -313,7 +313,7 @@ fn usable(blob: Vec<u8>) -> Option<Vec<f32>> {
     (!vector.is_empty()).then_some(vector)
 }
 
-/// Faces of `detector` on one photo without a name, with what `recognizer` made of them (REQ-031-09).
+/// Faces of `detector` on one photo without a name, with what `recognizer` made of them (REQ-032-09).
 pub fn unknown_faces_on(conn: &Connection, media: i64, detector: &str, recognizer: &str) -> Result<Vec<UnknownFace>> {
     let named = regions(conn, Some(media))?;
     let mut stmt = conn.prepare_cached(
@@ -344,7 +344,7 @@ pub fn unknown_faces_on(conn: &Connection, media: i64, detector: &str, recognize
     Ok(faces)
 }
 
-/// Every face without a name that `recognizer` has seen, for the groups (REQ-031-15). Faces of a person who was taken
+/// Every face without a name that `recognizer` has seen, for the groups (REQ-032-15). Faces of a person who was taken
 /// off a face stay.
 pub fn unknown_faces(conn: &Connection, detector: &str, recognizer: &str) -> Result<Vec<UnknownFace>> {
     let named = regions(conn, None)?;
@@ -380,7 +380,7 @@ pub fn unknown_faces(conn: &Connection, detector: &str, recognizer: &str) -> Res
     Ok(faces)
 }
 
-/// Faces overlapping a named region, with the region's name: what the app knows people look like (REQ-031-08).
+/// Faces overlapping a named region, with the region's name: what the app knows people look like (REQ-032-08).
 pub fn known_faces(conn: &Connection, detector: &str, recognizer: &str) -> Result<Vec<(String, Vec<f32>)>> {
     let mut stmt = conn.prepare_cached(
         "SELECT f.media_id, f.x, f.y, f.w, f.h, e.vector FROM detected_faces f
@@ -411,14 +411,14 @@ pub fn set_state(conn: &Connection, face: i64, state: FaceState) -> Result<()> {
     Ok(())
 }
 
-/// Remembers that `face` isn't `name` (REQ-031-10).
+/// Remembers that `face` isn't `name` (REQ-032-10).
 pub fn reject(conn: &Connection, face: i64, name: &str) -> Result<()> {
     conn.prepare_cached("INSERT OR IGNORE INTO face_rejections (face_id, name) VALUES (?1, ?2)")?
         .execute(params![face, name])?;
     Ok(())
 }
 
-/// The detected face lying on a region of `media`, for what removing a name should remember (REQ-031-13).
+/// The detected face lying on a region of `media`, for what removing a name should remember (REQ-032-13).
 pub fn face_on_region(conn: &Connection, media: i64, detector: &str, rect: [f32; 4]) -> Result<Option<i64>> {
     let mut stmt =
         conn.prepare_cached("SELECT id, x, y, w, h FROM detected_faces WHERE media_id = ?1 AND detector = ?2")?;
@@ -447,12 +447,12 @@ pub fn regions_named(conn: &Connection, media: i64, name: &str) -> Result<Vec<[f
         .collect::<rusqlite::Result<_>>()?)
 }
 
-/// Shows ignored faces again (REQ-031-11).
+/// Shows ignored faces again (REQ-032-11).
 pub fn restore_ignored(conn: &Connection) -> Result<usize> {
     Ok(conn.execute("UPDATE detected_faces SET state = 'open' WHERE state = 'ignored'", [])?)
 }
 
-/// Removes everything stored about faces, never the named regions of the files (REQ-031-04).
+/// Removes everything stored about faces, never the named regions of the files (REQ-032-04).
 pub fn delete_all(conn: &Connection) -> Result<()> {
     conn.execute("DELETE FROM detected_faces", [])?;
     conn.execute("DELETE FROM faces_scanned", [])?;
@@ -476,7 +476,7 @@ pub struct ShownFace {
     pub suggestion: Option<String>,
 }
 
-/// The faces without a name on a photo, each with the person it looks most like (REQ-031-09, REQ-031-10).
+/// The faces without a name on a photo, each with the person it looks most like (REQ-032-09, REQ-032-10).
 pub fn shown_faces(
     conn: &Connection,
     media: i64,
@@ -520,7 +520,7 @@ pub struct GroupFace {
     pub rect: [f32; 4],
 }
 
-/// Similar faces without a name, largest group first (REQ-031-15).
+/// Similar faces without a name, largest group first (REQ-032-15).
 pub fn face_groups(conn: &Connection, detector: &str, recognizer: &str, threshold: f32) -> Result<Vec<Vec<GroupFace>>> {
     const MIN_GROUP: usize = 3;
     let faces = unknown_faces(conn, detector, recognizer)?;
@@ -540,7 +540,7 @@ pub fn face_groups(conn: &Connection, detector: &str, recognizer: &str, threshol
         .collect())
 }
 
-/// Whether known faces suggest the recognition model is set up wrongly (REQ-031-17).
+/// Whether known faces suggest the recognition model is set up wrongly (REQ-032-17).
 pub fn model_seems_wrong(conn: &Connection, detector: &str, recognizer: &str) -> Result<bool> {
     let known = known_faces(conn, detector, recognizer)?;
     let known: Vec<(&str, &[f32])> = known
@@ -601,7 +601,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_05_works_through_photos_once_and_again_when_they_change() {
+    fn req_032_05_works_through_photos_once_and_again_when_they_change() {
         let (mut conn, root) = setup();
         let id = insert(&conn, root, "a.jpg", "image");
         insert(&conn, root, "b.mp4", "video");
@@ -626,7 +626,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_05_skips_offline_libraries() {
+    fn req_032_05_skips_offline_libraries() {
         let (conn, root) = setup();
         insert(&conn, root, "a.jpg", "image");
         conn.execute("UPDATE library_roots SET status = 'offline'", []).unwrap();
@@ -634,7 +634,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_07_keeps_each_models_vectors_apart() {
+    fn req_032_07_keeps_each_models_vectors_apart() {
         let (mut conn, root) = setup();
         let id = insert(&conn, root, "a.jpg", "image");
         let found = photo(&conn, "d");
@@ -658,7 +658,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_08_a_face_on_a_named_region_is_that_person_until_the_file_changes() {
+    fn req_032_08_a_face_on_a_named_region_is_that_person_until_the_file_changes() {
         let (mut conn, root) = setup();
         let id = insert(&conn, root, "a.jpg", "image");
         let found = photo(&conn, "d");
@@ -681,7 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_10_remembers_who_a_face_is_not() {
+    fn req_032_10_remembers_who_a_face_is_not() {
         let (mut conn, root) = setup();
         let id = insert(&conn, root, "a.jpg", "image");
         let found = photo(&conn, "d");
@@ -713,7 +713,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_10_suggests_a_known_person_for_an_unknown_face() {
+    fn req_032_10_suggests_a_known_person_for_an_unknown_face() {
         let (mut conn, root) = setup();
         let ids = people(&mut conn, root);
         let shown = shown_faces(&conn, ids[3], "d", Some("r"), 0.5).unwrap();
@@ -730,7 +730,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_15_groups_only_faces_without_a_name() {
+    fn req_032_15_groups_only_faces_without_a_name() {
         let (mut conn, root) = setup();
         let ids = people(&mut conn, root);
         let groups = face_groups(&conn, "d", "r", 0.5).unwrap();
@@ -743,7 +743,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_17_a_model_telling_people_apart_seems_right() {
+    fn req_032_17_a_model_telling_people_apart_seems_right() {
         let (mut conn, root) = setup();
         people(&mut conn, root);
         assert!(!model_seems_wrong(&conn, "d", "r").unwrap(), "too few to say");
@@ -769,7 +769,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_11_ignored_faces_stay_gone_when_looked_at_again_until_restored() {
+    fn req_032_11_ignored_faces_stay_gone_when_looked_at_again_until_restored() {
         let (mut conn, root) = setup();
         let id = insert(&conn, root, "a.jpg", "image");
         let found = photo(&conn, "d");
@@ -792,7 +792,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_16_decisions_carry_over_to_another_detector_and_earlier_work_stays() {
+    fn req_032_16_decisions_carry_over_to_another_detector_and_earlier_work_stays() {
         let (mut conn, root) = setup();
         let id = insert(&conn, root, "a.jpg", "image");
         let found = photo(&conn, "d1");
@@ -813,7 +813,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_04_deletes_all_face_data_but_no_named_regions() {
+    fn req_032_04_deletes_all_face_data_but_no_named_regions() {
         let (mut conn, root) = setup();
         let id = insert(&conn, root, "a.jpg", "image");
         let found = photo(&conn, "d");

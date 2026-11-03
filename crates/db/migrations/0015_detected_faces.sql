@@ -1,4 +1,4 @@
--- Faces found by a detection model (spec 031), on the upright photo as fractions of its size. Names aren't here: a face overlapping a named region in `media_faces` is that person.
+-- Faces found by a detection model (spec 032), on the upright photo as fractions of its size. Names aren't here: a face overlapping a named region in `media_faces` is that person.
 CREATE TABLE `detected_faces` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`media_id` integer NOT NULL,
@@ -15,7 +15,7 @@ CREATE TABLE `detected_faces` (
 --> statement-breakpoint
 CREATE INDEX `detected_faces_media_idx` ON `detected_faces` (`media_id`,`detector`);
 --> statement-breakpoint
--- What a recognition model made of a face; only compared within one `recognizer` (REQ-031-07).
+-- What a recognition model made of a face; only compared within one `recognizer` (REQ-032-07).
 CREATE TABLE `face_embeddings` (
 	`face_id` integer NOT NULL,
 	`recognizer` text NOT NULL,
@@ -24,7 +24,7 @@ CREATE TABLE `face_embeddings` (
 	FOREIGN KEY (`face_id`) REFERENCES `detected_faces`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
--- People the user said a face isn't (REQ-031-10).
+-- People the user said a face isn't (REQ-032-10).
 CREATE TABLE `face_rejections` (
 	`face_id` integer NOT NULL,
 	`name` text NOT NULL,
@@ -32,7 +32,7 @@ CREATE TABLE `face_rejections` (
 	FOREIGN KEY (`face_id`) REFERENCES `detected_faces`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
--- Photos a detection model has looked at, in the version of the file it saw (REQ-031-05).
+-- Photos a detection model has looked at, in the version of the file it saw (REQ-032-05).
 CREATE TABLE `faces_scanned` (
 	`media_id` integer NOT NULL,
 	`detector` text NOT NULL,

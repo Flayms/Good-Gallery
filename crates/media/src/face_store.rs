@@ -1,4 +1,4 @@
-//! The face models on this computer (spec 031): files named by their SHA-256 in the data folder, each with a small note
+//! The face models on this computer (spec 032): files named by their SHA-256 in the data folder, each with a small note
 //! on what it is. Downloading and adding end here, so everything else knows a model only by its hash.
 
 use domain::face_models::{CATALOG, CatalogModel, DetectorFormat, InputStyle, ModelKind};
@@ -116,7 +116,7 @@ impl FaceStore {
         self.models().into_iter().find(|model| model.sha256 == sha256)
     }
 
-    /// Downloads a listed model: whatever the host sends, it counts only if its hash is the catalog's (REQ-031-02).
+    /// Downloads a listed model: whatever the host sends, it counts only if its hash is the catalog's (REQ-032-02).
     pub fn download(&self, model: &CatalogModel, progress: Progress) -> Result<StoredModel, StoreError> {
         self.fetch(
             model.url,
@@ -128,7 +128,7 @@ impl FaceStore {
         )
     }
 
-    /// Downloads an unlisted model from an `https` link, if `check` can run it (REQ-031-03).
+    /// Downloads an unlisted model from an `https` link, if `check` can run it (REQ-032-03).
     pub fn add_link(
         &self,
         url: &str,
@@ -143,7 +143,7 @@ impl FaceStore {
         self.fetch(url, None, &name, kind, check, progress)
     }
 
-    /// Copies an unlisted model from a file, if `check` can run it (REQ-031-03).
+    /// Copies an unlisted model from a file, if `check` can run it (REQ-032-03).
     pub fn add_file(
         &self,
         file: &Path,
@@ -328,7 +328,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_02_keeps_a_download_only_if_its_hash_matches() {
+    fn req_032_02_keeps_a_download_only_if_its_hash_matches() {
         let dir = tempfile::tempdir().unwrap();
         let store = FaceStore::in_data_folder(dir.path());
         let good: &'static str = Box::leak(sha(BODY).into_boxed_str());
@@ -355,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_02_a_cancelled_or_failed_download_leaves_nothing() {
+    fn req_032_02_a_cancelled_or_failed_download_leaves_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let store = FaceStore::in_data_folder(dir.path());
         let url: &'static str = Box::leak(serve(BODY).into_boxed_str());
@@ -375,10 +375,10 @@ mod tests {
         assert_eq!(leftovers(&store), 0);
     }
 
-    /// REQ-031-02: the catalog's real links, over real TLS, give the published files. `cargo test -- --ignored`.
+    /// REQ-032-02: the catalog's real links, over real TLS, give the published files. `cargo test -- --ignored`.
     #[test]
     #[ignore = "downloads from the internet"]
-    fn req_031_02_downloads_a_small_real_model_over_https() {
+    fn req_032_02_downloads_a_small_real_model_over_https() {
         let dir = tempfile::tempdir().unwrap();
         let store = FaceStore::in_data_folder(dir.path());
         for name in ["YuNet", "RetinaFace (MobileNetV2)"] {
@@ -391,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_03_adds_a_file_only_if_it_runs() {
+    fn req_032_03_adds_a_file_only_if_it_runs() {
         let dir = tempfile::tempdir().unwrap();
         let store = FaceStore::in_data_folder(dir.path());
         let source = dir.path().join("my model.onnx");
@@ -415,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_03_links_must_be_https_and_name_the_model_by_their_file() {
+    fn req_032_03_links_must_be_https_and_name_the_model_by_their_file() {
         let dir = tempfile::tempdir().unwrap();
         let store = FaceStore::in_data_folder(dir.path());
         let refused = store.add_link("http://example.com/a.onnx", KIND, &|_| Ok(()), &mut |_, _| true);

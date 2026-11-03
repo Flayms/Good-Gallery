@@ -196,7 +196,7 @@ fn load_sidebar(conn: &Connection, library: Option<i64>) -> db::Result<SidebarDa
 }
 
 /// Runs one of the gallery's queries.
-/// A group of unknown faces, with what is needed to show its thumbnails (REQ-031-15).
+/// A group of unknown faces, with what is needed to show its thumbnails (REQ-032-15).
 pub type FaceGroup = Vec<(db::faces::GroupFace, Option<ThumbKey>)>;
 
 /// Groups shown; a library with more has far smaller ones further down.
@@ -428,9 +428,9 @@ pub struct Gallery {
     strip: std::ops::Range<usize>,
     /// The media item whose details were asked for last, and what came back.
     detail: Option<(i64, Option<DetailResult>)>,
-    /// The unknown faces on the item the viewer shows (REQ-031-09).
+    /// The unknown faces on the item the viewer shows (REQ-032-09).
     faces: Option<(i64, Option<Vec<db::faces::ShownFace>>)>,
-    /// The groups of unknown faces, until something changes (REQ-031-15).
+    /// The groups of unknown faces, until something changes (REQ-032-15).
     face_groups: Option<Option<Vec<FaceGroup>>>,
     /// A context menu's choice this frame.
     menu_action: Option<(usize, MediaAction)>,
@@ -889,7 +889,7 @@ impl Gallery {
             .unwrap_or(domain::face_models::DEFAULT_THRESHOLD)
     }
 
-    /// The unknown faces on `id`, asked for when it isn't the item asked for last (REQ-031-09).
+    /// The unknown faces on `id`, asked for when it isn't the item asked for last (REQ-032-09).
     pub fn faces_on(&mut self, id: i64) -> &[db::faces::ShownFace] {
         if self.faces.as_ref().is_none_or(|(asked, _)| *asked != id) {
             self.faces = Some((id, None));
@@ -915,7 +915,7 @@ impl Gallery {
         self.face_groups = None;
     }
 
-    /// The groups of unknown faces, `None` while loading or without chosen models (REQ-031-15).
+    /// The groups of unknown faces, `None` while loading or without chosen models (REQ-032-15).
     pub fn face_groups(&mut self) -> Option<&[FaceGroup]> {
         if self.face_groups.is_none() {
             let (detector, recognizer) = (

@@ -176,6 +176,6 @@ Add every pitfall you hit. A trap in a tool, library, OS or our tests that we ca
 
 * **A blocked-quantized ONNX model doesn't load in `tract` 0.23.9** (`DequantizeLinear: blocked quantization is not supported`), so OpenCV's `int8bq` YuNet and SFace files can't be offered. YuNet also fails at any input but 640 × 640, because its graph has fixed shapes.
 * **A photo-sized YuNet pass misses faces under about 15 px of input.** A 110 px face on a 4000 px photo is found only by looking closer, and a first look that finds nothing gives no reason to. Weak first-look candidates (`HINT_SCORE`) decide it, not confident detections.
-* **A model set up with the wrong input style gives no error.** It runs and returns numbers that tell nobody apart. SFace takes raw 0–255 where ArcFace-style models take −1…1. REQ-031-17 warns once there are named faces to check against.
+* **A model set up with the wrong input style gives no error.** It runs and returns numbers that tell nobody apart. SFace takes raw 0–255 where ArcFace-style models take −1…1. REQ-032-17 warns once there are named faces to check against.
 * **A model repository's license tag covers the repository, not every file.** `fal/AuraFace-v1` is tagged Apache-2.0, and its `scrfd_10g_bnkps.onnx` has the same hash as InsightFace's non-commercial detector. Check each file you offer.
 * **Never leave a photo unmarked after a crash in the search.** It would be picked first every round and block the rest. `indexer::faces` catches a panic per photo and marks it looked at.

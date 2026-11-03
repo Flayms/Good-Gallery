@@ -51,7 +51,7 @@ pub fn upright_rect([x, y, w, h]: [f32; 4], orientation: u8) -> [f32; 4] {
     [ax.min(bx), ay.min(by), (ax - bx).abs(), (ay - by).abs()]
 }
 
-/// A rectangle of the upright photo on the stored photo, as a file's regions need it (REQ-031-14).
+/// A rectangle of the upright photo on the stored photo, as a file's regions need it (REQ-032-14).
 pub fn stored_rect(rect: [f32; 4], orientation: u8) -> [f32; 4] {
     let inverse = match orientation {
         6 => 8,
@@ -133,7 +133,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_14_stored_rect_undoes_turning_upright() {
+    fn req_032_14_stored_rect_undoes_turning_upright() {
         let stored = [0.1, 0.2, 0.3, 0.4];
         for orientation in 1..=8 {
             let back = stored_rect(upright_rect(stored, orientation), orientation);

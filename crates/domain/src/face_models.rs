@@ -1,4 +1,4 @@
-//! Finding and recognizing faces (spec 031), without IO: the models on offer, what each expects, and the steps around
+//! Finding and recognizing faces (spec 032), without IO: the models on offer, what each expects, and the steps around
 //! them. `media::face_models` runs them.
 
 /// The input of every detection pass, in pixels; these models are at their best near it, and YuNet's file is fixed to it.
@@ -32,7 +32,7 @@ pub enum DetectorFormat {
 }
 
 impl DetectorFormat {
-    /// The score below which a detection is dropped. Not calibrated yet (spec 031's benchmark).
+    /// The score below which a detection is dropped. Not calibrated yet (spec 032's benchmark).
     pub fn min_score(self) -> f32 {
         match self {
             DetectorFormat::YuNet => 0.8,
@@ -141,7 +141,7 @@ fn intersection(a: [f32; 4], b: [f32; 4]) -> f32 {
     w.max(0.0) * h.max(0.0)
 }
 
-/// Keeps the best of detections that overlap, best first (REQ-031-06).
+/// Keeps the best of detections that overlap, best first (REQ-032-06).
 pub fn suppress(mut found: Vec<Detection>) -> Vec<Detection> {
     const MAX_OVERLAP: f32 = 0.3;
     found.sort_by(|a, b| b.score.total_cmp(&a.score));
@@ -425,7 +425,7 @@ pub fn same_face(a: [f32; 4], b: [f32; 4]) -> bool {
 /// How similar `face` is to a person: the mean of the best few of their faces, so one mislabeled face counts for little.
 const BEST_FEW: usize = 3;
 
-/// The person most similar to `face`, if similar enough and not `rejected` (REQ-031-10).
+/// The person most similar to `face`, if similar enough and not `rejected` (REQ-032-10).
 pub fn suggest<'a>(
     face: &[f32],
     known: &[(&'a str, &[f32])],
@@ -454,7 +454,7 @@ pub fn suggest<'a>(
         .max_by(|a, b| a.1.total_cmp(&b.1))
 }
 
-/// Groups similar faces, largest first, leaving out groups smaller than `min_size` (REQ-031-15). Each face joins the
+/// Groups similar faces, largest first, leaving out groups smaller than `min_size` (REQ-032-15). Each face joins the
 /// group whose mean it is closest to, so the work grows with faces × groups.
 pub fn group(faces: &[&[f32]], threshold: f32, min_size: usize) -> Vec<Vec<usize>> {
     let mut groups: Vec<(Vec<f32>, Vec<f32>, Vec<usize>)> = Vec::new();
@@ -488,7 +488,7 @@ pub fn group(faces: &[&[f32]], threshold: f32, min_size: usize) -> Vec<Vec<usize
 }
 
 /// Whether known faces look no more alike within a person than between people, which suggests a model set up wrongly
-/// (REQ-031-17). `false` while there are too few to say: at least two people with three faces each.
+/// (REQ-032-17). `false` while there are too few to say: at least two people with three faces each.
 pub fn tells_nobody_apart(known: &[(&str, &[f32])]) -> bool {
     const MIN_FACES: usize = 3;
     const MAX_FACES: usize = 20;
@@ -541,7 +541,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_06_finds_the_same_face_only_once() {
+    fn req_032_06_finds_the_same_face_only_once() {
         let kept = suppress(vec![
             face(10.0, 10.0, 100.0, 100.0, 0.7),
             face(12.0, 12.0, 100.0, 100.0, 0.9),
@@ -553,7 +553,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_06_decodes_yunets_output() {
+    fn req_032_06_decodes_yunets_output() {
         // One cell of the coarsest grid (stride 32, 20 × 20), row 1 and column 2, is a face.
         let grid = |side: usize, len: usize| vec![0.0; side * side * len];
         let mut cls = [grid(80, 1), grid(40, 1), grid(20, 1)];
@@ -575,7 +575,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_06_decodes_retinafaces_output() {
+    fn req_032_06_decodes_retinafaces_output() {
         let priors = retinaface_priors();
         // Three sizes of grids with two anchors each.
         assert_eq!(priors.len(), 2 * (80 * 80 + 40 * 40 + 20 * 20));
@@ -596,10 +596,10 @@ mod tests {
         assert_eq!(found[0].landmarks[0], [20.0, 4.0]);
     }
 
-    /// REQ-031-06: small faces are looked for closer only where the whole photo hints at them, and a face that fills
+    /// REQ-032-06: small faces are looked for closer only where the whole photo hints at them, and a face that fills
     /// the photo is looked for with the photo smaller.
     #[test]
-    fn req_031_06_chooses_passes_by_what_the_first_found() {
+    fn req_032_06_chooses_passes_by_what_the_first_found() {
         let first = Pass {
             x: 0.0,
             y: 0.0,
@@ -636,7 +636,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_06_turns_what_a_pass_found_into_photo_pixels_and_drops_tiny_faces() {
+    fn req_032_06_turns_what_a_pass_found_into_photo_pixels_and_drops_tiny_faces() {
         let tile = Pass {
             x: 1000.0,
             y: 500.0,
@@ -656,9 +656,9 @@ mod tests {
         assert_eq!(kept.len(), 1);
     }
 
-    /// REQ-031-07: the transform moves the landmarks onto the template, whatever the face's place, size and tilt.
+    /// REQ-032-07: the transform moves the landmarks onto the template, whatever the face's place, size and tilt.
     #[test]
-    fn req_031_07_aligns_a_turned_face_onto_the_template() {
+    fn req_032_07_aligns_a_turned_face_onto_the_template() {
         let (angle, scale): (f32, f32) = (0.5, 3.0);
         let (cos, sin) = (angle.cos(), angle.sin());
         let landmarks =
@@ -674,14 +674,14 @@ mod tests {
     }
 
     #[test]
-    fn req_031_07_prepares_pixels_as_the_style_expects() {
+    fn req_032_07_prepares_pixels_as_the_style_expects() {
         assert_eq!(InputStyle::ArcFace.value(255), 1.0);
         assert_eq!(InputStyle::ArcFace.value(0), -1.0);
         assert_eq!(InputStyle::SFace.value(200), 200.0);
     }
 
     #[test]
-    fn req_031_07_normalizes_and_compares_only_the_same_size() {
+    fn req_032_07_normalizes_and_compares_only_the_same_size() {
         let mut vector = vec![3.0, 4.0];
         normalize(&mut vector);
         assert!(close(vector[0], 0.6) && close(vector[1], 0.8));
@@ -693,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_08_a_loose_region_of_another_program_is_the_same_face() {
+    fn req_032_08_a_loose_region_of_another_program_is_the_same_face() {
         let detected = [0.40, 0.40, 0.10, 0.10];
         assert!(same_face(detected, [0.38, 0.36, 0.16, 0.18]));
         assert!(same_face(detected, [0.42, 0.42, 0.08, 0.08]));
@@ -708,7 +708,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_10_suggests_the_most_similar_person_unless_rejected() {
+    fn req_032_10_suggests_the_most_similar_person_unless_rejected() {
         let (anna, bob) = (unit(0.0), unit(1.5));
         let known = [
             ("Anna", anna.as_slice()),
@@ -722,9 +722,9 @@ mod tests {
         assert_eq!(suggest(&unit(0.1), &[], 0.5, &[]), None);
     }
 
-    /// REQ-031-10: one mislabeled face doesn't outweigh a person's other faces.
+    /// REQ-032-10: one mislabeled face doesn't outweigh a person's other faces.
     #[test]
-    fn req_031_10_one_wrong_face_of_a_person_counts_for_little() {
+    fn req_032_10_one_wrong_face_of_a_person_counts_for_little() {
         let (wrong, right, far) = (unit(0.0), unit(0.2), unit(1.5));
         let known = [
             ("Bob", wrong.as_slice()),
@@ -738,7 +738,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_15_groups_similar_faces_largest_first_without_small_groups() {
+    fn req_032_15_groups_similar_faces_largest_first_without_small_groups() {
         let faces = [
             unit(0.0),
             unit(1.5),
@@ -755,7 +755,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_17_notices_a_model_that_tells_nobody_apart() {
+    fn req_032_17_notices_a_model_that_tells_nobody_apart() {
         let same = unit(0.0);
         let mixed = [("Anna", same.as_slice()); 3];
         let both: Vec<(&str, &[f32])> = mixed.iter().copied().chain([("Bob", same.as_slice()); 3]).collect();
@@ -772,9 +772,9 @@ mod tests {
         assert!(!tells_nobody_apart(&both[2..4]));
     }
 
-    /// REQ-031-02: hashes are the published files', links are pinned, and nothing non-commercial has a button.
+    /// REQ-032-02: hashes are the published files', links are pinned, and nothing non-commercial has a button.
     #[test]
-    fn req_031_02_the_catalog_pins_what_it_downloads() {
+    fn req_032_02_the_catalog_pins_what_it_downloads() {
         let names: Vec<&str> = CATALOG.iter().map(|model| model.name).collect();
         assert_eq!(names.len(), 5, "{names:?}");
         for model in CATALOG {

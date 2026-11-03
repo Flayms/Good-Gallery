@@ -1,4 +1,4 @@
-//! The app's side of faces (spec 031): the models on this computer, downloads, the background search, and what the user
+//! The app's side of faces (spec 032): the models on this computer, downloads, the background search, and what the user
 //! decides about a face. Desktop only; the browser version looks for no faces.
 
 use super::{AppState, Event, lock};
@@ -59,7 +59,7 @@ impl AddedKind {
     }
 }
 
-/// How often the check for a wrongly set up model runs while the settings are open (REQ-031-17).
+/// How often the check for a wrongly set up model runs while the settings are open (REQ-032-17).
 const MODEL_CHECK_EVERY: Duration = Duration::from_secs(30);
 
 /// Faces' part of the app's state.
@@ -131,7 +131,7 @@ impl AppState {
         }
     }
 
-    /// Chooses a model of its kind, or none (REQ-031-01, REQ-031-16).
+    /// Chooses a model of its kind, or none (REQ-032-01, REQ-032-16).
     pub fn choose_face_model(&mut self, detect: bool, sha256: Option<String>) {
         if detect {
             self.store_face_setting(faces::DETECTOR_KEY, sha256.as_deref());
@@ -156,7 +156,7 @@ impl AppState {
         self.kick_faces();
     }
 
-    /// Switches the search on or off (REQ-031-05).
+    /// Switches the search on or off (REQ-032-05).
     pub fn set_face_search(&mut self, paused: bool) {
         self.faces.paused = paused;
         self.store_face_setting(faces::SEARCH_KEY, Some(if paused { "paused" } else { "on" }));
@@ -191,7 +191,7 @@ impl AppState {
         }
     }
 
-    /// Downloads a listed model in the background (REQ-031-02).
+    /// Downloads a listed model in the background (REQ-032-02).
     pub fn download_face_model(&mut self, model: &'static CatalogModel) {
         let Some(store) = self.faces.store.clone() else { return };
         let mut progress = self.arriving_progress(model.sha256.to_owned());
@@ -210,7 +210,7 @@ impl AppState {
         }
     }
 
-    /// Checks that a model file runs as the kind the user said it is (REQ-031-03).
+    /// Checks that a model file runs as the kind the user said it is (REQ-032-03).
     fn checker(kind: ModelKind) -> impl Fn(&Path) -> Result<(), String> {
         move |file| match kind {
             ModelKind::Detect(format) => Detector::load(file, format).map(|_| ()),
@@ -218,7 +218,7 @@ impl AppState {
         }
     }
 
-    /// Adds a model from the pasted link (REQ-031-03).
+    /// Adds a model from the pasted link (REQ-032-03).
     pub fn add_face_link(&mut self) {
         let Some(store) = self.faces.store.clone() else { return };
         let url = self.faces.link.trim().to_owned();
@@ -234,7 +234,7 @@ impl AppState {
         });
     }
 
-    /// Adds a model from a file the user picks (REQ-031-03).
+    /// Adds a model from a file the user picks (REQ-032-03).
     pub fn add_face_file(&mut self) {
         let Some(store) = self.faces.store.clone() else { return };
         let picker = self.picker.clone();
@@ -300,7 +300,7 @@ impl AppState {
         }
     }
 
-    /// Shows ignored faces again (REQ-031-11).
+    /// Shows ignored faces again (REQ-032-11).
     pub fn restore_ignored_faces(&mut self) {
         let Some(db) = self.db.clone() else { return };
         match faces::restore_ignored(&lock(&db)) {
@@ -313,7 +313,7 @@ impl AppState {
         self.kick_faces();
     }
 
-    /// Deletes everything stored about faces and stops looking; files stay as they are (REQ-031-04).
+    /// Deletes everything stored about faces and stops looking; files stay as they are (REQ-032-04).
     pub fn delete_face_data(&mut self) {
         let Some(db) = self.db.clone() else { return };
         self.choose_face_model(true, None);
@@ -328,7 +328,7 @@ impl AppState {
         }
     }
 
-    /// Looks now and then whether the chosen model tells known people apart (REQ-031-17).
+    /// Looks now and then whether the chosen model tells known people apart (REQ-032-17).
     pub fn check_face_model(&mut self) {
         let (Some(db), Some(detector), Some(recognizer)) = (
             self.db.clone(),
@@ -354,7 +354,7 @@ impl AppState {
         self.faces.model_seems_wrong = wrong;
     }
 
-    /// What the user decided about a face (REQ-031-09 … REQ-031-15).
+    /// What the user decided about a face (REQ-032-09 … REQ-032-15).
     pub fn face_action(&mut self, action: super::FaceAction) {
         use super::FaceAction as A;
         let Some(db) = self.db.clone() else { return };
@@ -401,7 +401,7 @@ impl AppState {
         }
     }
 
-    /// Writes region changes on the writer thread; the index reads the files again afterwards (REQ-031-14).
+    /// Writes region changes on the writer thread; the index reads the files again afterwards (REQ-032-14).
     fn write_regions(&mut self, changes: Vec<(i64, RegionChange)>) {
         let (Some(db), Some(exiftool)) = (
             self.db.clone(),
@@ -455,7 +455,7 @@ impl AppState {
     }
 }
 
-/// Removes every region of `name` from a photo for its People tag's remove button (REQ-031-13), and remembers that
+/// Removes every region of `name` from a photo for its People tag's remove button (REQ-032-13), and remembers that
 /// these faces aren't that person.
 pub(super) fn remove_person(
     exiftool: &Path,

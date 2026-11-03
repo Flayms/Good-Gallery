@@ -248,9 +248,9 @@ fn req_026_02_removes_a_tag() {
     assert!(reread(&fixture, "a.png"));
 }
 
-/// REQ-031-13: a person named by a face region can be removed too; the region goes with the tag, or it would come back.
+/// REQ-032-13: a person named by a face region can be removed too; the region goes with the tag, or it would come back.
 #[test]
-fn req_031_13_the_people_tags_remove_button_takes_the_region() {
+fn req_032_13_the_people_tags_remove_button_takes_the_region() {
     let Some(exiftool) = exiftool() else { return };
     let fixture = Fixture::new();
     let (mut harness, dir) = app(&fixture, Some(&exiftool));

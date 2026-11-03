@@ -1,4 +1,4 @@
-//! Faces in the settings, the viewer and on the People page (spec 031), on a library of real photos and files written
+//! Faces in the settings, the viewer and on the People page (spec 032), on a library of real photos and files written
 //! with exiftool. Models run in `media`'s and `indexer`'s tests; here, what they found is in the index.
 
 mod common;
@@ -186,7 +186,7 @@ fn write_ben(exiftool: &Path, file: &Path) {
 }
 
 #[test]
-fn req_031_09_shows_unknown_faces_with_suggestions_beside_named_ones() {
+fn req_032_09_shows_unknown_faces_with_suggestions_beside_named_ones() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, true, None);
     open_with_faces(&mut harness, "a.png");
@@ -199,9 +199,9 @@ fn req_031_09_shows_unknown_faces_with_suggestions_beside_named_ones() {
     assert_eq!(harness.query_all_by_label_contains("Unknown face:").count(), 1);
 }
 
-/// REQ-009-17, REQ-031-09: the button also shows for a photo with only unknown faces, with regions on or off.
+/// REQ-009-17, REQ-032-09: the button also shows for a photo with only unknown faces, with regions on or off.
 #[test]
-fn req_031_09_faces_button_shows_when_faces_are_looked_for() {
+fn req_032_09_faces_button_shows_when_faces_are_looked_for() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, true, None);
     harness.get_by_role_and_label(Role::Image, "b.png").click();
@@ -213,7 +213,7 @@ fn req_031_09_faces_button_shows_when_faces_are_looked_for() {
 }
 
 #[test]
-fn req_031_09_no_faces_button_while_none_are_looked_for() {
+fn req_032_09_no_faces_button_while_none_are_looked_for() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, false, None);
     harness.get_by_role_and_label(Role::Image, "b.png").click();
@@ -222,7 +222,7 @@ fn req_031_09_no_faces_button_while_none_are_looked_for() {
 }
 
 #[test]
-fn req_031_10_not_this_person_is_remembered() {
+fn req_032_10_not_this_person_is_remembered() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, true, None);
     open_with_faces(&mut harness, "a.png");
@@ -235,7 +235,7 @@ fn req_031_10_not_this_person_is_remembered() {
 }
 
 #[test]
-fn req_031_11_ignored_and_non_faces_go_away() {
+fn req_032_11_ignored_and_non_faces_go_away() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, true, None);
     open_with_faces(&mut harness, "a.png");
@@ -247,7 +247,7 @@ fn req_031_11_ignored_and_non_faces_go_away() {
 }
 
 #[test]
-fn req_031_11_a_non_face_goes_away() {
+fn req_032_11_a_non_face_goes_away() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, true, None);
     open_with_faces(&mut harness, "b.png");
@@ -258,9 +258,9 @@ fn req_031_11_a_non_face_goes_away() {
     assert_eq!(harness.query_all_by_label_contains("Unknown face:").count(), 0);
 }
 
-/// REQ-031-14: only a confirmed name reaches the file; before, the file stays as it was.
+/// REQ-032-14: only a confirmed name reaches the file; before, the file stays as it was.
 #[test]
-fn req_031_14_confirming_a_suggestion_writes_it_and_nothing_before_that() {
+fn req_032_14_confirming_a_suggestion_writes_it_and_nothing_before_that() {
     let Some(exiftool) = exiftool() else { return };
     let fixture = Fixture::new();
     let (mut harness, dir) = app(&fixture, true, Some(&exiftool));
@@ -281,7 +281,7 @@ fn req_031_14_confirming_a_suggestion_writes_it_and_nothing_before_that() {
 }
 
 #[test]
-fn req_031_14_rejecting_and_ignoring_leave_the_file_alone() {
+fn req_032_14_rejecting_and_ignoring_leave_the_file_alone() {
     let Some(exiftool) = exiftool() else { return };
     let fixture = Fixture::new();
     let (mut harness, dir) = app(&fixture, true, Some(&exiftool));
@@ -300,7 +300,7 @@ fn req_031_14_rejecting_and_ignoring_leave_the_file_alone() {
 }
 
 #[test]
-fn req_031_09_naming_an_unknown_face_writes_the_typed_name() {
+fn req_032_09_naming_an_unknown_face_writes_the_typed_name() {
     let Some(exiftool) = exiftool() else { return };
     let fixture = Fixture::new();
     let (mut harness, dir) = app(&fixture, true, Some(&exiftool));
@@ -313,9 +313,9 @@ fn req_031_09_naming_an_unknown_face_writes_the_typed_name() {
     assert_eq!(regions(&exiftool, &dir.join("b.png")), ["Zoe Lang"]);
 }
 
-/// REQ-031-13: a region of another program can be renamed and removed on the photo.
+/// REQ-032-13: a region of another program can be renamed and removed on the photo.
 #[test]
-fn req_031_13_renames_and_removes_a_region_on_the_photo() {
+fn req_032_13_renames_and_removes_a_region_on_the_photo() {
     let Some(exiftool) = exiftool() else { return };
     let fixture = Fixture::new();
     let (mut harness, dir) = app(&fixture, true, Some(&exiftool));
@@ -331,7 +331,7 @@ fn req_031_13_renames_and_removes_a_region_on_the_photo() {
 }
 
 #[test]
-fn req_031_13_removing_on_the_photo_takes_the_region_and_the_keyword() {
+fn req_032_13_removing_on_the_photo_takes_the_region_and_the_keyword() {
     let Some(exiftool) = exiftool() else { return };
     let fixture = Fixture::new();
     let (mut harness, dir) = app(&fixture, true, Some(&exiftool));
@@ -352,7 +352,7 @@ fn req_031_13_removing_on_the_photo_takes_the_region_and_the_keyword() {
 }
 
 #[test]
-fn req_031_12_draws_a_face_and_saves_it_where_it_was_drawn() {
+fn req_032_12_draws_a_face_and_saves_it_where_it_was_drawn() {
     let Some(exiftool) = exiftool() else { return };
     let fixture = Fixture::new();
     let (mut harness, dir) = app(&fixture, false, Some(&exiftool));
@@ -380,7 +380,7 @@ fn req_031_12_draws_a_face_and_saves_it_where_it_was_drawn() {
 }
 
 #[test]
-fn req_031_15_names_a_group_after_asking_and_writes_to_all_its_photos() {
+fn req_032_15_names_a_group_after_asking_and_writes_to_all_its_photos() {
     let Some(exiftool) = exiftool() else { return };
     let fixture = Fixture::new();
     let (mut harness, dir) = app(&fixture, true, Some(&exiftool));
@@ -403,7 +403,7 @@ fn req_031_15_names_a_group_after_asking_and_writes_to_all_its_photos() {
 }
 
 #[test]
-fn req_031_15_ignoring_a_group_or_taking_a_face_out_leaves_too_few() {
+fn req_032_15_ignoring_a_group_or_taking_a_face_out_leaves_too_few() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, true, None);
     harness.get_by_label("Unknown faces").click();
@@ -418,7 +418,7 @@ fn req_031_15_ignoring_a_group_or_taking_a_face_out_leaves_too_few() {
 }
 
 #[test]
-fn req_031_15_no_people_page_without_models() {
+fn req_032_15_no_people_page_without_models() {
     let fixture = Fixture::new();
     let (harness, _) = app(&fixture, false, None);
     assert!(harness.query_by_label("Unknown faces").is_none());
@@ -432,7 +432,7 @@ fn settings(fixture: &Fixture, models: bool) -> App {
 }
 
 #[test]
-fn req_031_01_lists_the_models_with_their_licenses() {
+fn req_032_01_lists_the_models_with_their_licenses() {
     let fixture = Fixture::new();
     let harness = settings(&fixture, false);
     harness.get_by_label("Compare the models");
@@ -452,7 +452,7 @@ fn yunet() -> PathBuf {
 }
 
 #[test]
-fn req_031_03_adds_a_file_it_can_run_and_refuses_one_it_cant() {
+fn req_032_03_adds_a_file_it_can_run_and_refuses_one_it_cant() {
     let fixture = Fixture::new();
     let mut harness = settings(&fixture, false);
     let junk = fixture.dir.path().join("junk.onnx");
@@ -472,9 +472,9 @@ fn req_031_03_adds_a_file_it_can_run_and_refuses_one_it_cant() {
     assert_eq!(harness.state().faces.models.len(), 1);
 }
 
-/// REQ-031-01, REQ-031-04: nothing is looked for until a model is chosen, and the choice is kept.
+/// REQ-032-01, REQ-032-04: nothing is looked for until a model is chosen, and the choice is kept.
 #[test]
-fn req_031_01_choosing_a_model_is_kept_and_can_be_undone() {
+fn req_032_01_choosing_a_model_is_kept_and_can_be_undone() {
     let fixture = Fixture::new();
     let mut harness = settings(&fixture, false);
     harness.state_mut().faces.added_kind = app::state::faces::AddedKind::Yunet;
@@ -492,7 +492,7 @@ fn req_031_01_choosing_a_model_is_kept_and_can_be_undone() {
 }
 
 #[test]
-fn req_031_04_delete_face_data_asks_and_stops_the_search() {
+fn req_032_04_delete_face_data_asks_and_stops_the_search() {
     let fixture = Fixture::new();
     let mut harness = settings(&fixture, true);
     harness.get_by_label("Delete face data").click();
@@ -513,7 +513,7 @@ fn req_031_04_delete_face_data_asks_and_stops_the_search() {
 }
 
 #[test]
-fn req_031_17_warns_when_the_model_tells_nobody_apart() {
+fn req_032_17_warns_when_the_model_tells_nobody_apart() {
     let fixture = Fixture::new();
     let (conn, _) = library(&fixture, true);
     // Three named faces each of two people, all with the same vector.
@@ -561,9 +561,9 @@ fn req_031_17_warns_when_the_model_tells_nobody_apart() {
     harness.get_by_label_contains("doesn't tell your named people apart");
 }
 
-/// REQ-031-01, REQ-031-09, REQ-031-15: how the section, a face's popup and the People page look.
+/// REQ-032-01, REQ-032-09, REQ-032-15: how the section, a face's popup and the People page look.
 #[test]
-fn req_031_01_settings_section_looks_as_designed() {
+fn req_032_01_settings_section_looks_as_designed() {
     let fixture = Fixture::new();
     let mut harness = settings(&fixture, false);
     harness.state_mut().faces.added_kind = app::state::faces::AddedKind::Yunet;
@@ -575,7 +575,7 @@ fn req_031_01_settings_section_looks_as_designed() {
 }
 
 #[test]
-fn req_031_09_a_faces_popup_looks_as_designed() {
+fn req_032_09_a_faces_popup_looks_as_designed() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, true, None);
     harness.set_size(egui::vec2(1000.0, 700.0));
@@ -587,7 +587,7 @@ fn req_031_09_a_faces_popup_looks_as_designed() {
 }
 
 #[test]
-fn req_031_15_people_page_looks_as_designed() {
+fn req_032_15_people_page_looks_as_designed() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, true, None);
     harness.set_size(egui::vec2(1000.0, 700.0));

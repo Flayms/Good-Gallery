@@ -23,7 +23,7 @@ pub enum Page {
     #[default]
     Gallery,
     Settings,
-    /// Groups of unknown faces (REQ-031-15).
+    /// Groups of unknown faces (REQ-032-15).
     People,
 }
 
@@ -31,7 +31,7 @@ pub enum Page {
 pub trait FolderPicker: Send + Sync {
     fn pick_folder(&self) -> Option<PathBuf>;
 
-    /// An ONNX model file (REQ-031-03).
+    /// An ONNX model file (REQ-032-03).
     fn pick_model_file(&self) -> Option<PathBuf> {
         None
     }
@@ -252,7 +252,7 @@ struct ChangedMany {
     first_failure: Option<(String, String)>,
 }
 
-/// What the user decided about a face (spec 031).
+/// What the user decided about a face (spec 032).
 #[derive(Debug, Clone, PartialEq)]
 pub enum FaceAction {
     /// This person is at these places (media item and rectangle): one face, a drawn one, or a group's.
@@ -375,7 +375,7 @@ pub struct SettingsPage {
 
 pub struct AppState {
     pub page: Page,
-    /// Face models and the search for faces (spec 031).
+    /// Face models and the search for faces (spec 032).
     #[cfg(not(target_arch = "wasm32"))]
     pub faces: faces::Faces,
     /// Wakes the UI from a background job's progress.
@@ -834,7 +834,7 @@ impl AppState {
         let db = self.db.clone();
         let detector = self.faces.detector.clone();
         self.spawn_write(move || {
-            // Removing a person also takes their face regions, or the name would come back from them (REQ-031-13).
+            // Removing a person also takes their face regions, or the name would come back from them (REQ-032-13).
             if let (domain::tagging::Change::Remove(name), Some(db), domain::media::MediaKind::Image) =
                 (&tag.change, &db, tag.kind)
             {
@@ -867,7 +867,7 @@ impl AppState {
     #[cfg(target_arch = "wasm32")]
     pub fn tag(&mut self, _tag: TagChange) {}
 
-    /// The browser version looks for no faces (spec 031).
+    /// The browser version looks for no faces (spec 032).
     #[cfg(target_arch = "wasm32")]
     pub fn face_action(&mut self, _action: FaceAction) {}
 

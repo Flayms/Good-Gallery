@@ -66,7 +66,7 @@ pub enum Action {
     Rate(crate::state::Rate),
     /// Add or remove a tag of an item (spec 026); the viewer stays.
     Tag(crate::state::TagChange),
-    /// What the user decided about a face (spec 031); the viewer stays.
+    /// What the user decided about a face (spec 032); the viewer stays.
     Face(crate::state::FaceAction),
 }
 
@@ -81,7 +81,7 @@ enum FaceTarget {
     Drawn([f32; 4]),
 }
 
-/// The popup with what can be done with a face (REQ-031-09, REQ-031-12, REQ-031-13).
+/// The popup with what can be done with a face (REQ-032-09, REQ-032-12, REQ-032-13).
 struct FacePopup {
     media: i64,
     target: FaceTarget,
@@ -234,7 +234,7 @@ pub struct Viewer {
     /// The face regions drawn in the last frame, by name.
     faces_drawn: Vec<(String, Rect)>,
     face_popup: Option<FacePopup>,
-    /// Drawing a new face (REQ-031-12): where the drag started, once it has.
+    /// Drawing a new face (REQ-032-12): where the drag started, once it has.
     drawing_face: Option<Option<egui::Pos2>>,
     chrome: Chrome,
     /// The media item the chrome was tinted for.
@@ -740,7 +740,7 @@ impl Viewer {
         self.follow(gallery);
         let count = gallery.count().unwrap_or(0);
         let mut keys = std::mem::take(&mut self.keys);
-        // Escape first leaves what the faces are doing (REQ-031-09, REQ-031-12).
+        // Escape first leaves what the faces are doing (REQ-032-09, REQ-032-12).
         if keys.close && (self.face_popup.is_some() || self.drawing_face.is_some()) {
             keys.close = false;
             self.face_popup = None;
@@ -2061,9 +2061,9 @@ struct BarText {
     date: Option<std::sync::Arc<egui::Galley>>,
     stars: usize,
     editable: bool,
-    /// The photo may have faces (REQ-009-17, REQ-031-09).
+    /// The photo may have faces (REQ-009-17, REQ-032-09).
     faces: bool,
-    /// Faces are on, so one can be drawn (REQ-031-12).
+    /// Faces are on, so one can be drawn (REQ-032-12).
     add_face: bool,
 }
 
@@ -2228,7 +2228,7 @@ fn on_screen(photo: Rect, [x, y, w, h]: [f32; 4]) -> Rect {
     )
 }
 
-/// Draws the faces without a name, with their suggestions, and returns the face clicked, named or not (REQ-031-09). A
+/// Draws the faces without a name, with their suggestions, and returns the face clicked, named or not (REQ-032-09). A
 /// face is its box's own widget, so a click there doesn't reach the photo.
 fn face_clicks(
     ui: &egui::Ui,
@@ -2299,7 +2299,7 @@ fn face_clicks(
     clicked
 }
 
-/// Drawing a new face: a drag across the photo gives its rectangle, as fractions of the photo (REQ-031-12).
+/// Drawing a new face: a drag across the photo gives its rectangle, as fractions of the photo (REQ-032-12).
 fn draw_new_face(ui: &egui::Ui, photo: Rect, drawing: &mut Option<Option<egui::Pos2>>) -> Option<[f32; 4]> {
     let start = (*drawing)?;
     let response = ui.interact(photo, ui.make_persistent_id("draw a face"), egui::Sense::drag());

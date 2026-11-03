@@ -1,5 +1,5 @@
-//! Writes face regions the user confirmed, drew, renamed or removed into a file or its sidecar (REQ-031-12 …
-//! REQ-031-14), as exiftool's structs read back and changed, so regions and fields the app doesn't know survive.
+//! Writes face regions the user confirmed, drew, renamed or removed into a file or its sidecar (REQ-032-12 …
+//! REQ-032-14), as exiftool's structs read back and changed, so regions and fields the app doesn't know survive.
 
 use crate::rating::{WriteError, existing_sidecar, library_path, path_arg};
 use domain::face_models::same_face;
@@ -145,7 +145,7 @@ fn change_mwg(info: &mut Value, change: &RegionChange, size: Option<(u32, u32)>)
     }
 }
 
-/// `info`, the Microsoft struct, with the change. It is only written where it exists (REQ-031-14).
+/// `info`, the Microsoft struct, with the change. It is only written where it exists (REQ-032-14).
 fn change_microsoft(info: &mut Value, change: &RegionChange) -> bool {
     let Some(list) = info.get_mut("Regions").and_then(Value::as_array_mut) else {
         return false;
@@ -414,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_12_a_new_region_goes_into_the_file_and_reads_back_where_it_was_drawn() {
+    fn req_032_12_a_new_region_goes_into_the_file_and_reads_back_where_it_was_drawn() {
         let Some(lib) = library() else { return };
         let file = lib.photo("a.jpg", &[]);
         lib.write(
@@ -438,9 +438,9 @@ mod tests {
         assert_eq!(people(&tags), ["Anna Müller"]);
     }
 
-    /// REQ-031-14: everything else in the list and the file stays, also what the app doesn't know.
+    /// REQ-032-14: everything else in the list and the file stays, also what the app doesn't know.
     #[test]
-    fn req_031_14_other_regions_and_fields_survive() {
+    fn req_032_14_other_regions_and_fields_survive() {
         let Some(lib) = library() else { return };
         let file = lib.photo("a.jpg", &[OTHERS, "-XMP-dc:Title=A title", "-XMP-xmp:Rating=3"]);
         lib.write("a.jpg", &add("Clara"));
@@ -459,7 +459,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_13_removes_and_renames_one_region_of_any_program() {
+    fn req_032_13_removes_and_renames_one_region_of_any_program() {
         let Some(lib) = library() else { return };
         let file = lib.photo(
             "a.jpg",
@@ -495,7 +495,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_13_a_person_with_another_region_stays_in_person_in_image() {
+    fn req_032_13_a_person_with_another_region_stays_in_person_in_image() {
         let Some(lib) = library() else { return };
         let file = lib.photo("a.jpg", &[]);
         lib.write(
@@ -535,7 +535,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_14_changes_the_microsoft_region_only_where_it_exists() {
+    fn req_032_14_changes_the_microsoft_region_only_where_it_exists() {
         let Some(lib) = library() else { return };
         let plain = lib.photo("plain.jpg", &[]);
         lib.write("plain.jpg", &add("Anna"));
@@ -562,9 +562,9 @@ mod tests {
         assert_eq!(tags["RegionInfoMP"]["Regions"].as_array().unwrap().len(), 1);
     }
 
-    /// REQ-031-14: rectangles are for the upright photo, files store them for the turned one.
+    /// REQ-032-14: rectangles are for the upright photo, files store them for the turned one.
     #[test]
-    fn req_031_14_stores_rectangles_for_the_files_orientation() {
+    fn req_032_14_stores_rectangles_for_the_files_orientation() {
         let Some(lib) = library() else { return };
         let file = lib.photo("a.jpg", &["-Orientation#=6"]);
         lib.write(
@@ -589,7 +589,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_14_uses_the_sidecar_when_only_it_has_regions() {
+    fn req_032_14_uses_the_sidecar_when_only_it_has_regions() {
         let Some(lib) = library() else { return };
         let file = lib.photo("a.jpg", &[]);
         let sidecar = lib.path("a.jpg.xmp");
@@ -614,7 +614,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_14_a_read_only_file_shows_why_and_stays() {
+    fn req_032_14_a_read_only_file_shows_why_and_stays() {
         let Some(lib) = library() else { return };
         let file = lib.photo("a.jpg", &[]);
         let mut permissions = std::fs::metadata(&file).unwrap().permissions();
@@ -625,9 +625,9 @@ mod tests {
         assert!(names(&lib.tags(&file)).is_empty());
     }
 
-    /// REQ-031-14: what's written reads back through the indexer's own rules.
+    /// REQ-032-14: what's written reads back through the indexer's own rules.
     #[test]
-    fn req_031_14_is_read_back_by_the_indexing_rules() {
+    fn req_032_14_is_read_back_by_the_indexing_rules() {
         let Some(lib) = library() else { return };
         let file = lib.photo("a.jpg", &[]);
         lib.write(

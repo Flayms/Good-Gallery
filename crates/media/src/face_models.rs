@@ -1,4 +1,4 @@
-//! Running face models (spec 031): a detector or recognizer on a photo, with what `domain::face_models` says each
+//! Running face models (spec 032): a detector or recognizer on a photo, with what `domain::face_models` says each
 //! needs. The engine is behind [`Net`], so another can join `tract` without touching the steps around it.
 
 use domain::face_models::{
@@ -62,7 +62,7 @@ pub struct Detector {
 }
 
 impl Detector {
-    /// Loads `file` and checks on an empty picture that it answers as `format` does (REQ-031-03).
+    /// Loads `file` and checks on an empty picture that it answers as `format` does (REQ-032-03).
     pub fn load(file: &Path, format: DetectorFormat) -> Result<Self, String> {
         let net = load_tract(file, INPUT_SIDE)?;
         Self::new(Box::new(net), format)
@@ -148,7 +148,7 @@ impl Detector {
         input
     }
 
-    /// The faces in an upright `photo`, in its pixels (REQ-031-06).
+    /// The faces in an upright `photo`, in its pixels (REQ-032-06).
     pub fn find(&self, photo: &RgbImage) -> Result<Vec<Detection>, String> {
         if photo.width() == 0 || photo.height() == 0 {
             return Ok(Vec::new());
@@ -174,7 +174,7 @@ pub struct Recognizer {
 }
 
 impl Recognizer {
-    /// Loads `file` and checks on an empty crop that it answers with one vector (REQ-031-03).
+    /// Loads `file` and checks on an empty crop that it answers with one vector (REQ-032-03).
     pub fn load(file: &Path, style: InputStyle) -> Result<Self, String> {
         let net = load_tract(file, CROP_SIDE)?;
         Self::new(Box::new(net), style)
@@ -200,7 +200,7 @@ impl Recognizer {
         }
     }
 
-    /// The vector of the face with `landmarks` in `photo`, aligned onto the template (REQ-031-07).
+    /// The vector of the face with `landmarks` in `photo`, aligned onto the template (REQ-032-07).
     pub fn embed(&self, photo: &RgbImage, landmarks: &[[f32; 2]; 5]) -> Result<Vec<f32>, String> {
         let crop = aligned_crop(photo, landmarks);
         let mut input = vec![0.0; 3 * CROP_SIDE * CROP_SIDE];
@@ -265,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_06_finds_a_real_face_with_its_landmarks() {
+    fn req_032_06_finds_a_real_face_with_its_landmarks() {
         let found = yunet().find(&astronaut()).unwrap();
         assert_eq!(found.len(), 1, "{found:?}");
         let face = &found[0];
@@ -278,9 +278,9 @@ mod tests {
         );
     }
 
-    /// REQ-031-06: two faces about 80 px wide on a 4000 px photo, about 13 px in the first look at it.
+    /// REQ-032-06: two faces about 80 px wide on a 4000 px photo, about 13 px in the first look at it.
     #[test]
-    fn req_031_06_finds_small_faces_on_a_large_photo() {
+    fn req_032_06_finds_small_faces_on_a_large_photo() {
         let face = image::imageops::crop_imm(&astronaut(), 120, 0, 240, 240).to_image();
         let mut large = RgbImage::from_pixel(4000, 3000, image::Rgb([90, 100, 110]));
         image::imageops::replace(&mut large, &face, 2600, 1800);
@@ -292,9 +292,9 @@ mod tests {
         assert!(found.iter().any(|f| f.rect[0] < 800.0), "{found:?}");
     }
 
-    /// REQ-031-06: a face filling the frame is beyond what YuNet is trained on; the second look finds it.
+    /// REQ-032-06: a face filling the frame is beyond what YuNet is trained on; the second look finds it.
     #[test]
-    fn req_031_06_finds_a_face_that_fills_the_photo() {
+    fn req_032_06_finds_a_face_that_fills_the_photo() {
         let face = image::imageops::crop_imm(&astronaut(), 165, 25, 120, 140).to_image();
         let photo = image::imageops::resize(&face, 1200, 1400, FilterType::Triangle);
         let found = yunet().find(&photo).unwrap();
@@ -303,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_03_refuses_a_file_that_is_no_model_or_the_wrong_kind() {
+    fn req_032_03_refuses_a_file_that_is_no_model_or_the_wrong_kind() {
         let dir = tempfile::tempdir().unwrap();
         let junk = dir.path().join("junk.onnx");
         std::fs::write(&junk, b"not a model").unwrap();
@@ -315,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_07_moves_the_landmarks_onto_the_template_in_the_crop() {
+    fn req_032_07_moves_the_landmarks_onto_the_template_in_the_crop() {
         // A white dot at each landmark of a face at another place and scale.
         let landmarks = TEMPLATE.map(|[x, y]| [x * 2.0 + 100.0, y * 2.0 + 50.0]);
         let mut photo = RgbImage::new(400, 400);
@@ -342,7 +342,7 @@ mod tests {
     }
 
     #[test]
-    fn req_031_07_gives_a_normalized_vector_prepared_for_its_style() {
+    fn req_032_07_gives_a_normalized_vector_prepared_for_its_style() {
         let photo = RgbImage::from_pixel(300, 300, image::Rgb([255, 0, 0]));
         let landmarks = TEMPLATE.map(|[x, y]| [x + 50.0, y + 50.0]);
         let vector = Recognizer::new(Box::new(Echo), InputStyle::SFace)
@@ -362,7 +362,7 @@ mod tests {
         PathBuf::from(std::env::var("GG_FACE_MODELS").expect("GG_FACE_MODELS"))
     }
 
-    /// REQ-031-06, REQ-031-07: the same person in other light and size is closer than someone else.
+    /// REQ-032-06, REQ-032-07: the same person in other light and size is closer than someone else.
     fn tells_people_apart(recognizer: &Recognizer, detector: &Detector) {
         let folder = evaluation_folder();
         let her = astronaut();
@@ -386,7 +386,7 @@ mod tests {
 
     #[test]
     #[ignore = "needs models outside the repository"]
-    fn req_031_07_sface_tells_people_apart() {
+    fn req_032_07_sface_tells_people_apart() {
         let folder = evaluation_folder();
         let recognizer =
             Recognizer::load(&folder.join("face_recognition_sface_2021dec.onnx"), InputStyle::SFace).unwrap();
@@ -395,7 +395,7 @@ mod tests {
 
     #[test]
     #[ignore = "needs models outside the repository"]
-    fn req_031_07_auraface_tells_people_apart() {
+    fn req_032_07_auraface_tells_people_apart() {
         let folder = evaluation_folder();
         let recognizer = Recognizer::load(&folder.join("glintr100.onnx"), InputStyle::ArcFace).unwrap();
         tells_people_apart(&recognizer, &yunet());
@@ -403,7 +403,7 @@ mod tests {
 
     #[test]
     #[ignore = "needs models outside the repository"]
-    fn req_031_06_retinaface_finds_a_real_face() {
+    fn req_032_06_retinaface_finds_a_real_face() {
         let folder = evaluation_folder();
         let detector = Detector::load(&folder.join("retinaface_mv2.onnx"), DetectorFormat::RetinaFace).unwrap();
         let found = detector.find(&astronaut()).unwrap();

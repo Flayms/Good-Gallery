@@ -1,4 +1,4 @@
-//! REQ-019-12: the browser version sends nothing. The desktop app downloads face models (spec 031).
+//! REQ-019-12: the browser version sends nothing. The desktop app downloads face models (spec 032).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
