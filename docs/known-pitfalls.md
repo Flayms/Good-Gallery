@@ -165,6 +165,7 @@ Add every pitfall you hit. A trap in a tool, library, OS or our tests that we ca
 * **rusqlite 0.41 has no `DatabaseName`:** use `rusqlite::MAIN_DB` with `serialize` / `deserialize_read_exact` (features `serialize`, `backup`).
 * **`cargo install` builds in `/tmp`**, which is a small RAM disk on some machines (`Disk quota exceeded`, os error 122). Set `CARGO_TARGET_DIR` to a folder on the disk for the install.
 * **Playwright's Chromium needs system libraries** on Linux (`libnspr4.so: cannot open shared object file`): `sudo npx playwright install-deps chromium` (CI: `npx playwright install --with-deps chromium`).
+* **A double-click right after another click is a triple-click** to egui: it counts every click within 0.3 s of the last one, on any widget. UI tests wait half a second before double-clicking (`common::double_click_at`); `Node::click()` twice in one frame isn't seen as a double-click either.
 * **egui misses clicks that arrive with the pointer** (Playwright's `mouse.click` moves, presses and releases at once): the browser test moves first, waits 100 ms, then presses (`click` in `web.spec.js`).
 * **A 1 % screenshot tolerance hides small changes** like a status badge: the browser test allows 50 pixels. Fix the page's clock (`page.clock.setFixedTime`), time zone and locale, since Settings show when a library was last indexed.
 * **The page can't be driven through Chromium's directory picker headless:** the test deletes `showDirectoryPicker`, so the page falls back to the folder upload input, which `setInputFiles` fills.
