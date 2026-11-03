@@ -47,7 +47,8 @@ impl Selection {
         self.count(ids) == 0
     }
 
-    /// Selects `id`, or deselects it if it was; it becomes the anchor (REQ-025-01, REQ-025-03).
+    /// Selects `id`, or deselects it if it was, keeping the others; it becomes the anchor: a Ctrl-click or Space
+    /// (REQ-025-01).
     pub fn toggle(&mut self, id: i64) {
         let (Held::Some(ids) | Held::AllExcept(ids)) = &mut self.held;
         if !ids.remove(&id) {
@@ -56,8 +57,9 @@ impl Selection {
         self.anchor = Some(id);
     }
 
-    /// Makes `id` the anchor without changing the selection: a plain click outside selection mode.
-    pub fn set_anchor(&mut self, id: i64) {
+    /// Selects only `id`, which becomes the anchor: a plain click (REQ-025-01).
+    pub fn select_only(&mut self, id: i64) {
+        self.held = Held::Some(HashSet::from([id]));
         self.anchor = Some(id);
     }
 
@@ -110,9 +112,24 @@ mod tests {
 
     const IDS: [i64; 6] = [10, 11, 12, 13, 14, 15];
 
-    /// REQ-025-01, REQ-025-03: Ctrl-click, Space or a click in selection mode toggles an item.
+    /// REQ-025-01: a plain click selects only the clicked item, and a range starts from it.
     #[test]
-    fn req_025_01_req_025_03_toggles_items() {
+    fn req_025_01_a_click_selects_only_that_item() {
+        let mut selection = Selection::default();
+        selection.toggle(11);
+        selection.toggle(12);
+        selection.select_only(14);
+        assert_eq!(selection.ids(&IDS), [14]);
+        selection.select_all();
+        selection.select_only(10);
+        assert_eq!(selection.ids(&IDS), [10]);
+        selection.add_range(&IDS, 12);
+        assert_eq!(selection.ids(&IDS), [10, 11, 12]);
+    }
+
+    /// REQ-025-01: Ctrl-click or Space toggles an item, keeping the others.
+    #[test]
+    fn req_025_01_toggles_items() {
         let mut selection = Selection::default();
         assert!(selection.is_empty(&IDS));
         selection.toggle(12);
@@ -137,7 +154,7 @@ mod tests {
         assert_eq!(selection.ids(&IDS), [11, 12, 13, 14]);
 
         let mut selection = Selection::default();
-        selection.set_anchor(15);
+        selection.select_only(15);
         selection.add_range(&IDS, 13);
         assert_eq!(selection.ids(&IDS), [13, 14, 15]);
         // The clicked item is the next range's anchor.
@@ -145,7 +162,7 @@ mod tests {
         assert_eq!(selection.ids(&IDS), [11, 12, 13, 14, 15]);
 
         let mut selection = Selection::default();
-        selection.set_anchor(99);
+        selection.select_only(99);
         selection.add_range(&IDS, 10);
         assert_eq!(
             selection.ids(&IDS),

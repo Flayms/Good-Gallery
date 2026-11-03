@@ -37,7 +37,7 @@ Good Gallery doesn't write tags or ratings. It only writes files when you save o
 
 Download from the [releases](https://github.com/Flayms/Good-Gallery/releases) (Windows 10 or 11, 64-bit):
 
-- **`good-gallery-<version>-windows-x64-setup.exe`** installs for your user, without admin rights.
+- **`good-gallery-<version>-windows-x64-setup.exe`** installs for your user, without admin rights. You choose a Start menu shortcut, a desktop shortcut and whether Explorer offers Good Gallery under _Open with_; the last one can be changed later in the settings.
 - **`good-gallery-<version>-windows-x64-portable.zip`** runs from wherever you extract it.
 
 Both include exiftool, ffmpeg and libmpv. The downloads aren't code-signed yet, so SmartScreen may warn: choose _More info_ → _Run anyway_ (for the zip: _Properties_ → _Unblock_ before extracting).
@@ -80,7 +80,9 @@ Open **Settings**, add a folder as a library and wait for the first indexing to 
 | Gallery | Ctrl + mouse wheel            | Bigger or smaller tiles             |
 | Gallery | Hold the middle mouse button  | Autoscroll                          |
 | Gallery | Ctrl + B                      | Hide or show the sidebar            |
-| Gallery | Enter, or a click             | Open in the viewer                  |
+| Gallery | Enter, or a double-click      | Open in the viewer                  |
+| Gallery | Click, Ctrl + click, Shift + click | Select one, add or remove one, add a range |
+| Gallery | Ctrl + A / Esc                | Select all / clear the selection    |
 | Viewer  | ← / →                         | Previous / next                     |
 | Viewer  | + / − / 0, mouse wheel, click | Zoom in, out, fit                   |
 | Viewer  | I / F                         | Info panel / filmstrip              |

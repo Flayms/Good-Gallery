@@ -790,19 +790,41 @@ impl Gallery {
         });
     }
 
-    /// A click on the item at `index` (a tile or a row): Ctrl toggles it, Shift adds the range from the anchor, and a
-    /// plain click toggles it in selection mode or opens it (REQ-025-01 to REQ-025-03, REQ-009-01). Space on the
-    /// focused item toggles it too.
-    fn clicked(&mut self, index: usize, modifiers: egui::Modifiers, space: bool) {
+    /// Selects all items of the search (REQ-025-04).
+    pub fn select_all(&mut self) {
+        self.selection.select_all();
+    }
+
+    /// Clicks on the item at `index` (a tile or a row): a double-click or Enter on the focused item opens it
+    /// (REQ-025-08, REQ-009-01); a click selects only it, Ctrl or Space on the focused item toggles it, Shift adds
+    /// the range from the anchor (REQ-025-01, REQ-025-02).
+    fn respond(&mut self, ui: &egui::Ui, response: &egui::Response, index: usize) {
         let Some(data) = self.data.clone() else { return };
         let Some(&id) = data.ids.get(index) else { return };
+        // The first click of a double-click already selected the item.
+        if response.double_clicked() {
+            self.opened = Some(index);
+            return;
+        }
+        if !response.clicked() {
+            return;
+        }
+        let (modifiers, space, enter) = ui.input(|input| {
+            (
+                input.modifiers,
+                input.key_pressed(egui::Key::Space),
+                input.key_pressed(egui::Key::Enter),
+            )
+        });
+        let focused = response.has_focus();
         if modifiers.shift {
             self.selection.add_range(&data.ids, id);
-        } else if modifiers.command || space || !self.selection.is_empty(&data.ids) {
+        } else if modifiers.command || (space && focused) {
             self.selection.toggle(id);
-        } else {
-            self.selection.set_anchor(id);
+        } else if enter && focused {
             self.opened = Some(index);
+        } else {
+            self.selection.select_only(id);
         }
     }
 
@@ -1388,12 +1410,22 @@ impl Gallery {
             ui.set_min_height(total + inset_top + PADDING);
             self.anchor = self.item_at(&arranged, count, f64::from(viewport.min.y));
             self.anchor_id = self.data.as_ref().and_then(|data| data.ids.get(self.anchor).copied());
+            // Under the items, which take their own clicks: a click beside them clears the selection (REQ-025-04).
+            let background = ui.interact(
+                ui.clip_rect(),
+                ui.make_persistent_id("gallery background"),
+                self.tile_sense(),
+            );
             if list {
                 let origin = ui.min_rect().min + vec2(0.0, inset_top);
                 self.draw_list(ui, &arranged, viewport, origin, inset_top);
             } else {
                 let origin = ui.min_rect().min + vec2(PADDING, inset_top);
                 self.draw_tiles(ui, &arranged, viewport, origin, inset_top);
+            }
+            let modifiers = ui.input(|input| input.modifiers);
+            if background.clicked() && !modifiers.command && !modifiers.shift {
+                self.selection.clear();
             }
         });
         self.arranged = Some(arranged);

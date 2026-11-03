@@ -29,7 +29,7 @@ impl Gallery {
     ) {
         let Some(data) = self.data.clone() else { return };
         let layout = &arranged.tiles;
-        // In selection mode a click selects; hovered tiles show where (REQ-025-03).
+        // With a selection, hovered tiles show where a Ctrl-click would add to it (REQ-025-01).
         let selecting = !self.selection.is_empty(&data.ids);
         // Below the toolbar floating over the gallery.
         let mut visible = ui.clip_rect();
@@ -67,11 +67,7 @@ impl Gallery {
             }
             let id = data.ids[index];
             let response = ui.interact(rect, ui.make_persistent_id(("tile", id)), self.tile_sense());
-            // A click, or Enter on the focused tile, opens the viewer (REQ-009-01) or selects (spec 025).
-            if response.clicked() {
-                let (modifiers, space) = ui.input(|input| (input.modifiers, input.key_pressed(egui::Key::Space)));
-                self.clicked(index, modifiers, space && response.has_focus());
-            }
+            self.respond(ui, &response, index);
             response.context_menu(|ui| {
                 if let Some(action) = super::context_menu(ui) {
                     self.menu_action = Some((index, action));
@@ -226,7 +222,7 @@ pub(super) fn selected_mark(ui: &egui::Ui, tile: Rect, radius: u8) {
     check_badge(ui, tile, true);
 }
 
-/// A tile under the pointer in selection mode: an empty circle where the check mark goes (REQ-025-03).
+/// A tile under the pointer while others are selected: an empty circle where the check mark goes (REQ-025-01).
 pub(super) fn select_hint(ui: &egui::Ui, tile: Rect) {
     check_badge(ui, tile, false);
 }

@@ -73,9 +73,7 @@ fn settle_viewer(harness: &mut App) {
 }
 
 fn open(harness: &mut App, name: &str) {
-    harness
-        .get_by_role_and_label(egui::accesskit::Role::Image, name)
-        .click();
+    common::open_item(harness, name);
     settle_viewer(harness);
 }
 
@@ -955,7 +953,8 @@ fn req_009_11_context_menus_show_in_explorer_and_information() {
     settle(&mut harness);
     assert!(harness.state().info_sheet.is_none());
 
-    // The sheet steps aside for the viewer, which has its own panel.
+    // The sheet steps aside for the viewer, which has its own panel. The tiles have their final sizes by now.
+    let tile = harness.get_by_role_and_label(Role::Image, "1.png").rect().center();
     right_click_at(&mut harness, tile);
     harness.get_by_label("Information").click();
     settle(&mut harness);
@@ -1178,8 +1177,8 @@ fn req_013_12_the_photo_grows_from_its_tile_and_back() {
     harness.ctx.all_styles_mut(|style| style.animation_time = 0.12);
     let tile = harness.get_by_role_and_label(Role::Image, "1.png").rect();
 
-    harness.get_by_role_and_label(Role::Image, "1.png").click();
-    harness.run_steps(2);
+    common::double_click_at(&mut harness, tile.center());
+    harness.run_steps(1);
     let start = viewer(&harness).photo_rect().unwrap();
     assert!(
         (start.center() - tile.center()).length() < 40.0,
