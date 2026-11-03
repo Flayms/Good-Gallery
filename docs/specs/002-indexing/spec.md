@@ -169,4 +169,4 @@ Every library is mirrored in a local index, so browsing and searching 50k–500k
 | REQ-002-15 | `crates/indexer/src/scan.rs` › quick_scans_read_unreadable_files_again, changes_scans_read_an_unreadable_file_again (the metadata version stays, so `schedule::scan_all` keeps quick scans); `crates/db/src/lib.rs` › marks_media_indexed_without_dimensions_unreadable | pass |
 | REQ-002-16 | `crates/app/tests/indexing.rs` › lists_unreadable_files_with_their_library_folder_and_reason (snapshot `unreadable_files`), shows_nothing_without_unreadable_files; `crates/app/src/unreadable.rs` › names_the_library_and_folder | pass |
 | REQ-002-17 | `crates/app/tests/indexing.rs` › reads_files_again_and_drops_those_read_successfully; `crates/indexer/src/scan.rs` › changes_scans_read_an_unreadable_file_again | pass |
-| REQ-002-18 | `crates/indexer/src/indexer.rs` › urgent_paths_go_first_and_pause_the_running_scan; `crates/indexer/src/scan.rs` › an_interrupted_scan_keeps_what_it_read | pass |
+| REQ-002-18 | `crates/indexer/src/indexer.rs` › urgent_paths_go_first_and_pause_the_running_scan; `crates/indexer/src/scan.rs` › a_paused_scan_removes_nothing_and_saves_no_folders | pass |
