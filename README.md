@@ -80,7 +80,9 @@ Open **Settings**, add a folder as a library and wait for the first indexing to 
 | Gallery | Ctrl + mouse wheel            | Bigger or smaller tiles             |
 | Gallery | Hold the middle mouse button  | Autoscroll                          |
 | Gallery | Ctrl + B                      | Hide or show the sidebar            |
-| Gallery | Enter, or a click             | Open in the viewer                  |
+| Gallery | Enter, or a double-click      | Open in the viewer                  |
+| Gallery | Click, Ctrl + click, Shift + click | Select one, add or remove one, add a range |
+| Gallery | Ctrl + A / Esc                | Select all / clear the selection    |
 | Viewer  | ← / →                         | Previous / next                     |
 | Viewer  | + / − / 0, mouse wheel, click | Zoom in, out, fit                   |
 | Viewer  | I / F                         | Info panel / filmstrip              |

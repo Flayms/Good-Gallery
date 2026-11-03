@@ -188,6 +188,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
         return;
     };
     let mut search = gallery.search().clone();
+    // _Select all in library_ or _folder_ was picked (REQ-025-09).
+    let mut select_all = false;
     let empty = SidebarData::default();
     let data = gallery.sidebar().unwrap_or(&empty);
     // Folders leading to the active folder start expanded (REQ-008-02).
@@ -206,7 +208,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
         .auto_shrink([false, false])
         .show(ui, |ui| {
             group_label(ui, "Libraries");
-            if libraries(ui, state, &mut search, data, &input, on_settings) {
+            if libraries(ui, state, &mut search, &mut select_all, data, &input, on_settings) {
                 *input.page = Page::Gallery;
             }
             // The groups in the user's order, without the switched-off ones (REQ-008-10).
@@ -244,6 +246,21 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
         *input.page = Page::Gallery;
         gallery.set_search(search);
     }
+    if select_all {
+        *input.page = Page::Gallery;
+        gallery.select_all();
+    }
+}
+
+/// _Select all in library_ or _folder_ in a row's context menu (REQ-025-09); whether it was picked.
+fn select_all_menu(response: &egui::Response, label: &str) -> bool {
+    let mut picked = false;
+    response.context_menu(|ui| {
+        if ui.button(label).clicked() {
+            picked = true;
+        }
+    });
+    picked
 }
 
 /// The _Show sidebar_ button at the left of the toolbar and the Settings header while the sidebar is hidden
@@ -375,6 +392,7 @@ fn libraries(
     ui: &mut egui::Ui,
     state: &mut SidebarState,
     search: &mut GallerySearch,
+    select_all: &mut bool,
     data: &SidebarData,
     input: &SidebarInput,
     on_settings: bool,
@@ -431,16 +449,18 @@ fn libraries(
                 Rect::from_center_size(pos2(rect.right() - 16.0, rect.center().y), Vec2::splat(14.0)),
             );
         }
-        if response.clicked() {
+        let select = select_all_menu(&response, "Select all in library");
+        if response.clicked() || select {
             // A library replaces any folder, the other filters stay.
             (search.library, search.folder) = (Some(library.id), None);
             clicked = true;
+            *select_all |= select;
         }
         if selected
             && !on_settings
             && let Some((_, folders)) = data.folders.as_ref().filter(|(id, _)| *id == library.id)
         {
-            folder_items(ui, state, search, library.id, folders, 1);
+            folder_items(ui, state, search, select_all, library.id, folders, 1);
         }
     }
     clicked
@@ -450,6 +470,7 @@ fn folder_items(
     ui: &mut egui::Ui,
     state: &mut SidebarState,
     search: &mut GallerySearch,
+    select_all: &mut bool,
     library: i64,
     nodes: &[FolderNode],
     depth: usize,
@@ -469,17 +490,19 @@ fn folder_items(
                 tooltip: Some(format!("{} · {} items", node.path, format::count(node.count))),
             },
         );
+        let select = select_all_menu(&response, "Select all in folder");
         if chevron.as_ref().is_some_and(egui::Response::clicked) {
             if !state.expanded_folders.remove(&node.path) {
                 state.expanded_folders.insert(node.path.clone());
             }
-        } else if response.clicked() {
+        } else if response.clicked() || select {
             // Choosing a folder also expands it.
             (search.library, search.folder) = (Some(library), Some(node.path.clone()));
             state.expanded_folders.insert(node.path.clone());
+            *select_all |= select;
         }
         if open && has_children {
-            folder_items(ui, state, search, library, &node.children, depth + 1);
+            folder_items(ui, state, search, select_all, library, &node.children, depth + 1);
         }
     }
 }

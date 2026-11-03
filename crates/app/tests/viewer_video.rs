@@ -70,7 +70,7 @@ fn app(fixture: &Fixture, fake: Option<&FakePlayback>) -> (App, PathBuf) {
 }
 
 fn open(harness: &mut App, name: &str) {
-    harness.get_by_role_and_label(Role::Image, name).click();
+    common::open_item(harness, name);
     settle(harness);
     // Past the opening transition.
     harness.run_steps(30);

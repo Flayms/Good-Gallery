@@ -122,11 +122,7 @@ impl Gallery {
 
     fn draw_row(&mut self, ui: &mut egui::Ui, rect: Rect, index: usize, id: i64, frame: &mut FrameState) {
         let response = ui.interact(rect, ui.make_persistent_id(("row", id)), self.tile_sense());
-        // A click, or Enter on the focused row, opens the viewer (REQ-009-01) or selects (spec 025).
-        if response.clicked() {
-            let (modifiers, space) = ui.input(|input| (input.modifiers, input.key_pressed(egui::Key::Space)));
-            self.clicked(index, modifiers, space && response.has_focus());
-        }
+        self.respond(ui, &response, index);
         let selected = self.selection.contains(id);
         response.context_menu(|ui| {
             if let Some(action) = super::context_menu(ui) {
