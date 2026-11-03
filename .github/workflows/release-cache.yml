@@ -1,0 +1,50 @@
+# Compiles on main what a release compiles, so the release's build jobs start from a cache (docs/specs/014-ci-release,
+# REQ-014-14). A tag can't restore what another tag saved, but it can restore what main saved.
+name: Release cache
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.lock
+      - '**/Cargo.toml'
+      - rust-toolchain.toml
+      - .cargo/config.toml
+      - .github/workflows/release-cache.yml
+  # GitHub evicts a cache nothing used for 7 days.
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-cache
+  cancel-in-progress: true
+
+# rust-cache hashes the CARGO variables into its key, so these have to match release.yml's and linux-packages.yml's.
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    # A release commit changes only the version, and its tag's run is about to need the cache as it is.
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release)') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The systems the release builds on: linux-packages.yml's image decides the glibc (REQ-018-12).
+        os: [windows-latest, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # What `cargo xtask` compiles first, then what `cargo xtask dist` builds (xtask/src/dist.rs).
+      - run: cargo build -p xtask
+      - run: cargo build --release --locked -p app --features packaged
