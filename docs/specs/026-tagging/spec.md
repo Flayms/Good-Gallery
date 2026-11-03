@@ -20,7 +20,7 @@ Users add the tags, People and Places a photo lacks, and take back wrong ones, w
 - **Given** a tag of the item in the info panel or info sheet, in the desktop app
 - **When** the user clicks its remove button (×)
 - **Then** the item no longer has that tag
-- **And** a person named only by a face region (REQ-004-09) has no remove button: the region stays as other programs drew it, and the tag's tooltip says why
+- **And** a person named by a face region loses the region too, or the name would come back from it (REQ-031-13)
 
 ### REQ-026-03 · Written into the metadata
 
@@ -59,7 +59,7 @@ Users add the tags, People and Places a photo lacks, and take back wrong ones, w
 
 - Renaming, moving or merging tags across the library.
 - Removing a tag from a selection.
-- Drawing or naming face regions.
+- Drawing or naming face regions (spec 031).
 - `XMP-mwg-kw` keyword structures.
 
 ## Assumptions
@@ -72,7 +72,7 @@ Users add the tags, People and Places a photo lacks, and take back wrong ones, w
 | REQ        | Test | Result |
 | ---------- | ---- | ------ |
 | REQ-026-01 | `crates/domain/src/tagging.rs` › req_026_01_suggests_and_finds_the_tags_of_a_group; `crates/app/tests/tagging.rs` › req_026_01_req_026_03_adds_suggested_and_new_tags, req_026_01_suggests_in_the_info_sheet, req_026_01_escape_closes_the_field; snapshot `tag_suggestions` | pass |
-| REQ-026-02 | `crates/app/tests/tagging.rs` › req_026_02_removes_a_tag_but_not_a_face_region | pass |
+| REQ-026-02 | `crates/app/tests/tagging.rs` › req_026_02_removes_a_tag | pass |
 | REQ-026-03 | `crates/domain/src/tagging.rs` › req_026_03_adds_the_hierarchy_and_the_name, req_026_03_removes_the_tag_from_every_field; `crates/media/src/tagging.rs` › req_026_03_…; `crates/db/src/media.rs` › req_026_03_marks_a_retagged_file_for_reading; `crates/app/tests/tagging.rs` › req_026_01_req_026_03_adds_suggested_and_new_tags | pass |
 | REQ-026-04 | `crates/media/src/tagging.rs` › req_026_04_leaves_a_read_only_file_as_it_was; `crates/app/tests/tagging.rs` › req_026_04_keeps_the_tags_of_a_file_it_cant_write | pass |
 | REQ-026-05 | by inspection: `crate::WEB` turns off _Add_ and the remove buttons (`info.rs`); `cargo clippy -p app --target wasm32-unknown-unknown` | no test |

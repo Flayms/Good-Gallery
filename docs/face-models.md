@@ -1,11 +1,13 @@
 # Face models
 
-> [!WARNING]
-> Draft for #36. Speed and memory are not measured yet, and the licenses marked _open_ are not settled. Not legal advice.
+> [!NOTE]
+> Speed and memory are not measured yet. Licenses marked _open_ are not settled. This isn't legal advice.
 
 Good Gallery finds faces in two steps, and you choose a model for each. One model **detects** where the faces are. The other **recognizes** them: it turns each face into a list of numbers, and similar numbers suggest the same person.
 
-Models run on your computer. Photos, faces and those numbers are never uploaded, and the numbers are never written into your files.
+Models run on your computer. The app connects to the internet only to download a model you asked for. Photos, faces and those numbers are never uploaded, and the numbers are never written into your files.
+
+A name reaches your file only when you confirm it. Suggestions, faces you ignore and faces nobody has named stay in the app's index.
 
 ## Which should I pick?
 
@@ -22,8 +24,8 @@ Changing the recognition model means reading every face again, which can take ma
 | Model | Download | Finds faces in WIDER FACE (easy / medium / hard) | Speed | Memory | License |
 | --- | --- | --- | --- | --- | --- |
 | YuNet (2023) | 232 KB | 88.4% / 86.6% / 75.0% | not measured | not measured | MIT |
-| RetinaFace, MobileNetV2 | not measured | 94.0% / 92.3% / 83.6% | not measured | not measured | MIT (_open_) |
-| RetinaFace, ResNet34 | not measured | 95.1% / 93.5% / 84.4% | not measured | not measured | MIT (_open_) |
+| RetinaFace, MobileNetV2 | 12.5 MB | 94.0% / 92.3% / 83.6% | not measured | not measured | MIT (_open_) |
+| RetinaFace, ResNet34 | 88.5 MB | 95.1% / 93.5% / 84.4% | not measured | not measured | MIT (_open_) |
 
 RetinaFace's figures are at the photo's original size. Scaling images for the test raises its _hard_ score (88.9% for ResNet34) and lowers _easy_ and _medium_. YuNet's model page also lists lower figures (83.4% / 82.4% / 70.8%) without explaining the difference.
 
@@ -57,10 +59,13 @@ If you use Good Gallery for work, such as for a photography business, non-commer
 
 ## Using a model that isn't listed
 
-Choose **Add model file** and pick an ONNX file you downloaded yourself. You then choose how the model expects its input:
+In _Settings › Faces › Add a model_, paste an `https` link or choose an ONNX file you downloaded yourself. EdgeFace needs converting to ONNX first. Then say what the model is:
 
-- **ArcFace style:** most recognition models. RGB values scaled to −1…1.
-- **SFace style:** RGB values from 0 to 255.
+- **Recognition, ArcFace style:** most recognition models, including AuraFace, EdgeFace and `buffalo_l`. RGB values scaled to −1…1, 112 × 112 pixels.
+- **Recognition, SFace style:** RGB values from 0 to 255, 112 × 112 pixels.
+- **Detection, YuNet or RetinaFace format:** detection models need code for their output, so only these two formats work.
+
+Only add files you trust.
 
 A wrong choice doesn't cause an error, it just gives poor results. If you have named faces, the app checks whether they still match and warns you if they don't.
 

@@ -66,6 +66,27 @@ pub enum Action {
     Rate(crate::state::Rate),
     /// Add or remove a tag of an item (spec 026); the viewer stays.
     Tag(crate::state::TagChange),
+    /// What the user decided about a face (spec 031); the viewer stays.
+    Face(crate::state::FaceAction),
+}
+
+/// What a face's popup is about.
+#[derive(Clone)]
+enum FaceTarget {
+    /// A detected face without a name.
+    Unknown(db::faces::ShownFace),
+    /// A named region, with its name.
+    Named { name: String, rect: [f32; 4] },
+    /// A rectangle the user just drew.
+    Drawn([f32; 4]),
+}
+
+/// The popup with what can be done with a face (REQ-031-09, REQ-031-12, REQ-031-13).
+struct FacePopup {
+    media: i64,
+    target: FaceTarget,
+    /// The name being typed.
+    name: String,
 }
 
 /// What the keys and the mouse's back button asked for since the last frame.
@@ -212,6 +233,9 @@ pub struct Viewer {
     photo: Option<Rect>,
     /// The face regions drawn in the last frame, by name.
     faces_drawn: Vec<(String, Rect)>,
+    face_popup: Option<FacePopup>,
+    /// Drawing a new face (REQ-031-12): where the drag started, once it has.
+    drawing_face: Option<Option<egui::Pos2>>,
     chrome: Chrome,
     /// The media item the chrome was tinted for.
     chrome_for: Option<i64>,
@@ -263,6 +287,8 @@ impl Viewer {
             closing: None,
             photo: None,
             faces_drawn: Vec::new(),
+            face_popup: None,
+            drawing_face: None,
             chrome: Chrome::new(None),
             chrome_blur: None,
             chrome_for: None,
@@ -586,6 +612,116 @@ impl Viewer {
         gallery.store_setting(FILMSTRIP_KEY, if self.filmstrip { "shown" } else { "hidden" });
     }
 
+    /// The popup of the face clicked or drawn: what it offers depends on whether it has a name.
+    fn face_popup_ui(&mut self, ui: &egui::Ui, photo: Rect) -> Option<crate::state::FaceAction> {
+        use crate::state::FaceAction;
+        let mut popup = self.face_popup.take()?;
+        let rect = match &popup.target {
+            FaceTarget::Unknown(face) => face.rect,
+            FaceTarget::Named { rect, .. } | FaceTarget::Drawn(rect) => *rect,
+        };
+        let anchor = on_screen(photo, rect);
+        let media = popup.media;
+        let mut action = None;
+        let mut close = false;
+        let clean = |name: &str| {
+            let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+            (!name.is_empty()).then_some(name)
+        };
+        egui::Area::new(ui.make_persistent_id("face popup"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(anchor.left_bottom() + vec2(0.0, FACE_LABEL_HEIGHT + 8.0))
+            .show(ui.ctx(), |ui| {
+                crate::glass::panel(ui, egui::Margin::same(10), |ui| {
+                    ui.spacing_mut().item_spacing.y = 6.0;
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut popup.name)
+                            .hint_text("Who is this?")
+                            .desired_width(200.0),
+                    );
+                    field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Who is this?"));
+                    let enter = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                    let suggestion = match &popup.target {
+                        FaceTarget::Unknown(face) => face.suggestion.clone(),
+                        _ => None,
+                    };
+                    if let (FaceTarget::Unknown(face), Some(name)) = (&popup.target, &suggestion) {
+                        ui.horizontal(|ui| {
+                            if ui.button(format!("It's {name}")).clicked() {
+                                action = Some(FaceAction::Name {
+                                    name: name.clone(),
+                                    places: vec![(media, face.rect)],
+                                });
+                            }
+                            if ui.button("Not this person").clicked() {
+                                action = Some(FaceAction::NotThisPerson {
+                                    face: face.id,
+                                    name: name.clone(),
+                                });
+                            }
+                        });
+                    }
+                    ui.horizontal(|ui| {
+                        let typed = clean(&popup.name);
+                        match &popup.target {
+                            FaceTarget::Named { name, rect } => {
+                                if (ui.button("Rename").clicked() || enter)
+                                    && let Some(to) = typed.filter(|to| to != name)
+                                {
+                                    action = Some(FaceAction::Rename {
+                                        media,
+                                        from: name.clone(),
+                                        to,
+                                        rect: *rect,
+                                    });
+                                }
+                                if ui.button("Remove").clicked() {
+                                    action = Some(FaceAction::Remove {
+                                        media,
+                                        name: name.clone(),
+                                        rect: *rect,
+                                    });
+                                }
+                            }
+                            FaceTarget::Unknown(face) => {
+                                if (ui.button("Save").clicked() || enter)
+                                    && let Some(name) = typed
+                                {
+                                    action = Some(FaceAction::Name {
+                                        name,
+                                        places: vec![(media, face.rect)],
+                                    });
+                                }
+                                if ui.button("Ignore").clicked() {
+                                    action = Some(FaceAction::Ignore { faces: vec![face.id] });
+                                }
+                                if ui.button("Not a face").clicked() {
+                                    action = Some(FaceAction::NotAFace { face: face.id });
+                                }
+                            }
+                            FaceTarget::Drawn(rect) => {
+                                if (ui.button("Save").clicked() || enter)
+                                    && let Some(name) = typed
+                                {
+                                    action = Some(FaceAction::Name {
+                                        name,
+                                        places: vec![(media, *rect)],
+                                    });
+                                }
+                            }
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close = true;
+                        }
+                    });
+                });
+            });
+        if action.is_none() && !close {
+            self.face_popup = Some(popup);
+        }
+        action
+    }
+
     fn toggle_faces(&mut self, gallery: &Gallery) {
         self.faces = !self.faces;
         gallery.store_setting(faces::FACES_KEY, if self.faces { "shown" } else { "hidden" });
@@ -604,6 +740,12 @@ impl Viewer {
         self.follow(gallery);
         let count = gallery.count().unwrap_or(0);
         let mut keys = std::mem::take(&mut self.keys);
+        // Escape first leaves what the faces are doing (REQ-031-09, REQ-031-12).
+        if keys.close && (self.face_popup.is_some() || self.drawing_face.is_some()) {
+            keys.close = false;
+            self.face_popup = None;
+            self.drawing_face = None;
+        }
         self.track_video_focus(ctx);
         if let Some(session) = &mut self.edit {
             session.poll();
@@ -732,8 +874,36 @@ impl Viewer {
                         let drawn = self.media(ui, &backdrop, &layout, item, gallery, &original, keys, transition);
                         self.photo = Some(drawn);
                         if self.faces && transition.is_none() && !closing && self.edit.is_none() {
-                            let faces = gallery.cached_detail(item.id).map_or(&[][..], |detail| &detail.faces);
-                            self.faces_drawn = draw_faces(ui, layout.media, drawn, faces);
+                            let faces = gallery
+                                .cached_detail(item.id)
+                                .map_or(&[][..], |detail| &detail.faces)
+                                .to_vec();
+                            self.faces_drawn = draw_faces(ui, layout.media, drawn, &faces);
+                            let unknown = gallery.faces_on(item.id).to_vec();
+                            if item.kind == MediaKind::Image && !crate::WEB {
+                                if let Some(target) =
+                                    face_clicks(ui, drawn, &faces, &unknown, self.drawing_face.is_some())
+                                {
+                                    self.face_popup = Some(FacePopup {
+                                        media: item.id,
+                                        name: match &target {
+                                            FaceTarget::Named { name, .. } => name.clone(),
+                                            _ => String::new(),
+                                        },
+                                        target,
+                                    });
+                                }
+                                if let Some(rect) = draw_new_face(ui, drawn, &mut self.drawing_face) {
+                                    self.face_popup = Some(FacePopup {
+                                        media: item.id,
+                                        name: String::new(),
+                                        target: FaceTarget::Drawn(rect),
+                                    });
+                                }
+                                if let Some(chosen) = self.face_popup_ui(ui, drawn) {
+                                    action = Some(Action::Face(chosen));
+                                }
+                            }
                         }
                     }
                     None if self.missing => {
@@ -798,6 +968,7 @@ impl Viewer {
             Some(Action::Revert(target)) => Some(Action::Revert(target)),
             Some(Action::Rate(rate)) => Some(Action::Rate(rate)),
             Some(Action::Tag(change)) => Some(Action::Tag(change)),
+            Some(Action::Face(face)) => Some(Action::Face(face)),
             // Closing while editing asks about unsaved changes first (REQ-021-08).
             Some(Action::Close) if self.edit.is_some() => {
                 self.leave_edit(Leave::Close, gallery);
@@ -1257,13 +1428,16 @@ impl Viewer {
     ) -> Option<Action> {
         let ctx = ui.ctx().clone();
         let screen = layout.screen;
+        let looks_for_faces = gallery.looks_for_faces();
         let has_faces = item.is_some_and(|item| {
             item.kind == MediaKind::Image
-                && gallery
-                    .cached_detail(item.id)
-                    .is_some_and(|detail| !detail.faces.is_empty())
+                && (looks_for_faces
+                    || gallery
+                        .cached_detail(item.id)
+                        .is_some_and(|detail| !detail.faces.is_empty()))
         });
-        let text = bar_text(ui, screen, item, libraries, has_faces);
+        let mut text = bar_text(ui, screen, item, libraries, has_faces);
+        text.add_face = has_faces && self.faces && !crate::WEB;
         let bar = control_bar_rect(layout, &text);
         let previous = self.step_target(-1, count).map(|_| {
             Rect::from_center_size(
@@ -1362,6 +1536,10 @@ impl Viewer {
                 Some(BarButton::Info) => self.info_open = !self.info_open,
                 Some(BarButton::Filmstrip) => self.toggle_filmstrip(gallery),
                 Some(BarButton::Faces) => self.toggle_faces(gallery),
+                Some(BarButton::AddFace) => {
+                    self.face_popup = None;
+                    self.drawing_face = Some(None);
+                }
                 Some(BarButton::Close) => action = Some(Action::Close),
                 None => {}
             }
@@ -1883,8 +2061,10 @@ struct BarText {
     date: Option<std::sync::Arc<egui::Galley>>,
     stars: usize,
     editable: bool,
-    /// The photo has face regions (REQ-009-17).
+    /// The photo may have faces (REQ-009-17, REQ-031-09).
     faces: bool,
+    /// Faces are on, so one can be drawn (REQ-031-12).
+    add_face: bool,
 }
 
 /// Whether the item is a photo that can be edited here: JPEG, PNG or WebP in an online library, not in the browser
@@ -1924,6 +2104,7 @@ fn bar_text(ui: &egui::Ui, screen: Rect, item: Option<&GalleryItem>, libraries: 
         stars: item.and_then(|item| item.rating).unwrap_or(0).clamp(0, 5) as usize,
         editable: item.is_some_and(|item| editable(item, libraries)),
         faces,
+        add_face: false,
     }
 }
 
@@ -1938,10 +2119,11 @@ enum BarButton {
     Info,
     Filmstrip,
     Faces,
+    AddFace,
     Close,
 }
 
-const BAR_BUTTONS: [(BarButton, Icon, &str, &str); 6] = [
+const BAR_BUTTONS: [(BarButton, Icon, &str, &str); 7] = [
     (BarButton::Edit, Icon::SlidersHorizontal, "Edit", "Edit (e)"),
     (
         BarButton::ShowInExplorer,
@@ -1957,17 +2139,19 @@ const BAR_BUTTONS: [(BarButton, Icon, &str, &str); 6] = [
         "Filmstrip (f)",
     ),
     (BarButton::Faces, Icon::ScanFace, "Faces", "Faces (p)"),
+    (BarButton::AddFace, Icon::Plus, "Add face", "Draw a face on the photo"),
     (BarButton::Close, Icon::X, "Close", "Close (Esc)"),
 ];
 
 /// The bar's buttons on this platform and for this item: the browser can't open a file manager (REQ-019-13), only
 /// photos that can be edited have _Edit_ (REQ-021-01), only photos with face regions _Faces_ (REQ-009-17).
-fn bar_buttons(editable: bool, faces: bool) -> Vec<(BarButton, Icon, &'static str, &'static str)> {
+fn bar_buttons(editable: bool, faces: bool, add_face: bool) -> Vec<(BarButton, Icon, &'static str, &'static str)> {
     BAR_BUTTONS
         .into_iter()
         .filter(|(button, ..)| match button {
             BarButton::Edit => editable,
             BarButton::Faces => faces,
+            BarButton::AddFace => add_face,
             BarButton::ShowInExplorer => !crate::WEB,
             _ => true,
         })
@@ -1983,7 +2167,10 @@ fn control_bar_rect(layout: &Layout, text: &BarText) -> Rect {
         width += text.stars as f32 * (STAR_SIZE + 2.0) + BAR_GAP;
     }
     // Separator, the buttons and the right padding.
-    width += 1.0 + BAR_GAP + bar_buttons(text.editable, text.faces).len() as f32 * theme::CONTROL_HEIGHT + 6.0;
+    width += 1.0
+        + BAR_GAP
+        + bar_buttons(text.editable, text.faces, text.add_face).len() as f32 * theme::CONTROL_HEIGHT
+        + 6.0;
     let room = layout.right - layout.screen.left();
     let width = width.min(room - 32.0);
     Rect::from_center_size(
@@ -2033,6 +2220,118 @@ fn draw_faces(ui: &egui::Ui, area: Rect, photo: Rect, faces: &[faces::FaceRegion
     drawn
 }
 
+/// A fraction-of-the-photo rectangle where the photo is drawn.
+fn on_screen(photo: Rect, [x, y, w, h]: [f32; 4]) -> Rect {
+    Rect::from_min_size(
+        pos2(photo.left() + x * photo.width(), photo.top() + y * photo.height()),
+        vec2(w * photo.width(), h * photo.height()),
+    )
+}
+
+/// Draws the faces without a name, with their suggestions, and returns the face clicked, named or not (REQ-031-09). A
+/// face is its box's own widget, so a click there doesn't reach the photo.
+fn face_clicks(
+    ui: &egui::Ui,
+    photo: Rect,
+    named: &[faces::FaceRegion],
+    unknown: &[db::faces::ShownFace],
+    drawing: bool,
+) -> Option<FaceTarget> {
+    if drawing {
+        return None;
+    }
+    let mut clicked = None;
+    for region in named {
+        let rect = [region.x, region.y, region.w, region.h];
+        let label = format!("Face of {}", region.name);
+        let response = ui.interact(
+            on_screen(photo, rect),
+            ui.make_persistent_id(("named face", rect.map(f32::to_bits))),
+            egui::Sense::click(),
+        );
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
+        if response.clicked() {
+            clicked = Some(FaceTarget::Named {
+                name: region.name.clone(),
+                rect,
+            });
+        }
+    }
+    let painter = ui.painter();
+    let font = egui::FontId::new(theme::SIZE_CAPTION, theme::semibold());
+    for face in unknown {
+        let area = on_screen(photo, face.rect);
+        let shadow = egui::Stroke::new(3.0, Color32::from_black_alpha(110));
+        let line = egui::Stroke::new(1.5, Color32::from_white_alpha(170));
+        painter.rect_stroke(area, 4.0, shadow, egui::StrokeKind::Middle);
+        painter.extend(egui::Shape::dashed_line(
+            &[
+                area.left_top(),
+                area.right_top(),
+                area.right_bottom(),
+                area.left_bottom(),
+                area.left_top(),
+            ],
+            line,
+            6.0,
+            4.0,
+        ));
+        let text = match &face.suggestion {
+            Some(name) => format!("{name}?"),
+            None => "Who is this?".to_owned(),
+        };
+        let galley = painter.layout_no_wrap(text.clone(), font.clone(), Color32::WHITE);
+        let size = vec2(galley.size().x + 12.0, FACE_LABEL_HEIGHT);
+        let label = Rect::from_min_size(pos2(area.center().x - size.x / 2.0, area.bottom() + 4.0), size);
+        painter.rect_filled(label, size.y / 2.0, Color32::from_black_alpha(153));
+        painter.galley(label.center() - galley.size() / 2.0, galley, Color32::WHITE);
+        let response = ui.interact(
+            area,
+            ui.make_persistent_id(("unknown face", face.id)),
+            egui::Sense::click(),
+        );
+        let spoken = format!("Unknown face: {text}");
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &spoken));
+        if response.clicked() {
+            clicked = Some(FaceTarget::Unknown(face.clone()));
+        }
+    }
+    clicked
+}
+
+/// Drawing a new face: a drag across the photo gives its rectangle, as fractions of the photo (REQ-031-12).
+fn draw_new_face(ui: &egui::Ui, photo: Rect, drawing: &mut Option<Option<egui::Pos2>>) -> Option<[f32; 4]> {
+    let start = (*drawing)?;
+    let response = ui.interact(photo, ui.make_persistent_id("draw a face"), egui::Sense::drag());
+    ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+    if response.drag_started() {
+        *drawing = Some(response.interact_pointer_pos());
+    }
+    let start = (*drawing).flatten().or(start);
+    let (Some(start), Some(now)) = (start, ui.ctx().pointer_latest_pos()) else {
+        return None;
+    };
+    let area = Rect::from_two_pos(start, now).intersect(photo);
+    ui.painter().rect_stroke(
+        area,
+        4.0,
+        egui::Stroke::new(1.5, Color32::WHITE),
+        egui::StrokeKind::Middle,
+    );
+    if !response.drag_stopped() {
+        return None;
+    }
+    *drawing = None;
+    (area.width() > 8.0 && area.height() > 8.0).then(|| {
+        [
+            (area.left() - photo.left()) / photo.width(),
+            (area.top() - photo.top()) / photo.height(),
+            area.width() / photo.width(),
+            area.height() / photo.height(),
+        ]
+    })
+}
+
 /// Which of the bar's toggles are on.
 #[derive(Clone, Copy)]
 struct Toggles {
@@ -2056,7 +2355,11 @@ fn control_bar(
         faces,
         editing,
     } = toggles;
-    let buttons = bar_buttons(text.editable || editing, text.faces && !editing);
+    let buttons = bar_buttons(
+        text.editable || editing,
+        text.faces && !editing,
+        text.add_face && !editing,
+    );
     backing.paint(ui.painter(), rect, rect.height() / 2.0);
     // Clicks on the bar's background don't reach the scrim behind it.
     ui.interact(rect, ui.make_persistent_id("control bar"), egui::Sense::click());

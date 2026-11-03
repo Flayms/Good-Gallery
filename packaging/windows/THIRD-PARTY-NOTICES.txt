@@ -25,4 +25,5 @@ Atkinson Hyperlegible Next, the typeface. Copyright the Braille Institute of Ame
 Lucide icons. License: ISC.
 U²-Net-p, the network that finds a photo's subject. Copyright Xuebin Qin et al.
   License: Apache-2.0. https://github.com/xuebinqin/U-2-Net
+Face models aren't part of the app. The user downloads them on request, under their own licenses: https://github.com/Flayms/Good-Gallery/blob/main/docs/face-models.md
 Rust crates as listed in the source's Cargo.lock, under their licenses (mostly MIT and Apache-2.0).

@@ -44,6 +44,21 @@
 **Decided:** only a name the user confirmed reaches a file. A detected face overlapping a named region is that person, worked out when read, so another program's change to the regions needs no sync. Face tables live in the index, not a database of their own, so they follow `media` by foreign key and share its writer conventions. `face_embeddings` is its own table and read only by the face code, so the gallery's reads don't pay for it.
 **Rejected:** writing unknown faces to files (other programs show them as nameless boxes, and digiKam's writes on rejecting caused complaints, its bug 511184). A separate database (cleanup without foreign keys, for rejections to survive a rebuild, which is rare).
 
+### 2026-11-03 · A first look, and more only where it hints at faces
+
+**Decided:** every photo gets one look at 640 × 640. Without a confident face it gets another at half the size, for a face larger than YuNet is trained on. Where even a weak candidate (`HINT_SCORE` 0.3) is small, overlapping tiles follow. Real YuNet missed a 110 px face on a 4000 px photo until the hints were weak ones.
+**Rejected:** tiles on every photo (about five times the work for a library that mostly has large faces or none), a confident first detection as the trigger (the case above).
+
+### 2026-11-03 · Taking a face out of a group ignores it
+
+**Decided:** a face taken out of a group becomes ignored, and comes back with _Show ignored faces again_. Groups are computed, so there is nothing to remove it from, and it would rejoin the same group if merely skipped.
+**Rejected:** a rejection list per group: groups have no lasting identity.
+
+### 2026-11-03 · Unnamed regions of other programs stay out
+
+**Decided:** only named regions are read (REQ-004-13). Unnamed ones stay in the file, untouched, and the detector usually finds the same face.
+**Rejected:** importing them as unknown faces: a schema change and a second kind of unknown face, for a case rarely seen.
+
 ### 2026-11-03 · Unsettled licenses are stated, not avoided
 
 **Decided:** YuNet, SFace, RetinaFace and AuraFace have a download button. EdgeFace and `buffalo_l` are not in the code: the info page describes them, with a disclaimer for `buffalo_l`, and they are added by link or file. RetinaFace's and AuraFace's open questions are on the page. Only AuraFace's `glintr100.onnx` is downloaded, since its repository also holds InsightFace's non-commercial files.

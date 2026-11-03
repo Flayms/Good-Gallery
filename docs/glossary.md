@@ -27,6 +27,10 @@ Domain terms used in specs, code and UI. Code names differ from the UI term in s
 | **Tag**               | A keyword from the metadata. Tags are compared case-insensitively after Unicode (NFKC) and whitespace normalization. The first spelling seen is displayed.       |
 | **Tag hierarchy**     | Tags nested as `Parent\|Child\|Leaf` (e.g. `Places\|France\|Paris`). A media item is linked to the leaf. Searching for a tag also matches its descendants.        |
 | **Face region**       | A named area of a photo marked as a face by a photo app. Its name becomes the tag `People\|<name>`.                                                               |
+| **Detected face**     | A face a detection model found in a photo, stored in the index. It has a name only if it overlaps a named face region. (code: `detected_faces`)                  |
+| **Face model**        | A detection or recognition model the user chose, identified by its file's SHA-256, kept in the data folder. See `docs/face-models.md`.                           |
+| **Embedding**         | The numbers a recognition model makes of a face. Only comparable within one model, and never written to files. (code: `face_embeddings`)                         |
+| **Suggestion**        | The known person an unknown face looks most like. It reaches a file only when the user confirms it.                                                              |
 | **Tag category**      | _People_ or _Places_. A tag belongs to a category when its top-level ancestor is a **category root**: `People`, `Person`, `Persons`, `Faces` / `Places`, `Place`, `Locations`, `Location`. |
 | **Metadata version**  | The version of the metadata extraction rules. Media indexed with an older version are read again. (code: `METADATA_VERSION`, `media.meta_version`)                  |
 

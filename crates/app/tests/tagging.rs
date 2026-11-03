@@ -232,12 +232,11 @@ fn req_026_01_suggests_in_the_info_sheet() {
 /// REQ-026-02, REQ-026-03: a tag's remove button takes it out of the file; a person named only by a face region has
 /// none.
 #[test]
-fn req_026_02_removes_a_tag_but_not_a_face_region() {
+fn req_026_02_removes_a_tag() {
     let Some(exiftool) = exiftool() else { return };
     let fixture = Fixture::new();
     let (mut harness, dir) = app(&fixture, Some(&exiftool));
     open_info(&mut harness, "a.png");
-    assert!(harness.query_by_label("Remove Ben").is_none());
     assert!(harness.query_by_label("Remove Anna").is_some());
 
     harness.get_by_label("Remove Rome").click();
@@ -247,6 +246,34 @@ fn req_026_02_removes_a_tag_but_not_a_face_region() {
         json!({ "HierarchicalSubject": "People|Anna", "Subject": ["Beach", "Anna"] })
     );
     assert!(reread(&fixture, "a.png"));
+}
+
+/// REQ-031-13: a person named by a face region can be removed too; the region goes with the tag, or it would come back.
+#[test]
+fn req_031_13_the_people_tags_remove_button_takes_the_region() {
+    let Some(exiftool) = exiftool() else { return };
+    let fixture = Fixture::new();
+    let (mut harness, dir) = app(&fixture, Some(&exiftool));
+    let status = Command::new(&exiftool)
+        .args([
+            "-q",
+            "-overwrite_original",
+            "-XMP-mwg-rs:RegionInfo={RegionList=[{Area={X=0.2,Y=0.25,W=0.2,H=0.3,Unit=normalized},Name=Ben,Type=Face}]}",
+        ])
+        .arg(dir.join("a.png"))
+        .status()
+        .unwrap();
+    assert!(status.success());
+    open_info(&mut harness, "a.png");
+    harness.get_by_label("Remove Ben").click();
+    settle(&mut harness);
+    let output = Command::new(&exiftool)
+        .args(["-json", "-struct", "-XMP-mwg-rs:RegionInfo"])
+        .arg(dir.join("a.png"))
+        .output()
+        .unwrap();
+    let read: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(read[0].get("RegionInfo"), None, "{read}");
 }
 
 /// REQ-026-01: Escape closes the field without a change, and keeps the viewer open.

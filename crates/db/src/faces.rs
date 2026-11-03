@@ -2,9 +2,9 @@
 //! that person, worked out here when read, so a change by another program needs no syncing (REQ-031-08).
 
 use crate::Result;
-use domain::face_models::{Detection, same_face};
+use domain::face_models::{Detection, group, same_face, suggest, tells_nobody_apart};
 use domain::faces::FaceRegion;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -12,6 +12,8 @@ use std::path::PathBuf;
 pub const DETECTOR_KEY: &str = "faces.detector";
 /// The setting holding the chosen recognition model's hash.
 pub const RECOGNIZER_KEY: &str = "faces.recognizer";
+/// How similar faces must be for the chosen recognition model, as text.
+pub const THRESHOLD_KEY: &str = "faces.threshold";
 /// Whether the search goes on, `"paused"` if the user switched it off.
 pub const SEARCH_KEY: &str = "faces.search";
 
@@ -50,6 +52,7 @@ pub struct FacePhoto {
     pub size: i64,
     pub mtime: i64,
     pub sidecar_orientation: Option<u8>,
+    pub root_id: i64,
 }
 
 impl FacePhoto {
@@ -67,10 +70,11 @@ fn photo_from_row(row: &rusqlite::Row) -> rusqlite::Result<FacePhoto> {
         size: row.get(3)?,
         mtime: row.get(4)?,
         sidecar_orientation: row.get(5)?,
+        root_id: row.get(6)?,
     })
 }
 
-const PHOTO_COLUMNS: &str = "m.id, r.path, m.rel_path, m.size, m.mtime, m.sidecar_orientation";
+const PHOTO_COLUMNS: &str = "m.id, r.path, m.rel_path, m.size, m.mtime, m.sidecar_orientation, m.root_id";
 
 /// Photos `detector` hasn't looked at in their current version, newest first; videos and offline libraries don't count.
 pub fn pending_photos(conn: &Connection, detector: &str, limit: usize) -> Result<Vec<FacePhoto>> {
@@ -208,8 +212,8 @@ pub fn pending_faces(
         .query_map(params![detector, recognizer, limit as i64], |row| {
             Ok(FaceToRecognize {
                 photo: photo_from_row(row)?,
-                face: row.get(6)?,
-                landmarks: landmarks_from_blob(&row.get::<_, Vec<u8>>(7)?),
+                face: row.get(7)?,
+                landmarks: landmarks_from_blob(&row.get::<_, Vec<u8>>(8)?),
             })
         })?
         .collect::<rusqlite::Result<_>>()?;
@@ -433,6 +437,16 @@ pub fn face_on_region(conn: &Connection, media: i64, detector: &str, rect: [f32;
     Ok(None)
 }
 
+/// Where a person's regions are on a photo.
+pub fn regions_named(conn: &Connection, media: i64, name: &str) -> Result<Vec<[f32; 4]>> {
+    Ok(conn
+        .prepare_cached("SELECT x, y, w, h FROM media_faces WHERE media_id = ?1 AND name = ?2")?
+        .query_map(params![media, name], |row| {
+            Ok([row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?])
+        })?
+        .collect::<rusqlite::Result<_>>()?)
+}
+
 /// Shows ignored faces again (REQ-031-11).
 pub fn restore_ignored(conn: &Connection) -> Result<usize> {
     Ok(conn.execute("UPDATE detected_faces SET state = 'open' WHERE state = 'ignored'", [])?)
@@ -443,6 +457,97 @@ pub fn delete_all(conn: &Connection) -> Result<()> {
     conn.execute("DELETE FROM detected_faces", [])?;
     conn.execute("DELETE FROM faces_scanned", [])?;
     Ok(())
+}
+
+/// The file of a media item.
+pub fn photo(conn: &Connection, media: i64) -> Result<Option<FacePhoto>> {
+    let sql = format!("SELECT {PHOTO_COLUMNS} FROM media m JOIN library_roots r ON r.id = m.root_id WHERE m.id = ?1");
+    Ok(conn
+        .prepare_cached(&sql)?
+        .query_row([media], photo_from_row)
+        .optional()?)
+}
+
+/// A face without a name as the viewer shows it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShownFace {
+    pub id: i64,
+    pub rect: [f32; 4],
+    pub suggestion: Option<String>,
+}
+
+/// The faces without a name on a photo, each with the person it looks most like (REQ-031-09, REQ-031-10).
+pub fn shown_faces(
+    conn: &Connection,
+    media: i64,
+    detector: &str,
+    recognizer: Option<&str>,
+    threshold: f32,
+) -> Result<Vec<ShownFace>> {
+    let recognizer = recognizer.unwrap_or_default();
+    let faces = unknown_faces_on(conn, media, detector, recognizer)?;
+    if faces.is_empty() {
+        return Ok(Vec::new());
+    }
+    let known = known_faces(conn, detector, recognizer)?;
+    let known: Vec<(&str, &[f32])> = known
+        .iter()
+        .map(|(name, vector)| (name.as_str(), vector.as_slice()))
+        .collect();
+    Ok(faces
+        .into_iter()
+        .map(|face| {
+            let rejected: Vec<&str> = face.rejected.iter().map(String::as_str).collect();
+            let suggestion = face
+                .vector
+                .as_deref()
+                .and_then(|vector| suggest(vector, &known, threshold, &rejected))
+                .map(|(name, _)| name.to_owned());
+            ShownFace {
+                id: face.id,
+                rect: face.rect,
+                suggestion,
+            }
+        })
+        .collect())
+}
+
+/// One of a group's faces.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GroupFace {
+    pub id: i64,
+    pub media: i64,
+    pub rect: [f32; 4],
+}
+
+/// Similar faces without a name, largest group first (REQ-031-15).
+pub fn face_groups(conn: &Connection, detector: &str, recognizer: &str, threshold: f32) -> Result<Vec<Vec<GroupFace>>> {
+    const MIN_GROUP: usize = 3;
+    let faces = unknown_faces(conn, detector, recognizer)?;
+    let vectors: Vec<&[f32]> = faces.iter().filter_map(|face| face.vector.as_deref()).collect();
+    Ok(group(&vectors, threshold, MIN_GROUP)
+        .into_iter()
+        .map(|members| {
+            members
+                .into_iter()
+                .map(|index| GroupFace {
+                    id: faces[index].id,
+                    media: faces[index].media,
+                    rect: faces[index].rect,
+                })
+                .collect()
+        })
+        .collect())
+}
+
+/// Whether known faces suggest the recognition model is set up wrongly (REQ-031-17).
+pub fn model_seems_wrong(conn: &Connection, detector: &str, recognizer: &str) -> Result<bool> {
+    let known = known_faces(conn, detector, recognizer)?;
+    let known: Vec<(&str, &[f32])> = known
+        .iter()
+        .map(|(name, vector)| (name.as_str(), vector.as_slice()))
+        .collect();
+    Ok(tells_nobody_apart(&known))
 }
 
 /// A stored setting holding a model's hash, or the search's state.
@@ -585,6 +690,82 @@ mod tests {
         reject(&conn, face_id, "Anna").unwrap();
         reject(&conn, face_id, "Anna").unwrap();
         assert_eq!(unknown_faces_on(&conn, id, "d", "r").unwrap()[0].rejected, ["Anna"]);
+    }
+
+    /// Two photos of Anna, one of Bob, and an unknown face on each of three more.
+    fn people(conn: &mut Connection, root: i64) -> Vec<i64> {
+        let mut ids = Vec::new();
+        for (n, vector) in [[1.0, 0.0], [1.0, 0.0], [0.0, 1.0], [0.9, 0.1], [0.9, 0.1], [0.9, 0.1]]
+            .iter()
+            .enumerate()
+        {
+            let id = insert(conn, root, &format!("{n}.jpg"), "image");
+            let found = photo(conn, "d");
+            store_scan(conn, &found, "d", &[face(0.1)]).unwrap();
+            let waiting = pending_faces(conn, "d", "r", 1).unwrap().remove(0);
+            store_embedding(conn, waiting.face, "r", vector).unwrap();
+            ids.push(id);
+        }
+        name_region(conn, ids[0], "Anna", 0.1);
+        name_region(conn, ids[1], "Anna", 0.1);
+        name_region(conn, ids[2], "Bob", 0.1);
+        ids
+    }
+
+    #[test]
+    fn req_031_10_suggests_a_known_person_for_an_unknown_face() {
+        let (mut conn, root) = setup();
+        let ids = people(&mut conn, root);
+        let shown = shown_faces(&conn, ids[3], "d", Some("r"), 0.5).unwrap();
+        assert_eq!(shown[0].suggestion.as_deref(), Some("Anna"));
+
+        reject(&conn, shown[0].id, "Anna").unwrap();
+        let shown = shown_faces(&conn, ids[3], "d", Some("r"), 0.5).unwrap();
+        assert_eq!(shown[0].suggestion, None, "Bob is too unlike");
+        assert_eq!(
+            shown_faces(&conn, ids[4], "d", None, 0.5).unwrap()[0].suggestion,
+            None,
+            "no recognition chosen"
+        );
+    }
+
+    #[test]
+    fn req_031_15_groups_only_faces_without_a_name() {
+        let (mut conn, root) = setup();
+        let ids = people(&mut conn, root);
+        let groups = face_groups(&conn, "d", "r", 0.5).unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].iter().map(|face| face.media).collect::<Vec<_>>(), ids[3..6]);
+
+        // With one ignored, too few remain.
+        set_state(&conn, groups[0][0].id, FaceState::Ignored).unwrap();
+        assert!(face_groups(&conn, "d", "r", 0.5).unwrap().is_empty());
+    }
+
+    #[test]
+    fn req_031_17_a_model_telling_people_apart_seems_right() {
+        let (mut conn, root) = setup();
+        people(&mut conn, root);
+        assert!(!model_seems_wrong(&conn, "d", "r").unwrap(), "too few to say");
+        for n in 6..8 {
+            let id = insert(&conn, root, &format!("{n}.jpg"), "image");
+            let found = photo(&conn, "d");
+            store_scan(&mut conn, &found, "d", &[face(0.1)]).unwrap();
+            let waiting = pending_faces(&conn, "d", "r", 1).unwrap().remove(0);
+            store_embedding(&conn, waiting.face, "r", &[0.0, 1.0]).unwrap();
+            name_region(&conn, id, "Bob", 0.1);
+        }
+        let more = insert(&conn, root, "8.jpg", "image");
+        let found = photo(&conn, "d");
+        store_scan(&mut conn, &found, "d", &[face(0.1)]).unwrap();
+        let waiting = pending_faces(&conn, "d", "r", 1).unwrap().remove(0);
+        store_embedding(&conn, waiting.face, "r", &[1.0, 0.0]).unwrap();
+        name_region(&conn, more, "Anna", 0.1);
+        assert!(!model_seems_wrong(&conn, "d", "r").unwrap());
+
+        conn.execute("UPDATE face_embeddings SET vector = ?1", [vector_to_blob(&[1.0, 0.0])])
+            .unwrap();
+        assert!(model_seems_wrong(&conn, "d", "r").unwrap());
     }
 
     #[test]

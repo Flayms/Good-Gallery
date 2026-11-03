@@ -146,6 +146,8 @@ pub struct SidebarInput<'a> {
     pub scanning: Option<i64>,
     pub page: &'a mut Page,
     pub db: Option<Arc<Mutex<Connection>>>,
+    /// Faces are recognized, so the People page has something to show (REQ-031-15).
+    pub people: bool,
 }
 
 /// Draws the sidebar into `ui` (a left panel).
@@ -211,6 +213,20 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
             for group in shown {
                 match group {
                     SidebarGroup::People => {
+                        if input.people {
+                            let unknown = Row {
+                                depth: 0,
+                                chevron: None,
+                                icon: Some((Icon::ScanFace, theme::text())),
+                                label: "Unknown faces",
+                                active: *input.page == Page::People,
+                                trailing: None,
+                                tooltip: None,
+                            };
+                            if row(ui, unknown).0.clicked() {
+                                *input.page = Page::People;
+                            }
+                        }
                         category(ui, state, &mut search, group, &data.people, input.db.as_ref());
                     }
                     SidebarGroup::Places => {
