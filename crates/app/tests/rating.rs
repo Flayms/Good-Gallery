@@ -81,7 +81,7 @@ fn app(fixture: &Fixture, exiftool: Option<&Path>) -> (App, PathBuf) {
 }
 
 fn open(harness: &mut App, name: &str) {
-    harness.get_by_role_and_label(Role::Image, name).click();
+    common::open_item(harness, name);
     settle(harness);
 }
 

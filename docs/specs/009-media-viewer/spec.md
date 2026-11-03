@@ -11,7 +11,7 @@ The user looks at one media item at full quality without losing their place in t
 ### REQ-009-01 · Open an item
 
 - **Given** the gallery in any view
-- **When** the user clicks (or presses Enter on) a tile or list row, while no item is selected (REQ-025-03)
+- **When** the user double-clicks (or presses Enter on) a tile or list row (REQ-025-08)
 - **Then** the viewer opens over the whole window, showing the item and its file name
 - **And** the gallery behind it keeps its scroll position and scrolls the viewed item into view, so closing the viewer lands on it
 

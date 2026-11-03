@@ -98,7 +98,7 @@ fn settle_all(harness: &mut App) {
 }
 
 fn open(harness: &mut App, name: &str) {
-    harness.get_by_role_and_label(Role::Image, name).click();
+    common::open_item(harness, name);
     settle_all(harness);
 }
 

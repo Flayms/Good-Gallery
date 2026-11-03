@@ -11,7 +11,6 @@ use db::writer::{IndexWriter, IndexedFile};
 use domain::face_models::Detection;
 use domain::faces::FaceRegion;
 use domain::media::{MediaKind, MediaMetadata};
-use eframe::egui::accesskit::Role;
 use eframe::egui::{self, Key};
 use egui_kittest::kittest::Queryable as _;
 use serde_json::{Value, json};
@@ -134,7 +133,7 @@ fn app(fixture: &Fixture, models: bool, exiftool: Option<&Path>) -> (App, PathBu
 
 /// Opens `name` in the viewer with its faces shown.
 fn open_with_faces(harness: &mut App, name: &str) {
-    harness.get_by_role_and_label(Role::Image, name).click();
+    common::open_item(harness, name);
     settle(harness);
     if let Some(originals) = harness.state_mut().originals.as_mut() {
         originals.wait();
@@ -204,7 +203,7 @@ fn req_032_09_shows_unknown_faces_with_suggestions_beside_named_ones() {
 fn req_032_09_faces_button_shows_when_faces_are_looked_for() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, true, None);
-    harness.get_by_role_and_label(Role::Image, "b.png").click();
+    common::open_item(&mut harness, "b.png");
     settle(&mut harness);
     assert!(harness.query_by_label("Faces").is_some());
     harness.key_press(Key::P);
@@ -216,7 +215,7 @@ fn req_032_09_faces_button_shows_when_faces_are_looked_for() {
 fn req_032_09_no_faces_button_while_none_are_looked_for() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, false, None);
-    harness.get_by_role_and_label(Role::Image, "b.png").click();
+    common::open_item(&mut harness, "b.png");
     settle(&mut harness);
     assert!(harness.query_by_label("Faces").is_none());
 }
@@ -504,7 +503,7 @@ fn req_032_04_delete_face_data_asks_and_stops_the_search() {
     assert_eq!(harness.state().faces.recognizer, None);
     harness.state_mut().page = Page::Gallery;
     settle(&mut harness);
-    harness.get_by_role_and_label(Role::Image, "b.png").click();
+    common::open_item(&mut harness, "b.png");
     settle(&mut harness);
     assert!(
         harness.query_by_label("Faces").is_none(),
