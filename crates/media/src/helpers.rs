@@ -176,7 +176,7 @@ pub fn show_in_explorer(file: &std::path::Path) -> std::io::Result<()> {
     })
 }
 
-/// Opens `url` in the default browser, which makes the connection, not the app (REQ-010-07, REQ-011-11). Started
+/// Opens `url` in the default browser, which makes the connection, not the app (REQ-010-07). Started
 /// outside the app's job object, so the browser stays when the app ends.
 #[cfg(windows)]
 pub fn open_in_browser(url: &str) -> std::io::Result<()> {
@@ -195,7 +195,7 @@ pub fn open_in_browser(url: &str) -> std::io::Result<()> {
     })
 }
 
-/// Opens `url` in the default browser, which makes the connection, not the app (REQ-010-07, REQ-011-11).
+/// Opens `url` in the default browser, which makes the connection, not the app (REQ-010-07).
 #[cfg(target_os = "linux")]
 pub fn open_in_browser(url: &str) -> std::io::Result<()> {
     let status = std::process::Command::new("xdg-open")

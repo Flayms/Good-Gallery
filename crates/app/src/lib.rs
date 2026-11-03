@@ -14,6 +14,7 @@ pub mod info;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod instance;
 pub mod originals;
+pub mod people_page;
 pub mod search_bar;
 pub mod settings_page;
 pub mod sidebar;
@@ -107,6 +108,10 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
             scanning: state.indexer_status.current.map(|scan| scan.library),
             page: &mut state.page,
             db: state.db.clone(),
+            #[cfg(not(target_arch = "wasm32"))]
+            people: state.faces.detector.is_some() && state.faces.recognizer.is_some(),
+            #[cfg(target_arch = "wasm32")]
+            people: false,
         };
         // The sidebar's data comes with the gallery, also while the Settings page shows.
         if let Some(gallery) = &mut state.gallery {
@@ -153,6 +158,7 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
         egui::CentralPanel::no_frame().show(ui, |ui| match state.page {
             Page::Gallery => gallery_page(ui, state),
             Page::Settings => settings_page::ui(ui, state),
+            Page::People => people_page::ui(ui, state),
         });
         show_viewer(&ctx, state);
     }
@@ -205,6 +211,7 @@ fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
         Some(viewer::Action::Revert(target)) => state.confirm_revert = Some(target),
         Some(viewer::Action::Rate(rate)) => state.rate(rate),
         Some(viewer::Action::Tag(change)) => state.tag(change),
+        Some(viewer::Action::Face(face)) => state.face_action(face),
         None => {}
     }
     // Details are kept only while an info view or the viewer (editing starts from them, face regions are drawn from

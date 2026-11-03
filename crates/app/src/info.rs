@@ -9,7 +9,7 @@ use crate::icons::Icon;
 use crate::theme;
 use db::media::MediaDetail;
 use domain::media::MediaKind;
-use domain::tags::{PEOPLE_TAG_ROOT, TagCategory, normalize_tag};
+use domain::tags::{PEOPLE_TAG_ROOT, TagCategory};
 use eframe::egui;
 
 /// Width of the info panel and sheet.
@@ -128,7 +128,6 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths) -> Option
     }
     // The browser version doesn't write files (REQ-026-05).
     let editable = !crate::WEB;
-    let face_names: Vec<String> = detail.faces.iter().map(|face| normalize_tag(&face.name)).collect();
     for (label, category, root, known) in [
         (
             "People",
@@ -168,19 +167,11 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths) -> Option
                         .corner_radius(theme::RADIUS_CONTROL)
                         .min_size(egui::vec2(0.0, 24.0));
                     let response = ui.add(chip);
-                    // Only from a face region: other programs drew it, and it would come back (REQ-026-02).
-                    let face_only = category == Some(TagCategory::People) && face_names.contains(&normalize_tag(name));
-                    let response = if face_only && editable {
-                        response.on_hover_text(format!(
-                            "Show only {name}. Named in a face region, so it can't be removed here"
-                        ))
-                    } else {
-                        response.on_hover_text(format!("Show only {name}"))
-                    };
+                    let response = response.on_hover_text(format!("Show only {name}"));
                     if response.clicked() {
                         clicked = Some(InfoAction::FilterByTag((*name).to_owned()));
                     }
-                    if editable && !face_only {
+                    if editable {
                         let remove = ui
                             .add(
                                 egui::Button::image(Icon::X.image(12.0, theme::muted()))

@@ -9,6 +9,8 @@
 const _: Option<&str> = option_env!("GOOD_GALLERY_WORKTREE");
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod faces;
+#[cfg(not(target_arch = "wasm32"))]
 mod indexer;
 pub mod libraries;
 #[cfg(not(target_arch = "wasm32"))]

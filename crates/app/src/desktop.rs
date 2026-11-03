@@ -424,7 +424,18 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
         }
         None => tracing::error!("no wgpu renderer: the gallery shows no thumbnails"),
     }
+    let faces = open_faces_connection(data_dir).map(|conn| {
+        let repaint = ctx.clone();
+        Arc::new(indexer::faces::FaceService::start(indexer::faces::FaceDeps {
+            conn,
+            work: Box::new(indexer::faces::RunModels::new(data_dir, media::ffmpeg::find_ffmpeg())),
+            is_reachable: is_reachable.clone(),
+            on_change: Box::new(move || repaint.request_repaint()),
+        }))
+    });
     let mut state = state
+        .with_faces(data_dir, faces)
+        .with_repaint(ctx.clone())
         .with_thumbnails(thumbnails.clone())
         .with_gallery(gallery)
         .with_originals(originals)
@@ -525,6 +536,13 @@ fn start_thumbnails(
         workers: settings.io_concurrency as usize,
         on_ready,
     })
+}
+
+/// A write connection for the search for faces (spec 032). Without it, no faces are looked for.
+fn open_faces_connection(data_dir: &Path) -> Option<db::rusqlite::Connection> {
+    db::open(&data_dir.join("gallery.db"))
+        .inspect_err(|error| tracing::error!("can't open the index for faces: {error}"))
+        .ok()
 }
 
 /// Logs to stderr and, when it can be opened, to `logs\app.log` in the data folder.

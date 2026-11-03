@@ -146,6 +146,8 @@ pub struct SidebarInput<'a> {
     pub scanning: Option<i64>,
     pub page: &'a mut Page,
     pub db: Option<Arc<Mutex<Connection>>>,
+    /// Faces are recognized, so the People page has something to show (REQ-032-15).
+    pub people: bool,
 }
 
 /// Draws the sidebar into `ui` (a left panel).
@@ -153,7 +155,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
     if let Some(db) = &input.db {
         state.load(db);
     }
-    let on_settings = *input.page == Page::Settings;
+    // On another page, no library counts as shown.
+    let on_settings = *input.page != Page::Gallery;
     ui.spacing_mut().item_spacing.y = 2.0;
     // The header is part of the title bar: it moves the window (REQ-013-02).
     let header = egui::Rect::from_min_size(ui.ctx().content_rect().min, vec2(WIDTH, crate::titlebar::HEIGHT));
@@ -211,6 +214,20 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
             for group in shown {
                 match group {
                     SidebarGroup::People => {
+                        if input.people {
+                            let unknown = Row {
+                                depth: 0,
+                                chevron: None,
+                                icon: Some((Icon::ScanFace, theme::text())),
+                                label: "Unknown faces",
+                                active: *input.page == Page::People,
+                                trailing: None,
+                                tooltip: None,
+                            };
+                            if row(ui, unknown).0.clicked() {
+                                *input.page = Page::People;
+                            }
+                        }
                         category(ui, state, &mut search, group, &data.people, input.db.as_ref());
                     }
                     SidebarGroup::Places => {

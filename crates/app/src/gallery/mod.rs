@@ -60,6 +60,17 @@ const TAG_INDICATORS_KEY: &str = "gallery.tagIndicators";
 const RESIZE_SETTLE: std::time::Duration = std::time::Duration::from_millis(120);
 
 enum Request {
+    Faces {
+        id: i64,
+        detector: String,
+        recognizer: Option<String>,
+        threshold: f32,
+    },
+    FaceGroups {
+        detector: String,
+        recognizer: String,
+        threshold: f32,
+    },
     Layout {
         generation: u64,
         search: GallerySearch,
@@ -85,6 +96,11 @@ enum Request {
 }
 
 enum Loaded {
+    Faces {
+        id: i64,
+        result: Result<Vec<db::faces::ShownFace>, String>,
+    },
+    FaceGroups(Result<Vec<FaceGroup>, String>),
     Layout {
         generation: u64,
         result: Result<GalleryLayout, String>,
@@ -180,8 +196,46 @@ fn load_sidebar(conn: &Connection, library: Option<i64>) -> db::Result<SidebarDa
 }
 
 /// Runs one of the gallery's queries.
+/// A group of unknown faces, with what is needed to show its thumbnails (REQ-032-15).
+pub type FaceGroup = Vec<(db::faces::GroupFace, Option<ThumbKey>)>;
+
+/// Groups shown; a library with more has far smaller ones further down.
+const FACE_GROUPS: usize = 40;
+
+fn load_face_groups(conn: &Connection, detector: &str, recognizer: &str, threshold: f32) -> db::Result<Vec<FaceGroup>> {
+    let mut groups = db::faces::face_groups(conn, detector, recognizer, threshold)?;
+    groups.truncate(FACE_GROUPS);
+    groups
+        .into_iter()
+        .map(|faces| {
+            faces
+                .into_iter()
+                .map(|face| {
+                    let key = db::thumbs::thumb_source(conn, face.media)?.map(|source| source.key);
+                    Ok((face, key))
+                })
+                .collect()
+        })
+        .collect()
+}
+
 fn run(conn: &Connection, request: Request) -> Loaded {
     match request {
+        Request::Faces {
+            id,
+            detector,
+            recognizer,
+            threshold,
+        } => Loaded::Faces {
+            id,
+            result: db::faces::shown_faces(conn, id, &detector, recognizer.as_deref(), threshold)
+                .map_err(|e| e.to_string()),
+        },
+        Request::FaceGroups {
+            detector,
+            recognizer,
+            threshold,
+        } => Loaded::FaceGroups(load_face_groups(conn, &detector, &recognizer, threshold).map_err(|e| e.to_string())),
         Request::Layout { generation, search } => Loaded::Layout {
             generation,
             result: db::gallery::layout(conn, &search).map_err(|e| e.to_string()),
@@ -374,6 +428,10 @@ pub struct Gallery {
     strip: std::ops::Range<usize>,
     /// The media item whose details were asked for last, and what came back.
     detail: Option<(i64, Option<DetailResult>)>,
+    /// The unknown faces on the item the viewer shows (REQ-032-09).
+    faces: Option<(i64, Option<Vec<db::faces::ShownFace>>)>,
+    /// The groups of unknown faces, until something changes (REQ-032-15).
+    face_groups: Option<Option<Vec<FaceGroup>>>,
     /// A context menu's choice this frame.
     menu_action: Option<(usize, MediaAction)>,
     /// Where the tiles were drawn in the last frame: the content's origin and the visible area (REQ-013-12).
@@ -440,6 +498,8 @@ impl Gallery {
             outside: None,
             strip: 0..0,
             detail: None,
+            faces: None,
+            face_groups: None,
             menu_action: None,
             autoscroll: Autoscroll::Off,
             autoscroll_at: egui::Pos2::ZERO,
@@ -463,6 +523,8 @@ impl Gallery {
 
     /// Loads the layout again (new media items while indexing, REQ-006-11). The current one stays shown meanwhile.
     pub fn reload(&mut self) {
+        // A file read again may have new regions, which name some of its faces.
+        self.forget_faces();
         if !self.started {
             return;
         }
@@ -816,6 +878,82 @@ impl Gallery {
         }
     }
 
+    /// Whether a detection model is chosen, so photos may have faces without regions.
+    pub fn looks_for_faces(&self) -> bool {
+        self.setting(db::faces::DETECTOR_KEY).is_some()
+    }
+
+    fn face_threshold(&self) -> f32 {
+        self.setting(db::faces::THRESHOLD_KEY)
+            .and_then(|text| text.parse().ok())
+            .unwrap_or(domain::face_models::DEFAULT_THRESHOLD)
+    }
+
+    /// The unknown faces on `id`, asked for when it isn't the item asked for last (REQ-032-09).
+    pub fn faces_on(&mut self, id: i64) -> &[db::faces::ShownFace] {
+        if self.faces.as_ref().is_none_or(|(asked, _)| *asked != id) {
+            self.faces = Some((id, None));
+            if let Some(detector) = self.setting(db::faces::DETECTOR_KEY) {
+                let (recognizer, threshold) = (self.setting(db::faces::RECOGNIZER_KEY), self.face_threshold());
+                self.loader.send(Request::Faces {
+                    id,
+                    detector,
+                    recognizer,
+                    threshold,
+                });
+            }
+        }
+        match &self.faces {
+            Some((_, Some(faces))) => faces,
+            _ => &[],
+        }
+    }
+
+    /// Faces changed: they are asked for anew.
+    pub fn forget_faces(&mut self) {
+        self.faces = None;
+        self.face_groups = None;
+    }
+
+    /// The groups of unknown faces, `None` while loading or without chosen models (REQ-032-15).
+    pub fn face_groups(&mut self) -> Option<&[FaceGroup]> {
+        if self.face_groups.is_none() {
+            let (detector, recognizer) = (
+                self.setting(db::faces::DETECTOR_KEY)?,
+                self.setting(db::faces::RECOGNIZER_KEY)?,
+            );
+            self.face_groups = Some(None);
+            let threshold = self.face_threshold();
+            self.loader.send(Request::FaceGroups {
+                detector,
+                recognizer,
+                threshold,
+            });
+        }
+        self.face_groups.as_ref()?.as_deref()
+    }
+
+    /// Asks for these media items' thumbnails, for the People page, which draws no tiles.
+    pub fn want_thumbnails(&mut self, wanted: &[(i64, ThumbKey)]) {
+        let Some(thumbnails) = &mut self.thumbnails else { return };
+        let width = domain::thumbs::MAX_THUMB_WIDTH;
+        thumbnails.streamer.request(
+            wanted
+                .iter()
+                .map(|(media, key)| TextureRequest {
+                    media: *media,
+                    path: thumbnails.cache.path(key, width),
+                    width,
+                })
+                .collect(),
+        );
+        for media in thumbnails.streamer.take_missing() {
+            if let Some(service) = &thumbnails.service {
+                service.request(media);
+            }
+        }
+    }
+
     /// Forgets the details asked for last: no info view shows them any more.
     pub fn forget_detail(&mut self) {
         self.detail = None;
@@ -927,6 +1065,22 @@ impl Gallery {
                 }
                 Err(error) => tracing::error!("can't load an item: {error}"),
             },
+            Loaded::Faces { id, result } => {
+                if let Some((asked, loaded)) = &mut self.faces
+                    && *asked == id
+                {
+                    *loaded = Some(result.unwrap_or_else(|error| {
+                        tracing::error!("can't load the faces of media item {id}: {error}");
+                        Vec::new()
+                    }));
+                }
+            }
+            Loaded::FaceGroups(result) => {
+                self.face_groups = Some(Some(result.unwrap_or_else(|error| {
+                    tracing::error!("can't load the groups of faces: {error}");
+                    Vec::new()
+                })));
+            }
             Loaded::Detail { id, result } => {
                 if let Some((asked, loaded)) = &mut self.detail
                     && *asked == id

@@ -1,5 +1,8 @@
 //! App state and the background jobs that feed it.
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod faces;
+
 use crate::format;
 use crate::gallery::Gallery;
 use crate::toasts::Toasts;
@@ -20,11 +23,18 @@ pub enum Page {
     #[default]
     Gallery,
     Settings,
+    /// Groups of unknown faces (REQ-032-15).
+    People,
 }
 
 /// The native folder dialog, or a fake in tests. Blocks until the user picks or cancels; runs on a job thread.
 pub trait FolderPicker: Send + Sync {
     fn pick_folder(&self) -> Option<PathBuf>;
+
+    /// An ONNX model file (REQ-032-03).
+    fn pick_model_file(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -34,6 +44,13 @@ pub struct NativeFolderPicker;
 impl FolderPicker for NativeFolderPicker {
     fn pick_folder(&self) -> Option<PathBuf> {
         rfd::FileDialog::new().set_title("Add a library").pick_folder()
+    }
+
+    fn pick_model_file(&self) -> Option<PathBuf> {
+        rfd::FileDialog::new()
+            .set_title("Add a face model")
+            .add_filter("ONNX model", &["onnx"])
+            .pick_file()
     }
 }
 
@@ -235,6 +252,37 @@ struct ChangedMany {
     first_failure: Option<(String, String)>,
 }
 
+/// What the user decided about a face (spec 032).
+#[derive(Debug, Clone, PartialEq)]
+pub enum FaceAction {
+    /// This person is at these places (media item and rectangle): one face, a drawn one, or a group's.
+    Name {
+        name: String,
+        places: Vec<(i64, [f32; 4])>,
+    },
+    NotThisPerson {
+        face: i64,
+        name: String,
+    },
+    Ignore {
+        faces: Vec<i64>,
+    },
+    NotAFace {
+        face: i64,
+    },
+    Remove {
+        media: i64,
+        name: String,
+        rect: [f32; 4],
+    },
+    Rename {
+        media: i64,
+        from: String,
+        to: String,
+        rect: [f32; 4],
+    },
+}
+
 /// A tag added to or removed from a media item by hand (spec 026).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TagChange {
@@ -272,6 +320,19 @@ struct Written {
 /// some never happen there.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 enum Event {
+    #[cfg(not(target_arch = "wasm32"))]
+    FaceModelArrived {
+        key: String,
+        name: String,
+        result: Result<media::face_store::StoredModel, media::face_store::StoreError>,
+    },
+    #[cfg(not(target_arch = "wasm32"))]
+    FaceModelChecked(bool),
+    #[cfg(not(target_arch = "wasm32"))]
+    FaceRegionsWritten {
+        written: Vec<(i64, String)>,
+        failed: Option<String>,
+    },
     /// The latest published version, or `None` if the check failed (REQ-031-03).
     UpdateChecked(Option<domain::update::Version>),
     /// The installer runs, or why it doesn't (REQ-031-05, REQ-031-06).
@@ -318,6 +379,12 @@ pub struct SettingsPage {
 
 pub struct AppState {
     pub page: Page,
+    /// Face models and the search for faces (spec 032).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub faces: faces::Faces,
+    /// Wakes the UI from a background job's progress.
+    #[cfg(not(target_arch = "wasm32"))]
+    repaint: Option<eframe::egui::Context>,
     /// The write connection. `None` if the index couldn't be opened; `error` says why.
     pub(crate) db: Option<Arc<Mutex<Connection>>>,
     pub error: Option<String>,
@@ -333,6 +400,7 @@ pub struct AppState {
     #[cfg(not(target_arch = "wasm32"))]
     writer: Option<Sender<Box<dyn FnOnce() + Send>>>,
     pub settings_page: SettingsPage,
+    pub people_page: crate::people_page::PeoplePage,
     pub toasts: Toasts,
     indexer_events: Option<Receiver<IndexerEvent>>,
     pub indexer_status: IndexerStatus,
@@ -589,6 +657,13 @@ impl AppState {
         db::media::file_in(&self.libraries, item.root_id, &item.rel_path)
     }
 
+    /// Wakes the UI when a download gets further.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_repaint(mut self, ctx: eframe::egui::Context) -> Self {
+        self.repaint = Some(ctx);
+        self
+    }
+
     /// Loads the viewer's originals with `originals` (wgpu textures in the app).
     pub fn with_originals(mut self, originals: crate::originals::Originals) -> Self {
         self.originals = Some(originals);
@@ -809,7 +884,21 @@ impl AppState {
         };
         let folder = PathBuf::from(&library.path);
         let db = self.db.clone();
+        let detector = self.faces.detector.clone();
         self.spawn_write(move || {
+            // Removing a person also takes their face regions, or the name would come back from them (REQ-032-13).
+            if let (domain::tagging::Change::Remove(name), Some(db), domain::media::MediaKind::Image) =
+                (&tag.change, &db, tag.kind)
+            {
+                let photo = db::faces::photo(&lock(db), tag.media).ok().flatten();
+                if let Some(photo) = photo {
+                    let removed = faces::remove_person(&exiftool, &photo, name, db, detector.as_deref());
+                    if let Err(error) = removed {
+                        tracing::error!("can't remove {name}'s regions from {}: {error}", tag.rel_path);
+                        return Event::Tagged(Err(error));
+                    }
+                }
+            }
             let written =
                 media::tagging::write(&exiftool, &folder, &tag.rel_path, tag.kind, &tag.change).map_err(|error| {
                     tracing::error!("can't tag {}: {error}", tag.rel_path);
@@ -829,6 +918,10 @@ impl AppState {
     /// The browser version never writes files (REQ-026-05).
     #[cfg(target_arch = "wasm32")]
     pub fn tag(&mut self, _tag: TagChange) {}
+
+    /// The browser version looks for no faces (spec 032).
+    #[cfg(target_arch = "wasm32")]
+    pub fn face_action(&mut self, _action: FaceAction) {}
 
     #[cfg(not(target_arch = "wasm32"))]
     fn thumbnail_cache(&self) -> Option<indexer::thumb_cache::ThumbCache> {
@@ -985,6 +1078,10 @@ impl AppState {
     fn empty(scans: Arc<dyn ScanRequests>, picker: Arc<dyn FolderPicker>) -> Self {
         Self {
             page: Page::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            faces: faces::Faces::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            repaint: None,
             db: None,
             error: None,
             libraries: Vec::new(),
@@ -996,6 +1093,7 @@ impl AppState {
             #[cfg(not(target_arch = "wasm32"))]
             writer: None,
             settings_page: SettingsPage::default(),
+            people_page: crate::people_page::PeoplePage::default(),
             toasts: Toasts::default(),
             indexer_events: None,
             indexer_status: IndexerStatus::default(),
@@ -1314,6 +1412,12 @@ impl AppState {
     fn apply(&mut self, event: Event) {
         self.pending_jobs -= 1;
         match event {
+            #[cfg(not(target_arch = "wasm32"))]
+            Event::FaceModelArrived { key, name, result } => self.face_model_arrived(&key, &name, result),
+            #[cfg(not(target_arch = "wasm32"))]
+            Event::FaceModelChecked(wrong) => self.face_model_checked(wrong),
+            #[cfg(not(target_arch = "wasm32"))]
+            Event::FaceRegionsWritten { written, failed } => self.face_regions_written(written, failed),
             Event::LibraryAdded(result) => {
                 self.settings_page.adding = false;
                 match result {
@@ -1483,6 +1587,6 @@ fn forget_index_entry(
 
 /// The index connection. A job that panicked while holding it poisons the mutex; SQLite rolled its transaction back,
 /// so the connection is still usable.
-fn lock(db: &Mutex<Connection>) -> std::sync::MutexGuard<'_, Connection> {
+fn lock<T>(db: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     db.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }

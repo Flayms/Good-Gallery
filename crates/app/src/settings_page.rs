@@ -16,7 +16,7 @@ const HEADER_HEIGHT: f32 = crate::gallery::TOOLBAR_HEIGHT;
 
 /// The glass header over the page, which is also the window's title bar (REQ-013-02, REQ-013-03): back to the
 /// gallery and the page's title; its empty space moves the window.
-fn page_header(ui: &mut egui::Ui, rect: Rect, state: &mut AppState) {
+pub(crate) fn page_header(ui: &mut egui::Ui, rect: Rect, state: &mut AppState, title: &str) {
     let background = ui.interact(
         rect,
         ui.make_persistent_id("settings header"),
@@ -47,7 +47,7 @@ fn page_header(ui: &mut egui::Ui, rect: Rect, state: &mut AppState) {
                 if back.clicked() {
                     state.page = Page::Gallery;
                 }
-                ui.label(RichText::new("Settings").font(FontId::new(theme::SIZE_TITLE, theme::semibold())));
+                ui.label(RichText::new(title).font(FontId::new(theme::SIZE_TITLE, theme::semibold())));
             });
         },
     );
@@ -76,6 +76,11 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
                     sidebar(ui, state);
                     ui.add_space(theme::SPACE * 10.0);
                     // The browser has no watchers, scheduled checks or parallel reads to tune (REQ-019-13).
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if state.faces.enabled() {
+                        faces(ui, state);
+                        ui.add_space(theme::SPACE * 10.0);
+                    }
                     if !crate::WEB {
                         indexing(ui, state);
                         ui.add_space(theme::SPACE * 10.0);
@@ -89,7 +94,9 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
                 });
             });
         });
-    page_header(ui, header, state);
+    page_header(ui, header, state, "Settings");
+    #[cfg(not(target_arch = "wasm32"))]
+    confirm_delete_faces(ui.ctx(), state);
     confirm_remove(ui.ctx(), state);
     confirm_clear(ui.ctx(), state);
 }
@@ -491,6 +498,257 @@ fn about(ui: &mut egui::Ui, state: &mut AppState) {
             ui.ctx().open_url(egui::OpenUrl::new_tab(LATEST_RELEASE));
         } else {
             state.open_in_browser(LATEST_RELEASE);
+        }
+    }
+}
+
+/// The page comparing the models (REQ-032-01).
+#[cfg(not(target_arch = "wasm32"))]
+const FACE_MODELS_PAGE: &str = "https://github.com/Flayms/Good-Gallery/blob/main/docs/face-models.md";
+
+#[cfg(not(target_arch = "wasm32"))]
+fn megabytes(bytes: u64) -> String {
+    let megabytes = bytes as f64 / 1_000_000.0;
+    if megabytes < 1.0 {
+        format!("{:.0} KB", megabytes * 1000.0)
+    } else if megabytes < 10.0 {
+        format!("{megabytes:.1} MB")
+    } else {
+        format!("{megabytes:.0} MB")
+    }
+}
+
+/// One model's row: name, what's known about it, and what can be done with it.
+#[cfg(not(target_arch = "wasm32"))]
+fn model_row(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    detect: bool,
+    name: &str,
+    description: &str,
+    sha256: &str,
+    catalog: Option<&'static domain::face_models::CatalogModel>,
+) {
+    let present = state.faces.models.iter().any(|model| model.sha256 == sha256);
+    let arriving = state.faces.arriving().remove(sha256);
+    let chosen = if detect {
+        state.faces.detector.as_deref() == Some(sha256)
+    } else {
+        state.faces.recognizer.as_deref() == Some(sha256)
+    };
+    let mut command = None;
+    // Short on screen, with the model's name for screen readers.
+    let button = |ui: &mut egui::Ui, text: &str, spoken: String, selected: bool| {
+        let response = ui.add(egui::Button::new(text).selected(selected));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &spoken));
+        response.clicked()
+    };
+    setting_row(ui, name, description, 180.0, |ui| {
+        if let Some(arriving) = &arriving {
+            if button(ui, "Cancel", format!("Cancel {name}"), false) {
+                command = Some("cancel");
+            }
+            let share = arriving
+                .total
+                .map_or(0.0, |total| arriving.bytes as f32 / total.max(1) as f32);
+            ui.add(egui::ProgressBar::new(share).desired_width(90.0).show_percentage());
+        } else if present {
+            if button(ui, "Delete", format!("Delete {name}"), false) {
+                command = Some("delete");
+            }
+            let (text, spoken) = if chosen {
+                ("In use", format!("Using {name}"))
+            } else {
+                ("Use", format!("Use {name}"))
+            };
+            if button(ui, text, spoken, chosen) {
+                command = Some(if chosen { "none" } else { "use" });
+            }
+        } else if catalog.is_some() && button(ui, "Download", format!("Download {name}"), false) {
+            command = Some("download");
+        }
+    });
+    match command {
+        Some("cancel") => state.cancel_face_model(sha256),
+        Some("delete") => state.remove_face_model(sha256),
+        Some("use") => state.choose_face_model(detect, Some(sha256.to_owned())),
+        Some("none") => state.choose_face_model(detect, None),
+        Some("download") => {
+            if let Some(model) = catalog {
+                state.download_face_model(model);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// _Faces_: the models, how far the search has come, and the user's data (REQ-032-01 … REQ-032-05, REQ-032-17).
+#[cfg(not(target_arch = "wasm32"))]
+fn faces(ui: &mut egui::Ui, state: &mut AppState) {
+    use crate::state::faces::AddedKind;
+    use domain::face_models::{CATALOG, ModelKind};
+    section_title(ui, "Faces");
+    ui.add(
+        egui::Label::new(
+            RichText::new("Models run on this computer. Photos and faces stay here. You choose one of each kind.")
+                .color(theme::muted()),
+        )
+        .wrap(),
+    );
+    if ui.link("Compare the models").clicked() {
+        state.open_in_browser(FACE_MODELS_PAGE);
+    }
+    ui.add_space(theme::SPACE * 2.0);
+    for (title, detect) in [("Detection", true), ("Recognition", false)] {
+        ui.label(RichText::new(title).font(FontId::new(theme::SIZE_BODY, theme::semibold())));
+        ui.add_space(theme::SPACE);
+        let is_kind = |kind: &ModelKind| matches!(kind, ModelKind::Detect(_)) == detect;
+        group(ui, |ui| {
+            let mut first = true;
+            for model in CATALOG.iter().filter(|model| is_kind(&model.kind)) {
+                if !std::mem::take(&mut first) {
+                    divider(ui);
+                }
+                let description = format!("{}. {}", megabytes(model.bytes), model.license);
+                model_row(ui, state, detect, model.name, &description, model.sha256, Some(model));
+            }
+            let added: Vec<_> = state
+                .faces
+                .models
+                .iter()
+                .filter(|model| is_kind(&model.kind) && media::face_store::catalog_entry(&model.sha256).is_none())
+                .cloned()
+                .collect();
+            for model in added {
+                divider(ui);
+                model_row(ui, state, detect, &model.name, "Added by you", &model.sha256, None);
+            }
+        });
+        ui.add_space(theme::SPACE * 4.0);
+    }
+    ui.label(RichText::new("Add a model").font(FontId::new(theme::SIZE_BODY, theme::semibold())));
+    ui.add_space(theme::SPACE);
+    group(ui, |ui| {
+        Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = theme::SPACE * 2.0;
+            ui.add(
+                egui::Label::new(
+                    RichText::new("An ONNX file you trust. Its license is yours to check.").color(theme::muted()),
+                )
+                .wrap(),
+            );
+            let current = state.faces.added_kind;
+            let combo = egui::ComboBox::from_id_salt("added face model")
+                .width(260.0)
+                .selected_text(current.label())
+                .show_ui(ui, |ui| {
+                    crate::glass::behind_menu(ui, |ui| {
+                        for option in AddedKind::ALL {
+                            ui.selectable_value(&mut state.faces.added_kind, option, option.label());
+                        }
+                    });
+                });
+            name_combo(&combo.response, "What the model does", current.label().to_owned());
+            ui.horizontal(|ui| {
+                let field = ui.add(
+                    egui::TextEdit::singleline(&mut state.faces.link)
+                        .hint_text("https://…/model.onnx")
+                        .desired_width(320.0),
+                );
+                field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Link to a model"));
+                let busy = state.faces.arriving().contains_key("added");
+                if ui.add_enabled(!busy, egui::Button::new("Add link")).clicked() {
+                    state.add_face_link();
+                }
+                if ui.add_enabled(!busy, egui::Button::new("Choose file…")).clicked() {
+                    state.add_face_file();
+                }
+                if busy && ui.button("Cancel adding").clicked() {
+                    state.cancel_face_model("added");
+                }
+            });
+        });
+    });
+    ui.add_space(theme::SPACE * 4.0);
+    state.check_face_model();
+    let status = state.faces.status();
+    group(ui, |ui| {
+        let progress = status.as_ref().map(|status| status.progress).unwrap_or_default();
+        let description = if state.faces.detector.is_none() {
+            "Choose a detection model to start.".to_owned()
+        } else {
+            format!(
+                "{} of {} photos looked at, {} faces found.",
+                progress.photos_done, progress.photos, progress.faces
+            )
+        };
+        let mut search = !state.faces.paused;
+        setting_row(ui, "Look for faces", &description, 40.0, |ui| {
+            let on = search;
+            ui.checkbox(&mut search, "")
+                .widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, on, "Look for faces"));
+        });
+        if search == state.faces.paused {
+            state.set_face_search(!search);
+        }
+        if let Some(problem) = status.as_ref().and_then(|status| status.problem.as_ref()) {
+            divider(ui);
+            Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
+                ui.colored_label(theme::alert(), problem);
+            });
+        }
+        if state.faces.model_seems_wrong {
+            divider(ui);
+            Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
+                ui.colored_label(
+                    theme::alert(),
+                    "This model doesn't tell your named people apart. It may be set up with the wrong style.",
+                );
+            });
+        }
+        divider(ui);
+        setting_row(
+            ui,
+            "Ignored faces",
+            "Faces you chose to ignore stay out of the way.",
+            170.0,
+            |ui| {
+                if ui.button("Show ignored faces again").clicked() {
+                    state.restore_ignored_faces();
+                }
+            },
+        );
+        divider(ui);
+        setting_row(
+            ui,
+            "Face data",
+            "Removes found faces and what you decided about them. Your files stay as they are.",
+            140.0,
+            |ui| {
+                if ui.button("Delete face data").clicked() {
+                    state.faces.confirm_delete = true;
+                }
+            },
+        );
+    });
+}
+
+/// "Delete what the app stored about faces?" (REQ-032-04).
+#[cfg(not(target_arch = "wasm32"))]
+fn confirm_delete_faces(ctx: &egui::Context, state: &mut AppState) {
+    if !state.faces.confirm_delete {
+        return;
+    }
+    if let Some(delete) = confirm(
+        ctx,
+        "confirm-delete-faces",
+        "Delete face data",
+        "Delete everything stored about faces? Names in your files stay. The search stops until you choose models again.",
+        "Delete",
+    ) {
+        state.faces.confirm_delete = false;
+        if delete {
+            state.delete_face_data();
         }
     }
 }

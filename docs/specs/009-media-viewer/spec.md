@@ -126,7 +126,7 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 ### REQ-009-17 · Face regions
 
 - **Given** a photo with face regions (REQ-004-13) in the viewer
-- **When** the user turns face regions on (`P` or the control bar's _Faces_ button, shown only for photos with face regions)
+- **When** the user turns face regions on (`P` or the control bar's _Faces_ button, shown only for photos with face regions, or for all photos while faces are looked for, REQ-032-09)
 - **Then** each region is drawn as a box with the person's name, on the person, upright and at any zoom and pan
 - **And** the choice is remembered across items and restarts, and turning it off hides the boxes
 
@@ -144,7 +144,7 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 
 ## Out of scope
 
-- Adding, editing or removing face regions, finding faces (#36), and face regions in videos.
+- Face regions in videos. Adding, editing and removing face regions and finding faces are spec 032.
 - Slideshows, rotating, cropping, editing, deleting, copying or sharing files.
 - Opening a file in another app (other than revealing it in Explorer).
 - Fullscreen mode and comparing items side by side. The filmstrip is specified in [015](../015-filmstrip/spec.md).

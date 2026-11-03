@@ -85,7 +85,7 @@ People who want to try Good Gallery, or who are on a computer where they can't i
 - **Given** the page open and a library indexed, browsed and viewed
 - **When** anything happens in the page
 - **Then** the only requests it makes are for its own files from the host it was loaded from, and none of them carries data from the user's files or index
-- **And** the page forbids itself any other connection (a content security policy), so a mistake in the code can't send data out (the web counterpart of REQ-011-11)
+- **And** the page forbids itself any other connection (a content security policy), so a mistake in the code can't send data out
 
 ### REQ-019-13 · Desktop-only features hidden
 

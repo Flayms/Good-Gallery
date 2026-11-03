@@ -51,6 +51,16 @@ pub fn upright_rect([x, y, w, h]: [f32; 4], orientation: u8) -> [f32; 4] {
     [ax.min(bx), ay.min(by), (ax - bx).abs(), (ay - by).abs()]
 }
 
+/// A rectangle of the upright photo on the stored photo, as a file's regions need it (REQ-032-14).
+pub fn stored_rect(rect: [f32; 4], orientation: u8) -> [f32; 4] {
+    let inverse = match orientation {
+        6 => 8,
+        8 => 6,
+        other => other,
+    };
+    upright_rect(rect, inverse)
+}
+
 /// Where a point of the stored photo (fractions of its width and height) lies on the upright photo.
 fn upright_point(u: f32, v: f32, orientation: u8) -> (f32, f32) {
     match orientation {
@@ -120,6 +130,17 @@ mod tests {
         assert_eq!(FaceRegion::new("A", 0.9, 0.1, 0.2, 0.2, 1), None);
         assert_eq!(FaceRegion::new("A", f32::NAN, 0.1, 0.2, 0.2, 1), None);
         assert_eq!(FaceRegion::from_center("A", 1.5, 0.5, 0.2, 0.2, 1), None);
+    }
+
+    #[test]
+    fn req_032_14_stored_rect_undoes_turning_upright() {
+        let stored = [0.1, 0.2, 0.3, 0.4];
+        for orientation in 1..=8 {
+            let back = stored_rect(upright_rect(stored, orientation), orientation);
+            for (a, b) in back.iter().zip(stored) {
+                assert!((a - b).abs() < 1e-5, "orientation {orientation}: {back:?}");
+            }
+        }
     }
 
     #[test]

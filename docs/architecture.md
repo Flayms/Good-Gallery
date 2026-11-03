@@ -31,8 +31,9 @@ crates/
             No IO.
   db        rusqlite: migrations, connections, index writer, gallery and tag queries, settings
   media     exiftool process pool, metadata extraction, thumbnail rendering, originals, ffmpeg, editing, subject
-            detection, writing ratings and tags, helper lookup (desktop only)
-  indexer   scan queue, walk, scans, watcher, schedule, reachability, thumbnail cache and service, library operations
+            detection, face models and their store, writing ratings, tags and face regions, helper lookup (desktop only)
+  indexer   scan queue, walk, scans, watcher, schedule, reachability, thumbnail cache and service, face search,
+            library operations
   app       eframe binary: UI, texture streaming, glass, viewer, video, editor, settings; `app::web` for the browser
 xtask/      check-specs, libraries CLI, benchmarks, screenshots, dist, release, web, web-test
 web/        the browser page: index.html (content security policy), browser check, Trunk config; Playwright tests
@@ -64,12 +65,13 @@ There is no async runtime: work runs on OS threads that talk over channels (`cro
 | Scan workers (`io_concurrency`) | stat and metadata reads of one scan | results to the indexer thread |
 | Scheduler | a read connection | queues scans on the indexer |
 | Thumbnail service (`io_concurrency`) | rendering, its own write connection | a callback per finished thumbnail |
+| Faces (1) | its own write connection, the loaded face models | a status the settings read, a repaint |
 | Gallery loader | a read connection | layout, tile data, suggestions, sidebar lists |
 | Texture workers (4) | thumbnail decode, mips, `wgpu::Texture` creation | finished textures, registered by the UI within 3 ms per frame |
 | Originals workers (2) | full-size decodes for the viewer | finished textures |
 | mpv render / event | libmpv's render context and events | a published frame per load |
 | Background jobs | reachability, folder dialog, cache clearing | an event applied in `AppState::poll` |
-| Writer (1) | every write into a library file: ratings, tags, saving and reverting edits, one after another in the order made (REQ-024-07) | an event applied in `AppState::poll` |
+| Writer (1) | every write into a library file: ratings, tags, face regions, saving and reverting edits, one after another in the order made (REQ-024-07) | an event applied in `AppState::poll` |
 
 - The UI never waits for IO. Each frame it applies what arrived (`AppState::poll`), draws, and sends requests; requests are priority lists replaced every frame, so work that scrolled out of view drops out.
 - Every job runs under `catch_unwind`: a panic costs that file or that job, not the app.
@@ -80,9 +82,10 @@ There is no async runtime: work runs on OS threads that talk over channels (`cro
 
 - **Index:** SQLite in WAL mode in the data folder. One write connection (the indexer's), read-only connections for readers. Migrations are drizzle-compatible SQL files in `crates/db/migrations/`, so indexes made by earlier versions keep opening (REQ-001-08); a schema change is a new migration, never an edited one.
 - **Settings:** the `settings` table of the index, validated by `db::settings`.
+- **Faces:** `detected_faces`, `face_embeddings`, `face_rejections` and `faces_scanned` in the index. Names aren't there: a detected face overlapping a named region in `media_faces` is that person, worked out when read. Models are files named by their SHA-256 in `<data>/face-models/`, with a note on what each is.
 - **Thumbnail cache:** one WebP file per thumbnail and width under `<data>/thumbs/`, named by a hash of the file's identity, LRU by file mtime within a size limit.
 - **Data folder:** `%APPDATA%\good-gallery` (Windows) or `$XDG_DATA_HOME/good-gallery` (Linux) for the packaged app; development builds use `good-gallery-rust`. Logs are in `logs/` there.
-- **User files:** the app writes into them only when the user asks: ratings and tags (through exiftool, into the file or its XMP sidecar), and saved edits (with the recipe in our `gg:` XMP namespace; replaced originals are kept in `<library>/.good-gallery/originals/`). Indexing then reads them back with its normal rules.
+- **User files:** the app writes into them only when the user asks: ratings, tags and confirmed face regions (through exiftool, into the file or its XMP sidecar), and saved edits (with the recipe in our `gg:` XMP namespace; replaced originals are kept in `<library>/.good-gallery/originals/`). Indexing then reads them back with its normal rules.
 - **Browser:** the index is an in-memory SQLite database with a snapshot in the Origin Private File System; thumbnails are OPFS files with the desktop cache's names.
 
 ## Rendering
@@ -107,7 +110,7 @@ Platform code sits behind `cfg(windows)`, `cfg(target_os = "linux")` and `cfg(ta
 ## Conventions
 
 - **Errors:** `thiserror` enums in library crates, `anyhow` in `app` and `xtask`. **Logging:** `tracing`, to stderr and `logs/app.log`.
-- **No network:** the app makes no network requests of its own (REQ-011-11); `xtask/tests/no_network.rs` keeps network crates out. The one exception is the update check and download (spec 031), which `media::update` leaves to the system's `curl`.
+- **Network:** the desktop app connects only for what the user allowed: the update check and download (spec 031), through the system's `curl`, and a face model they asked for (spec 032). The browser version sends nothing (REQ-019-12); `xtask/tests/no_network.rs` keeps it that way.
 - **Specs and tests:** every test that covers a REQ names it (`fn req_007_01_…` or a doc comment); `cargo xtask check-specs` checks it.
 - **Visual checks:** `egui_kittest` snapshots (`UPDATE_SNAPSHOTS=1`), and `cargo run -p app -- --screenshot <file.png>` for the real window with glass.
 - **Pinned UI crates:** egui, eframe, egui_kittest and wgpu are pinned to exact versions.

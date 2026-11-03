@@ -99,7 +99,7 @@ Search and sorting rely on the tags, ratings and dates that photo tools (Lightro
 ## Out of scope
 
 - Editing, adding or removing tags or ratings, and writing anything back to files.
-- Automatic tagging (AI, face recognition, reverse geocoding of GPS data).
+- Automatic tagging (reverse geocoding of GPS data). Faces are spec 032.
 - GPS coordinates, camera and lens data, captions and titles.
 - Color labels, flags and picks.
 - Orientations only in XMP in the browser version (spec 019): the browser turns photos by their EXIF orientation alone.

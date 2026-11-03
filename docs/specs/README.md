@@ -35,6 +35,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [029-crop-and-rotate](029-crop-and-rotate/spec.md)       | Crop and rotate photos in the viewer's editing mode              | Implemented |
 | [030-masks](030-masks/spec.md)                           | Gradient, luminance and color masks with their own light and color | Implemented |
 | [031-updates](031-updates/spec.md)                       | Notice of a newer version, verified install from a button          | Implemented |
+| [032-faces](032-faces/spec.md)                           | Find and recognize faces with models the user picks; suggested names, written to files when confirmed | Implemented |
 
 ## Conventions
 
