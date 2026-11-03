@@ -66,6 +66,9 @@ A desktop gallery for large photo and video libraries (50k–500k files). Media 
 
 Create a new worktree for a new feature, branched from `origin/main`. Use conventional commits. When you are done, merge `origin/main` into the branch and create a PR to main. Then wait for CI and fix whatever turns red (on conflicts, merge `origin/main` again) until it is green and mergeable. Merged worktrees are removed at session start (`.claude/hooks/tidy-worktrees.sh`).
 
+> [!NOTE]
+> The storage on my machines is limited. Dont create builds on multiple worktrees in parallel as they can get very big. Instead when building, first finish one and then clean up before starting with another.
+
 ## Note
 
 For issues and pull requests you create put the following note at the top of the description:
