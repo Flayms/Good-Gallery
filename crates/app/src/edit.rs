@@ -615,7 +615,7 @@ impl EditSession {
     /// The size to fit into the media area while editing draws the photo: the output, or the whole unedited photo while
     /// comparing (REQ-029-01, REQ-029-05). `None` until the original is there, while the viewer shows the file.
     pub fn shown_size(&self, compare: bool) -> Option<[f32; 2]> {
-        if !matches!(self.base, Base::Loaded(_)) {
+        if !matches!(self.base, Base::Loaded(_)) || (!compare && self.waits_for_subject()) {
             return None;
         }
         let [width, height] = self.target.full_size;
@@ -625,6 +625,12 @@ impl EditSession {
         }
         let (width, height) = self.shown_geometry(compare).output_size(width, height);
         Some([width as f32, height as f32])
+    }
+
+    /// Whether the recipe has parts by the subject that isn't found yet: the preview would show the edit without them,
+    /// so the viewer keeps showing the file meanwhile (REQ-022-05, #151).
+    fn waits_for_subject(&self) -> bool {
+        self.draft.needs_subject() && matches!(self.subject, Subject::Unknown | Subject::Finding(_))
     }
 
     /// What is drawn of the photo: while comparing all of it unturned, while cropping all of it turned, else the output.
@@ -1076,8 +1082,12 @@ impl EditSession {
     }
 
     /// Draws the photo through the recipe into `rect` (texture coordinates `uv`), clipped to `clip`; the original
-    /// while `compare` (REQ-021-02, REQ-021-07). False while there is nothing to draw yet.
+    /// while `compare` (REQ-021-02, REQ-021-07). False while there is nothing to draw yet, or while the parts wait for the
+    /// subject (REQ-022-05).
     pub fn paint(&mut self, ui: &egui::Ui, rect: Rect, uv: Rect, clip: Rect, compare: bool, opacity: f32) -> bool {
+        if !compare && self.waits_for_subject() {
+            return false;
+        }
         let geometry = self.shown_geometry(compare);
         let tints = self.tints_selection();
         self.sync_paintings();
@@ -3352,6 +3362,50 @@ mod tests {
             full_size,
             sidecar_orientation: None,
         }
+    }
+
+    /// REQ-022-05, REQ-021-07 (#151): editing a photo saved with a background part again starts with nothing to undo,
+    /// and shows the saved file (no preview, the file's size) until the subject is found again instead of the edit
+    /// without its parts; _Compare_ shows the original meanwhile.
+    #[test]
+    fn req_022_05_req_021_07_shows_the_saved_file_until_the_subject_is_found_again() {
+        let mut recipe = Recipe::default();
+        Adjustment::Hue.set(recipe.part_mut(Part::Background), -79.0);
+        let mut session = EditSession::new(missing_target([10, 10]), None);
+        session.set_source("a.jpg".into(), recipe.clone());
+        assert!(!session.history.can_undo() && !session.history.can_redo());
+        session.undo();
+        assert_eq!(session.recipe(), &recipe);
+        session.base = Base::Loaded(Box::new(Loaded {
+            view: None,
+            small: Some(image::RgbaImage::from_pixel(10, 10, image::Rgba([60, 140, 60, 255]))),
+            cpu: None,
+        }));
+        let (tx, rx) = channel();
+        session.subject = Subject::Finding(rx);
+
+        let ctx = egui::Context::default();
+        let paint = |session: &mut EditSession, compare: bool| {
+            let mut drawn = false;
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(10.0, 10.0));
+                let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+                drawn = session.paint(ui, rect, uv, rect, compare, 1.0);
+            })
+            .textures_delta
+            .clear();
+            drawn
+        };
+        assert!(!paint(&mut session, false), "the saved file shows while finding");
+        assert_eq!(session.shown_size(false), None);
+        assert!(paint(&mut session, true), "compare shows the original");
+        assert_eq!(session.shown_size(true), Some([10.0, 10.0]));
+
+        tx.send(Mask::new(10, 10, vec![1.0; 100]).ok_or(String::from("mask")))
+            .unwrap();
+        session.poll();
+        assert!(paint(&mut session, false), "the preview with its parts once found");
+        assert_eq!(session.shown_size(false), Some([10.0, 10.0]));
     }
 
     /// REQ-021-19: without an earlier edit, the panel shows its sliders as soon as editing starts, before any pixels
