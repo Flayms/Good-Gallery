@@ -5,7 +5,9 @@
 ;   OUTFILE  the installer to write
 ;   ICON     the app icon (.ico)
 ; The app starts it as `/S /UPDATE /D=<folder>` (REQ-031-08): it waits for the app to close and starts the new version.
-; Uninstalling removes the program, its shortcut and its registry entry, never the data folder
+; A page of options offers the Start menu and desktop shortcuts and _Open with_ (REQ-014-15); the choices are kept in
+; the uninstall key, so the next install or update starts from them. The app's setting changes `OpenWith` too
+; (REQ-027-06). Uninstalling removes the program, its shortcuts and its registry entries, never the data folder
 ; (%APPDATA%\good-gallery: index, settings, thumbnails, logs).
 
 Unicode true
@@ -13,6 +15,8 @@ ManifestDPIAware true
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
+!include "Sections.nsh"
+!include "LogicLib.nsh"
 
 !ifndef VERSION | SOURCE | OUTFILE | ICON
   !error "Pass /DVERSION=… /DSOURCE=… /DOUTFILE=… /DICON=… (cargo xtask dist does)"
@@ -46,6 +50,12 @@ VIAddVersionKey "LegalCopyright" "GPL-3.0-only"
 
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE OwnFolder
 !insertmacro MUI_PAGE_DIRECTORY
+!define MUI_PAGE_HEADER_TEXT "Options"
+!define MUI_PAGE_HEADER_SUBTEXT "Choose where ${PRODUCT} shows up. You can change $\"Open with$\" later in its settings."
+!define MUI_COMPONENTSPAGE_TEXT_TOP "Uncheck what you don't want."
+!define MUI_COMPONENTSPAGE_TEXT_COMPLIST "Add:"
+!define MUI_COMPONENTSPAGE_SMALLDESC
+!insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
@@ -72,11 +82,28 @@ Function OwnFolder
   done:
 FunctionEnd
 
-; Silent installs (/S /D=…) skip the directory page.
-Function .onInit
-  IfSilent 0 +2
-    Call OwnFolder
-FunctionEnd
+; A choice of the last install or update, or of the app's settings (REQ-014-15, REQ-027-06): 1 selects the section, 0
+; unselects it, and without a value it keeps its default.
+!macro Remembered VALUE SECTION
+  ClearErrors
+  ReadRegDWORD $0 HKCU "${UNINSTALL_KEY}" "${VALUE}"
+  ${IfNot} ${Errors}
+    ${If} $0 = 0
+      !insertmacro UnselectSection ${${SECTION}}
+    ${Else}
+      !insertmacro SelectSection ${${SECTION}}
+    ${EndIf}
+  ${EndIf}
+!macroend
+
+; Keeps a choice for the next run: 1 if the section is selected, else 0.
+!macro Remember VALUE SECTION
+  ${If} ${SectionIsSelected} ${${SECTION}}
+    WriteRegDWORD HKCU "${UNINSTALL_KEY}" "${VALUE}" 1
+  ${Else}
+    WriteRegDWORD HKCU "${UNINSTALL_KEY}" "${VALUE}" 0
+  ${EndIf}
+!macroend
 
 ; The formats the app indexes (domain::media::IMAGE_EXTENSIONS, VIDEO_EXTENSIONS) offer Good Gallery under _Open with_,
 ; without making it the default app (REQ-027-05).
@@ -139,7 +166,7 @@ Function RestartApp
   done:
 FunctionEnd
 
-Section "Install"
+Section "-Install"
   Call WaitForApp
   SetOutPath "$INSTDIR"
   ; An update replaces the helper folders as a whole, so no file of an older version stays behind. The folder is the
@@ -149,7 +176,6 @@ Section "Install"
   RMDir /r "$INSTDIR\mpv"
   File /r "${SOURCE}\*.*"
   WriteUninstaller "$INSTDIR\${UNINSTALLER}"
-  CreateShortcut "$SMPROGRAMS\${PRODUCT}.lnk" "$INSTDIR\${EXE}"
 
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "${PRODUCT}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
@@ -161,20 +187,66 @@ Section "Install"
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "EstimatedSize" $0
+SectionEnd
 
+Section "Start menu shortcut" START_MENU
+  CreateShortcut "$SMPROGRAMS\${PRODUCT}.lnk" "$INSTDIR\${EXE}"
+SectionEnd
+
+Section /o "Desktop shortcut" DESKTOP
+  CreateShortcut "$DESKTOP\${PRODUCT}.lnk" "$INSTDIR\${EXE}"
+SectionEnd
+
+Section "Show under $\"Open with$\"" OPEN_WITH
   WriteRegStr HKCU "Software\Classes\${PROGID}" "" "Photo or video"
   WriteRegStr HKCU "Software\Classes\${PROGID}\DefaultIcon" "" "$INSTDIR\${EXE},0"
   WriteRegStr HKCU "Software\Classes\${PROGID}\shell\open\command" "" '"$INSTDIR\${EXE}" "%1"'
   WriteRegStr HKCU "${APP_KEY}" "FriendlyAppName" "${PRODUCT}"
   WriteRegStr HKCU "${APP_KEY}\shell\open\command" "" '"$INSTDIR\${EXE}" "%1"'
   !insertmacro ForEachExtension OpenWith
+SectionEnd
+
+; Removes what was turned off since the last install, and remembers the choices (REQ-014-15).
+Section "-Finish"
+  ${IfNot} ${SectionIsSelected} ${START_MENU}
+    Delete "$SMPROGRAMS\${PRODUCT}.lnk"
+  ${EndIf}
+  ${IfNot} ${SectionIsSelected} ${DESKTOP}
+    Delete "$DESKTOP\${PRODUCT}.lnk"
+  ${EndIf}
+  ${IfNot} ${SectionIsSelected} ${OPEN_WITH}
+    !insertmacro ForEachExtension NoOpenWith
+    DeleteRegKey HKCU "Software\Classes\${PROGID}"
+    DeleteRegKey HKCU "${APP_KEY}"
+  ${EndIf}
+  !insertmacro Remember "StartMenuShortcut" START_MENU
+  !insertmacro Remember "DesktopShortcut" DESKTOP
+  !insertmacro Remember "OpenWith" OPEN_WITH
   ; SHCNE_ASSOCCHANGED: Explorer reads the associations again.
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
   Call RestartApp
 SectionEnd
 
+; What each option does, under the list (REQ-014-15).
+!insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
+  !insertmacro MUI_DESCRIPTION_TEXT ${START_MENU} "${PRODUCT} in the Start menu, where you can search for it."
+  !insertmacro MUI_DESCRIPTION_TEXT ${DESKTOP} "An icon on the desktop that starts ${PRODUCT}."
+  !insertmacro MUI_DESCRIPTION_TEXT ${OPEN_WITH} "Right-click a photo or video in Explorer and open it with ${PRODUCT}. It doesn't become your default app."
+!insertmacro MUI_FUNCTION_DESCRIPTION_END
+
+; Silent installs (/S /D=…) skip the directory page and the options: they take the remembered ones. After the sections,
+; whose indexes it needs.
+Function .onInit
+  IfSilent 0 +2
+    Call OwnFolder
+  !insertmacro Remembered "StartMenuShortcut" START_MENU
+  !insertmacro Remembered "DesktopShortcut" DESKTOP
+  !insertmacro Remembered "OpenWith" OPEN_WITH
+FunctionEnd
+
 Section "Uninstall"
   Delete "$SMPROGRAMS\${PRODUCT}.lnk"
+  Delete "$DESKTOP\${PRODUCT}.lnk"
   ; Only what the installer put there, in the app's own folder (OwnFolder).
   Delete "$INSTDIR\${EXE}"
   Delete "$INSTDIR\LICENSE.txt"

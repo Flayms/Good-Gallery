@@ -76,7 +76,7 @@ fn req_027_05_the_desktop_file_lists_every_indexed_format() {
 #[test]
 fn req_031_08_an_update_waits_for_the_app_and_restarts_it() {
     let installer = read("packaging/windows/installer.nsi");
-    let section = &installer[installer.find("Section \"Install\"").unwrap()..];
+    let section = &installer[installer.find("Section \"-Install\"").unwrap()..];
     let wait = section.find("Call WaitForApp").expect("the installer doesn't wait");
     assert!(
         wait < section.find("RMDir").unwrap(),
@@ -154,4 +154,32 @@ fn req_031_09_the_app_verifies_what_the_release_signs() {
     let other = dir.path().join("other.txt");
     std::fs::write(&other, "00".repeat(32)).unwrap();
     assert!(!run(&key, &other).status.success());
+}
+
+/// REQ-014-15: the installer offers the shortcuts and _Open with_ on a page of options, remembers them for the next
+/// install or update, and removes what was turned off.
+#[test]
+fn req_014_15_the_installer_offers_and_remembers_its_options() {
+    let nsi = read("packaging/windows/installer.nsi");
+    assert!(nsi.contains("!insertmacro MUI_PAGE_COMPONENTS"), "no page of options");
+    for (section, value) in [
+        (r#"Section "Start menu shortcut" START_MENU"#, "StartMenuShortcut"),
+        (r#"Section /o "Desktop shortcut" DESKTOP"#, "DesktopShortcut"),
+        (r#"Section "Show under $\"Open with$\"" OPEN_WITH"#, "OpenWith"),
+    ] {
+        assert!(nsi.contains(section), "installer.nsi lacks {section}");
+        // Read back on the next run, and written for it.
+        assert!(
+            nsi.contains(&format!(r#"!insertmacro Remembered "{value}""#)),
+            "{value} isn't read back"
+        );
+        assert!(
+            nsi.contains(&format!(r#"!insertmacro Remember "{value}""#)),
+            "{value} isn't remembered"
+        );
+    }
+    // What was turned off goes, also on uninstall.
+    assert!(nsi.contains(r#"Delete "$DESKTOP\${PRODUCT}.lnk""#));
+    assert!(nsi.matches(r#"Delete "$SMPROGRAMS\${PRODUCT}.lnk""#).count() >= 2);
+    assert!(nsi.matches("!insertmacro ForEachExtension NoOpenWith").count() >= 2);
 }

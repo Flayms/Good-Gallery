@@ -27,6 +27,10 @@ if (-not $DataDir) { $DataDir = Join-Path $work 'data' }
 $DataDir = [System.IO.Path]::GetFullPath($DataDir)
 $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Good Gallery.lnk'
 $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\GoodGallery'
+$desktopShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Good Gallery.lnk'
+$openWith = 'HKCU:\Software\Classes\GoodGallery.Media'
+
+function Remembered([string]$Name) { (Get-ItemProperty $uninstallKey -Name $Name).$Name }
 
 # /D must come last and unquoted (NSIS).
 $install = Start-Process $Installer -ArgumentList '/S', "/D=$target" -Wait -PassThru
@@ -37,6 +41,11 @@ foreach ($file in 'good-gallery.exe', 'exiftool\exiftool.exe', 'exiftool\exiftoo
 }
 Assert (Test-Path $uninstallKey) 'the uninstaller is registered'
 Assert (Test-Path $shortcut) 'the Start menu shortcut is there'
+# The options' defaults, remembered for the next install (REQ-014-15).
+Assert (-not (Test-Path $desktopShortcut)) 'no desktop shortcut by default'
+Assert (Test-Path $openWith) 'the app is offered under Open with'
+Assert ((Remembered 'StartMenuShortcut') -eq 1 -and (Remembered 'DesktopShortcut') -eq 0 -and
+    (Remembered 'OpenWith') -eq 1) 'the options are remembered'
 
 $exe = Join-Path $target 'good-gallery.exe'
 $shot = Join-Path $work 'screenshot.png'
@@ -55,6 +64,11 @@ foreach ($helper in 'exiftool\exiftool.exe', 'ffmpeg\ffmpeg.exe', 'mpv\libmpv-2.
     Assert ($log -match $pattern) "the log finds the bundled $helper"
 }
 Assert (-not ($log -match ' ERROR ')) 'the log has no errors'
+
+# Choices changed since (the installer run interactively, or Open with in the settings, REQ-027-06): the update keeps
+# them (REQ-014-15).
+Set-ItemProperty $uninstallKey -Name 'DesktopShortcut' -Value 1 -Type DWord
+Set-ItemProperty $uninstallKey -Name 'OpenWith' -Value 0 -Type DWord
 
 # An update while the app runs (REQ-031-08): the installer waits for the app to end, then starts the new version.
 $running = Start-Process $exe -PassThru -ArgumentList '--data-dir', "`"$DataDir`""
@@ -75,6 +89,9 @@ foreach ($attempt in 1..20) {
 Assert ([bool]$restarted) 'the update starts the new version'
 $restarted | Stop-Process -Force
 $restarted | Wait-Process -ErrorAction SilentlyContinue
+Assert (Test-Path $desktopShortcut) 'the update adds the desktop shortcut chosen since'
+Assert (-not (Test-Path $openWith)) 'the update removes Open with, turned off since'
+Assert (Test-Path $shortcut) 'the update keeps the Start menu shortcut'
 
 # _?= keeps the uninstaller in place and makes it wait (it copies itself to a temp folder otherwise).
 $uninstaller = Join-Path $target 'Uninstall Good Gallery.exe'
@@ -84,6 +101,7 @@ Assert (-not (Test-Path $exe)) 'the app is removed'
 Assert (-not (Test-Path (Join-Path $target 'exiftool'))) 'the helpers are removed'
 Assert (-not (Test-Path $uninstallKey)) 'the uninstaller is unregistered'
 Assert (-not (Test-Path $shortcut)) 'the Start menu shortcut is removed'
+Assert (-not (Test-Path $desktopShortcut)) 'the desktop shortcut is removed'
 Assert (Test-Path (Join-Path $DataDir 'gallery.db')) 'the data folder stays'
 
 Copy-Item $shot (Join-Path ([System.IO.Path]::GetTempPath()) 'gg-smoke-screenshot.png') -Force

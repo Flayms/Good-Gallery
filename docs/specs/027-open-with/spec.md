@@ -37,10 +37,18 @@ Users open a photo or video with Good Gallery from the file manager (_Open with_
 
 ### REQ-027-05 · Registered as a handler
 
-- **Given** the Windows installer has run (spec 014)
+- **Given** the Windows installer has run with _Show under "Open with"_ on (REQ-014-15), or the setting is on (REQ-027-06)
 - **When** the user opens _Open with_ on a photo or video of a format the app indexes
 - **Then** Good Gallery is listed, without making itself the default app; uninstalling removes the entries
 - **And** on Linux the installed `.desktop` file lists those formats' MIME types and passes the file to the app, so file managers offer it the same way; the portable Windows zip registers nothing
+
+### REQ-027-06 · Open with in the settings
+
+- **Given** the app installed with the Windows installer
+- **When** the user turns _Show under "Open with"_ on or off in the settings
+- **Then** the app adds or removes the same entries as the installer (REQ-027-05) at once, and the next update keeps that choice (REQ-014-15)
+- **And** the switch shows whether the entries are there now; if they can't be changed, an error message says why and the switch stays as it was
+- **And** the portable app, Linux and the browser version don't show the switch: they register nothing (REQ-027-05)
 
 ## Out of scope
 
@@ -61,3 +69,4 @@ Users open a photo or video with Good Gallery from the file manager (_Open with_
 | REQ-027-03 | `crates/app/tests/open_with.rs` › req_027_03_offers_to_add_the_folder_of_a_file_outside_every_library, req_027_03_cancel_adds_nothing | pass |
 | REQ-027-04 | `crates/app/tests/open_with.rs` › req_027_04_says_why_a_file_cant_be_opened | pass |
 | REQ-027-05 | `xtask/tests/packaging.rs` › req_027_05_the_installer_registers_every_indexed_format, req_027_05_the_desktop_file_lists_every_indexed_format | partial: _Open with_ in Explorer and a Linux file manager by hand |
+| REQ-027-06 | `crates/app/src/open_with.rs` › req_027_06_adds_and_removes_the_installers_entries; `crates/app/tests/settings.rs` › req_027_06_switches_open_with_in_the_settings | partial: the app's own registry in Explorer by hand |
