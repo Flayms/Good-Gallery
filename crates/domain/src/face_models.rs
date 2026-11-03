@@ -293,25 +293,30 @@ pub fn first_pass(width: u32, height: u32) -> Pass {
     }
 }
 
-/// The looks a photo still needs after its first found `found` (in photo pixels). Most photos get none, so a large
-/// library stays affordable. Nothing found: perhaps a face too large for the model (YuNet is trained up to about 300
-/// px), so the photo again at half the size. Small faces: perhaps more of them, too small to see, so overlapping tiles.
-pub fn more_passes(width: u32, height: u32, found: &[Detection]) -> Vec<Pass> {
+/// How sure a detector must be for a first look to count as a hint that faces may be there.
+pub const HINT_SCORE: f32 = 0.3;
+
+/// The looks a photo still needs after its first, which found `confident` faces and weaker `hints` (in photo pixels,
+/// `hints` includes `confident`). Most photos need few, so a large library stays affordable. No confident face: perhaps
+/// one too large for the model (YuNet is trained up to about 300 px), so the photo again at half the size. Small hints:
+/// faces too small to be sure of, or more beside them, so overlapping tiles.
+pub fn more_passes(width: u32, height: u32, confident: &[Detection], hints: &[Detection]) -> Vec<Pass> {
     /// A face smaller than this in the first pass suggests there are smaller ones.
     const SMALL_IN_INPUT: f32 = 40.0;
     let first = first_pass(width, height);
-    if found.is_empty() {
-        return vec![Pass {
+    let mut passes = Vec::new();
+    if confident.is_empty() {
+        passes.push(Pass {
             input: INPUT_SIDE as f32 / 2.0,
             ..first
-        }];
+        });
     }
     let scale = first.input / first.side;
-    let small = found
+    let small = hints
         .iter()
         .any(|face| face.rect[2].min(face.rect[3]) * scale < SMALL_IN_INPUT);
     if !small || first.side <= INPUT_SIDE as f32 * 1.5 {
-        return Vec::new();
+        return passes;
     }
     let side = (first.side * 0.6).max(INPUT_SIDE as f32);
     let starts = |length: f32| {
@@ -321,10 +326,9 @@ pub fn more_passes(width: u32, height: u32, found: &[Detection]) -> Vec<Pass> {
         }
         starts
     };
-    let mut tiles = Vec::new();
     for y in starts(height as f32) {
         for x in starts(width as f32) {
-            tiles.push(Pass {
+            passes.push(Pass {
                 x,
                 y,
                 side,
@@ -332,7 +336,7 @@ pub fn more_passes(width: u32, height: u32, found: &[Detection]) -> Vec<Pass> {
             });
         }
     }
-    tiles
+    passes
 }
 
 /// Drops faces too small to recognize.
@@ -592,7 +596,7 @@ mod tests {
         assert_eq!(found[0].landmarks[0], [20.0, 4.0]);
     }
 
-    /// REQ-031-06: small faces are looked for closer only where the whole photo showed people, and a face that fills
+    /// REQ-031-06: small faces are looked for closer only where the whole photo hints at them, and a face that fills
     /// the photo is looked for with the photo smaller.
     #[test]
     fn req_031_06_chooses_passes_by_what_the_first_found() {
@@ -603,13 +607,14 @@ mod tests {
             input: INPUT_SIDE as f32,
         };
         assert_eq!(first_pass(4000, 3000), first);
-        assert_eq!(more_passes(4000, 3000, &[]), vec![Pass { input: 320.0, ..first }]);
+        let half = Pass { input: 320.0, ..first };
+        assert_eq!(more_passes(4000, 3000, &[], &[]), vec![half]);
 
         let big = [face(100.0, 100.0, 2000.0, 2000.0, 0.9)];
-        assert!(more_passes(4000, 3000, &big).is_empty());
+        assert!(more_passes(4000, 3000, &big, &big).is_empty());
 
         let small = [face(100.0, 100.0, 100.0, 100.0, 0.9)];
-        let tiles = more_passes(4000, 3000, &small);
+        let tiles = more_passes(4000, 3000, &small, &small);
         assert!(tiles.len() >= 4, "{tiles:?}");
         // Together the tiles cover the photo, overlapping so a face on an edge lies whole in one.
         assert!(
@@ -621,7 +626,13 @@ mod tests {
         assert!(tiles.iter().any(|tile| tile.y + tile.side >= 3000.0));
         assert!(tiles[1].x < tiles[0].x + tiles[0].side - 100.0);
         // A small photo has nothing more to show.
-        assert!(more_passes(640, 480, &[face(0.0, 0.0, 30.0, 30.0, 0.9)]).is_empty());
+        let tiny = [face(0.0, 0.0, 30.0, 30.0, 0.9)];
+        assert!(more_passes(640, 480, &tiny, &tiny).is_empty());
+
+        // Only a weak hint of a small face is enough to look closer, and the half-size look still happens.
+        let weak = more_passes(4000, 3000, &[], &small);
+        assert_eq!(weak[0], half);
+        assert_eq!(weak.len(), tiles.len() + 1);
     }
 
     #[test]

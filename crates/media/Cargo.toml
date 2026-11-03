@@ -15,10 +15,13 @@ fast_image_resize.workspace = true
 image = { workspace = true, features = ["gif", "webp"] }
 jpeg-decoder.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
 thiserror.workspace = true
 thumbhash.workspace = true
 tract-onnx.workspace = true
 tracing.workspace = true
+ureq.workspace = true
 webp.workspace = true
 
 [target.'cfg(windows)'.dependencies]
@@ -27,8 +30,6 @@ windows-sys.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 
-[dev-dependencies]
-tempfile.workspace = true
 
 [lints]
 workspace = true

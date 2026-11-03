@@ -1,7 +1,7 @@
 //! One app per data folder (REQ-027-02). The first start holds a lock on `instance.lock` in the data folder for as
 //! long as it runs; a later start finds it locked, leaves the file it was asked to open in the `open` folder there and
 //! exits. The running app checks that folder a few times a second, shows the file and comes to the front. Plain files,
-//! so there is no socket or pipe (REQ-011-11).
+//! so there is no socket or pipe.
 
 use std::fs::{self, File, TryLockError};
 use std::io::{self, Write as _};

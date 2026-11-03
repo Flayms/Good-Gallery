@@ -1,5 +1,5 @@
 //! Finding a photo's main subject (spec 022): U²-Net-p, a network for salient object detection, run on the CPU with
-//! tract. The model is part of the executable, so it needs neither a download nor a helper (REQ-011-11).
+//! tract. The model is part of the executable, so it needs neither a download nor a helper.
 
 use domain::edit::Mask;
 use std::sync::{Arc, OnceLock};
