@@ -10,6 +10,7 @@ pub mod caption;
 pub mod crop;
 pub mod date_groups;
 pub mod edit;
+pub mod face_models;
 pub mod faces;
 pub mod folders;
 pub mod layout;

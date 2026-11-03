@@ -54,7 +54,7 @@ The user adapts indexing and the thumbnail cache to their hardware and network: 
 - **When** it is open
 - **Then** _About_ shows the app's version and a _See the latest release_ button
 - **When** the user clicks the button
-- **Then** the releases page opens in the default browser, which makes the connection, not the app (REQ-011-11); if it can't be opened, a toast says why
+- **Then** the releases page opens in the default browser; if it can't be opened, a toast says why
 
 ## Out of scope
 
