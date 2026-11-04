@@ -114,7 +114,21 @@ impl AppState {
             self.faces.recognizer = faces::chosen(&db, faces::RECOGNIZER_KEY).ok().flatten();
             self.faces.paused = faces::chosen(&db, faces::SEARCH_KEY).ok().flatten().as_deref() == Some("paused");
         }
+        // A threshold chosen by an earlier version may have been measured better since.
+        let threshold = self.chosen_threshold(self.faces.recognizer.as_deref());
+        if threshold.is_some() {
+            self.store_face_setting(faces::THRESHOLD_KEY, threshold.as_deref());
+        }
         self
+    }
+
+    /// The threshold of a stored recognition model, as stored settings hold it.
+    fn chosen_threshold(&self, sha256: Option<&str>) -> Option<String> {
+        let sha256 = sha256?;
+        match self.faces.models.iter().find(|model| model.sha256 == sha256)?.kind {
+            ModelKind::Recognize { threshold, .. } => Some(threshold.to_string()),
+            ModelKind::Detect(_) => None,
+        }
     }
 
     fn kick_faces(&self) {
@@ -137,13 +151,7 @@ impl AppState {
             self.store_face_setting(faces::DETECTOR_KEY, sha256.as_deref());
             self.faces.detector = sha256;
         } else {
-            let threshold = sha256
-                .as_deref()
-                .and_then(|sha256| self.faces.models.iter().find(|model| model.sha256 == sha256))
-                .and_then(|model| match model.kind {
-                    ModelKind::Recognize { threshold, .. } => Some(threshold.to_string()),
-                    ModelKind::Detect(_) => None,
-                });
+            let threshold = self.chosen_threshold(sha256.as_deref());
             self.store_face_setting(faces::THRESHOLD_KEY, threshold.as_deref());
             self.store_face_setting(faces::RECOGNIZER_KEY, sha256.as_deref());
             self.faces.recognizer = sha256;

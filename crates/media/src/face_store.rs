@@ -100,9 +100,13 @@ impl FaceStore {
                     return None;
                 }
                 let note: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
+                // What the catalog says now beats what it said at the download: thresholds get measured better.
+                let kind = catalog_entry(&sha256)
+                    .map(|model| model.kind)
+                    .or_else(|| note_to_kind(&note))?;
                 Some(StoredModel {
                     name: note.get("name")?.as_str()?.to_owned(),
-                    kind: note_to_kind(&note)?,
+                    kind,
                     sha256,
                 })
             })
@@ -388,6 +392,22 @@ mod tests {
             assert_eq!(std::fs::metadata(store.file(model.sha256)).unwrap().len(), model.bytes);
         }
         assert_eq!(store.models().len(), 2);
+    }
+
+    /// REQ-032-10: a model downloaded earlier gets the catalog's current threshold, not the one in its note.
+    #[test]
+    fn req_032_10_the_catalog_beats_an_old_note() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FaceStore::in_data_folder(dir.path());
+        let model = CATALOG.iter().find(|model| model.name == "SFace").unwrap();
+        std::fs::create_dir_all(&store.folder).unwrap();
+        std::fs::write(store.file(model.sha256), b"model").unwrap();
+        std::fs::write(
+            store.note(model.sha256),
+            r#"{"name":"SFace","recognize":"sface","threshold":0.1}"#,
+        )
+        .unwrap();
+        assert_eq!(store.model(model.sha256).unwrap().kind, model.kind);
     }
 
     #[test]

@@ -21,7 +21,8 @@
 - [x] `media::face_regions`: writing regions (REQ-032-12 … REQ-032-14)
 - [x] Viewer (REQ-032-09 … REQ-032-13)
 - [x] People page and groups (REQ-032-15)
-- [ ] Benchmark, after this feature: speed and memory for `docs/face-models.md`, thresholds per model, detection and recognition rates on a real library
+- [x] Benchmark (`cargo xtask face-bench`): speed and memory for `docs/face-models.md`, thresholds per model, on LFW and WIDER FACE
+- [ ] Detection and recognition rates on a real library
 
 ## Decisions
 
@@ -44,6 +45,11 @@
 
 **Decided:** only a name the user confirmed reaches a file. A detected face overlapping a named region is that person, worked out when read, so another program's change to the regions needs no sync. Face tables live in the index, not a database of their own, so they follow `media` by foreign key and share its writer conventions. `face_embeddings` is its own table and read only by the face code, so the gallery's reads don't pay for it.
 **Rejected:** writing unknown faces to files (other programs show them as nameless boxes, and digiKam's writes on rejecting caused complaints, its bug 511184). A separate database (cleanup without foreign keys, for rejections to survive a rebuild, which is rare).
+
+### 2026-11-03 · Thresholds keep strangers out
+
+**Decided:** a recognition threshold is the lowest at which about 99% of a group is one person and at most 0.5% of strangers get a suggestion, in a simulation with the app's own `suggest` and `group` on LFW: SFace 0.50, AuraFace 0.45 (where it still finds only 89%), and 0.50 for a model the catalog doesn't know. YuNet's detection score stays 0.8 (2.8 false boxes per 100 WIDER FACE photos), RetinaFace's rises from 0.7 to 0.95 (from 19.5 to 5.6). The catalog's numbers beat those in a model's note and the stored setting, so a measurement reaches models already on a computer.
+**Rejected:** thresholds from a rate of false matches per pair, as usually published: SFace's 0.363 (0.1% per pair) compares a face with every known face, so most strangers were named at 0.30, and 12% still at 0.40. Calibrating on a real library, which this machine doesn't have.
 
 ### 2026-11-03 · A first look, and more only where it hints at faces
 

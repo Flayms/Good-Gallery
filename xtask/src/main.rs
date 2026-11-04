@@ -5,6 +5,7 @@ const _: Option<&str> = option_env!("GOOD_GALLERY_WORKTREE");
 
 mod check_specs;
 mod dist;
+mod face_bench;
 mod gallery_bench;
 mod icons;
 mod libraries;
@@ -38,6 +39,7 @@ fn main() -> ExitCode {
             ExitCode::from(code as u8)
         }
         Some("libraries") => report(libraries::run(&args[1..])),
+        Some("face-bench") => report(face_bench::run(&args[1..])),
         Some("gallery-bench") => report(gallery_bench::run(&args[1..])),
         Some("icons") => report(icons::run(&args[1..])),
         Some("dist") => report(dist::run(&args[1..])),
