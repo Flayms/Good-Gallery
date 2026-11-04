@@ -139,8 +139,9 @@ fn req_027_01_indexes_a_new_file_first() {
     settle(&mut harness);
     assert_eq!(shown_file(&harness), None);
     assert_eq!(
-        *fixture.scans.paths.lock().unwrap(),
-        [(root, vec!["new.jpg".to_owned()])]
+        *fixture.scans.first.lock().unwrap(),
+        [(root, vec!["new.jpg".to_owned()])],
+        "the file is indexed ahead of other scans"
     );
 
     // The indexer writes it and finishes.
@@ -149,6 +150,19 @@ fn req_027_01_indexes_a_new_file_first() {
     events.send(IndexerEvent::Done(root, ScanResult::Completed)).unwrap();
     settle(&mut harness);
     assert_eq!(shown_file(&harness), Some(id_of(&index, root, "new.jpg")));
+}
+
+#[test]
+fn req_027_01_says_it_opens_once_indexed() {
+    let fixture = Fixture::new();
+    let Opened {
+        mut harness, photos, ..
+    } = opened(&fixture);
+    touch(&photos, &["new.jpg"]);
+
+    harness.state_mut().open_file(photos.join("new.jpg"));
+    settle(&mut harness);
+    harness.get_by_label("new.jpg opens once it's indexed");
 }
 
 #[test]

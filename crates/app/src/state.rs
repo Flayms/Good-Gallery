@@ -455,6 +455,8 @@ pub struct AppState {
     pending_open: Option<PendingOpen>,
     /// A file outside every library, waiting for the user to add its folder or not (REQ-027-03).
     pub confirm_add_folder: Option<PathBuf>,
+    /// The installed Windows app's _Open with_ entries, and whether they are on (REQ-027-06).
+    open_with: Option<(Arc<dyn crate::open_with::OpenWithEntries>, bool)>,
     /// A file whose folder is being added as a library, opened once the library is there (REQ-027-03).
     #[cfg(not(target_arch = "wasm32"))]
     open_when_added: Option<PathBuf>,
@@ -955,6 +957,32 @@ impl AppState {
         }
     }
 
+    /// Offers _Open with_ in the settings, for the installed Windows app (REQ-027-06).
+    pub fn with_open_with(mut self, entries: Arc<dyn crate::open_with::OpenWithEntries>) -> Self {
+        let on = entries.is_on();
+        self.open_with = Some((entries, on));
+        self
+    }
+
+    /// Whether the app is offered under _Open with_; `None` where the settings don't offer the switch (REQ-027-06).
+    pub fn open_with(&self) -> Option<bool> {
+        self.open_with.as_ref().map(|(_, on)| *on)
+    }
+
+    /// Adds or removes the _Open with_ entries, or says why it couldn't (REQ-027-06).
+    pub fn set_open_with(&mut self, on: bool) {
+        let Some((entries, shown)) = &mut self.open_with else {
+            return;
+        };
+        match entries.set(on) {
+            Ok(()) => *shown = on,
+            Err(error) => {
+                tracing::error!("can't change Open with: {error}");
+                self.toasts.error(format!("Couldn't change \"Open with\": {error}"));
+            }
+        }
+    }
+
     /// Takes the files later starts of the app hand over (REQ-027-02).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn with_open_requests(mut self, requests: Receiver<crate::instance::Request>) -> Self {
@@ -1025,8 +1053,8 @@ impl AppState {
         self.open_when_added = Some(file);
     }
 
-    /// Looks up the media item of the file opened with the app; asks for a scan of it the first time the index
-    /// doesn't have it, and gives up once that scan found nothing (a skipped folder).
+    /// Looks up the media item of the file opened with the app; asks for a scan of it ahead of the others the first
+    /// time the index doesn't have it, and gives up once that scan found nothing (a skipped folder).
     fn find_pending_open(&mut self) {
         let (Some(pending), Some(db)) = (&mut self.pending_open, &self.db) else {
             return;
@@ -1041,7 +1069,10 @@ impl AppState {
         let library = pending.library;
         if !pending.scanned {
             pending.scanned = true;
-            self.scans.request_paths(library, vec![pending.rel_path.clone()]);
+            // Ahead of other scans, e.g. the library's own first scan (REQ-002-18).
+            self.scans.request_paths_first(library, vec![pending.rel_path.clone()]);
+            let name = pending.rel_path.rsplit('/').next().unwrap_or_default();
+            self.toasts.success(format!("{name} opens once it's indexed"));
             return;
         }
         let waiting = self.indexer_status.current.is_some_and(|scan| scan.library == library)
@@ -1126,6 +1157,7 @@ impl AppState {
             open_requests: None,
             bring_to_front: false,
             pending_open: None,
+            open_with: None,
             confirm_add_folder: None,
             #[cfg(not(target_arch = "wasm32"))]
             open_when_added: None,

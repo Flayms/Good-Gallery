@@ -11,8 +11,9 @@ Users who sort out a shoot want to act on many items at once instead of opening 
 ### REQ-025-01 · Select items
 
 - **Given** the gallery in any view
-- **When** the user Ctrl-clicks an item, or presses Space on the focused item
-- **Then** the item is selected, or no longer selected if it was
+- **When** the user clicks an item
+- **Then** only that item is selected, as in the file manager; it doesn't open (REQ-025-08)
+- **And** a Ctrl-click, or Space on the focused item, selects the item or no longer selects it if it was, and keeps the rest of the selection
 - **And** a selected item shows a ring and a check mark (a row in the List view: the selected background and a check mark)
 
 ### REQ-025-02 · Select a range
@@ -22,19 +23,16 @@ Users who sort out a shoot want to act on many items at once instead of opening 
 - **Then** all items from the anchor to that item, in gallery order, are added to the selection
 - **And** without an anchor only the clicked item is added
 
-### REQ-025-03 · Selection mode
+### ~~REQ-025-03 · Selection mode~~
 
-- **Given** a selection of at least one item
-- **When** the user clicks an item without a modifier
-- **Then** the item is selected or deselected instead of opening in the viewer
-- **And** without a selection a click opens the viewer as before (REQ-009-01)
+Deprecated (#164): a click always selects (REQ-025-01) and a double-click opens (REQ-025-08), so there is no mode in which a click does something else.
 
 ### REQ-025-04 · Select all, clear
 
 - **Given** the gallery, with no text field focused
-- **When** the user presses Ctrl+A
+- **When** the user presses Ctrl+A, or clicks _Select all_ in the toolbar
 - **Then** all items of the current search are selected, also those not loaded or scrolled into view yet and those indexed into the search while it stays selected, without slowing the gallery down (REQ-006-12)
-- **And** Escape, or _Clear_ in the toolbar, clears the selection
+- **And** Escape, _Clear_ in the toolbar, or a click on the gallery's background beside the items clears the selection
 
 ### REQ-025-05 · What the selection holds
 
@@ -47,7 +45,7 @@ Users who sort out a shoot want to act on many items at once instead of opening 
 
 - **Given** a selection
 - **When** the gallery shows
-- **Then** the toolbar shows how many items are selected (`3 selected`, the count grouped like other counts), _Rate_ and _Clear_ in place of the search bar
+- **Then** the toolbar shows how many items are selected (`3 selected`, the count grouped like other counts), _Rate_, _Tag_ and _Clear_ next to the search bar, which stays
 
 ### REQ-025-07 · Rate the selection
 
@@ -57,6 +55,18 @@ Users who sort out a shoot want to act on many items at once instead of opening 
 - **And** more than 100 items are written only after the user confirms (`Rate 2,345 items with 4 stars? Their files are changed.`)
 - **And** files that can't be written keep their rating and are counted in a toast that names the first one and why (REQ-024-04); the others are rated
 - **And** the browser version doesn't show _Rate_ (REQ-024-05)
+
+### REQ-025-08 · Open with a double-click
+
+- **Given** the gallery in any view
+- **When** the user double-clicks an item, or presses Enter on the focused item
+- **Then** the viewer opens on it (REQ-009-01); the first click of the double-click selected it (REQ-025-01)
+
+### REQ-025-09 · Select a folder's items
+
+- **Given** a library or folder in the sidebar
+- **When** the user right-clicks it and picks _Select all in library_ or _Select all in folder_
+- **Then** the gallery shows that library or folder, as a click on it does, and all its items are selected (REQ-025-04)
 
 ## Out of scope
 
@@ -74,10 +84,12 @@ Users who sort out a shoot want to act on many items at once instead of opening 
 
 | REQ        | Test | Result |
 | ---------- | ---- | ------ |
-| REQ-025-01 | `crates/domain/src/selection.rs` › req_025_01_req_025_03_toggles_items; `crates/app/tests/selection.rs` › req_025_01_req_025_06_ctrl_click_selects; snapshot `selection` | pass |
+| REQ-025-01 | `crates/domain/src/selection.rs` › req_025_01_a_click_selects_only_that_item, req_025_01_toggles_items; `crates/app/tests/selection.rs` › req_025_01_req_025_06_ctrl_click_selects, req_025_01_req_025_08_a_click_selects_and_a_double_click_opens; snapshot `selection` | pass |
 | REQ-025-02 | `crates/domain/src/selection.rs` › req_025_02_adds_the_range_from_the_anchor; `crates/app/tests/selection.rs` › req_025_02_shift_click_adds_a_range | pass |
-| REQ-025-03 | `crates/domain/src/selection.rs` › req_025_01_req_025_03_toggles_items; `crates/app/tests/selection.rs` › req_025_03_a_click_selects_in_selection_mode | pass |
-| REQ-025-04 | `crates/domain/src/selection.rs` › req_025_04_selects_all_and_clears; `crates/app/tests/selection.rs` › req_025_04_req_025_05_selects_all_and_clears | pass |
+| ~~REQ-025-03~~ | — | no test (deprecated) |
+| REQ-025-04 | `crates/domain/src/selection.rs` › req_025_04_selects_all_and_clears; `crates/app/tests/selection.rs` › req_025_04_req_025_05_selects_all_and_clears, req_025_04_select_all_button_and_a_click_on_the_background | pass |
 | REQ-025-05 | `crates/domain/src/selection.rs` › req_025_05_forgets_items_that_left; `crates/app/tests/selection.rs` › req_025_04_req_025_05_selects_all_and_clears | pass |
 | REQ-025-06 | `crates/app/tests/selection.rs` › req_025_01_req_025_06_ctrl_click_selects | pass |
 | REQ-025-07 | `crates/db/src/media.rs` › req_025_07_finds_the_files_of_the_selection; `crates/app/tests/selection.rs` › req_025_07_rates_the_selection, req_025_07_counts_the_files_it_cant_rate, req_025_07_asks_before_rating_many | pass |
+| REQ-025-08 | `crates/app/tests/selection.rs` › req_025_01_req_025_08_a_click_selects_and_a_double_click_opens; `crates/app/tests/viewer.rs` › req_009_01_opens_the_focused_tile_with_enter | pass |
+| REQ-025-09 | `crates/app/tests/selection.rs` › req_025_09_selects_a_library_or_folder_from_the_sidebar | pass |

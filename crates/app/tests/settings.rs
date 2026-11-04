@@ -387,3 +387,69 @@ fn req_010_07_says_why_the_browser_didnt_open() {
 
     harness.get_by_label("Couldn't open the browser: no browser");
 }
+
+/// _Open with_ entries that remember what they were set to, and can fail.
+#[derive(Default)]
+struct FakeOpenWith {
+    on: Mutex<bool>,
+    failing: Mutex<Option<String>>,
+}
+
+impl app::open_with::OpenWithEntries for FakeOpenWith {
+    fn is_on(&self) -> bool {
+        *self.on.lock().unwrap()
+    }
+
+    fn set(&self, on: bool) -> Result<(), String> {
+        if let Some(error) = self.failing.lock().unwrap().clone() {
+            return Err(error);
+        }
+        *self.on.lock().unwrap() = on;
+        Ok(())
+    }
+}
+
+const OPEN_WITH: &str = "Show under \"Open with\"";
+
+fn open_with_checked(harness: &Harness<'static, AppState>) -> bool {
+    harness
+        .get_by_role_and_label(Role::CheckBox, OPEN_WITH)
+        .accesskit_node()
+        .toggled()
+        == Some(eframe::egui::accesskit::Toggled::True)
+}
+
+/// REQ-027-06: the installed app's settings switch _Open with_ on and off; a failure says why and changes nothing.
+/// Without the installer's entries (portable app, Linux, browser) there is no switch.
+#[test]
+fn req_027_06_switches_open_with_in_the_settings() {
+    let fixture = Fixture::new();
+    let db = fixture.dir.path().join("gallery.db");
+    let harness = on_settings(&fixture, &db, Arc::new(FakeTargets::default()));
+    assert!(harness.query_by_label(OPEN_WITH).is_none());
+    drop(harness);
+
+    let entries = Arc::new(FakeOpenWith::default());
+    *entries.on.lock().unwrap() = true;
+    let state = fixture.state(db::open(&db).unwrap()).with_open_with(entries.clone());
+    let mut harness = common::harness(state);
+    harness.set_size(eframe::egui::vec2(900.0, 1600.0));
+    harness.state_mut().page = Page::Settings;
+    settle(&mut harness);
+    assert!(open_with_checked(&harness));
+    // The entries exist on Windows only.
+    if cfg!(windows) {
+        harness.snapshot("settings_open_with");
+    }
+
+    harness.get_by_role_and_label(Role::CheckBox, OPEN_WITH).click();
+    settle(&mut harness);
+    assert!(!*entries.on.lock().unwrap());
+    assert!(!open_with_checked(&harness));
+
+    *entries.failing.lock().unwrap() = Some("Access is denied.".into());
+    harness.get_by_role_and_label(Role::CheckBox, OPEN_WITH).click();
+    settle(&mut harness);
+    assert!(!open_with_checked(&harness), "the switch stays as it was");
+    harness.get_by_label("Couldn't change \"Open with\": Access is denied.");
+}

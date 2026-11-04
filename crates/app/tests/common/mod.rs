@@ -28,6 +28,8 @@ pub struct RecordedScans {
     pub scans: Mutex<Vec<(i64, ScanKind)>>,
     /// Changes scans of named files, which are also recorded in `scans`.
     pub paths: Mutex<Vec<(i64, Vec<String>)>>,
+    /// Changes scans that go ahead of the others (REQ-002-18), which are also recorded in `paths`.
+    pub first: Mutex<Vec<(i64, Vec<String>)>>,
     pub removed: Mutex<Vec<i64>>,
 }
 
@@ -39,6 +41,11 @@ impl ScanRequests for RecordedScans {
     fn request_paths(&self, library: i64, paths: Vec<String>) {
         self.paths.lock().unwrap().push((library, paths));
         self.request_scan(library, ScanKind::Changes);
+    }
+
+    fn request_paths_first(&self, library: i64, paths: Vec<String>) {
+        self.first.lock().unwrap().push((library, paths.clone()));
+        self.request_paths(library, paths);
     }
 
     fn remove_library(&self, library: i64) {
@@ -142,4 +149,38 @@ pub fn snapshot_name(name: &str) -> String {
     } else {
         name.to_owned()
     }
+}
+
+/// Two clicks at `pos` a frame apart, as a double-click is; half a second after any earlier click, which would make it
+/// a triple-click.
+pub fn double_click_at(harness: &mut Harness<'_, AppState>, pos: egui::Pos2) {
+    harness.run_steps(30);
+    harness.hover_at(pos);
+    harness.run_steps(1);
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            });
+            harness.run_steps(1);
+        }
+    }
+}
+
+/// Opens the tile or list row of `name` in the viewer with a double-click (REQ-025-08), selected or not.
+pub fn open_item(harness: &mut Harness<'_, AppState>, name: &str) {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::Queryable as _;
+    let selected = format!("{name}, selected");
+    let pos = [Role::Image, Role::Row]
+        .into_iter()
+        .flat_map(|role| [(role, name), (role, selected.as_str())])
+        .find_map(|(role, label)| harness.query_by_role_and_label(role, label))
+        .unwrap_or_else(|| panic!("no tile or row {name}"))
+        .rect()
+        .center();
+    double_click_at(harness, pos);
 }

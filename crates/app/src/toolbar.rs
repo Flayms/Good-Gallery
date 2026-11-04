@@ -71,6 +71,15 @@ pub fn show(
             if let Some(gallery) = gallery.as_deref_mut() {
                 view_button(ui, gallery);
                 filters_button(ui, gallery);
+                // Next to the search bar, which stays (REQ-025-06).
+                if gallery.selected_count() > 0 {
+                    ui.add_space(8.0);
+                    selection_bar(ui, gallery);
+                } else if gallery.count().unwrap_or(0) > 0
+                    && icon_button(ui, Icon::CheckCheck, "Select all", "Select all (Ctrl + A)").clicked()
+                {
+                    gallery.select_all();
+                }
             }
             // Also without a gallery: the first thing a new install could show.
             asked.update = crate::updates::notice(ui, updates);
@@ -83,12 +92,7 @@ pub fn show(
                     asked.show_sidebar = crate::sidebar::show_button(ui);
                 }
                 if let Some(gallery) = gallery {
-                    // A selection takes the search bar's place (REQ-025-06).
-                    if gallery.selected_count() > 0 {
-                        selection_bar(ui, gallery);
-                    } else {
-                        search_bar::show(ui, bar_state, gallery);
-                    }
+                    search_bar::show(ui, bar_state, gallery);
                 }
             });
         });
@@ -97,76 +101,78 @@ pub fn show(
     .inner
 }
 
-/// How many items are selected, _Rate_ (the desktop app only) and _Clear_ (REQ-025-06, REQ-025-07).
+/// _Clear_, how many items are selected, then _Rate_ and _Tag_ (the desktop app only); drawn into the toolbar's
+/// right-to-left part, so from the right (REQ-025-06, REQ-025-07, REQ-026-06).
 fn selection_bar(ui: &mut egui::Ui, gallery: &mut Gallery) {
-    if icon_button(ui, Icon::X, "Clear selection", "Clear (Esc)").clicked() {
-        gallery.clear_selection();
-        return;
+    if !crate::WEB {
+        {
+            let button = egui::Button::new((
+                Icon::Plus.small(),
+                "Tag",
+                Icon::ChevronDown.image(theme::ICON_SIZE, theme::muted()),
+            ))
+            .frame(false)
+            .min_size(vec2(0.0, theme::CONTROL_HEIGHT));
+            let response = ui.add(button);
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Tag the selection"));
+            let paths = gallery.tag_paths();
+            let mut picked = None;
+            menu(&response, "tag menu", 300.0, |ui| picked = tag_menu(ui, &paths));
+            if let Some(path) = picked {
+                egui::Popup::close_id(ui.ctx(), egui::Id::NULL.with("tag menu"));
+                gallery.tag_selection(path);
+            }
+        }
+        {
+            let button = egui::Button::new((
+                Icon::StarFilled.small(),
+                "Rate",
+                Icon::ChevronDown.image(theme::ICON_SIZE, theme::muted()),
+            ))
+            .frame(false)
+            .min_size(vec2(0.0, theme::CONTROL_HEIGHT));
+            let response = ui.add(button);
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Rate the selection"));
+            let mut chosen = None;
+            menu(&response, "rate menu", 200.0, |ui| {
+                for stars in (1..=domain::rating::MAX).rev() {
+                    let label = if stars == 1 {
+                        "1 star".to_owned()
+                    } else {
+                        format!("{stars} stars")
+                    };
+                    let row = egui::Button::new(egui::RichText::new(&label)).frame(false);
+                    let clicked = ui
+                        .horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 2.0;
+                            for star in 1..=domain::rating::MAX {
+                                ui.add(crate::icons::rating_star(star <= stars, theme::ICON_SIZE));
+                            }
+                            ui.add_space(6.0);
+                            ui.add(row)
+                        })
+                        .inner;
+                    clicked.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
+                    if clicked.clicked() {
+                        chosen = Some(Some(stars));
+                    }
+                }
+                ui.separator();
+                if ui.button("Remove rating").clicked() {
+                    chosen = Some(None);
+                }
+            });
+            if let Some(rating) = chosen {
+                egui::Popup::close_id(ui.ctx(), egui::Id::NULL.with("rate menu"));
+                gallery.rate_selection(rating);
+            }
+        }
+        ui.add_space(8.0);
     }
     let count = format::count(gallery.selected_count() as u64);
     ui.label(egui::RichText::new(format!("{count} selected")).family(theme::semibold()));
-    if crate::WEB {
-        return;
-    }
-    ui.add_space(8.0);
-    let button = egui::Button::new((
-        Icon::StarFilled.small(),
-        "Rate",
-        Icon::ChevronDown.image(theme::ICON_SIZE, theme::muted()),
-    ))
-    .frame(false)
-    .min_size(vec2(0.0, theme::CONTROL_HEIGHT));
-    let response = ui.add(button);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Rate the selection"));
-    let mut chosen = None;
-    menu(&response, "rate menu", 200.0, |ui| {
-        for stars in (1..=domain::rating::MAX).rev() {
-            let label = if stars == 1 {
-                "1 star".to_owned()
-            } else {
-                format!("{stars} stars")
-            };
-            let row = egui::Button::new(egui::RichText::new(&label)).frame(false);
-            let clicked = ui
-                .horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 2.0;
-                    for star in 1..=domain::rating::MAX {
-                        ui.add(crate::icons::rating_star(star <= stars, theme::ICON_SIZE));
-                    }
-                    ui.add_space(6.0);
-                    ui.add(row)
-                })
-                .inner;
-            clicked.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
-            if clicked.clicked() {
-                chosen = Some(Some(stars));
-            }
-        }
-        ui.separator();
-        if ui.button("Remove rating").clicked() {
-            chosen = Some(None);
-        }
-    });
-    if let Some(rating) = chosen {
-        egui::Popup::close_id(ui.ctx(), egui::Id::NULL.with("rate menu"));
-        gallery.rate_selection(rating);
-    }
-
-    let button = egui::Button::new((
-        Icon::Plus.small(),
-        "Tag",
-        Icon::ChevronDown.image(theme::ICON_SIZE, theme::muted()),
-    ))
-    .frame(false)
-    .min_size(vec2(0.0, theme::CONTROL_HEIGHT));
-    let response = ui.add(button);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Tag the selection"));
-    let paths = gallery.tag_paths();
-    let mut picked = None;
-    menu(&response, "tag menu", 300.0, |ui| picked = tag_menu(ui, &paths));
-    if let Some(path) = picked {
-        egui::Popup::close_id(ui.ctx(), egui::Id::NULL.with("tag menu"));
-        gallery.tag_selection(path);
+    if icon_button(ui, Icon::X, "Clear selection", "Clear (Esc)").clicked() {
+        gallery.clear_selection();
     }
 }
 

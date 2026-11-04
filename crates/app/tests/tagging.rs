@@ -113,7 +113,7 @@ fn app(fixture: &Fixture, exiftool: Option<&Path>) -> (App, PathBuf) {
 
 /// Opens `name` in the viewer with its info panel.
 fn open_info(harness: &mut App, name: &str) {
-    harness.get_by_role_and_label(Role::Image, name).click();
+    common::open_item(harness, name);
     settle(harness);
     harness.key_press(Key::I);
     settle(harness);

@@ -33,6 +33,7 @@ icons! {
     ArrowUpNarrowWide => "arrow-up-narrow-wide",
     Calendar => "calendar",
     Check => "check",
+    CheckCheck => "check-check",
     ChevronDown => "chevron-down",
     ChevronLeft => "chevron-left",
     ChevronRight => "chevron-right",
