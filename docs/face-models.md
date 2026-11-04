@@ -1,11 +1,8 @@
 # Face models
 
-> [!NOTE]
-> Licenses marked _open_ are not settled. This isn't legal advice.
-
 Good Gallery finds faces in two steps, and you choose a model for each. One model **detects** where the faces are. The other **recognizes** them: it turns each face into a list of numbers, and similar numbers suggest the same person.
 
-Models run on your computer. The app connects to the internet only to download a model you asked for. Photos, faces and those numbers are never uploaded, and the numbers are never written into your files.
+Models run on your computer. The app connects to the internet only to download a model you asked for.
 
 A name reaches your file only when you confirm it. Suggestions, faces you ignore and faces nobody has named stay in the app's index.
 
@@ -71,6 +68,9 @@ All of this ran through Good Gallery's own steps on one small machine: 2 shared 
 The photos are public test sets, not family albums, so expect lower results on your own photos, especially for children and for faces far apart in age. Numbers measured the same way can be compared with each other, unlike the figures models publish about themselves.
 
 ### Detection models
+
+> [!NOTE]
+> Licenses marked _open_ are not settled. This isn't legal advice.
 
 Faces found are from every 10th photo of WIDER FACE's validation set (323 photos), every 30th (108) for ResNet34. These photos are often crowded and hard. Faces under 24 pixels don't count, because the app drops them on purpose. A false box is one on no labeled face, though some of those may be real faces nobody labeled.
 
