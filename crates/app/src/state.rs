@@ -453,13 +453,17 @@ pub struct AppState {
     pub bring_to_front: bool,
     /// A file opened with the app, shown in the viewer once the gallery lists it (REQ-027-01).
     pending_open: Option<PendingOpen>,
-    /// A file outside every library, waiting for the user to add its folder or not (REQ-027-03).
-    pub confirm_add_folder: Option<PathBuf>,
     /// The installed Windows app's _Open with_ entries, and whether they are on (REQ-027-06).
     open_with: Option<(Arc<dyn crate::open_with::OpenWithEntries>, bool)>,
-    /// A file whose folder is being added as a library, opened once the library is there (REQ-027-03).
+    /// A file whose folder is being added as a library from the viewer, opened once the library is there (REQ-033-04).
     #[cfg(not(target_arch = "wasm32"))]
     open_when_added: Option<PathBuf>,
+    /// Where files outside every library are read into scratch indexes (spec 033).
+    #[cfg(not(target_arch = "wasm32"))]
+    loose_files: Option<crate::loose::LooseFiles>,
+    /// A file outside every library, shown from its scratch index (spec 033).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub loose: Option<crate::loose::Loose>,
 }
 
 /// A file opened with the app (REQ-027-01): where it is, and its media item once the index has it.
@@ -983,6 +987,14 @@ impl AppState {
         }
     }
 
+    /// Shows files outside every library from scratch indexes in `scratch`, reading their metadata with `metadata`
+    /// (spec 033).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_loose_files(mut self, scratch: PathBuf, metadata: Arc<dyn media::metadata::MetadataSource>) -> Self {
+        self.loose_files = Some(crate::loose::LooseFiles { scratch, metadata });
+        self
+    }
+
     /// Takes the files later starts of the app hand over (REQ-027-02).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn with_open_requests(mut self, requests: Receiver<crate::instance::Request>) -> Self {
@@ -991,8 +1003,8 @@ impl AppState {
     }
 
     /// Shows a file opened with the app (REQ-027-01): in the viewer if it is in a library, after indexing it if the
-    /// index doesn't have it yet; outside every library it offers to add its folder (REQ-027-03); anything else is an
-    /// error message (REQ-027-04).
+    /// index doesn't have it yet; outside every library from a scratch index (REQ-033-01); anything else is an error
+    /// message (REQ-027-04).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn open_file(&mut self, file: PathBuf) {
         let name = file.file_name().map_or_else(
@@ -1019,11 +1031,19 @@ impl AppState {
             })
             .max();
         let Some((_, library, rel_path)) = found else {
-            self.confirm_add_folder = Some(file);
+            self.open_loose(file);
             return;
         };
         self.page = Page::Gallery;
-        self.viewer = None;
+        // Its folder was just added from the viewer: it stays shown until the index has it (REQ-033-04).
+        let kept = self
+            .loose
+            .as_ref()
+            .is_some_and(|loose| loose.shown && loose.file == file);
+        if !kept {
+            self.viewer = None;
+            self.loose = None;
+        }
         self.info_sheet = None;
         if let Some(gallery) = &mut self.gallery {
             let search = domain::search::GallerySearch {
@@ -1045,12 +1065,77 @@ impl AppState {
         self.find_pending_open();
     }
 
-    /// Adds the folder of a file outside every library, and shows the file once it is indexed (REQ-027-03).
+    /// Shows a file outside every library from a scratch index (REQ-033-01), or says why it can't.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn add_folder_of(&mut self, file: PathBuf) {
+    fn open_loose(&mut self, file: PathBuf) {
+        let name = file.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let (Some(files), Some(db)) = (&self.loose_files, &self.db) else {
+            self.toasts
+                .error(format!("Couldn't open {name}: it isn't in a library"));
+            return;
+        };
+        match crate::loose::Loose::open(files, &file, db.clone(), self.repaint.clone()) {
+            Ok(loose) => {
+                self.page = Page::Gallery;
+                self.viewer = None;
+                self.info_sheet = None;
+                self.pending_open = None;
+                self.loose = Some(loose);
+            }
+            Err(error) => {
+                tracing::error!("can't show {}: {error}", file.display());
+                self.toasts.error(format!("Couldn't open {name}: {error}"));
+            }
+        }
+    }
+
+    /// Opens the viewer on a file outside every library once its scratch index has it (REQ-033-01).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn show_loose(&mut self) {
+        let Some(loose) = &mut self.loose else { return };
+        loose.poll();
+        if loose.shown {
+            return;
+        }
+        let Some(index) = loose.position() else {
+            // Read and loaded without it: the file couldn't be read (REQ-027-04).
+            if !loose.is_busy() {
+                let name = loose
+                    .file
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+                self.loose = None;
+                self.toasts.error(format!("Couldn't open {name}: it couldn't be read"));
+            }
+            return;
+        };
+        if let Some(viewer) = crate::viewer::Viewer::open_loose(&loose.gallery, index) {
+            self.viewer = Some(viewer);
+            loose.shown = true;
+        }
+    }
+
+    /// Adds the folder of the file shown from a scratch index as a library; the viewer switches to the indexed item
+    /// once the library's first scan has it (REQ-033-04).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn add_loose_folder(&mut self) {
+        let Some(file) = self.loose.as_ref().map(|loose| loose.file.clone()) else {
+            return;
+        };
         let Some(folder) = file.parent() else { return };
         self.add_library(folder.to_string_lossy().into_owned());
         self.open_when_added = Some(file);
+    }
+
+    /// The viewer closed: a file shown from a scratch index goes with it, and isn't opened later (REQ-033-05).
+    pub fn viewer_closed(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.loose.take().is_some() {
+            self.pending_open = None;
+            self.open_when_added = None;
+        }
     }
 
     /// Looks up the media item of the file opened with the app; asks for a scan of it ahead of the others the first
@@ -1072,14 +1157,31 @@ impl AppState {
             // Ahead of other scans, e.g. the library's own first scan (REQ-002-18).
             self.scans.request_paths_first(library, vec![pending.rel_path.clone()]);
             let name = pending.rel_path.rsplit('/').next().unwrap_or_default();
-            self.toasts.success(format!("{name} opens once it's indexed"));
+            // Not while the viewer shows it already, from a scratch index (REQ-033-04).
+            #[cfg(not(target_arch = "wasm32"))]
+            let shown = self.loose.as_ref().is_some_and(|loose| loose.shown);
+            #[cfg(target_arch = "wasm32")]
+            let shown = false;
+            if !shown {
+                self.toasts.success(format!("{name} opens once it's indexed"));
+            }
             return;
         }
         let waiting = self.indexer_status.current.is_some_and(|scan| scan.library == library)
             || self.indexer_status.queue.contains(&library);
         if !waiting {
-            let name = pending.rel_path.rsplit('/').next().unwrap_or_default().to_owned();
+            let rel_path = pending.rel_path.clone();
+            let name = rel_path.rsplit('/').next().unwrap_or_default().to_owned();
             self.pending_open = None;
+            // In a folder its library skips: shown as a file outside every library (REQ-033-06).
+            #[cfg(not(target_arch = "wasm32"))]
+            if self.loose_files.is_some()
+                && let Some(folder) = self.libraries.iter().find(|root| root.id == library)
+            {
+                let file = std::path::Path::new(&folder.path).join(rel_path);
+                self.open_loose(file);
+                return;
+            }
             self.toasts.error(format!("Couldn't open {name}: it wasn't indexed"));
         }
     }
@@ -1096,6 +1198,11 @@ impl AppState {
         if let Some(viewer) = crate::viewer::Viewer::open(gallery, index) {
             self.viewer = Some(viewer);
             self.pending_open = None;
+            // The indexed item takes the place of the one from a scratch index (REQ-033-04).
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.loose = None;
+            }
         }
     }
 
@@ -1158,9 +1265,12 @@ impl AppState {
             bring_to_front: false,
             pending_open: None,
             open_with: None,
-            confirm_add_folder: None,
             #[cfg(not(target_arch = "wasm32"))]
             open_when_added: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            loose_files: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            loose: None,
             unreadable: Default::default(),
         }
     }
@@ -1365,7 +1475,8 @@ impl AppState {
                     self.open_file(file);
                 }
             }
-            // The added folder is a library now (REQ-027-03).
+            self.show_loose();
+            // The folder added from the viewer is a library now (REQ-033-04).
             if let Some(file) = &self.open_when_added {
                 let path = file.to_string_lossy();
                 if self
@@ -1428,6 +1539,15 @@ impl AppState {
             || self.written_since_refresh
             || self.gallery.as_ref().is_some_and(Gallery::is_loading)
             || self.pending_open.is_some()
+            || self.loose_busy()
+    }
+
+    /// A file outside every library is still being read, or waits for the viewer (spec 033).
+    fn loose_busy(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        return self.loose.as_ref().is_some_and(|loose| loose.is_busy() || !loose.shown);
+        #[cfg(target_arch = "wasm32")]
+        false
     }
 
     /// Waits for all background jobs and applies them (tests, before stepping the UI).
@@ -1438,6 +1558,10 @@ impl AppState {
         }
         if let Some(gallery) = &mut self.gallery {
             gallery.wait_for_loads();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(loose) = &mut self.loose {
+            loose.wait_filled();
         }
     }
 

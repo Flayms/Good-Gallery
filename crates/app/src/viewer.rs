@@ -68,6 +68,8 @@ pub enum Action {
     Tag(crate::state::TagChange),
     /// What the user decided about a face (spec 032); the viewer stays.
     Face(crate::state::FaceAction),
+    /// Add the folder of the file outside every library as a library (REQ-033-04); the viewer stays.
+    AddFolder,
 }
 
 /// What a face's popup is about.
@@ -197,6 +199,9 @@ impl Transition {
 pub struct Viewer {
     /// A text field had the keyboard at the end of the last frame (a new tag, REQ-026-01).
     typing: bool,
+    /// The item is in a library. One outside every library, shown from a scratch index, has no rating, tags,
+    /// editing, faces or filmstrip (REQ-033-03).
+    indexed: bool,
     /// The shown item: its gallery position (out of the result, the place it had), and its id to find it again after a
     /// reload.
     index: usize,
@@ -277,6 +282,7 @@ impl Viewer {
             close_at: None,
             keys: Keys::default(),
             typing: false,
+            indexed: true,
             info_open: false,
             filmstrip,
             faces: false,
@@ -313,6 +319,15 @@ impl Viewer {
         Some(viewer)
     }
 
+    /// Opens the viewer on a file outside every library, from its scratch index's gallery (REQ-033-01, REQ-033-03).
+    pub fn open_loose(gallery: &Gallery, index: usize) -> Option<Self> {
+        let mut viewer = Self::open(gallery, index)?;
+        viewer.indexed = false;
+        viewer.filmstrip = false;
+        viewer.faces = false;
+        Some(viewer)
+    }
+
     pub fn index(&self) -> usize {
         self.index
     }
@@ -336,6 +351,12 @@ impl Viewer {
 
     pub fn filmstrip_shown(&self) -> bool {
         self.filmstrip
+    }
+
+    /// Whether the shown item is in a library; one outside every library has no rating, tags, editing, faces or
+    /// filmstrip (REQ-033-03).
+    pub fn is_indexed(&self) -> bool {
+        self.indexed
     }
 
     pub fn faces_shown(&self) -> bool {
@@ -740,6 +761,10 @@ impl Viewer {
         self.follow(gallery);
         let count = gallery.count().unwrap_or(0);
         let mut keys = std::mem::take(&mut self.keys);
+        // What needs the index isn't there for a file outside every library (REQ-033-03).
+        if !self.indexed {
+            (keys.edit, keys.filmstrip, keys.faces, keys.rate) = (false, false, false, None);
+        }
         // Escape first leaves what the faces are doing (REQ-032-09, REQ-032-12).
         if keys.close && (self.face_popup.is_some() || self.drawing_face.is_some()) {
             keys.close = false;
@@ -916,10 +941,10 @@ impl Viewer {
                 }
                 // The context menu's choice (REQ-009-11); after the photo, so its glass blurs it (REQ-013-03).
                 if !closing && let Some(item) = &item {
-                    let editable = editable(item, libraries) && self.edit.is_none();
+                    let editable = editable(item, libraries) && self.edit.is_none() && self.indexed;
                     let revert = gallery
                         .cached_detail(item.id)
-                        .filter(|_| !crate::WEB && self.edit.is_none())
+                        .filter(|_| !crate::WEB && self.edit.is_none() && self.indexed)
                         .and_then(|detail| {
                             let edit = detail.edit.as_ref()?;
                             edit.replaced_original(&detail.rel_path)
@@ -969,6 +994,7 @@ impl Viewer {
             Some(Action::Rate(rate)) => Some(Action::Rate(rate)),
             Some(Action::Tag(change)) => Some(Action::Tag(change)),
             Some(Action::Face(face)) => Some(Action::Face(face)),
+            Some(Action::AddFolder) => Some(Action::AddFolder),
             // Closing while editing asks about unsaved changes first (REQ-021-08).
             Some(Action::Close) if self.edit.is_some() => {
                 self.leave_edit(Leave::Close, gallery);
@@ -1429,15 +1455,18 @@ impl Viewer {
         let ctx = ui.ctx().clone();
         let screen = layout.screen;
         let looks_for_faces = gallery.looks_for_faces();
-        let has_faces = item.is_some_and(|item| {
-            item.kind == MediaKind::Image
-                && (looks_for_faces
-                    || gallery
-                        .cached_detail(item.id)
-                        .is_some_and(|detail| !detail.faces.is_empty()))
-        });
+        let has_faces = self.indexed
+            && item.is_some_and(|item| {
+                item.kind == MediaKind::Image
+                    && (looks_for_faces
+                        || gallery
+                            .cached_detail(item.id)
+                            .is_some_and(|detail| !detail.faces.is_empty()))
+            });
         let mut text = bar_text(ui, screen, item, libraries, has_faces);
         text.add_face = has_faces && self.faces && !crate::WEB;
+        text.editable &= self.indexed;
+        text.filmstrip = self.indexed;
         let bar = control_bar_rect(layout, &text);
         let previous = self.step_target(-1, count).map(|_| {
             Rect::from_center_size(
@@ -1571,6 +1600,7 @@ impl Viewer {
         // Clicks and wheel turns on the panel stay in it.
         ui.interact(rect, ui.make_persistent_id("info panel"), egui::Sense::click());
         let mut clicked = None;
+        let mut add_folder = false;
         let inner = rect.shrink(16.0);
         let mut panel = ui.new_child(
             egui::UiBuilder::new()
@@ -1582,9 +1612,29 @@ impl Viewer {
             .id_salt("info panel")
             .auto_shrink(false)
             .show(&mut panel, |ui| {
+                // A file outside every library: the way into the index; its _Library_ below says it is in none
+                // (REQ-033-03, REQ-033-04).
+                if !self.indexed {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(
+                                "Add its folder as a library to rate, tag and edit it, and to find it again.",
+                            )
+                            .color(theme::muted()),
+                        )
+                        .wrap(),
+                    );
+                    if ui.button("Add folder as library").clicked() {
+                        add_folder = true;
+                    }
+                    ui.add_space(16.0);
+                }
                 let paths = gallery.tag_paths();
-                clicked = info::show_loaded(ui, gallery.detail(self.id), &paths);
+                clicked = info::show_loaded(ui, gallery.detail(self.id), &paths, self.indexed && !crate::WEB);
             });
+        if add_folder {
+            return Some(Action::AddFolder);
+        }
         match clicked? {
             info::InfoAction::FilterByTag(tag) => Some(Action::FilterByTag(tag)),
             info::InfoAction::Revert => gallery
@@ -2065,6 +2115,8 @@ struct BarText {
     faces: bool,
     /// Faces are on, so one can be drawn (REQ-032-12).
     add_face: bool,
+    /// The filmstrip can be shown: not for a file outside every library (REQ-033-03).
+    filmstrip: bool,
 }
 
 /// Whether the item is a photo that can be edited here: JPEG, PNG or WebP in an online library, not in the browser
@@ -2105,6 +2157,7 @@ fn bar_text(ui: &egui::Ui, screen: Rect, item: Option<&GalleryItem>, libraries: 
         editable: item.is_some_and(|item| editable(item, libraries)),
         faces,
         add_face: false,
+        filmstrip: true,
     }
 }
 
@@ -2145,11 +2198,17 @@ const BAR_BUTTONS: [(BarButton, Icon, &str, &str); 7] = [
 
 /// The bar's buttons on this platform and for this item: the browser can't open a file manager (REQ-019-13), only
 /// photos that can be edited have _Edit_ (REQ-021-01), only photos with face regions _Faces_ (REQ-009-17).
-fn bar_buttons(editable: bool, faces: bool, add_face: bool) -> Vec<(BarButton, Icon, &'static str, &'static str)> {
+fn bar_buttons(
+    editable: bool,
+    faces: bool,
+    add_face: bool,
+    filmstrip: bool,
+) -> Vec<(BarButton, Icon, &'static str, &'static str)> {
     BAR_BUTTONS
         .into_iter()
         .filter(|(button, ..)| match button {
             BarButton::Edit => editable,
+            BarButton::Filmstrip => filmstrip,
             BarButton::Faces => faces,
             BarButton::AddFace => add_face,
             BarButton::ShowInExplorer => !crate::WEB,
@@ -2169,7 +2228,7 @@ fn control_bar_rect(layout: &Layout, text: &BarText) -> Rect {
     // Separator, the buttons and the right padding.
     width += 1.0
         + BAR_GAP
-        + bar_buttons(text.editable, text.faces, text.add_face).len() as f32 * theme::CONTROL_HEIGHT
+        + bar_buttons(text.editable, text.faces, text.add_face, text.filmstrip).len() as f32 * theme::CONTROL_HEIGHT
         + 6.0;
     let room = layout.right - layout.screen.left();
     let width = width.min(room - 32.0);
@@ -2359,6 +2418,7 @@ fn control_bar(
         text.editable || editing,
         text.faces && !editing,
         text.add_face && !editing,
+        text.filmstrip,
     );
     backing.paint(ui.painter(), rect, rect.height() / 2.0);
     // Clicks on the bar's background don't reach the scrim behind it.

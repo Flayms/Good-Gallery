@@ -13,6 +13,8 @@ pub mod indexer_progress;
 pub mod info;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod instance;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod loose;
 pub mod open_with;
 pub mod originals;
 pub mod people_page;
@@ -164,8 +166,6 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
         show_viewer(&ctx, state);
     }
     confirm_revert(&ctx, state);
-    #[cfg(not(target_arch = "wasm32"))]
-    confirm_add_folder(&ctx, state);
     confirm_many(&ctx, state);
     indexer_progress::show(&ctx, state);
     state.toasts.show(&ctx);
@@ -180,18 +180,33 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
 
 /// The viewer over the window while it is open; closing it leaves the gallery where it was (REQ-009-03).
 fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
-    let (Some(viewer), Some(gallery)) = (&mut state.viewer, &mut state.gallery) else {
-        return;
+    let Some(viewer) = &mut state.viewer else { return };
+    // A file outside every library shows from its scratch index (spec 033).
+    #[cfg(not(target_arch = "wasm32"))]
+    let loose = state
+        .loose
+        .as_mut()
+        .filter(|loose| loose.shown)
+        .map(|loose| (&mut loose.gallery, &loose.libraries[..]));
+    #[cfg(target_arch = "wasm32")]
+    let loose: Option<(&mut gallery::Gallery, &[db::libraries::Library])> = None;
+    let (gallery, libraries) = match loose {
+        Some(source) => source,
+        None => match &mut state.gallery {
+            Some(gallery) => (gallery, &state.libraries[..]),
+            None => return,
+        },
     };
     let originals = state
         .originals
         .get_or_insert_with(|| originals::Originals::new(ctx.clone(), None, None));
     // The viewer stays dark in the light appearance (REQ-020-05).
     let action = theme::with_palette(&theme::DARK, || {
-        viewer.show(ctx, gallery, originals, &state.libraries, &mut state.videos)
+        viewer.show(ctx, gallery, originals, libraries, &mut state.videos)
     });
     let closed = |state: &mut AppState| {
         state.viewer = None;
+        state.viewer_closed();
         if let Some(gallery) = &mut state.gallery {
             gallery.set_viewed(None);
             gallery.set_strip(0..0);
@@ -213,6 +228,10 @@ fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
         Some(viewer::Action::Rate(rate)) => state.rate(rate),
         Some(viewer::Action::Tag(change)) => state.tag(change),
         Some(viewer::Action::Face(face)) => state.face_action(face),
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(viewer::Action::AddFolder) => state.add_loose_folder(),
+        #[cfg(target_arch = "wasm32")]
+        Some(viewer::Action::AddFolder) => {}
         None => {}
     }
     // Details are kept only while an info view or the viewer (editing starts from them, face regions are drawn from
@@ -250,30 +269,6 @@ fn confirm_revert(ctx: &egui::Context, state: &mut AppState) {
         state.confirm_revert = None;
         if chosen == 0 {
             state.revert_edit(target);
-        }
-    }
-}
-
-/// Offers to add the folder of a file opened with the app that is in no library (REQ-027-03).
-#[cfg(not(target_arch = "wasm32"))]
-fn confirm_add_folder(ctx: &egui::Context, state: &mut AppState) {
-    let Some(file) = state.confirm_add_folder.clone() else {
-        return;
-    };
-    let name = file.file_name().unwrap_or_default().to_string_lossy();
-    let folder = file.parent().unwrap_or(&file).display().to_string();
-    let title = format!("{name} isn't in a library");
-    let text = format!("Add its folder, {folder}, as a library to see it in Good Gallery.");
-    let ask = || widgets::dialog(ctx, "confirm-add-folder", &title, &text, &["Add folder", "Cancel"]);
-    let chosen = if state.viewer.is_some() {
-        theme::with_palette(&theme::DARK, ask)
-    } else {
-        ask()
-    };
-    if let Some(chosen) = chosen {
-        state.confirm_add_folder = None;
-        if chosen == 0 {
-            state.add_folder_of(file);
         }
     }
 }
@@ -380,7 +375,7 @@ fn info_sheet(ui: &mut egui::Ui, state: &mut AppState) {
             .auto_shrink(false)
             .show(ui, |ui| {
                 let paths = gallery.tag_paths();
-                clicked = info::show_loaded(ui, gallery.detail(id), &paths);
+                clicked = info::show_loaded(ui, gallery.detail(id), &paths, !WEB);
             });
     }
     if close {
