@@ -9,6 +9,14 @@ use indexer::ScanKind;
 
 pub fn show(ctx: &egui::Context, state: &AppState) {
     let Some(current) = state.indexer_status.current else {
+        // The search for faces runs for hours: it says so on every page (REQ-032-20).
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let summary = state.faces.summary();
+            if summary.working {
+                notice(ctx, summary.title, summary.detail);
+            }
+        }
         return;
     };
     let label = state
@@ -30,6 +38,11 @@ pub fn show(ctx: &egui::Context, state: &AppState) {
     if queued > 0 {
         details.push_str(&format!(" · {} queued", format::count(queued as u64)));
     }
+    notice(ctx, &format!("{verb} {label}"), details);
+}
+
+/// A title with a spinner, and details, in the window's corner.
+fn notice(ctx: &egui::Context, title: &str, details: String) {
     egui::Area::new(egui::Id::unique("indexer-progress"))
         .anchor(Align2::LEFT_BOTTOM, [16.0, -16.0])
         .order(egui::Order::Foreground)
@@ -44,7 +57,7 @@ pub fn show(ctx: &egui::Context, state: &AppState) {
                     ui.spacing_mut().item_spacing.y = 2.0;
                     ui.horizontal(|ui| {
                         spinner(ui);
-                        ui.label(RichText::new(format!("{verb} {label}")).color(theme::text()));
+                        ui.label(RichText::new(title).color(theme::text()));
                     });
                     ui.label(
                         RichText::new(details)
@@ -55,7 +68,6 @@ pub fn show(ctx: &egui::Context, state: &AppState) {
         });
 }
 
-/// lucide `loader-circle`, turning.
 fn spinner(ui: &mut egui::Ui) {
     let angle = (ui.input(|i| i.time) * std::f64::consts::TAU) as f32;
     ui.add(

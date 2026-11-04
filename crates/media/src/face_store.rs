@@ -100,9 +100,13 @@ impl FaceStore {
                     return None;
                 }
                 let note: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
+                // What the catalog says now beats what it said at the download: thresholds get measured better.
+                let kind = catalog_entry(&sha256)
+                    .map(|model| model.kind)
+                    .or_else(|| note_to_kind(&note))?;
                 Some(StoredModel {
                     name: note.get("name")?.as_str()?.to_owned(),
-                    kind: note_to_kind(&note)?,
+                    kind,
                     sha256,
                 })
             })
@@ -118,37 +122,29 @@ impl FaceStore {
 
     /// Downloads a listed model: whatever the host sends, it counts only if its hash is the catalog's (REQ-032-02).
     pub fn download(&self, model: &CatalogModel, progress: Progress) -> Result<StoredModel, StoreError> {
-        self.fetch(
-            model.url,
-            Some(model.sha256),
-            model.name,
-            model.kind,
-            &|_| Ok(()),
-            progress,
-        )
+        let kind = model.kind;
+        self.fetch(model.url, Some(model.sha256), model.name, &|_| Ok(kind), progress)
     }
 
-    /// Downloads an unlisted model from an `https` link, if `check` can run it (REQ-032-03).
+    /// Downloads an unlisted model from an `https` link, as what `identify` makes of it (REQ-032-03).
     pub fn add_link(
         &self,
         url: &str,
-        kind: ModelKind,
-        check: &dyn Fn(&Path) -> Result<(), String>,
+        identify: &dyn Fn(&Path) -> Result<ModelKind, String>,
         progress: Progress,
     ) -> Result<StoredModel, StoreError> {
         if !url.to_ascii_lowercase().starts_with("https://") {
             return Err(StoreError::NotHttps);
         }
         let name = name_from_url(url);
-        self.fetch(url, None, &name, kind, check, progress)
+        self.fetch(url, None, &name, identify, progress)
     }
 
-    /// Copies an unlisted model from a file, if `check` can run it (REQ-032-03).
+    /// Copies an unlisted model from a file, as what `identify` makes of it (REQ-032-03).
     pub fn add_file(
         &self,
         file: &Path,
-        kind: ModelKind,
-        check: &dyn Fn(&Path) -> Result<(), String>,
+        identify: &dyn Fn(&Path) -> Result<ModelKind, String>,
         progress: Progress,
     ) -> Result<StoredModel, StoreError> {
         let name = file
@@ -156,7 +152,7 @@ impl FaceStore {
             .map_or_else(|| "Model".to_owned(), |stem| stem.to_string_lossy().into_owned());
         let source = std::fs::File::open(file).map_err(|error| StoreError::Failed(error.to_string()))?;
         let total = source.metadata().ok().map(|metadata| metadata.len());
-        self.receive(source, total, None, &name, kind, check, progress)
+        self.receive(source, total, None, &name, identify, progress)
     }
 
     fn fetch(
@@ -164,8 +160,7 @@ impl FaceStore {
         url: &str,
         sha256: Option<&str>,
         name: &str,
-        kind: ModelKind,
-        check: &dyn Fn(&Path) -> Result<(), String>,
+        identify: &dyn Fn(&Path) -> Result<ModelKind, String>,
         progress: Progress,
     ) -> Result<StoredModel, StoreError> {
         const CONNECT: Duration = Duration::from_secs(30);
@@ -184,19 +179,17 @@ impl FaceStore {
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse().ok());
         let reader = response.into_body().into_reader();
-        self.receive(reader, total, sha256, name, kind, check, progress)
+        self.receive(reader, total, sha256, name, identify, progress)
     }
 
     /// Writes beside the final name, and keeps the file only if everything holds.
-    #[allow(clippy::too_many_arguments)]
     fn receive(
         &self,
         reader: impl Read,
         total: Option<u64>,
         sha256: Option<&str>,
         name: &str,
-        kind: ModelKind,
-        check: &dyn Fn(&Path) -> Result<(), String>,
+        identify: &dyn Fn(&Path) -> Result<ModelKind, String>,
         progress: Progress,
     ) -> Result<StoredModel, StoreError> {
         let failed = |error: std::io::Error| StoreError::Failed(error.to_string());
@@ -210,7 +203,7 @@ impl FaceStore {
         if sha256.is_some_and(|wanted| wanted != hash) {
             return Err(StoreError::WrongHash);
         }
-        check(temporary.path()).map_err(StoreError::Failed)?;
+        let kind = identify(temporary.path()).map_err(StoreError::Failed)?;
         let note = {
             let mut note = kind_to_note(kind);
             note["name"] = name.into();
@@ -324,6 +317,7 @@ mod tests {
             sha256,
             bytes: 0,
             license: "MIT",
+            why: "",
         }
     }
 
@@ -381,13 +375,29 @@ mod tests {
     fn req_032_02_downloads_a_small_real_model_over_https() {
         let dir = tempfile::tempdir().unwrap();
         let store = FaceStore::in_data_folder(dir.path());
-        for name in ["YuNet", "RetinaFace (MobileNetV2)"] {
+        for name in ["YuNet", "RetinaFace (MobileNetV2)", "EdgeFace S"] {
             let model = CATALOG.iter().find(|model| model.name == name).unwrap();
             let stored = store.download(model, &mut |_, _| true).unwrap();
             assert_eq!(stored.sha256, model.sha256);
             assert_eq!(std::fs::metadata(store.file(model.sha256)).unwrap().len(), model.bytes);
         }
-        assert_eq!(store.models().len(), 2);
+        assert_eq!(store.models().len(), 3);
+    }
+
+    /// REQ-032-10: a model downloaded earlier gets the catalog's current threshold, not the one in its note.
+    #[test]
+    fn req_032_10_the_catalog_beats_an_old_note() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FaceStore::in_data_folder(dir.path());
+        let model = CATALOG.iter().find(|model| model.name == "SFace").unwrap();
+        std::fs::create_dir_all(&store.folder).unwrap();
+        std::fs::write(store.file(model.sha256), b"model").unwrap();
+        std::fs::write(
+            store.note(model.sha256),
+            r#"{"name":"SFace","recognize":"sface","threshold":0.1}"#,
+        )
+        .unwrap();
+        assert_eq!(store.model(model.sha256).unwrap().kind, model.kind);
     }
 
     #[test]
@@ -397,7 +407,7 @@ mod tests {
         let source = dir.path().join("my model.onnx");
         std::fs::write(&source, BODY).unwrap();
 
-        let refused = store.add_file(&source, KIND, &|_| Err("no".into()), &mut |_, _| true);
+        let refused = store.add_file(&source, &|_| Err("no".into()), &mut |_, _| true);
         assert_eq!(refused, Err(StoreError::Failed("no".into())));
         assert_eq!(leftovers(&store), 0);
 
@@ -405,7 +415,7 @@ mod tests {
             style: InputStyle::SFace,
             threshold: 0.4,
         };
-        let model = store.add_file(&source, kind, &|_| Ok(()), &mut |_, _| true).unwrap();
+        let model = store.add_file(&source, &|_| Ok(kind), &mut |_, _| true).unwrap();
         assert_eq!(model.name, "my model");
         assert_eq!(store.model(&model.sha256), Some(model.clone()));
         assert!(source.exists());
@@ -418,7 +428,7 @@ mod tests {
     fn req_032_03_links_must_be_https_and_name_the_model_by_their_file() {
         let dir = tempfile::tempdir().unwrap();
         let store = FaceStore::in_data_folder(dir.path());
-        let refused = store.add_link("http://example.com/a.onnx", KIND, &|_| Ok(()), &mut |_, _| true);
+        let refused = store.add_link("http://example.com/a.onnx", &|_| Ok(KIND), &mut |_, _| true);
         assert_eq!(refused, Err(StoreError::NotHttps));
         assert_eq!(name_from_url("https://host/dir/my_model.onnx?x=1#y"), "my_model");
         assert_eq!(name_from_url("https://host/"), "host");

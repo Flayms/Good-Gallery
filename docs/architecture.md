@@ -35,7 +35,7 @@ crates/
   indexer   scan queue, walk, scans, watcher, schedule, reachability, thumbnail cache and service, face search,
             library operations
   app       eframe binary: UI, texture streaming, glass, viewer, video, editor, settings; `app::web` for the browser
-xtask/      check-specs, libraries CLI, benchmarks, screenshots, dist, release, web, web-test
+xtask/      check-specs, libraries CLI, benchmarks (gallery, search, face models), screenshots, dist, release, web, web-test
 web/        the browser page: index.html (content security policy), browser check, Trunk config; Playwright tests
 packaging/  helper downloads, NSIS installer, smoke test (windows/); .desktop file, install script (linux/)
 ```

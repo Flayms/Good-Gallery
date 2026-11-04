@@ -32,11 +32,12 @@ pub enum DetectorFormat {
 }
 
 impl DetectorFormat {
-    /// The score below which a detection is dropped. Not calibrated yet (spec 032's benchmark).
+    /// The score below which a detection is dropped, measured on WIDER FACE (spec 032's plan). Each model's scale is its
+    /// own: RetinaFace is sure of far more of what it finds.
     pub fn min_score(self) -> f32 {
         match self {
             DetectorFormat::YuNet => 0.8,
-            DetectorFormat::RetinaFace => 0.7,
+            DetectorFormat::RetinaFace => 0.95,
         }
     }
 }
@@ -71,8 +72,8 @@ pub enum ModelKind {
     },
 }
 
-/// The threshold of a recognition model the catalog doesn't know.
-pub const DEFAULT_THRESHOLD: f32 = 0.4;
+/// The threshold of a recognition model the catalog doesn't know: it held for every model measured (spec 032's plan).
+pub const DEFAULT_THRESHOLD: f32 = 0.5;
 
 /// A model with a download button. The file is pinned by revision and hash, so a host can't swap it.
 #[derive(Debug, Clone, Copy)]
@@ -83,6 +84,8 @@ pub struct CatalogModel {
     pub sha256: &'static str,
     pub bytes: u64,
     pub license: &'static str,
+    /// What it is here for, from the measurements in `docs/face-models.md` (REQ-032-18).
+    pub why: &'static str,
 }
 
 pub const CATALOG: &[CatalogModel] = &[
@@ -93,6 +96,7 @@ pub const CATALOG: &[CatalogModel] = &[
         sha256: "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
         bytes: 232_589,
         license: "MIT",
+        why: "Recommended for speed. About 5 times as fast as the other, and finds 91% of large faces.",
     },
     CatalogModel {
         name: "RetinaFace (MobileNetV2)",
@@ -101,36 +105,43 @@ pub const CATALOG: &[CatalogModel] = &[
         sha256: "3ca44c045651cabeed1193a1fae8946ad1f3a55da8fa74b341feab5a8319f757",
         bytes: 12_506_811,
         license: "MIT, see the comparison page",
+        why: "Recommended for accuracy. Finds 98% of large faces and more small ones, but takes about 5 times as long.",
     },
     CatalogModel {
-        name: "RetinaFace (ResNet34)",
-        kind: ModelKind::Detect(DetectorFormat::RetinaFace),
-        url: "https://github.com/yakhyo/retinaface-pytorch/releases/download/v0.0.1/retinaface_r34.onnx",
-        sha256: "bd0263dc2a465d32859555cb1741f2d98991eb0053696e8ee33fec583d30e630",
-        bytes: 88_502_283,
-        license: "MIT, see the comparison page",
+        name: "EdgeFace S",
+        kind: ModelKind::Recognize {
+            style: InputStyle::ArcFace,
+            threshold: 0.5,
+        },
+        url: "https://github.com/yakhyo/edgeface-onnx/releases/download/weights/edgeface_s_gamma_05.onnx",
+        sha256: "b850767cf791bda585600b5c4c7d7432b2f998ccd862caae34ef1afa967d2e54",
+        bytes: 14_805_514,
+        license: "Non-commercial, see the comparison page",
+        why: "Recommended for speed. Names 98.3% of known people, and takes little time and memory.",
+    },
+    CatalogModel {
+        name: "EdgeFace Base",
+        kind: ModelKind::Recognize {
+            style: InputStyle::ArcFace,
+            threshold: 0.4,
+        },
+        url: "https://github.com/yakhyo/edgeface-onnx/releases/download/weights/edgeface_base.onnx",
+        sha256: "b56942f072c67385f44734b9458b0ccc4a2226888a113f77e0c802ad0c77b4c3",
+        bytes: 73_084_333,
+        license: "Non-commercial, see the comparison page",
+        why: "Recommended for accuracy. Names 98.8% of known people, taking about twice as long per face.",
     },
     CatalogModel {
         name: "SFace",
         kind: ModelKind::Recognize {
             style: InputStyle::SFace,
-            threshold: 0.363,
+            threshold: 0.5,
         },
         url: "https://huggingface.co/opencv/face_recognition_sface/resolve/3d7082438a6e4551e840c9b2bb60b71e8da4b524/face_recognition_sface_2021dec.onnx",
         sha256: "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
         bytes: 38_696_353,
         license: "Apache-2.0",
-    },
-    CatalogModel {
-        name: "AuraFace",
-        kind: ModelKind::Recognize {
-            style: InputStyle::ArcFace,
-            threshold: DEFAULT_THRESHOLD,
-        },
-        url: "https://huggingface.co/fal/AuraFace-v1/resolve/af6d057c9b0ec4071d4c49c80e3539258798b609/glintr100.onnx",
-        sha256: "a7933ea5330113b01c9b60351d8f4c33003f145d8470ac5f0e52ee2effe25c60",
-        bytes: 260_694_151,
-        license: "Apache-2.0, see the comparison page",
+        why: "For work use: the only one here with a clear commercial license. Names 95.9% of known people.",
     },
 ];
 
@@ -432,15 +443,10 @@ pub fn suggest<'a>(
     threshold: f32,
     rejected: &[&str],
 ) -> Option<(&'a str, f32)> {
-    let mut people: Vec<(&'a str, Vec<f32>)> = Vec::new();
+    let mut people: std::collections::HashMap<&'a str, Vec<f32>> = std::collections::HashMap::new();
     for (name, vector) in known {
-        if rejected.contains(name) {
-            continue;
-        }
-        let similarity = cosine(face, vector);
-        match people.iter_mut().find(|(other, _)| other == name) {
-            Some((_, similarities)) => similarities.push(similarity),
-            None => people.push((name, vec![similarity])),
+        if !rejected.contains(name) {
+            people.entry(name).or_default().push(cosine(face, vector));
         }
     }
     people
@@ -451,7 +457,8 @@ pub fn suggest<'a>(
             (name, similarities.iter().sum::<f32>() / similarities.len() as f32)
         })
         .filter(|(_, similarity)| *similarity >= threshold)
-        .max_by(|a, b| a.1.total_cmp(&b.1))
+        // By name among equals, so the same faces always get the same suggestion.
+        .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| b.0.cmp(a.0)))
 }
 
 /// Groups similar faces, largest first, leaving out groups smaller than `min_size` (REQ-032-15). Each face joins the
@@ -770,6 +777,41 @@ mod tests {
         // Too few people or faces to say.
         assert!(!tells_nobody_apart(&both[..3]));
         assert!(!tells_nobody_apart(&both[2..4]));
+    }
+
+    /// REQ-032-10: thresholds keep strangers out. A lower one suggested a name for most of them in the benchmark, as a
+    /// face is compared with every known face.
+    #[test]
+    fn req_032_10_thresholds_are_the_measured_ones() {
+        let threshold = |name: &str| {
+            CATALOG
+                .iter()
+                .find(|model| model.name == name)
+                .map(|model| match model.kind {
+                    ModelKind::Recognize { threshold, .. } => threshold,
+                    ModelKind::Detect(_) => 0.0,
+                })
+        };
+        assert_eq!(threshold("SFace"), Some(0.5));
+        assert_eq!(DetectorFormat::RetinaFace.min_score(), 0.95);
+        assert_eq!(DEFAULT_THRESHOLD, 0.5);
+    }
+
+    #[test]
+    fn req_032_18_recommends_one_for_speed_and_one_for_accuracy() {
+        for detect in [true, false] {
+            let picks = |word: &str| {
+                CATALOG
+                    .iter()
+                    .filter(|model| matches!(model.kind, ModelKind::Detect(_)) == detect)
+                    .filter(|model| model.why.starts_with(word))
+                    .count()
+            };
+            assert_eq!(picks("Recommended for speed"), 1);
+            assert_eq!(picks("Recommended for accuracy"), 1);
+        }
+        assert!(CATALOG.iter().all(|model| !model.why.is_empty()));
+        assert!(CATALOG.iter().all(|model| !model.name.contains("buffalo")));
     }
 
     /// REQ-032-02: hashes are the published files', links are pinned, and nothing non-commercial has a button.

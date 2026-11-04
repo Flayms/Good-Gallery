@@ -2,8 +2,9 @@
 //! needs. The engine is behind [`Net`], so another can join `tract` without touching the steps around it.
 
 use domain::face_models::{
-    Alignment, CROP_SIDE, Detection, DetectorFormat, HINT_SCORE, INPUT_SIDE, InputStyle, Pass, decode_retinaface,
-    decode_yunet, first_pass, keep_recognizable, more_passes, normalize, retinaface_priors, suppress,
+    Alignment, CROP_SIDE, DEFAULT_THRESHOLD, Detection, DetectorFormat, HINT_SCORE, INPUT_SIDE, InputStyle, ModelKind,
+    Pass, decode_retinaface, decode_yunet, first_pass, keep_recognizable, more_passes, normalize, retinaface_priors,
+    suppress,
 };
 use image::RgbImage;
 use image::imageops::FilterType;
@@ -150,19 +151,35 @@ impl Detector {
 
     /// The faces in an upright `photo`, in its pixels (REQ-032-06).
     pub fn find(&self, photo: &RgbImage) -> Result<Vec<Detection>, String> {
+        self.find_from(photo, self.format.min_score())
+    }
+
+    /// One look at a photo of the model's input size, for measuring a model's own speed.
+    pub fn find_one_look(&self, photo: &RgbImage) -> Result<Vec<Detection>, String> {
+        let pass = first_pass(photo.width(), photo.height());
+        self.run(self.input(photo, &pass), self.format.min_score())
+    }
+
+    /// As [`Self::find`], keeping faces from `lowest` on, while the same looks are taken. For measuring thresholds.
+    pub fn find_from(&self, photo: &RgbImage, lowest: f32) -> Result<Vec<Detection>, String> {
         if photo.width() == 0 || photo.height() == 0 {
             return Ok(Vec::new());
         }
         let min_score = self.format.min_score();
-        let look = |pass: &Pass, min_score: f32| -> Result<Vec<Detection>, String> {
-            let found = self.run(self.input(photo, pass), min_score)?;
+        let floor = lowest.min(HINT_SCORE).min(min_score);
+        let look = |pass: &Pass| -> Result<Vec<Detection>, String> {
+            let found = self.run(self.input(photo, pass), floor)?;
             Ok(found.into_iter().map(|face| pass.to_photo(face)).collect())
         };
-        let hints = look(&first_pass(photo.width(), photo.height()), HINT_SCORE.min(min_score))?;
-        let mut found: Vec<Detection> = hints.iter().copied().filter(|face| face.score >= min_score).collect();
-        for pass in more_passes(photo.width(), photo.height(), &found, &hints) {
-            found.extend(look(&pass, min_score)?);
+        let hints = look(&first_pass(photo.width(), photo.height()))?;
+        let confident: Vec<Detection> = hints.iter().copied().filter(|face| face.score >= min_score).collect();
+        let weak_enough = |face: &Detection| face.score >= HINT_SCORE.min(min_score);
+        let usable: Vec<Detection> = hints.iter().copied().filter(weak_enough).collect();
+        let mut found = hints;
+        for pass in more_passes(photo.width(), photo.height(), &confident, &usable) {
+            found.extend(look(&pass)?);
         }
+        found.retain(|face| face.score >= lowest);
         Ok(keep_recognizable(suppress(found)))
     }
 }
@@ -212,6 +229,26 @@ impl Recognizer {
         }
         self.run(input)
     }
+}
+
+/// What a model file is, by trying what it answers as (REQ-032-03). Recognition comes first: a large recognizer takes
+/// seconds to refuse as a detector, while a detector refuses at once as a recognizer. `style` can't be seen from the file.
+pub fn identify(file: &Path, style: InputStyle) -> Result<ModelKind, String> {
+    let as_recognizer = match Recognizer::load(file, style) {
+        Ok(_) => {
+            return Ok(ModelKind::Recognize {
+                style,
+                threshold: DEFAULT_THRESHOLD,
+            });
+        }
+        Err(error) => error,
+    };
+    for format in [DetectorFormat::YuNet, DetectorFormat::RetinaFace] {
+        if Detector::load(file, format).is_ok() {
+            return Ok(ModelKind::Detect(format));
+        }
+    }
+    Err(format!("it isn't a face model the app can run ({as_recognizer})"))
 }
 
 /// The face moved onto the template, [`CROP_SIDE`] square. Several samples per pixel, since a face may be far larger on
@@ -312,6 +349,19 @@ mod tests {
         let yunet = fixture("face_detection_yunet_2023mar.onnx");
         assert!(Detector::load(&yunet, DetectorFormat::RetinaFace).is_err());
         assert!(Recognizer::load(&yunet, InputStyle::ArcFace).is_err());
+    }
+
+    #[test]
+    fn req_032_03_works_out_what_a_model_is() {
+        let yunet = fixture("face_detection_yunet_2023mar.onnx");
+        assert_eq!(
+            identify(&yunet, InputStyle::ArcFace),
+            Ok(ModelKind::Detect(DetectorFormat::YuNet))
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let junk = dir.path().join("junk.onnx");
+        std::fs::write(&junk, b"not a model").unwrap();
+        assert!(identify(&junk, InputStyle::ArcFace).is_err());
     }
 
     #[test]

@@ -16,6 +16,8 @@ use egui_kittest::kittest::Queryable as _;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 type App = egui_kittest::Harness<'static, app::AppState>;
 
@@ -442,8 +444,8 @@ fn req_032_01_lists_the_models_with_their_licenses() {
             model.name
         );
     }
-    harness.get_by_label("233 KB. MIT");
-    harness.get_by_label("Choose a detection model to start.");
+    harness.get_by_label("Not looking for faces");
+    harness.get_by_label("Choose a detection model below to start.");
 }
 
 fn yunet() -> PathBuf {
@@ -457,9 +459,7 @@ fn req_032_03_adds_a_file_it_can_run_and_refuses_one_it_cant() {
     let junk = fixture.dir.path().join("junk.onnx");
     std::fs::write(&junk, b"no model").unwrap();
     {
-        let state = harness.state_mut();
-        state.faces.added_kind = app::state::faces::AddedKind::Yunet;
-        state.add_face_file_at(junk);
+        harness.state_mut().add_face_file_at(junk);
     }
     settle(&mut harness);
     assert!(harness.state().faces.models.is_empty());
@@ -471,12 +471,12 @@ fn req_032_03_adds_a_file_it_can_run_and_refuses_one_it_cant() {
     assert_eq!(harness.state().faces.models.len(), 1);
 }
 
-/// REQ-032-01, REQ-032-04: nothing is looked for until a model is chosen, and the choice is kept.
 #[test]
-fn req_032_01_choosing_a_model_is_kept_and_can_be_undone() {
+fn req_032_19_says_what_choosing_does_and_in_use_stays() {
     let fixture = Fixture::new();
     let mut harness = settings(&fixture, false);
-    harness.state_mut().faces.added_kind = app::state::faces::AddedKind::Yunet;
+    harness.get_by_label_contains("Choosing one starts looking through your photos");
+    harness.get_by_label_contains("Changing a model looks through your photos again");
     harness.state_mut().add_face_file_at(yunet());
     settle(&mut harness);
     assert_eq!(harness.state().faces.detector, None);
@@ -487,7 +487,138 @@ fn req_032_01_choosing_a_model_is_kept_and_can_be_undone() {
     assert!(chosen.is_some());
     harness.get_by_label("Using YuNet").click();
     settle(&mut harness);
+    assert_eq!(harness.state().faces.detector, chosen, "stopping is Pause");
+
+    harness.get_by_label("Delete YuNet").click();
+    settle(&mut harness);
     assert_eq!(harness.state().faces.detector, None);
+}
+
+#[test]
+fn req_032_18_says_why_a_model_is_recommended() {
+    let fixture = Fixture::new();
+    let harness = settings(&fixture, false);
+    for model in domain::face_models::CATALOG {
+        assert!(
+            harness.query_all_by_label_contains(model.why).next().is_some(),
+            "{}",
+            model.name
+        );
+    }
+}
+
+#[test]
+fn req_032_20_pause_and_resume() {
+    let fixture = Fixture::new();
+    let mut harness = settings(&fixture, true);
+    harness.get_by_label("Pause").click();
+    settle(&mut harness);
+    assert!(harness.state().faces.paused);
+    harness.get_by_label("Resume").click();
+    settle(&mut harness);
+    assert!(!harness.state().faces.paused);
+}
+
+/// A search stuck on its first photo until the test is over, so it stays "working".
+struct Waiting(Arc<AtomicBool>);
+
+impl indexer::faces::FaceWork for Waiting {
+    fn detect(&mut self, _: &str, _: &FacePhoto) -> Result<Vec<Detection>, indexer::faces::WorkError> {
+        while !self.0.load(Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        Ok(Vec::new())
+    }
+
+    fn recognize(
+        &mut self,
+        _: &str,
+        _: &FacePhoto,
+        faces: &[[[f32; 2]; 5]],
+    ) -> Result<Vec<Vec<f32>>, indexer::faces::WorkError> {
+        Ok(vec![Vec::new(); faces.len()])
+    }
+}
+
+#[test]
+fn req_032_20_the_notice_shows_on_every_page() {
+    let fixture = Fixture::new();
+    let (conn, _) = library(&fixture, false);
+    let index = fixture.dir.path().join("faces.db");
+    let search = db::open(&index).unwrap();
+    db::settings::set_value(&search, faces::DETECTOR_KEY, &json!("detector")).unwrap();
+    db::libraries::insert(&search, "/nowhere", "Nowhere", LibraryStatus::Online).unwrap();
+    search
+        .execute(
+            "INSERT INTO media (root_id, rel_path, file_name, kind, size, mtime, taken_at)
+             VALUES (1, 'a.jpg', 'a.jpg', 'image', 1, 1, 1)",
+            [],
+        )
+        .unwrap();
+    let release = Arc::new(AtomicBool::new(false));
+    let service = Arc::new(indexer::faces::FaceService::start(indexer::faces::FaceDeps {
+        conn: search,
+        work: Box::new(Waiting(release.clone())),
+        is_reachable: Arc::new(|_| true),
+        on_change: Box::new(|| {}),
+    }));
+    let state = fixture
+        .state(conn)
+        .with_faces(&fixture.dir.path().join("data"), Some(service));
+    let mut harness = common::harness_with_step(state, 1.0 / 60.0);
+    harness.state_mut().faces.detector = Some("detector".into());
+    harness.run_steps(3);
+    assert!(harness.query_by_label("Looking for faces").is_some(), "in the gallery");
+    harness.state_mut().page = Page::Settings;
+    harness.run_steps(3);
+    assert!(
+        harness.query_all_by_label("Looking for faces").next().is_some(),
+        "in the settings"
+    );
+    release.store(true, Ordering::SeqCst);
+}
+
+#[test]
+fn req_032_21_details_say_whether_a_photo_was_looked_at() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    common::open_item(&mut harness, "a.png");
+    settle(&mut harness);
+    harness.key_press(Key::I);
+    settle(&mut harness);
+    harness.get_by_label("Looked at, 2 found");
+}
+
+#[test]
+fn req_032_22_look_again_from_the_details() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    common::open_item(&mut harness, "a.png");
+    settle(&mut harness);
+    harness.key_press(Key::I);
+    settle(&mut harness);
+    harness.get_by_label("Look again").click();
+    settle(&mut harness);
+    harness.run_steps(3);
+    settle(&mut harness);
+    harness.get_by_label("Not looked at yet");
+    assert!(harness.query_by_label("Look again").is_none());
+}
+
+#[test]
+fn req_032_22_look_through_all_again_asks_first() {
+    let fixture = Fixture::new();
+    let mut harness = settings(&fixture, true);
+    harness
+        .get_all_by_label("Look through all photos again")
+        .last()
+        .unwrap()
+        .click();
+    settle(&mut harness);
+    harness.get_by_label_contains("can take many hours");
+    harness.get_by_label("Look again").click();
+    settle(&mut harness);
+    assert!(harness.query_by_label_contains("can take many hours").is_none());
 }
 
 #[test]
@@ -567,7 +698,7 @@ fn req_032_01_settings_section_looks_as_designed() {
     // Already on this computer, so no toast fades over the picture.
     let kind = domain::face_models::ModelKind::Detect(domain::face_models::DetectorFormat::YuNet);
     media::face_store::FaceStore::in_data_folder(&fixture.dir.path().join("data"))
-        .add_file(&yunet(), kind, &|_| Ok(()), &mut |_, _| true)
+        .add_file(&yunet(), &|_| Ok(kind), &mut |_, _| true)
         .unwrap();
     // No library: its path lies in a temporary folder named differently on every run.
     let state = fixture

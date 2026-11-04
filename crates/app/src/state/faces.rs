@@ -3,8 +3,8 @@
 
 use super::{AppState, Event, lock};
 use db::faces::{self, FaceState};
-use domain::face_models::{CatalogModel, DetectorFormat, InputStyle, ModelKind};
-use media::face_models::{Detector, Recognizer};
+use domain::face_models::{CatalogModel, InputStyle, ModelKind};
+use media::face_models::identify;
 use media::face_regions::RegionChange;
 use media::face_store::{FaceStore, StoreError, StoredModel};
 use std::collections::HashMap;
@@ -21,46 +21,110 @@ pub struct Arriving {
     cancel: Arc<AtomicBool>,
 }
 
-/// What the _Add a model_ form says the model is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AddedKind {
-    Yunet,
-    RetinaFace,
-    #[default]
-    ArcFaceStyle,
-    SFaceStyle,
+/// How the _Add a model_ form describes a recognition model's pixels, the one thing a file doesn't tell (REQ-032-03).
+pub fn style_label(style: InputStyle) -> &'static str {
+    match style {
+        InputStyle::ArcFace => "From -1 to 1 (most models)",
+        InputStyle::SFace => "From 0 to 255 (SFace and models like it)",
+    }
 }
 
-impl AddedKind {
-    pub const ALL: [Self; 4] = [Self::ArcFaceStyle, Self::SFaceStyle, Self::Yunet, Self::RetinaFace];
+/// What the search is doing, in words (REQ-032-20).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SearchSummary {
+    pub title: &'static str,
+    pub detail: String,
+    /// How far it has come, while that means something.
+    pub share: Option<f32>,
+    /// It is working right now, so the window's corner says so too.
+    pub working: bool,
+}
 
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Yunet => "Detection: YuNet format",
-            Self::RetinaFace => "Detection: RetinaFace format",
-            Self::ArcFaceStyle => "Recognition: ArcFace style",
-            Self::SFaceStyle => "Recognition: SFace style",
-        }
+/// Puts what the search reports into words.
+pub fn search_summary(
+    detector: bool,
+    recognizer: bool,
+    paused: bool,
+    status: Option<&indexer::faces::FaceStatus>,
+) -> SearchSummary {
+    let summary = |title, detail: String, share, working| SearchSummary {
+        title,
+        detail,
+        share,
+        working,
+    };
+    if !detector {
+        return summary(
+            "Not looking for faces",
+            "Choose a detection model below to start.".to_owned(),
+            None,
+            false,
+        );
     }
-
-    fn kind(self) -> ModelKind {
-        match self {
-            Self::Yunet => ModelKind::Detect(DetectorFormat::YuNet),
-            Self::RetinaFace => ModelKind::Detect(DetectorFormat::RetinaFace),
-            Self::ArcFaceStyle => ModelKind::Recognize {
-                style: InputStyle::ArcFace,
-                threshold: domain::face_models::DEFAULT_THRESHOLD,
-            },
-            Self::SFaceStyle => ModelKind::Recognize {
-                style: InputStyle::SFace,
-                threshold: domain::face_models::DEFAULT_THRESHOLD,
-            },
-        }
+    let Some(status) = status else {
+        return summary("Ready", String::new(), None, false);
+    };
+    if let Some(problem) = &status.problem {
+        return summary("Stopped", problem.clone(), None, false);
     }
+    let progress = status.progress;
+    let count = crate::format::count;
+    let photos_share = progress.photos_done as f32 / progress.photos.max(1) as f32;
+    let looked_at = format!(
+        "{} of {} photos looked at, {} faces found.",
+        count(progress.photos_done),
+        count(progress.photos),
+        count(progress.faces)
+    );
+    if paused {
+        let detail = format!("{looked_at} Everything found so far stays.");
+        return summary("Paused", detail, Some(photos_share), false);
+    }
+    let photos_left = progress.photos_done < progress.photos;
+    let faces_left = recognizer && progress.faces_recognized < progress.faces;
+    if status.working && (photos_left || progress.photos == 0) {
+        return summary("Looking for faces", looked_at, Some(photos_share), true);
+    }
+    if status.working && faces_left {
+        let detail = format!(
+            "{} of {} faces recognized.",
+            count(progress.faces_recognized),
+            count(progress.faces)
+        );
+        let share = progress.faces_recognized as f32 / progress.faces.max(1) as f32;
+        return summary("Recognizing faces", detail, Some(share), true);
+    }
+    if photos_left {
+        let left = progress.photos - progress.photos_done;
+        let detail = format!(
+            "{looked_at} The other {} are in a library that can't be reached right now.",
+            count(left)
+        );
+        return summary("Waiting", detail, Some(photos_share), false);
+    }
+    let mut detail = format!(
+        "All {} photos looked at, {} faces found.",
+        count(progress.photos),
+        count(progress.faces)
+    );
+    if !recognizer {
+        detail.push_str(" Choose a recognition model to get suggested names and groups.");
+    }
+    summary("Finished", detail, None, false)
 }
 
 /// How often the check for a wrongly set up model runs while the settings are open (REQ-032-17).
 const MODEL_CHECK_EVERY: Duration = Duration::from_secs(30);
+
+/// [`InputStyle`] with what most models use as the default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AddedStyle(pub InputStyle);
+
+impl Default for AddedStyle {
+    fn default() -> Self {
+        Self(InputStyle::ArcFace)
+    }
+}
 
 /// Faces' part of the app's state.
 #[derive(Default)]
@@ -74,8 +138,10 @@ pub struct Faces {
     /// By the catalog model's hash, or `"added"` for one being added.
     arriving: Arc<Mutex<HashMap<String, Arriving>>>,
     pub link: String,
-    pub added_kind: AddedKind,
+    /// How a recognition model being added expects its pixels.
+    pub added_style: AddedStyle,
     pub confirm_delete: bool,
+    pub confirm_look_again: bool,
     pub model_seems_wrong: bool,
     model_checked: Option<Instant>,
 }
@@ -92,6 +158,16 @@ impl Faces {
 
     pub fn enabled(&self) -> bool {
         self.store.is_some()
+    }
+
+    /// What the search is doing, in words (REQ-032-20).
+    pub fn summary(&self) -> SearchSummary {
+        search_summary(
+            self.detector.is_some(),
+            self.recognizer.is_some(),
+            self.paused,
+            self.status().as_ref(),
+        )
     }
 }
 
@@ -114,7 +190,21 @@ impl AppState {
             self.faces.recognizer = faces::chosen(&db, faces::RECOGNIZER_KEY).ok().flatten();
             self.faces.paused = faces::chosen(&db, faces::SEARCH_KEY).ok().flatten().as_deref() == Some("paused");
         }
+        // A threshold chosen by an earlier version may have been measured better since.
+        let threshold = self.chosen_threshold(self.faces.recognizer.as_deref());
+        if threshold.is_some() {
+            self.store_face_setting(faces::THRESHOLD_KEY, threshold.as_deref());
+        }
         self
+    }
+
+    /// The threshold of a stored recognition model, as stored settings hold it.
+    fn chosen_threshold(&self, sha256: Option<&str>) -> Option<String> {
+        let sha256 = sha256?;
+        match self.faces.models.iter().find(|model| model.sha256 == sha256)?.kind {
+            ModelKind::Recognize { threshold, .. } => Some(threshold.to_string()),
+            ModelKind::Detect(_) => None,
+        }
     }
 
     fn kick_faces(&self) {
@@ -137,13 +227,7 @@ impl AppState {
             self.store_face_setting(faces::DETECTOR_KEY, sha256.as_deref());
             self.faces.detector = sha256;
         } else {
-            let threshold = sha256
-                .as_deref()
-                .and_then(|sha256| self.faces.models.iter().find(|model| model.sha256 == sha256))
-                .and_then(|model| match model.kind {
-                    ModelKind::Recognize { threshold, .. } => Some(threshold.to_string()),
-                    ModelKind::Detect(_) => None,
-                });
+            let threshold = self.chosen_threshold(sha256.as_deref());
             self.store_face_setting(faces::THRESHOLD_KEY, threshold.as_deref());
             self.store_face_setting(faces::RECOGNIZER_KEY, sha256.as_deref());
             self.faces.recognizer = sha256;
@@ -210,14 +294,6 @@ impl AppState {
         }
     }
 
-    /// Checks that a model file runs as the kind the user said it is (REQ-032-03).
-    fn checker(kind: ModelKind) -> impl Fn(&Path) -> Result<(), String> {
-        move |file| match kind {
-            ModelKind::Detect(format) => Detector::load(file, format).map(|_| ()),
-            ModelKind::Recognize { style, .. } => Recognizer::load(file, style).map(|_| ()),
-        }
-    }
-
     /// Adds a model from the pasted link (REQ-032-03).
     pub fn add_face_link(&mut self) {
         let Some(store) = self.faces.store.clone() else { return };
@@ -225,12 +301,12 @@ impl AppState {
         if url.is_empty() {
             return;
         }
-        let kind = self.faces.added_kind.kind();
+        let style = self.faces.added_style.0;
         let mut progress = self.arriving_progress("added".to_owned());
         self.spawn(move || Event::FaceModelArrived {
             key: "added".to_owned(),
             name: url.clone(),
-            result: store.add_link(&url, kind, &Self::checker(kind), &mut progress),
+            result: store.add_link(&url, &|file| identify(file, style), &mut progress),
         });
     }
 
@@ -238,11 +314,11 @@ impl AppState {
     pub fn add_face_file(&mut self) {
         let Some(store) = self.faces.store.clone() else { return };
         let picker = self.picker.clone();
-        let kind = self.faces.added_kind.kind();
+        let style = self.faces.added_style.0;
         let mut progress = self.arriving_progress("added".to_owned());
         self.spawn(move || {
             let result = match picker.pick_model_file() {
-                Some(file) => store.add_file(&file, kind, &Self::checker(kind), &mut progress),
+                Some(file) => store.add_file(&file, &|file| identify(file, style), &mut progress),
                 None => Err(StoreError::Cancelled),
             };
             Event::FaceModelArrived {
@@ -256,12 +332,12 @@ impl AppState {
     /// Adds a model from a file, for tests and for what the dialog answered.
     pub fn add_face_file_at(&mut self, file: PathBuf) {
         let Some(store) = self.faces.store.clone() else { return };
-        let kind = self.faces.added_kind.kind();
+        let style = self.faces.added_style.0;
         let mut progress = self.arriving_progress("added".to_owned());
         self.spawn(move || Event::FaceModelArrived {
             key: "added".to_owned(),
             name: "the model".to_owned(),
-            result: store.add_file(&file, kind, &Self::checker(kind), &mut progress),
+            result: store.add_file(&file, &|file| identify(file, style), &mut progress),
         });
     }
 
@@ -298,6 +374,18 @@ impl AppState {
                 self.toasts.error(format!("Couldn't get {name}: {error}"));
             }
         }
+    }
+
+    /// Looks through every photo again (REQ-032-22).
+    pub fn look_through_all_again(&mut self) {
+        let Some(db) = self.db.clone() else { return };
+        if let Err(error) = faces::look_again(&lock(&db), None) {
+            self.toasts.error(format!("Couldn't look again: {error}"));
+        }
+        if let Some(gallery) = &mut self.gallery {
+            gallery.forget_detail();
+        }
+        self.kick_faces();
     }
 
     /// Shows ignored faces again (REQ-032-11).
@@ -363,13 +451,14 @@ impl AppState {
             A::Ignore { faces } => faces.iter().try_for_each(|face| decide(*face, FaceState::Ignored)),
             A::NotAFace { face } => decide(*face, FaceState::NotAFace),
             A::NotThisPerson { face, name } => faces::reject(&lock(&db), *face, name),
+            A::LookAgain { media } => faces::look_again(&lock(&db), Some(*media)),
             A::Name { .. } | A::Remove { .. } | A::Rename { .. } => Ok(()),
         };
         if let Err(error) = decided {
             self.toasts.error(format!("Couldn't save that: {error}"));
         }
         let changes: Vec<(i64, RegionChange)> = match action {
-            A::Ignore { .. } | A::NotAFace { .. } | A::NotThisPerson { .. } => Vec::new(),
+            A::Ignore { .. } | A::NotAFace { .. } | A::NotThisPerson { .. } | A::LookAgain { .. } => Vec::new(),
             A::Name { name, places } => places
                 .into_iter()
                 .map(|(media, rect)| {
@@ -395,7 +484,9 @@ impl AppState {
         if changes.is_empty() {
             if let Some(gallery) = &mut self.gallery {
                 gallery.forget_faces();
+                gallery.forget_detail();
             }
+            self.kick_faces();
         } else {
             self.write_regions(changes);
         }
@@ -528,4 +619,81 @@ fn write_region(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use db::faces::FaceProgress;
+    use indexer::faces::FaceStatus;
+
+    fn status(photos_done: u64, photos: u64, faces: u64, faces_recognized: u64, working: bool) -> FaceStatus {
+        FaceStatus {
+            progress: FaceProgress {
+                photos_done,
+                photos,
+                faces,
+                faces_recognized,
+            },
+            working,
+            problem: None,
+        }
+    }
+
+    #[test]
+    fn req_032_20_says_what_the_search_is_doing() {
+        let title = |detector, recognizer, paused, status: Option<&FaceStatus>| {
+            search_summary(detector, recognizer, paused, status).title
+        };
+        assert_eq!(title(false, false, false, None), "Not looking for faces");
+        let looking = status(10, 100, 5, 0, true);
+        assert_eq!(title(true, true, false, Some(&looking)), "Looking for faces");
+        assert_eq!(title(true, true, true, Some(&looking)), "Paused");
+        assert_eq!(
+            title(true, true, false, Some(&status(100, 100, 50, 10, true))),
+            "Recognizing faces"
+        );
+        assert_eq!(
+            title(true, true, false, Some(&status(90, 100, 50, 50, false))),
+            "Waiting"
+        );
+        assert_eq!(
+            title(true, true, false, Some(&status(100, 100, 50, 50, false))),
+            "Finished"
+        );
+
+        let without = search_summary(true, false, false, Some(&status(100, 100, 50, 0, false)));
+        assert!(
+            without.detail.contains("Choose a recognition model"),
+            "{}",
+            without.detail
+        );
+
+        let broken = FaceStatus {
+            problem: Some("The chosen detection model is gone.".into()),
+            ..looking.clone()
+        };
+        let stopped = search_summary(true, true, false, Some(&broken));
+        assert_eq!(
+            (stopped.title, stopped.detail.as_str()),
+            ("Stopped", "The chosen detection model is gone.")
+        );
+
+        let shown = search_summary(true, true, false, Some(&looking));
+        assert_eq!(shown.detail, "10 of 100 photos looked at, 5 faces found.");
+        assert_eq!(shown.share, Some(0.1));
+    }
+
+    #[test]
+    fn req_032_20_a_notice_only_while_it_works() {
+        let working = |recognizer, paused, status| search_summary(true, recognizer, paused, Some(&status)).working;
+        assert!(working(true, false, status(10, 100, 5, 0, true)));
+        assert!(working(true, false, status(100, 100, 5, 0, true)));
+        assert!(!working(true, true, status(10, 100, 5, 0, true)), "paused");
+        assert!(!working(true, false, status(100, 100, 5, 5, false)), "finished");
+        assert!(
+            !working(false, false, status(100, 100, 5, 0, true)),
+            "nothing left to do"
+        );
+    }
 }

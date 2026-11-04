@@ -35,6 +35,8 @@ pub struct MediaDetail {
     pub edit: Option<domain::edit::SavedEdit>,
     /// Named face regions on the upright photo (REQ-004-13).
     pub faces: Vec<FaceRegion>,
+    /// Whether the chosen detection model looked at it yet (REQ-032-21).
+    pub face_scan: crate::faces::FaceScan,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,6 +137,7 @@ pub fn detail(conn: &Connection, id: i64) -> Result<Option<MediaDetail>> {
                     row.get::<_, Option<String>>(16)?.as_deref(),
                 ),
                 faces: Vec::new(),
+                face_scan: Default::default(),
             }))
         })
         .optional()?
@@ -156,6 +159,7 @@ pub fn detail(conn: &Connection, id: i64) -> Result<Option<MediaDetail>> {
             name,
         })
         .collect();
+    detail.face_scan = crate::faces::scan_state(conn, id)?;
     detail.faces = conn
         .prepare_cached("SELECT name, x, y, w, h FROM media_faces WHERE media_id = ?1 ORDER BY rowid")?
         .query_map([id], |row| {
