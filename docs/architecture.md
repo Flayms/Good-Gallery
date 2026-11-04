@@ -71,6 +71,7 @@ There is no async runtime: work runs on OS threads that talk over channels (`cro
 | Originals workers (2) | full-size decodes for the viewer | finished textures |
 | mpv render / event | libmpv's render context and events | a published frame per load |
 | Background jobs | reachability, folder dialog, cache clearing | an event applied in `AppState::poll` |
+| Scratch index (1 per opened file) | a write connection to a scratch index: the opened file, then its folder (spec 033) | a message per step; its own `Gallery` reloads |
 | Writer (1) | every write into a library file: ratings, tags, face regions, saving and reverting edits, one after another in the order made (REQ-024-07) | an event applied in `AppState::poll` |
 
 - The UI never waits for IO. Each frame it applies what arrived (`AppState::poll`), draws, and sends requests; requests are priority lists replaced every frame, so work that scrolled out of view drops out.
@@ -83,6 +84,7 @@ There is no async runtime: work runs on OS threads that talk over channels (`cro
 - **Index:** SQLite in WAL mode in the data folder. One write connection (the indexer's), read-only connections for readers. Migrations are drizzle-compatible SQL files in `crates/db/migrations/`, so indexes made by earlier versions keep opening (REQ-001-08); a schema change is a new migration, never an edited one.
 - **Settings:** the `settings` table of the index, validated by `db::settings`.
 - **Faces:** `detected_faces`, `face_embeddings`, `face_rejections` and `faces_scanned` in the index. Names aren't there: a detected face overlapping a named region in `media_faces` is that person, worked out when read. Models are files named by their SHA-256 in `<data>/face-models/`, with a note on what each is.
+- **Scratch indexes:** a file opened from outside every library is read into `<data>/scratch/<pid>-<time>.db`, an index of the same schema with that folder as its one library, and shown by a second `Gallery` (`app::loose`). Its ids start at 2^50, so they never meet the index's in the originals and textures kept by id. It is deleted when the viewer closes; leftovers of a crash go at the next start.
 - **Thumbnail cache:** one WebP file per thumbnail and width under `<data>/thumbs/`, named by a hash of the file's identity, LRU by file mtime within a size limit.
 - **Data folder:** `%APPDATA%\good-gallery` (Windows) or `$XDG_DATA_HOME/good-gallery` (Linux) for the packaged app; development builds use `good-gallery-rust`. Logs are in `logs/` there.
 - **User files:** the app writes into them only when the user asks: ratings, tags and confirmed face regions (through exiftool, into the file or its XMP sidecar), and saved edits (with the recipe in our `gg:` XMP namespace; replaced originals are kept in `<library>/.good-gallery/originals/`). Indexing then reads them back with its normal rules.

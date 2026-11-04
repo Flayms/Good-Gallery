@@ -186,49 +186,6 @@ fn req_027_01_says_so_when_the_scan_finds_nothing() {
 }
 
 #[test]
-fn req_027_03_offers_to_add_the_folder_of_a_file_outside_every_library() {
-    let fixture = Fixture::new();
-    let Opened { mut harness, .. } = opened(&fixture);
-    let away = PathBuf::from(fixture.folder("Away"));
-    touch(&away, &["d.jpg"]);
-
-    harness.state_mut().open_file(away.join("d.jpg"));
-    settle(&mut harness);
-    harness.get_by_label("d.jpg isn't in a library");
-    assert_eq!(
-        harness.state().libraries.len(),
-        2,
-        "nothing is added before the user agrees"
-    );
-
-    harness.get_by_label("Add folder").click();
-    settle(&mut harness);
-    let away = away.to_str().unwrap();
-    assert!(harness.state().libraries.iter().any(|library| library.path == away));
-    // The new library's first scan is asked for, and the file's own once the library is there.
-    let paths = fixture.scans.paths.lock().unwrap();
-    assert_eq!(
-        paths.last().map(|(_, paths)| paths.clone()),
-        Some(vec!["d.jpg".to_owned()])
-    );
-}
-
-#[test]
-fn req_027_03_cancel_adds_nothing() {
-    let fixture = Fixture::new();
-    let Opened { mut harness, .. } = opened(&fixture);
-    let away = PathBuf::from(fixture.folder("Away"));
-    touch(&away, &["d.jpg"]);
-
-    harness.state_mut().open_file(away.join("d.jpg"));
-    settle(&mut harness);
-    harness.get_by_label("Cancel").click();
-    settle(&mut harness);
-    assert!(harness.query_by_label("d.jpg isn't in a library").is_none());
-    assert_eq!(harness.state().libraries.len(), 2);
-}
-
-#[test]
 fn req_027_04_says_why_a_file_cant_be_opened() {
     let fixture = Fixture::new();
     let Opened {
