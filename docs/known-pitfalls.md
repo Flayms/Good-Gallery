@@ -126,6 +126,7 @@ Add every pitfall you hit. A trap in a tool, library, OS or our tests that we ca
 
 ## Packaging and releases
 
+* **A snapshot that shows the version fails only in the release run.** Settings' _About_ prints `CARGO_PKG_VERSION`, so a window tall enough to reach it passes on every pull request, then fails once `cargo xtask release` bumps the version and no release gets published. Keep _About_ out of the picture.
 * **Container images leave out `/usr/share/doc`** when installing (Ubuntu's `path-exclude`), so a package test can't look for its license on disk: ask `dpkg -L` / `rpm -ql`.
 * **winit loads `libxkbcommon-x11` at run time and panics on X11 without it**, and nothing in a package's other dependencies brings it on a minimal system. The `.deb` and `.rpm` depend on it.
 * **The `zip` crate's `deflate` feature switches `flate2` to `zlib-rs` for the whole workspace**, which changes the bytes of every PNG we encode. Use `deflate-flate2`.

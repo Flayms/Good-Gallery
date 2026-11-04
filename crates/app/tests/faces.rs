@@ -705,7 +705,8 @@ fn req_032_01_settings_section_looks_as_designed() {
         .state(db::open_in_memory().unwrap())
         .with_faces(&fixture.dir.path().join("data"), None);
     let mut harness = common::harness_with_step(state, 1.0 / 60.0);
-    harness.set_size(egui::vec2(1000.0, 4000.0));
+    // Tall enough for the whole section and no further: _About_ further down shows the version, which a release changes.
+    harness.set_size(egui::vec2(1000.0, 2420.0));
     harness.state_mut().page = Page::Settings;
     settle(&mut harness);
     harness.get_by_label("Use YuNet").click();
