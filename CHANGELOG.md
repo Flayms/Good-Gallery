@@ -1,6 +1,31 @@
 # Changelog
 
 All notable changes to Good Gallery. Versions follow [Semantic Versioning](https://semver.org), entries are generated from [Conventional Commits](https://www.conventionalcommits.org).
+## [0.5.0](https://github.com/Flayms/Good-Gallery/releases/tag/v0.5.0) · 2026-11-04
+
+### ✨ Features
+
+- **updates:** Show a newer version and install it from a button (#160) ([`709cbbf`](https://github.com/Flayms/Good-Gallery/commit/709cbbfafda56a7b6478305d9e15cc168e82023f))
+- **faces:** Find and recognize faces with models the user picks (#166) ([`a27ebc6`](https://github.com/Flayms/Good-Gallery/commit/a27ebc6e5d151ff8be846536b5b9ba23e0c8d956))
+- **selection:** A click selects, a double-click opens (#164) (#170) ([`77f9681`](https://github.com/Flayms/Good-Gallery/commit/77f968145c9357e0ec351f0c946a603e797e9f90))
+- **installer:** Choose shortcuts and Open with, switch Open with in the settings (#161) (#172) ([`3ab631b`](https://github.com/Flayms/Good-Gallery/commit/3ab631b1ddf8f11236537f8f8c6a1ef029b3ccd6))
+- **open-with:** Show files outside libraries without indexing them (#162) (#171) ([`f2e137b`](https://github.com/Flayms/Good-Gallery/commit/f2e137b054ea7b27794b328324e42f800d8ccd90))
+- **faces:** Recommended models, charts, a status line and looking again (#178) ([`78f2c1e`](https://github.com/Flayms/Good-Gallery/commit/78f2c1e4f9c454b0929c0a67070229f2c349c5ce))
+
+### 🐛 Bug fixes
+
+- **open-with:** Index an opened file ahead of other scans (#162) (#169) ([`80c70c8`](https://github.com/Flayms/Good-Gallery/commit/80c70c8be502bb02580d771220529f7be6cb4cab))
+
+### 📝 Documentation
+
+- **agents.md:** Improve worktree storage usage ([`77a3f0c`](https://github.com/Flayms/Good-Gallery/commit/77a3f0c9701c42c6a6ce6aa6c6d11aaa30888dba))
+- Improve face-models text ([`c0d28b8`](https://github.com/Flayms/Good-Gallery/commit/c0d28b88357d780a91da4253284d860c6dc847b6))
+
+### 🔧 Maintenance
+
+- **release:** Build side by side, from a cache main keeps warm (#157) (#159) ([`147625c`](https://github.com/Flayms/Good-Gallery/commit/147625c9a792e838965f37741622518b0b447252))
+
+**Full changelog:** [v0.4.0...v0.5.0](https://github.com/Flayms/Good-Gallery/compare/v0.4.0...v0.5.0)
 ## [0.4.0](https://github.com/Flayms/Good-Gallery/releases/tag/v0.4.0) · 2026-11-03
 
 ### ✨ Features
