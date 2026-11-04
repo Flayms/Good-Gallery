@@ -26,8 +26,9 @@ Users with large libraries want to find people without tagging each photo by han
 ### REQ-032-03 · Adding another model
 
 - **Given** an ONNX model that isn't listed
-- **When** the user pastes an `https` link or picks a file, says whether it detects or recognizes, and for recognition chooses its input style (_ArcFace style_ or _SFace style_)
-- **Then** the model is copied into the data folder and available like a listed one, under the file's name
+- **When** the user pastes an `https` link or picks a file
+- **Then** the app works out by itself whether it finds or recognizes faces, the model is copied into the data folder and it is available like a listed one, under the file's name
+- **And** the one thing the app can't work out, how a recognition model expects its pixels, is a choice that says what it means, set to what most models use
 - **And** a file the app can't run as that kind of model is refused with the reason, and leaves nothing behind
 
 ### REQ-032-04 · Off until chosen
@@ -132,6 +133,42 @@ Users with large libraries want to find people without tagging each photo by han
 - **When** they aren't told apart better than chance
 - **Then** the _Faces_ section warns that the model may be set up wrongly
 
+### REQ-032-18 · Recommended models
+
+- **Given** the models with a download button in the _Faces_ section
+- **When** the user looks at them
+- **Then** one finding and one recognizing model each are marked as recommended for speed and for accuracy, and each says why, based on the measurements in `docs/face-models.md`
+- **And** a model with a button that isn't recommended says what it is there for
+- **And** no model labeled for research only has a button
+
+### REQ-032-19 · What choosing a model does
+
+- **Given** the _Faces_ section
+- **When** the user reads it, before choosing anything
+- **Then** it says that choosing a finding model starts looking through the photos in the background, what a recognizing model adds, and that changing a model looks again while confirmed names stay
+- **And** the model in use reads _In use_, and clicking it changes nothing: stopping is _Pause_, not unchoosing
+
+### REQ-032-20 · What the search is doing
+
+- **Given** a chosen finding model
+- **When** the user opens the _Faces_ section
+- **Then** its first line says what is going on: looking, recognizing, paused, waiting for an offline library, finished or stopped by a problem, with how far it has come, and offers _Pause_ or _Resume_
+- **And** pausing stops after the current photo and keeps everything found, and faces and suggestions stay visible
+- **And** while it works, a small notice in the window's corner says so on every page, unless a library scan's notice is showing
+
+### REQ-032-21 · Which photos were looked at
+
+- **Given** a photo with a chosen finding model
+- **When** its details are shown
+- **Then** they say whether it was looked at yet and how many faces were found
+
+### REQ-032-22 · Looking again
+
+- **Given** a photo that was looked at
+- **When** the user chooses _Look again_ in its details, or _Look through all photos again_ in the settings, which asks first
+- **Then** those photos are looked at again in the background
+- **And** what the user decided about a face stays (REQ-032-11), and names are untouched
+
 ## Out of scope
 
 - Videos, pets and the browser version.
@@ -149,9 +186,9 @@ Users with large libraries want to find people without tagging each photo by han
 
 | REQ        | Test | Result |
 | ---------- | ---- | ------ |
-| REQ-032-01 | `crates/app/tests/faces.rs` › req_032_01_lists_the_models_with_their_licenses, req_032_01_choosing_a_model_is_kept_and_can_be_undone, req_032_01_settings_section_looks_as_designed (snapshot `settings_faces`) | pass |
+| REQ-032-01 | `crates/app/tests/faces.rs` › req_032_01_lists_the_models_with_their_licenses, req_032_19_says_what_choosing_does_and_in_use_stays, req_032_01_settings_section_looks_as_designed (snapshot `settings_faces`) | pass |
 | REQ-032-02 | `crates/domain/src/face_models.rs` › req_032_02_the_catalog_pins_what_it_downloads; `crates/media/src/face_store.rs` › req_032_02_keeps_a_download_only_if_its_hash_matches, req_032_02_a_cancelled_or_failed_download_leaves_nothing, req_032_02_downloads_a_small_real_model_over_https (ignored in CI, run by hand) | partial: progress and cancelling are covered in `media`, not on the page |
-| REQ-032-03 | `crates/media/src/face_models.rs` › req_032_03_refuses_a_file_that_is_no_model_or_the_wrong_kind; `crates/media/src/face_store.rs` › req_032_03_adds_a_file_only_if_it_runs, req_032_03_links_must_be_https_and_name_the_model_by_their_file; `crates/app/tests/faces.rs` › req_032_03_adds_a_file_it_can_run_and_refuses_one_it_cant | pass |
+| REQ-032-03 | `crates/media/src/face_models.rs` › req_032_03_refuses_a_file_that_is_no_model_or_the_wrong_kind; `crates/media/src/face_models.rs` › req_032_03_works_out_what_a_model_is; `crates/media/src/face_store.rs` › req_032_03_adds_a_file_only_if_it_runs, req_032_03_links_must_be_https_and_name_the_model_by_their_file; `crates/app/tests/faces.rs` › req_032_03_adds_a_file_it_can_run_and_refuses_one_it_cant | pass |
 | REQ-032-04 | `crates/indexer/src/faces.rs` › req_032_04_looks_for_nothing_without_a_chosen_model; `crates/db/src/faces.rs` › req_032_04_deletes_all_face_data_but_no_named_regions; `crates/app/tests/faces.rs` › req_032_04_delete_face_data_asks_and_stops_the_search | pass |
 | REQ-032-05 | `crates/db/src/faces.rs` › req_032_05_works_through_photos_once_and_again_when_they_change, req_032_05_skips_offline_libraries; `crates/indexer/src/faces.rs` › req_032_05_works_through_all_photos_and_a_bad_file_costs_only_itself, req_032_05_stops_for_an_unreachable_share_or_when_paused, req_032_05_a_model_that_cant_run_says_so_and_a_panic_costs_only_that_file | pass |
 | REQ-032-06 | `crates/domain/src/face_models.rs` › req_032_06_finds_the_same_face_only_once, req_032_06_decodes_yunets_output, req_032_06_decodes_retinafaces_output, req_032_06_chooses_passes_by_what_the_first_found, req_032_06_turns_what_a_pass_found_into_photo_pixels_and_drops_tiny_faces; `crates/media/src/face_models.rs` › req_032_06_finds_a_real_face_with_its_landmarks, req_032_06_finds_small_faces_on_a_large_photo, req_032_06_finds_a_face_that_fills_the_photo, req_032_06_retinaface_finds_a_real_face (ignored in CI, run by hand); `crates/indexer/src/faces.rs` › req_032_06_finds_the_face_of_a_turned_photo_with_the_real_model, req_032_06_detections_become_fractions_of_the_upright_photo | pass, with rates measured on WIDER FACE (`docs/face-models.md`), not on a real library |
@@ -165,4 +202,9 @@ Users with large libraries want to find people without tagging each photo by han
 | REQ-032-14 | `crates/domain/src/faces.rs` › req_032_14_stored_rect_undoes_turning_upright; `crates/media/src/face_regions.rs` › req_032_14_other_regions_and_fields_survive, req_032_14_changes_the_microsoft_region_only_where_it_exists, req_032_14_stores_rectangles_for_the_files_orientation, req_032_14_uses_the_sidecar_when_only_it_has_regions, req_032_14_a_read_only_file_shows_why_and_stays, req_032_14_is_read_back_by_the_indexing_rules; `crates/app/tests/faces.rs` › req_032_14_confirming_a_suggestion_writes_it_and_nothing_before_that, req_032_14_rejecting_and_ignoring_leave_the_file_alone | pass |
 | REQ-032-15 | `crates/domain/src/face_models.rs` › req_032_15_groups_similar_faces_largest_first_without_small_groups; `crates/db/src/faces.rs` › req_032_15_groups_only_faces_without_a_name; `crates/app/src/people_page.rs` › req_032_15_crops_faces_without_stretching_them; `crates/app/tests/faces.rs` › req_032_15_names_a_group_after_asking_and_writes_to_all_its_photos, req_032_15_ignoring_a_group_or_taking_a_face_out_leaves_too_few, req_032_15_no_people_page_without_models, req_032_15_people_page_looks_as_designed (snapshot `people_page`) | pass |
 | REQ-032-16 | `crates/indexer/src/faces.rs` › req_032_16_another_recognition_model_recognizes_again_and_going_back_repeats_nothing; `crates/db/src/faces.rs` › req_032_16_decisions_carry_over_to_another_detector_and_earlier_work_stays | pass |
+| REQ-032-18 | `crates/domain/src/face_models.rs` › req_032_18_recommends_one_for_speed_and_one_for_accuracy; `crates/app/tests/faces.rs` › req_032_18_says_why_a_model_is_recommended | pass |
+| REQ-032-19 | `crates/app/tests/faces.rs` › req_032_19_says_what_choosing_does_and_in_use_stays | pass |
+| REQ-032-20 | `crates/app/src/state/faces.rs` › req_032_20_says_what_the_search_is_doing, req_032_20_a_notice_only_while_it_works; `crates/app/tests/faces.rs` › req_032_20_pause_and_resume, req_032_20_the_notice_shows_on_every_page | pass |
+| REQ-032-21 | `crates/db/src/faces.rs` › req_032_21_says_whether_a_photo_was_looked_at; `crates/app/tests/faces.rs` › req_032_21_details_say_whether_a_photo_was_looked_at | pass |
+| REQ-032-22 | `crates/db/src/faces.rs` › req_032_22_looks_again_and_decisions_stay; `crates/app/tests/faces.rs` › req_032_22_look_again_from_the_details, req_032_22_look_through_all_again_asks_first | pass |
 | REQ-032-17 | `crates/domain/src/face_models.rs` › req_032_17_notices_a_model_that_tells_nobody_apart; `crates/db/src/faces.rs` › req_032_17_a_model_telling_people_apart_seems_right; `crates/app/tests/faces.rs` › req_032_17_warns_when_the_model_tells_nobody_apart | pass |

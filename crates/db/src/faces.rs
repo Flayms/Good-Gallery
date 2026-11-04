@@ -233,9 +233,11 @@ pub struct FaceProgress {
     pub photos_done: u64,
     pub photos: u64,
     pub faces: u64,
+    /// Of `faces`, those the chosen recognition model has seen.
+    pub faces_recognized: u64,
 }
 
-pub fn progress(conn: &Connection, detector: &str) -> Result<FaceProgress> {
+pub fn progress(conn: &Connection, detector: &str, recognizer: Option<&str>) -> Result<FaceProgress> {
     let photos: i64 = conn
         .prepare_cached("SELECT count(*) FROM media WHERE kind = 'image'")?
         .query_row([], |row| row.get(0))?;
@@ -248,7 +250,14 @@ pub fn progress(conn: &Connection, detector: &str) -> Result<FaceProgress> {
     let faces: i64 = conn
         .prepare_cached("SELECT count(*) FROM detected_faces WHERE detector = ?1 AND state = 'open'")?
         .query_row([detector], |row| row.get(0))?;
+    let faces_recognized: i64 = conn
+        .prepare_cached(
+            "SELECT count(*) FROM detected_faces f JOIN face_embeddings e ON e.face_id = f.id AND e.recognizer = ?2
+             WHERE f.detector = ?1 AND f.state = 'open'",
+        )?
+        .query_row(params![detector, recognizer.unwrap_or_default()], |row| row.get(0))?;
     Ok(FaceProgress {
+        faces_recognized: faces_recognized as u64,
         photos_done: photos_done as u64,
         photos: photos as u64,
         faces: faces as u64,
@@ -447,6 +456,50 @@ pub fn regions_named(conn: &Connection, media: i64, name: &str) -> Result<Vec<[f
         .collect::<rusqlite::Result<_>>()?)
 }
 
+/// Whether a photo was looked at by the chosen detection model (REQ-032-21).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FaceScan {
+    /// No detection model is chosen, or it isn't a photo.
+    #[default]
+    NotLooking,
+    NotYet,
+    /// Looked at, with this many faces found, not counting what the user said isn't one.
+    Done(u32),
+}
+
+pub fn scan_state(conn: &Connection, media: i64) -> Result<FaceScan> {
+    let Some(detector) = chosen(conn, DETECTOR_KEY)? else {
+        return Ok(FaceScan::NotLooking);
+    };
+    let scanned: Option<(String, bool)> = conn
+        .prepare_cached(
+            "SELECT m.kind, s.media_id IS NOT NULL AND s.size = m.size AND s.mtime = m.mtime FROM media m
+             LEFT JOIN faces_scanned s ON s.media_id = m.id AND s.detector = ?2 WHERE m.id = ?1",
+        )?
+        .query_row(params![media, detector], |row| Ok((row.get(0)?, row.get(1)?)))
+        .optional()?;
+    Ok(match scanned {
+        Some((kind, true)) if kind == "image" => FaceScan::Done(
+            conn.prepare_cached(
+                "SELECT count(*) FROM detected_faces WHERE media_id = ?1 AND detector = ?2 AND state <> 'not_face'",
+            )?
+            .query_row(params![media, detector], |row| row.get(0))?,
+        ),
+        Some((kind, false)) if kind == "image" => FaceScan::NotYet,
+        _ => FaceScan::NotLooking,
+    })
+}
+
+/// Has one photo, or all, looked at again. What was found stays until then, and what the user decided carries over
+/// (REQ-032-22).
+pub fn look_again(conn: &Connection, media: Option<i64>) -> Result<()> {
+    match media {
+        Some(media) => conn.execute("DELETE FROM faces_scanned WHERE media_id = ?1", [media])?,
+        None => conn.execute("DELETE FROM faces_scanned", [])?,
+    };
+    Ok(())
+}
+
 /// Shows ignored faces again (REQ-032-11).
 pub fn restore_ignored(conn: &Connection) -> Result<usize> {
     Ok(conn.execute("UPDATE detected_faces SET state = 'open' WHERE state = 'ignored'", [])?)
@@ -611,18 +664,19 @@ mod tests {
         store_scan(&mut conn, &found, "d", &[face(0.1)]).unwrap();
         assert!(pending_photos(&conn, "d", 10).unwrap().is_empty());
         assert_eq!(
-            progress(&conn, "d").unwrap(),
+            progress(&conn, "d", None).unwrap(),
             FaceProgress {
                 photos_done: 1,
                 photos: 1,
-                faces: 1
+                faces: 1,
+                faces_recognized: 0,
             }
         );
 
         conn.execute("UPDATE media SET mtime = 2000 WHERE id = ?1", [id])
             .unwrap();
         assert_eq!(pending_photos(&conn, "d", 10).unwrap().len(), 1);
-        assert_eq!(progress(&conn, "d").unwrap().photos_done, 0);
+        assert_eq!(progress(&conn, "d", None).unwrap().photos_done, 0);
     }
 
     #[test]
@@ -835,6 +889,55 @@ mod tests {
             .query_row("SELECT count(*) FROM media_faces", [], |row| row.get(0))
             .unwrap();
         assert_eq!(named, 1);
+    }
+
+    #[test]
+    fn req_032_21_says_whether_a_photo_was_looked_at() {
+        let (mut conn, root) = setup();
+        let id = insert(&conn, root, "a.jpg", "image");
+        let video = insert(&conn, root, "b.mp4", "video");
+        assert_eq!(scan_state(&conn, id).unwrap(), FaceScan::NotLooking, "no model chosen");
+
+        crate::settings::set_value(&conn, DETECTOR_KEY, &serde_json::json!("d")).unwrap();
+        assert_eq!(scan_state(&conn, id).unwrap(), FaceScan::NotYet);
+        assert_eq!(scan_state(&conn, video).unwrap(), FaceScan::NotLooking);
+
+        let found = photo(&conn, "d");
+        store_scan(&mut conn, &found, "d", &[face(0.1), face(0.5)]).unwrap();
+        assert_eq!(scan_state(&conn, id).unwrap(), FaceScan::Done(2));
+
+        conn.execute("UPDATE media SET mtime = 2000 WHERE id = ?1", [id])
+            .unwrap();
+        assert_eq!(scan_state(&conn, id).unwrap(), FaceScan::NotYet, "it changed");
+    }
+
+    #[test]
+    fn req_032_22_looks_again_and_decisions_stay() {
+        let (mut conn, root) = setup();
+        let id = insert(&conn, root, "a.jpg", "image");
+        let other = insert(&conn, root, "b.jpg", "image");
+        for found in pending_photos(&conn, "d", 10).unwrap() {
+            store_scan(&mut conn, &found, "d", &[face(0.1)]).unwrap();
+        }
+        let ignored = unknown_faces_on(&conn, id, "d", "r").unwrap()[0].id;
+        set_state(&conn, ignored, FaceState::Ignored).unwrap();
+
+        look_again(&conn, Some(id)).unwrap();
+        let waiting = pending_photos(&conn, "d", 10).unwrap();
+        assert_eq!(waiting.iter().map(|photo| photo.media).collect::<Vec<_>>(), [id]);
+        store_scan(&mut conn, &waiting[0], "d", &[face(0.1)]).unwrap();
+        assert!(
+            unknown_faces_on(&conn, id, "d", "r").unwrap().is_empty(),
+            "still ignored"
+        );
+
+        look_again(&conn, None).unwrap();
+        assert_eq!(pending_photos(&conn, "d", 10).unwrap().len(), 2);
+        assert_eq!(
+            unknown_faces_on(&conn, other, "d", "r").unwrap().len(),
+            1,
+            "found stays until then"
+        );
     }
 
     #[test]

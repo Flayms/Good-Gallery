@@ -7,6 +7,7 @@ use crate::gallery::{PLACES_TAG_ROOT, TagPaths};
 use crate::icons;
 use crate::icons::Icon;
 use crate::theme;
+use db::faces::FaceScan;
 use db::media::MediaDetail;
 use domain::media::MediaKind;
 use domain::tags::{PEOPLE_TAG_ROOT, TagCategory};
@@ -28,6 +29,8 @@ pub enum InfoAction {
     AddTag(Vec<String>),
     /// Remove the tag with this name (REQ-026-02).
     RemoveTag(String),
+    /// Look for faces in this photo again (REQ-032-22).
+    LookForFacesAgain,
 }
 
 /// Suggestions shown at most while adding a tag (REQ-026-01).
@@ -124,6 +127,22 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths, writable:
             } else {
                 let name = edit.source.rsplit('/').next().unwrap_or(&edit.source);
                 ui.add(egui::Label::new(format!("An edited copy of {name}")).wrap());
+            }
+        });
+    }
+    // Only while faces are looked for (REQ-032-21).
+    let found = match detail.face_scan {
+        FaceScan::NotLooking => None,
+        FaceScan::NotYet => Some("Not looked at yet".to_owned()),
+        FaceScan::Done(0) => Some("Looked at, none found".to_owned()),
+        FaceScan::Done(1) => Some("Looked at, 1 found".to_owned()),
+        FaceScan::Done(faces) => Some(format!("Looked at, {faces} found")),
+    };
+    if let Some(found) = found {
+        field(ui, "Faces", |ui| {
+            ui.add(egui::Label::new(found).wrap());
+            if matches!(detail.face_scan, FaceScan::Done(_)) && ui.button("Look again").clicked() {
+                clicked = Some(InfoAction::LookForFacesAgain);
             }
         });
     }

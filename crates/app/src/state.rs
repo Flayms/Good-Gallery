@@ -281,6 +281,10 @@ pub enum FaceAction {
         to: String,
         rect: [f32; 4],
     },
+    /// Look at this photo again (REQ-032-22).
+    LookAgain {
+        media: i64,
+    },
 }
 
 /// A tag added to or removed from a media item by hand (spec 026).

@@ -102,6 +102,8 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     page_header(ui, header, state, "Settings");
     #[cfg(not(target_arch = "wasm32"))]
     confirm_delete_faces(ui.ctx(), state);
+    #[cfg(not(target_arch = "wasm32"))]
+    confirm_look_again(ui.ctx(), state);
     confirm_remove(ui.ctx(), state);
     confirm_clear(ui.ctx(), state);
 }
@@ -588,8 +590,9 @@ fn model_row(
             } else {
                 ("Use", format!("Use {name}"))
             };
-            if button(ui, text, spoken, chosen) {
-                command = Some(if chosen { "none" } else { "use" });
+            // In use is a state: stopping is Pause (REQ-032-19).
+            if button(ui, text, spoken, chosen) && !chosen {
+                command = Some("use");
             }
         } else if catalog.is_some() && button(ui, "Download", format!("Download {name}"), false) {
             command = Some("download");
@@ -599,7 +602,6 @@ fn model_row(
         Some("cancel") => state.cancel_face_model(sha256),
         Some("delete") => state.remove_face_model(sha256),
         Some("use") => state.choose_face_model(detect, Some(sha256.to_owned())),
-        Some("none") => state.choose_face_model(detect, None),
         Some("download") => {
             if let Some(model) = catalog {
                 state.download_face_model(model);
@@ -609,16 +611,42 @@ fn model_row(
     }
 }
 
-/// _Faces_: the models, how far the search has come, and the user's data (REQ-032-01 … REQ-032-05, REQ-032-17).
+/// _Faces_: what the search is doing, the models, and the user's data (REQ-032-01 … REQ-032-05, REQ-032-17 …
+/// REQ-032-20).
 #[cfg(not(target_arch = "wasm32"))]
 fn faces(ui: &mut egui::Ui, state: &mut AppState) {
-    use crate::state::faces::AddedKind;
-    use domain::face_models::{CATALOG, ModelKind};
+    use crate::state::faces::{AddedStyle, style_label};
+    use domain::face_models::{CATALOG, InputStyle, ModelKind};
     section_title(ui, "Faces");
+    let summary = state.faces.summary();
+    group(ui, |ui| {
+        let can_pause = state.faces.detector.is_some();
+        let paused = state.faces.paused;
+        setting_row(ui, summary.title, &summary.detail, 90.0, |ui| {
+            if can_pause && ui.button(if paused { "Resume" } else { "Pause" }).clicked() {
+                state.set_face_search(!paused);
+            }
+        });
+        if let Some(share) = summary.share {
+            Frame::new().inner_margin(Margin::symmetric(12, 0)).show(ui, |ui| {
+                ui.add(egui::ProgressBar::new(share).desired_height(4.0));
+                ui.add_space(12.0);
+            });
+        }
+        if state.faces.model_seems_wrong {
+            divider(ui);
+            Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
+                ui.colored_label(
+                    theme::alert(),
+                    "This model doesn't tell your named people apart. It may expect its pixels differently: remove it and add it again with the other choice.",
+                );
+            });
+        }
+    });
+    ui.add_space(theme::SPACE * 4.0);
     ui.add(
         egui::Label::new(
-            RichText::new("Models run on this computer. Photos and faces stay here. You choose one of each kind.")
-                .color(theme::muted()),
+            RichText::new("Models run on this computer. Photos and faces stay here.").color(theme::muted()),
         )
         .wrap(),
     );
@@ -626,8 +654,21 @@ fn faces(ui: &mut egui::Ui, state: &mut AppState) {
         state.open_in_browser(FACE_MODELS_PAGE);
     }
     ui.add_space(theme::SPACE * 2.0);
-    for (title, detect) in [("Detection", true), ("Recognition", false)] {
+    let sections = [
+        (
+            "Detection",
+            "Finds where the faces are. Choosing one starts looking through your photos in the background.",
+            true,
+        ),
+        (
+            "Recognition",
+            "Works out who a face is, for suggested names and groups. Without one, you still see the faces.",
+            false,
+        ),
+    ];
+    for (title, what, detect) in sections {
         ui.label(RichText::new(title).font(FontId::new(theme::SIZE_BODY, theme::semibold())));
+        ui.add(egui::Label::new(RichText::new(what).color(theme::muted())).wrap());
         ui.add_space(theme::SPACE);
         let is_kind = |kind: &ModelKind| matches!(kind, ModelKind::Detect(_)) == detect;
         group(ui, |ui| {
@@ -636,46 +677,53 @@ fn faces(ui: &mut egui::Ui, state: &mut AppState) {
                 if !std::mem::take(&mut first) {
                     divider(ui);
                 }
-                let description = format!("{}. {}", megabytes(model.bytes), model.license);
+                let description = format!("{}\n{}. {}", model.why, megabytes(model.bytes), model.license);
                 model_row(ui, state, detect, model.name, &description, model.sha256, Some(model));
             }
-            let added: Vec<_> = state
+            let others: Vec<_> = state
                 .faces
                 .models
                 .iter()
                 .filter(|model| is_kind(&model.kind) && media::face_store::catalog_entry(&model.sha256).is_none())
                 .cloned()
                 .collect();
-            for model in added {
+            for model in others {
                 divider(ui);
-                model_row(ui, state, detect, &model.name, "Added by you", &model.sha256, None);
+                model_row(
+                    ui,
+                    state,
+                    detect,
+                    &model.name,
+                    "On this computer, not in the list",
+                    &model.sha256,
+                    None,
+                );
             }
         });
         ui.add_space(theme::SPACE * 4.0);
     }
-    ui.label(RichText::new("Add a model").font(FontId::new(theme::SIZE_BODY, theme::semibold())));
+    ui.add(
+        egui::Label::new(
+            RichText::new("Changing a model looks through your photos again. Names you confirmed stay.")
+                .color(theme::muted()),
+        )
+        .wrap(),
+    );
+    ui.add_space(theme::SPACE * 4.0);
+    ui.label(RichText::new("Add another model").font(FontId::new(theme::SIZE_BODY, theme::semibold())));
     ui.add_space(theme::SPACE);
     group(ui, |ui| {
         Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = theme::SPACE * 2.0;
             ui.add(
                 egui::Label::new(
-                    RichText::new("An ONNX file you trust. Its license is yours to check.").color(theme::muted()),
+                    RichText::new(
+                        "An ONNX file you trust. The app works out what it does. Its license is yours to check.",
+                    )
+                    .color(theme::muted()),
                 )
                 .wrap(),
             );
-            let current = state.faces.added_kind;
-            let combo = egui::ComboBox::from_id_salt("added face model")
-                .width(260.0)
-                .selected_text(current.label())
-                .show_ui(ui, |ui| {
-                    crate::glass::behind_menu(ui, |ui| {
-                        for option in AddedKind::ALL {
-                            ui.selectable_value(&mut state.faces.added_kind, option, option.label());
-                        }
-                    });
-                });
-            name_combo(&combo.response, "What the model does", current.label().to_owned());
             ui.horizontal(|ui| {
                 let field = ui.add(
                     egui::TextEdit::singleline(&mut state.faces.link)
@@ -694,45 +742,45 @@ fn faces(ui: &mut egui::Ui, state: &mut AppState) {
                     state.cancel_face_model("added");
                 }
             });
+            ui.add_space(theme::SPACE);
+            ui.label("Pixel values, for a recognition model");
+            ui.add(
+                egui::Label::new(
+                    RichText::new(
+                        "How the model expects its input. A file doesn't say. If you don't know, keep the first: a warning shows above if it's wrong.",
+                    )
+                    .color(theme::muted()),
+                )
+                .wrap(),
+            );
+            let current = state.faces.added_style.0;
+            let combo = egui::ComboBox::from_id_salt("added face model")
+                .width(320.0)
+                .selected_text(style_label(current))
+                .show_ui(ui, |ui| {
+                    crate::glass::behind_menu(ui, |ui| {
+                        for option in [InputStyle::ArcFace, InputStyle::SFace] {
+                            ui.selectable_value(&mut state.faces.added_style, AddedStyle(option), style_label(option));
+                        }
+                    });
+                });
+            name_combo(&combo.response, "Pixel values", style_label(current).to_owned());
         });
     });
     ui.add_space(theme::SPACE * 4.0);
     state.check_face_model();
-    let status = state.faces.status();
     group(ui, |ui| {
-        let progress = status.as_ref().map(|status| status.progress).unwrap_or_default();
-        let description = if state.faces.detector.is_none() {
-            "Choose a detection model to start.".to_owned()
-        } else {
-            format!(
-                "{} of {} photos looked at, {} faces found.",
-                progress.photos_done, progress.photos, progress.faces
-            )
-        };
-        let mut search = !state.faces.paused;
-        setting_row(ui, "Look for faces", &description, 40.0, |ui| {
-            let on = search;
-            ui.checkbox(&mut search, "")
-                .widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, on, "Look for faces"));
-        });
-        if search == state.faces.paused {
-            state.set_face_search(!search);
-        }
-        if let Some(problem) = status.as_ref().and_then(|status| status.problem.as_ref()) {
-            divider(ui);
-            Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
-                ui.colored_label(theme::alert(), problem);
-            });
-        }
-        if state.faces.model_seems_wrong {
-            divider(ui);
-            Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
-                ui.colored_label(
-                    theme::alert(),
-                    "This model doesn't tell your named people apart. It may be set up with the wrong style.",
-                );
-            });
-        }
+        setting_row(
+            ui,
+            "Look through all photos again",
+            "For when something was missed. What you decided about a face stays.",
+            210.0,
+            |ui| {
+                if ui.button("Look through all photos again").clicked() {
+                    state.faces.confirm_look_again = true;
+                }
+            },
+        );
         divider(ui);
         setting_row(
             ui,
@@ -758,6 +806,26 @@ fn faces(ui: &mut egui::Ui, state: &mut AppState) {
             },
         );
     });
+}
+
+/// "Look through all photos again?" (REQ-032-22).
+#[cfg(not(target_arch = "wasm32"))]
+fn confirm_look_again(ctx: &egui::Context, state: &mut AppState) {
+    if !state.faces.confirm_look_again {
+        return;
+    }
+    if let Some(again) = confirm(
+        ctx,
+        "confirm-look-again",
+        "Look through all photos again",
+        "This can take many hours on a large library. Names and what you decided about a face stay.",
+        "Look again",
+    ) {
+        state.faces.confirm_look_again = false;
+        if again {
+            state.look_through_all_again();
+        }
+    }
 }
 
 /// "Delete what the app stored about faces?" (REQ-032-04).

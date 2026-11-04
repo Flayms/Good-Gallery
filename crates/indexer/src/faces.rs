@@ -164,7 +164,10 @@ fn run(shared: &Shared, mut deps: FaceDeps) {
             Err(_) => (false, Some("Looking for faces stopped unexpectedly.".to_owned())),
         };
         let progress = chosen(&deps.conn, faces::DETECTOR_KEY)
-            .and_then(|detector| faces::progress(&deps.conn, &detector).ok())
+            .and_then(|detector| {
+                let recognizer = chosen(&deps.conn, faces::RECOGNIZER_KEY);
+                faces::progress(&deps.conn, &detector, recognizer.as_deref()).ok()
+            })
             .unwrap_or_default();
         {
             let mut control = shared.lock();
@@ -597,8 +600,7 @@ mod tests {
         let model = store
             .add_file(
                 &fixtures.join("face_detection_yunet_2023mar.onnx"),
-                kind,
-                &|_| Ok(()),
+                &|_| Ok(kind),
                 &mut |_, _| true,
             )
             .unwrap();

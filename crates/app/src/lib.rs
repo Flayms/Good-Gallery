@@ -383,6 +383,9 @@ fn info_sheet(ui: &mut egui::Ui, state: &mut AppState) {
     }
     match clicked {
         Some(info::InfoAction::FilterByTag(tag)) => filter_by_tag(state, &tag),
+        Some(info::InfoAction::LookForFacesAgain) => {
+            state.face_action(state::FaceAction::LookAgain { media: id });
+        }
         Some(info::InfoAction::Revert) => {
             let detail = state.gallery.as_ref().and_then(|gallery| gallery.cached_detail(id));
             state.confirm_revert = detail.map(state::RevertTarget::of);

@@ -1637,6 +1637,9 @@ impl Viewer {
         }
         match clicked? {
             info::InfoAction::FilterByTag(tag) => Some(Action::FilterByTag(tag)),
+            info::InfoAction::LookForFacesAgain => {
+                Some(Action::Face(crate::state::FaceAction::LookAgain { media: self.id }))
+            }
             info::InfoAction::Revert => gallery
                 .cached_detail(self.id)
                 .map(|detail| Action::Revert(crate::state::RevertTarget::of(detail))),

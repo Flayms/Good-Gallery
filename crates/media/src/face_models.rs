@@ -2,8 +2,9 @@
 //! needs. The engine is behind [`Net`], so another can join `tract` without touching the steps around it.
 
 use domain::face_models::{
-    Alignment, CROP_SIDE, Detection, DetectorFormat, HINT_SCORE, INPUT_SIDE, InputStyle, Pass, decode_retinaface,
-    decode_yunet, first_pass, keep_recognizable, more_passes, normalize, retinaface_priors, suppress,
+    Alignment, CROP_SIDE, DEFAULT_THRESHOLD, Detection, DetectorFormat, HINT_SCORE, INPUT_SIDE, InputStyle, ModelKind,
+    Pass, decode_retinaface, decode_yunet, first_pass, keep_recognizable, more_passes, normalize, retinaface_priors,
+    suppress,
 };
 use image::RgbImage;
 use image::imageops::FilterType;
@@ -230,6 +231,26 @@ impl Recognizer {
     }
 }
 
+/// What a model file is, by trying what it answers as (REQ-032-03). Recognition comes first: a large recognizer takes
+/// seconds to refuse as a detector, while a detector refuses at once as a recognizer. `style` can't be seen from the file.
+pub fn identify(file: &Path, style: InputStyle) -> Result<ModelKind, String> {
+    let as_recognizer = match Recognizer::load(file, style) {
+        Ok(_) => {
+            return Ok(ModelKind::Recognize {
+                style,
+                threshold: DEFAULT_THRESHOLD,
+            });
+        }
+        Err(error) => error,
+    };
+    for format in [DetectorFormat::YuNet, DetectorFormat::RetinaFace] {
+        if Detector::load(file, format).is_ok() {
+            return Ok(ModelKind::Detect(format));
+        }
+    }
+    Err(format!("it isn't a face model the app can run ({as_recognizer})"))
+}
+
 /// The face moved onto the template, [`CROP_SIDE`] square. Several samples per pixel, since a face may be far larger on
 /// the photo than in the crop.
 pub fn aligned_crop(photo: &RgbImage, landmarks: &[[f32; 2]; 5]) -> RgbImage {
@@ -328,6 +349,19 @@ mod tests {
         let yunet = fixture("face_detection_yunet_2023mar.onnx");
         assert!(Detector::load(&yunet, DetectorFormat::RetinaFace).is_err());
         assert!(Recognizer::load(&yunet, InputStyle::ArcFace).is_err());
+    }
+
+    #[test]
+    fn req_032_03_works_out_what_a_model_is() {
+        let yunet = fixture("face_detection_yunet_2023mar.onnx");
+        assert_eq!(
+            identify(&yunet, InputStyle::ArcFace),
+            Ok(ModelKind::Detect(DetectorFormat::YuNet))
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let junk = dir.path().join("junk.onnx");
+        std::fs::write(&junk, b"not a model").unwrap();
+        assert!(identify(&junk, InputStyle::ArcFace).is_err());
     }
 
     #[test]
