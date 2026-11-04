@@ -14,14 +14,14 @@ The viewer is built on a `Gallery`: positions, ids, tile data, details and origi
 ## Tasks
 
 - [x] 1. `ScanScope::Folder`: one folder, no subfolders; scan tests (REQ-033-02)
-- [ ] 2. Scratch index: create, fill in two steps on a worker, delete on close and at startup; tests in `app` with a temp data folder (REQ-033-01, REQ-033-05)
-- [ ] 3. `AppState::open_file` outside every library opens the scratch gallery and the viewer at the file; `lib.rs` routes the viewer to its gallery; kittest: shown at once, nothing in `gallery.db` (REQ-033-01)
-- [ ] 4. Stepping in name order through the folder; kittest (REQ-033-02)
-- [ ] 5. `Viewer::indexed`: what is hidden, the info panel's line and button; snapshot (REQ-033-03)
-- [ ] 6. _Add folder as library_ and the switch to the indexed item; kittest (REQ-033-04)
-- [ ] 7. Close returns to the previous gallery and deletes the scratch file (REQ-033-05)
-- [ ] 8. Skipped folders use the scratch path (REQ-033-06)
-- [ ] 9. Deprecate REQ-027-03, update its tests; README, glossary (_scratch index_), architecture
+- [x] 2. Scratch index: create, fill in two steps on a worker, delete on close and at startup; tests in `app` with a temp data folder (REQ-033-01, REQ-033-05)
+- [x] 3. `AppState::open_file` outside every library opens the scratch gallery and the viewer at the file; `lib.rs` routes the viewer to its gallery; kittest: shown at once, nothing in `gallery.db` (REQ-033-01)
+- [x] 4. Stepping in name order through the folder; kittest (REQ-033-02)
+- [x] 5. `Viewer::indexed`: what is hidden, the info panel's line and button; snapshot (REQ-033-03)
+- [x] 6. _Add folder as library_ and the switch to the indexed item; kittest (REQ-033-04)
+- [x] 7. Close returns to the previous gallery and deletes the scratch file (REQ-033-05)
+- [x] 8. Skipped folders use the scratch path (REQ-033-06)
+- [x] 9. Deprecate REQ-027-03, update its tests; README, glossary (_scratch index_), architecture
 
 ## Decisions
 

@@ -38,9 +38,10 @@ pub fn show_loaded(
     ui: &mut egui::Ui,
     detail: Option<&crate::gallery::DetailResult>,
     paths: &TagPaths,
+    writable: bool,
 ) -> Option<InfoAction> {
     match detail {
-        Some(Ok(Some(detail))) => return show(ui, detail, paths),
+        Some(Ok(Some(detail))) => return show(ui, detail, paths, writable),
         Some(Ok(None)) => {
             ui.label("Media not found");
         }
@@ -56,7 +57,7 @@ pub fn show_loaded(
 
 /// Shows `detail`; returns a tag the user clicked, to filter the gallery by it (REQ-009-09), or _Revert to original_
 /// (REQ-021-12).
-pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths) -> Option<InfoAction> {
+pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths, writable: bool) -> Option<InfoAction> {
     let mut clicked = None;
     ui.spacing_mut().item_spacing.y = 12.0;
     field(ui, "File", |ui| {
@@ -101,8 +102,8 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths) -> Option
         ui.label(format::bytes(detail.size));
     });
     field(ui, "Rating", |ui| {
-        // The browser version doesn't write files (REQ-024-05).
-        if crate::WEB {
+        // The browser version doesn't write files (REQ-024-05), nor does the app outside libraries (REQ-033-03).
+        if !writable {
             match detail.rating {
                 Some(rating) => stars(ui, rating),
                 None => empty(ui, "Not rated"),
@@ -117,7 +118,7 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths) -> Option
             if replaced {
                 ui.add(egui::Label::new("Saved over the original, which is kept").wrap());
                 // The browser version doesn't edit (REQ-021-01).
-                if !crate::WEB && ui.button("Revert to original").clicked() {
+                if writable && ui.button("Revert to original").clicked() {
                     clicked = Some(InfoAction::Revert);
                 }
             } else {
@@ -126,8 +127,8 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths) -> Option
             }
         });
     }
-    // The browser version doesn't write files (REQ-026-05).
-    let editable = !crate::WEB;
+    // The browser version doesn't write files (REQ-026-05), nor does the app outside libraries (REQ-033-03).
+    let editable = writable;
     for (label, category, root, known) in [
         (
             "People",

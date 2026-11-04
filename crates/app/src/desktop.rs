@@ -379,6 +379,12 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
         tracing::info!("exiftool: {}", path.display());
         Arc::new(media::exiftool::ExifTool::new(path, concurrency))
     });
+    // Files outside every library show from scratch indexes (spec 033); an earlier run's leftovers go first.
+    let scratch = data_dir.join("scratch");
+    app::loose::clear_scratch(&scratch);
+    if let Some(exiftool) = &exiftool {
+        state = state.with_loose_files(scratch, exiftool.clone());
+    }
     let is_reachable =
         Arc::new(|path: &Path| indexer::reachability::is_reachable_directory(path, indexer::reachability::TIMEOUT));
     let (ready_tx, ready) = std::sync::mpsc::channel();

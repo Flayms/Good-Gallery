@@ -1,6 +1,6 @@
 # 033 · Files outside libraries
 
-**Status:** Approved
+**Status:** Implemented
 
 ## Goal
 
@@ -68,11 +68,11 @@ Users who open a photo or video with Good Gallery from Explorer (spec 027) want 
 
 ## Verification
 
-| REQ        | Test | Result  |
-| ---------- | ---- | ------- |
-| REQ-033-01 | —    | no test |
-| REQ-033-02 | —    | no test |
-| REQ-033-03 | —    | no test |
-| REQ-033-04 | —    | no test |
-| REQ-033-05 | —    | no test |
-| REQ-033-06 | —    | no test |
+| REQ        | Test | Result |
+| ---------- | ---- | ------ |
+| REQ-033-01 | `crates/indexer/src/scan.rs` › req_033_01_a_files_scan_reads_only_the_named_files; `crates/app/tests/loose.rs` › req_033_01_shows_a_file_outside_every_library | pass |
+| REQ-033-02 | `crates/indexer/src/scan.rs` › req_033_02_a_folder_scan_stays_in_its_folder; `crates/app/tests/loose.rs` › req_033_02_steps_through_its_folder_by_name | pass |
+| REQ-033-03 | `crates/app/tests/loose.rs` › req_033_03_offers_what_needs_no_index; snapshot `loose_info` | pass |
+| REQ-033-04 | `crates/app/tests/loose.rs` › req_033_04_adds_its_folder_and_switches_to_the_indexed_item | pass |
+| REQ-033-05 | `crates/app/tests/loose.rs` › req_033_05_closing_leaves_nothing_behind | pass |
+| REQ-033-06 | `crates/app/tests/loose.rs` › req_033_06_shows_a_file_its_library_skips | pass |
