@@ -2088,6 +2088,16 @@ fn message(ui: &mut egui::Ui, at: Pos2, text: &str) {
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, text));
 }
 
+/// An icon button that fills `rect` exactly. With the theme's padding it paints as wide as its icon and padding want,
+/// past `rect` and over its neighbours, though its response says `rect` (REQ-013-18).
+pub(crate) fn put_button(ui: &mut egui::Ui, rect: Rect, button: egui::Button<'_>) -> egui::Response {
+    ui.scope(|ui| {
+        ui.spacing_mut().button_padding = Vec2::ZERO;
+        ui.put(rect, button.min_size(rect.size()))
+    })
+    .inner
+}
+
 fn round_button(
     ui: &mut egui::Ui,
     rect: Rect,
@@ -2097,12 +2107,12 @@ fn round_button(
     backing: crate::glass::Backing,
 ) -> egui::Response {
     backing.paint(ui.painter(), rect, NAV_SIZE / 2.0);
-    let response = ui
-        .put(
-            rect,
-            egui::Button::image(icon.image(20.0, theme::text())).corner_radius(NAV_SIZE / 2.0),
-        )
-        .on_hover_text(tooltip);
+    let response = put_button(
+        ui,
+        rect,
+        egui::Button::image(icon.image(20.0, theme::text())).corner_radius(NAV_SIZE / 2.0),
+    )
+    .on_hover_text(tooltip);
     let label = label.to_owned();
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
     response
@@ -2165,6 +2175,13 @@ fn bar_text(ui: &egui::Ui, screen: Rect, item: Option<&GalleryItem>, libraries: 
 }
 
 const BAR_GAP: f32 = 12.0;
+/// Between the control bar's buttons, so that two pressed ones stay two circles (REQ-013-18).
+const BAR_BUTTON_GAP: f32 = theme::SPACE;
+
+/// How wide `count` buttons of the control bar are.
+fn bar_buttons_width(count: usize) -> f32 {
+    count as f32 * (theme::CONTROL_HEIGHT + BAR_BUTTON_GAP) - BAR_BUTTON_GAP
+}
 const STAR_SIZE: f32 = 14.0;
 
 /// The control bar's buttons, right of the separator.
@@ -2231,7 +2248,7 @@ fn control_bar_rect(layout: &Layout, text: &BarText) -> Rect {
     // Separator, the buttons and the right padding.
     width += 1.0
         + BAR_GAP
-        + bar_buttons(text.editable, text.faces, text.add_face, text.filmstrip).len() as f32 * theme::CONTROL_HEIGHT
+        + bar_buttons_width(bar_buttons(text.editable, text.faces, text.add_face, text.filmstrip).len())
         + 6.0;
     let room = layout.right - layout.screen.left();
     let width = width.min(room - 32.0);
@@ -2427,7 +2444,7 @@ fn control_bar(
     // Clicks on the bar's background don't reach the scrim behind it.
     ui.interact(rect, ui.make_persistent_id("control bar"), egui::Sense::click());
     let y = rect.center().y;
-    let buttons_width = buttons.len() as f32 * theme::CONTROL_HEIGHT + 6.0;
+    let buttons_width = bar_buttons_width(buttons.len()) + 6.0;
     let text_clip = Rect::from_min_max(rect.min, pos2(rect.right() - buttons_width - BAR_GAP, rect.bottom()));
     let painter = ui.painter().with_clip_rect(text_clip);
     let mut x = rect.left() + 20.0;
@@ -2455,7 +2472,7 @@ fn control_bar(
     for (i, &(button, icon, label, tooltip)) in buttons.iter().enumerate() {
         let at = Rect::from_min_size(
             pos2(
-                rect.right() - 6.0 - (buttons.len() - i) as f32 * theme::CONTROL_HEIGHT,
+                rect.right() - 6.0 - bar_buttons_width(buttons.len() - i),
                 y - theme::CONTROL_HEIGHT / 2.0,
             ),
             Vec2::splat(theme::CONTROL_HEIGHT),
@@ -2474,7 +2491,7 @@ fn control_bar(
         if pressed == Some(true) {
             widget = widget.fill(theme::selected()).stroke(egui::Stroke::NONE);
         }
-        let response = ui.put(at, widget).on_hover_text(tooltip);
+        let response = put_button(ui, at, widget).on_hover_text(tooltip);
         response.widget_info(|| match pressed {
             Some(pressed) => egui::WidgetInfo::selected(egui::Role::Button, true, pressed, label),
             None => egui::WidgetInfo::labeled(egui::Role::Button, true, label),
