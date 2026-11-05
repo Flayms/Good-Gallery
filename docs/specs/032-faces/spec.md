@@ -154,7 +154,9 @@ Users with large libraries want to find people without tagging each photo by han
 
 - **Given** a chosen finding model
 - **When** the user opens the _Faces_ section
-- **Then** its first line says what is going on: looking, recognizing, paused, waiting for an offline library, finished or stopped by a problem, with how far it has come, and offers _Pause_ or _Resume_
+- **Then** its first line says what is going on: finding faces, finding and recognizing them, only recognizing, paused, waiting for an offline library, finished or stopped by a problem, with how far it has come, and offers _Pause_ or _Resume_
+- **And** while photos are waiting it counts photos and the faces found, for both steps when both models are chosen (REQ-032-23): `1,234 of 50,000 photos done, 321 faces found`; only recognizing, it counts faces: `120 of 3,210 faces recognized`
+- **And** the real number of photos shows from the start, before the first photo is done, and it never says `0 of 0`
 - **And** pausing stops after the current photo and keeps everything found, and faces and suggestions stay visible
 - **And** while it works, the processing icon shows on every page; its menu says what the first line says and leads to the _Faces_ section (#175)
 
@@ -213,7 +215,7 @@ Users with large libraries want to find people without tagging each photo by han
 | REQ-032-16 | `crates/indexer/src/faces.rs` › req_032_16_another_recognition_model_recognizes_again_and_going_back_repeats_nothing; `crates/db/src/faces.rs` › req_032_16_decisions_carry_over_to_another_detector_and_earlier_work_stays | pass |
 | REQ-032-18 | `crates/domain/src/face_models.rs` › req_032_18_recommends_one_for_speed_and_one_for_accuracy, req_032_18_descriptions_have_no_scores_and_no_second_link; `crates/app/tests/faces.rs` › req_032_18_says_why_a_model_is_recommended | pass |
 | REQ-032-19 | `crates/app/tests/faces.rs` › req_032_19_says_what_choosing_does_and_in_use_stays | pass |
-| REQ-032-20 | `crates/app/src/state/faces.rs` › req_032_20_says_what_the_search_is_doing, req_032_20_a_notice_only_while_it_works; `crates/app/tests/faces.rs` › req_032_20_pause_and_resume, req_032_20_the_icon_shows_on_every_page_and_leads_to_the_settings | pass |
+| REQ-032-20 | `crates/app/src/state/faces.rs` › req_032_20_says_what_the_search_is_doing, req_032_20_never_says_none_of_none, req_032_20_a_notice_only_while_it_works; `crates/indexer/src/faces.rs` › req_032_20_counts_the_photos_before_the_first_is_done; `crates/app/tests/faces.rs` › req_032_20_pause_and_resume, req_032_20_the_icon_shows_on_every_page_and_leads_to_the_settings | pass |
 | REQ-032-21 | `crates/db/src/faces.rs` › req_032_21_says_whether_a_photo_was_looked_at; `crates/app/tests/faces.rs` › req_032_21_details_say_whether_a_photo_was_looked_at | pass |
 | REQ-032-22 | `crates/db/src/faces.rs` › req_032_22_looks_again_and_decisions_stay; `crates/app/tests/faces.rs` › req_032_22_look_again_from_the_details, req_032_22_look_through_all_again_asks_first | pass |
 | REQ-032-23 | `crates/indexer/src/faces.rs` › req_032_23_recognizes_a_photos_faces_right_after_looking_at_it, req_032_23_only_looks_without_a_recognition_model_and_catches_up_with_one; `crates/db/src/faces.rs` › req_032_23_only_the_open_faces_of_that_photo | pass |
