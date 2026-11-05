@@ -108,6 +108,21 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 - **Then** the 95th percentile of frame times stays within REQ-006-12's budget (below 16 ms on an integrated laptop GPU, measured without vsync)
 - **And** rendering thumbnails runs at a lower priority than the UI
 
+### REQ-006-16 · Years beside the scrollbar
+
+- **Given** a gallery sorted by a date that doesn't fit the window
+- **When** the pointer is near the scrollbar, or the scrollbar is being dragged
+- **Then** the years of the result show beside the scrollbar, each at the height the thumb has when the gallery is scrolled to that year's first item, so a year holding more items takes more of the bar
+- **And** a year too close to the one above it isn't shown, so labels never overlap
+- **And** clicking a year scrolls to its first item
+- **And** with the pointer elsewhere, under a menu or the viewer, during autoscroll, or for another sort, no years show
+
+### REQ-006-17 · Month while dragging
+
+- **Given** a gallery sorted by a date
+- **When** the user drags the scrollbar
+- **Then** the month and year at the top of the gallery show beside the thumb ("June 2023"), and go away on release
+
 ## Out of scope
 
 - Selecting multiple media items, and drag and drop to other apps.
@@ -140,3 +155,5 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 | REQ-006-13 | `crates/app/src/textures.rs` › req_006_13_frees_least_recently_shown_textures_down_to_90_percent_of_the_budget, req_006_13_keeps_textures_shown_or_requested_in_this_or_the_last_frame; `cargo xtask gallery-bench` (at most 511 MB of a 512 MB budget) | pass |
 | REQ-006-14 | `crates/domain/src/autoscroll.rs` › req_006_14_scrolls_toward_the_pointer_faster_the_farther_it_is, req_006_14_releasing_after_moving_stops_it, req_006_14_a_click_keeps_it_on_until_the_next_click; `crates/app/tests/gallery.rs` › req_006_14_scrolls_while_the_middle_button_is_held_and_after_a_middle_click, req_006_14_stops_at_the_end_without_scrolling_past_it, req_006_14_the_wheel_or_a_key_stops_it | pass |
 | REQ-006-15 | `crates/indexer/src/thumbnails.rs` › req_006_15_renders_below_the_ui_threads_priority; `cargo xtask gallery-bench --originals` (Linux VM with lavapipe: cold p95 527 → 307 ms with the lowered priority, warm 223 ms) | partial (the 16 ms budget on an integrated laptop GPU not measured yet) |
+| REQ-006-16 | `crates/domain/src/scrollbar.rs` › req_006_16_marks_where_each_year_starts_in_either_order, req_006_16_places_a_year_where_the_thumb_is_when_scrolled_there, req_006_16_a_long_gallery_has_the_shortest_thumb, req_006_16_drops_years_too_close_together; `crates/app/tests/gallery.rs` › req_006_16_shows_years_near_the_scrollbar_and_jumps_to_one (snapshot `gallery_years`), req_006_16_leaves_out_years_too_close_together, req_006_16_shows_no_years_for_other_sorts, req_006_16_shows_no_years_without_a_scrollbar | pass |
+| REQ-006-17 | `crates/app/src/format.rs` › req_006_17_names_the_month_and_year; `crates/app/tests/gallery.rs` › req_006_17_shows_the_month_while_dragging_the_scrollbar (snapshot `gallery_years_dragging`) | pass |

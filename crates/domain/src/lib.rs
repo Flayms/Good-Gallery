@@ -18,6 +18,7 @@ pub mod look;
 pub mod media;
 pub mod paint;
 pub mod rating;
+pub mod scrollbar;
 pub mod search;
 pub mod selection;
 pub mod sidebar;

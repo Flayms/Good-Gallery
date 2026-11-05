@@ -4,6 +4,7 @@
 
 mod list;
 mod tiles;
+mod years;
 
 use crate::icons::Icon;
 use crate::textures::{TextureRequest, TextureStreamer};
@@ -1445,7 +1446,7 @@ impl Gallery {
         } else if let Some(top) = self.viewed.and_then(|(index, _)| self.reveal(&arranged, index, count)) {
             scroll = scroll.vertical_scroll_offset(top);
         }
-        scroll.show_viewport(ui, |ui, viewport| {
+        let output = scroll.show_viewport(ui, |ui, viewport| {
             self.offset = viewport.min.y;
             self.view_height = viewport.height() - inset_top;
             ui.set_min_height(total + inset_top + PADDING);
@@ -1469,6 +1470,13 @@ impl Gallery {
                 self.selection.clear();
             }
         });
+        self.year_labels(
+            ui,
+            &arranged,
+            scroll_bar_rect(area, list),
+            output.content_size.y,
+            output.inner_rect.height(),
+        );
         self.arranged = Some(arranged);
         if list {
             list::column_header(ui, area, self.list_width);
