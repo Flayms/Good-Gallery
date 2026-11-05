@@ -625,6 +625,15 @@ impl AppState {
         self
     }
 
+    /// _Faces settings_ in the menu of what's running (REQ-032-20).
+    pub fn open_face_settings(&mut self) {
+        self.page = Page::Settings;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.faces.reveal = true;
+        }
+    }
+
     /// Asks for the latest version when it is due, without blocking (REQ-031-01).
     fn check_for_updates(&mut self) {
         if !self

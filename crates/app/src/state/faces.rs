@@ -140,6 +140,8 @@ pub struct Faces {
     /// How a recognition model being added expects its pixels.
     pub added_style: AddedStyle,
     pub confirm_delete: bool,
+    /// The settings should scroll to this section (REQ-032-20).
+    pub reveal: bool,
     pub confirm_look_again: bool,
     pub model_seems_wrong: bool,
     model_checked: Option<Instant>,

@@ -36,18 +36,24 @@ pub(crate) fn page_header(ui: &mut egui::Ui, rect: Rect, state: &mut AppState, t
             rect.bottom() - 8.0,
         ),
     );
+    let work = crate::processing::running(state);
     ui.scope_builder(
         egui::UiBuilder::new().id_salt("settings header").max_rect(controls),
         |ui| {
-            ui.horizontal_centered(|ui| {
-                if state.sidebar.is_hidden() && crate::sidebar::show_button(ui) {
-                    state.sidebar.set_hidden(false, state.db.as_ref());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if crate::processing::button(ui, &work) {
+                    state.open_face_settings();
                 }
-                let back = icon_button(ui, Icon::ChevronLeft, "Back to gallery", "Back to gallery");
-                if back.clicked() {
-                    state.page = Page::Gallery;
-                }
-                ui.label(RichText::new(title).font(FontId::new(theme::SIZE_TITLE, theme::semibold())));
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    if state.sidebar.is_hidden() && crate::sidebar::show_button(ui) {
+                        state.sidebar.set_hidden(false, state.db.as_ref());
+                    }
+                    let back = icon_button(ui, Icon::ChevronLeft, "Back to gallery", "Back to gallery");
+                    if back.clicked() {
+                        state.page = Page::Gallery;
+                    }
+                    ui.label(RichText::new(title).font(FontId::new(theme::SIZE_TITLE, theme::semibold())));
+                });
             });
         },
     );
@@ -621,6 +627,10 @@ fn model_row(
 fn faces(ui: &mut egui::Ui, state: &mut AppState) {
     use crate::state::faces::{AddedStyle, style_label};
     use domain::face_models::{CATALOG, InputStyle, ModelKind};
+    // Centered, since the top of the page lies under the header.
+    if std::mem::take(&mut state.faces.reveal) {
+        ui.scroll_to_cursor(Some(egui::Align::Center));
+    }
     section_title(ui, "Faces");
     let summary = state.faces.summary();
     group(ui, |ui| {

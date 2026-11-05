@@ -9,7 +9,6 @@ pub mod format;
 pub mod gallery;
 pub mod glass;
 pub mod icons;
-pub mod indexer_progress;
 pub mod info;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod instance;
@@ -18,6 +17,7 @@ pub mod loose;
 pub mod open_with;
 pub mod originals;
 pub mod people_page;
+pub mod processing;
 pub mod search_bar;
 pub mod settings_page;
 pub mod sidebar;
@@ -167,7 +167,6 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     }
     confirm_revert(&ctx, state);
     confirm_many(&ctx, state);
-    indexer_progress::show(&ctx, state);
     state.toasts.show(&ctx);
     // Over the viewer they go with its dark look (REQ-020-05).
     if state.viewer.is_some() {
@@ -455,22 +454,29 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
     }
     // The toolbar floats over the gallery, which scrolls underneath it (REQ-013-03).
     let area = ui.max_rect();
+    // Over a narrow window the sidebar opens above the toolbar, which keeps its button (REQ-019-15).
+    let sidebar_hidden = state.sidebar.is_hidden() || state.sidebar.is_drawer();
+    let work = processing::running(state);
     let gallery = if state.libraries.is_empty() {
         None
     } else {
         state.gallery.as_mut()
     };
-    // Over a narrow window the sidebar opens above the toolbar, which keeps its button (REQ-019-15).
-    let sidebar_hidden = state.sidebar.is_hidden() || state.sidebar.is_drawer();
     let asked = toolbar::show(
         ui,
         area,
         gallery,
         &mut state.search_bar,
         sidebar_hidden,
-        &state.unreadable,
-        &state.updates,
+        toolbar::Notices {
+            unreadable: &state.unreadable,
+            updates: &state.updates,
+            work: &work,
+        },
     );
+    if asked.face_settings {
+        state.open_face_settings();
+    }
     if let Some(update) = asked.update {
         state.answer_update(update, ui.ctx());
     }

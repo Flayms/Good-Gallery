@@ -59,9 +59,10 @@ Every library is mirrored in a local index, so browsing and searching 50k–500k
 ### REQ-002-08 · Scan progress
 
 - **Given** a running scan
-- **When** the user looks at the sidebar
-- **Then** its footer shows "Indexing <library>" (full scan) or "Checking <library>" (quick or changes scan), the number of files seen and updated, and how many scans are waiting
-- **And** the library's entry shows a spinner
+- **When** the user looks at any page
+- **Then** the toolbar or page header shows a spinning processing icon, and nothing covers the window's corners (#175)
+- **And** clicking the icon shows "Indexing <library>" (full scan) or "Checking <library>" (quick or changes scan), the number of files seen and updated, and how many scans are waiting, updated while it is open
+- **And** the library's entry shows a spinner, and once nothing is running the icon is gone
 
 ### REQ-002-09 · Offline library at scan start
 
@@ -159,7 +160,7 @@ Every library is mirrored in a local index, so browsing and searching 50k–500k
 | REQ-002-05 | `crates/indexer/src/scan.rs` › rereads_files_from_an_older_metadata_extractor; `crates/indexer/src/schedule.rs` › scans_libraries_with_outdated_rows_fully_and_others_quickly | pass |
 | REQ-002-06 | `crates/indexer/src/scan.rs` › writes_read_files_while_the_scan_still_runs | pass |
 | REQ-002-07 | `crates/indexer/src/indexer.rs` › merges_scopes_keeping_the_more_thorough_kind, runs_scans_one_at_a_time_in_request_order | pass |
-| REQ-002-08 | `crates/app/tests/indexing.rs` › shows_which_library_is_scanned_with_counts_and_waiting_scans | partial: drawn over the window's bottom-left corner (the sidebar's foot) rather than as a footer row; the library's spinner is drawn but not tested |
+| REQ-002-08 | `crates/app/tests/indexing.rs` › req_002_08_shows_which_library_is_scanned_with_counts_and_waiting_scans (snapshot `processing_menu`) | partial: the library's spinner is drawn but not tested |
 | REQ-002-09 | `crates/indexer/src/scan.rs` › keeps_the_index_of_unreachable_libraries | pass |
 | REQ-002-10 | `crates/indexer/src/scan.rs` › stops_and_keeps_everything_when_the_library_goes_offline_during_a_scan | pass |
 | REQ-002-11 | `crates/indexer/src/scan.rs` › keeps_the_media_of_folders_that_cant_be_listed_and_retries_them (Unix only: a folder without the read permission) | pass |
