@@ -526,7 +526,7 @@ fn req_032_03_says_why_a_dropped_file_isnt_added() {
     let mut harness = settings(&fixture, false);
     let photo = fixture.dir.path().join("photo.jpg");
     std::fs::write(&photo, b"a photo").unwrap();
-    drop_files(&mut harness, &[photo.clone()]);
+    drop_files(&mut harness, std::slice::from_ref(&photo));
     assert!(harness.state().faces.models.is_empty());
     harness.get_by_label_contains("photo.jpg isn't an ONNX file");
 
