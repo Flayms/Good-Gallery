@@ -661,19 +661,16 @@ fn req_032_20_the_icon_shows_on_every_page_and_leads_to_the_settings() {
         harness.get_by_label("What's running").click();
         harness.run_steps(3);
     };
-    assert!(harness.query_by_label("Looking for faces").is_none(), "behind the icon");
+    assert!(harness.query_by_label("Finding faces").is_none(), "behind the icon");
     open(&mut harness);
-    assert!(harness.query_by_label("Looking for faces").is_some(), "in the gallery");
+    assert!(harness.query_by_label("Finding faces").is_some(), "in the gallery");
     harness.key_press(Key::Escape);
     harness.run_steps(3);
 
     harness.state_mut().page = Page::People;
     harness.run_steps(3);
     open(&mut harness);
-    assert!(
-        harness.query_by_label("Looking for faces").is_some(),
-        "on the People page"
-    );
+    assert!(harness.query_by_label("Finding faces").is_some(), "on the People page");
 
     harness.get_by_label("Faces settings").click();
     harness.run_steps(3);

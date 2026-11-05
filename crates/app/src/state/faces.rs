@@ -67,23 +67,34 @@ pub fn search_summary(
     if let Some(problem) = &status.problem {
         return summary("Stopped", problem.clone(), None, false);
     }
+    // Only for a moment, while the search counts for the first time: never `0 of 0` (REQ-032-20).
+    if !status.counted {
+        let title = if paused { "Paused" } else { "Getting ready" };
+        return summary(title, String::new(), None, false);
+    }
     let progress = status.progress;
     let count = crate::format::count;
     let photos_share = progress.photos_done as f32 / progress.photos.max(1) as f32;
-    let looked_at = format!(
-        "{} of {} photos looked at, {} faces found.",
+    let done = format!(
+        "{} of {} photos done, {} faces found.",
         count(progress.photos_done),
         count(progress.photos),
         count(progress.faces)
     );
     if paused {
-        let detail = format!("{looked_at} Everything found so far stays.");
+        let detail = format!("{done} Everything found so far stays.");
         return summary("Paused", detail, Some(photos_share), false);
     }
     let photos_left = progress.photos_done < progress.photos;
     let faces_left = recognizer && progress.faces_recognized < progress.faces;
-    if status.working && (photos_left || progress.photos == 0) {
-        return summary("Looking for faces", looked_at, Some(photos_share), true);
+    if status.working && photos_left {
+        // Each photo gets both steps before the next one (REQ-032-23), so its count stands for both.
+        let title = if recognizer {
+            "Finding and recognizing faces"
+        } else {
+            "Finding faces"
+        };
+        return summary(title, done, Some(photos_share), true);
     }
     if status.working && faces_left {
         let detail = format!(
@@ -97,13 +108,13 @@ pub fn search_summary(
     if photos_left {
         let left = progress.photos - progress.photos_done;
         let detail = format!(
-            "{looked_at} The other {} are in a library that can't be reached right now.",
+            "{done} The other {} are in a library that can't be reached right now.",
             count(left)
         );
         return summary("Waiting", detail, Some(photos_share), false);
     }
     let mut detail = format!(
-        "All {} photos looked at, {} faces found.",
+        "All {} photos done, {} faces found.",
         count(progress.photos),
         count(progress.faces)
     );
@@ -639,6 +650,7 @@ mod tests {
                 faces,
                 faces_recognized,
             },
+            counted: true,
             working,
             problem: None,
         }
@@ -651,7 +663,11 @@ mod tests {
         };
         assert_eq!(title(false, false, false, None), "Not looking for faces");
         let looking = status(10, 100, 5, 0, true);
-        assert_eq!(title(true, true, false, Some(&looking)), "Looking for faces");
+        assert_eq!(
+            title(true, true, false, Some(&looking)),
+            "Finding and recognizing faces"
+        );
+        assert_eq!(title(true, false, false, Some(&looking)), "Finding faces");
         assert_eq!(title(true, true, true, Some(&looking)), "Paused");
         assert_eq!(
             title(true, true, false, Some(&status(100, 100, 50, 10, true))),
@@ -684,8 +700,24 @@ mod tests {
         );
 
         let shown = search_summary(true, true, false, Some(&looking));
-        assert_eq!(shown.detail, "10 of 100 photos looked at, 5 faces found.");
+        assert_eq!(shown.detail, "10 of 100 photos done, 5 faces found.");
         assert_eq!(shown.share, Some(0.1));
+    }
+
+    /// REQ-032-20: before the first count there is nothing to say yet, and certainly not `0 of 0`.
+    #[test]
+    fn req_032_20_never_says_none_of_none() {
+        let uncounted = FaceStatus {
+            working: true,
+            ..FaceStatus::default()
+        };
+        let starting = search_summary(true, true, false, Some(&uncounted));
+        assert_eq!((starting.title, starting.detail.as_str()), ("Getting ready", ""));
+        assert_eq!(starting.share, None);
+        assert_eq!(search_summary(true, true, true, Some(&uncounted)).title, "Paused");
+
+        let empty = search_summary(true, true, false, Some(&status(0, 0, 0, 0, true)));
+        assert_eq!(empty.title, "Finished", "a library without photos is simply done");
     }
 
     #[test]
