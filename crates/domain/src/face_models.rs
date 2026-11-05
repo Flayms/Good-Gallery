@@ -129,7 +129,7 @@ pub const CATALOG: &[CatalogModel] = &[
         sha256: "b56942f072c67385f44734b9458b0ccc4a2226888a113f77e0c802ad0c77b4c3",
         bytes: 73_084_333,
         license: "Non-commercial",
-        why: "Recommended for accuracy. More accurate, but takes about twice as long per face.",
+        why: "Recommended for accuracy. Takes about twice as long per face.",
     },
     CatalogModel {
         name: "SFace",
@@ -141,7 +141,7 @@ pub const CATALOG: &[CatalogModel] = &[
         sha256: "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
         bytes: 38_696_353,
         license: "Apache-2.0",
-        why: "For work use: the only one here with a clear commercial license, but less accurate.",
+        why: "For work use: the only one here with a clear commercial license.",
     },
 ];
 
