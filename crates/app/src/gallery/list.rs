@@ -153,9 +153,6 @@ impl Gallery {
         let y = rect.center().y;
         let thumb_rect = Rect::from_center_size(pos2(thumb.0 + THUMB / 2.0, y), Vec2::splat(THUMB));
         self.paint_thumbnail(ui, thumb_rect, 4, id, frame);
-        if selected {
-            super::tiles::check_badge_small(ui, thumb_rect);
-        }
         let Some(item) = self.items.get(&id) else { return };
         name_cell(ui, name, y, item);
         text_cell(ui, folder, y, folder_of(&item.rel_path), theme::muted(), false);
