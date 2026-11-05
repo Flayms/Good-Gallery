@@ -1,6 +1,27 @@
 # Changelog
 
 All notable changes to Good Gallery. Versions follow [Semantic Versioning](https://semver.org), entries are generated from [Conventional Commits](https://www.conventionalcommits.org).
+## [0.6.0](https://github.com/Flayms/Good-Gallery/releases/tag/v0.6.0) · 2026-11-05
+
+### ✨ Features
+
+- **viewer:** Zoom a photo with a touchpad's pinch (#168) (#184) ([`ff2f7e0`](https://github.com/Flayms/Good-Gallery/commit/ff2f7e0f159ea092cfd63be2f18f902af6d841ec))
+- **selection:** A selected item shows only its ring (#185) ([`704d59c`](https://github.com/Flayms/Good-Gallery/commit/704d59c8ff44d73bad66756ed5b0a6a419b239c4))
+- **faces:** Recognize a photo's faces right after finding them (#182) (#189) ([`3a74bca`](https://github.com/Flayms/Good-Gallery/commit/3a74bca6dc75bc6defce2e2bc5691e7fe23bebfe))
+- **faces:** Add a model by choosing or dropping a file, no more links (#187) ([`f9fd549`](https://github.com/Flayms/Good-Gallery/commit/f9fd5496040f45e75b91b71b738fb41b9277f1f8))
+- **processing:** What's running moves behind an icon (#190) ([`112c74b`](https://github.com/Flayms/Good-Gallery/commit/112c74b2e7e49421a5d9b47a5da11de0a4082118))
+- **updates:** Check when the app starts, and with a button (#181) (#197) ([`68c44fd`](https://github.com/Flayms/Good-Gallery/commit/68c44fdbe18b3e9377c8ff129557188c642f2b1b))
+- **selection:** A click opens, a circle starts a selection (#191) (#198) ([`563bbb8`](https://github.com/Flayms/Good-Gallery/commit/563bbb8951e55f85aba03e321ef08a8062fa74a6))
+- **gallery:** The scrollbar shows years and the month while dragging (#199) (#208) ([`655523b`](https://github.com/Flayms/Good-Gallery/commit/655523ba13c05b28cd4d6d3668cccc0fb7add423))
+
+### 🐛 Bug fixes
+
+- **viewer:** Keep the control bar's buttons apart (#183) ([`7ad1e07`](https://github.com/Flayms/Good-Gallery/commit/7ad1e071ab284dc7337179fe2d640b2ed0a81bbc))
+- **faces:** Shorter model descriptions without scores (#186) ([`46ed546`](https://github.com/Flayms/Good-Gallery/commit/46ed54672a85b22e5a79eb0bcd5c6f33e07fdfad))
+- **faces:** Show the faces of a group on the People page (#194) (#195) ([`cbd5ef2`](https://github.com/Flayms/Good-Gallery/commit/cbd5ef2e3665e7806edacd6b74571ddeb3a4486b))
+- **faces:** Say clearly what the search is doing, from the start (#193, #192) (#196) ([`0852df8`](https://github.com/Flayms/Good-Gallery/commit/0852df8d0f937bc9bb4d945f4d76f1809ec3ec66))
+
+**Full changelog:** [v0.5.1...v0.6.0](https://github.com/Flayms/Good-Gallery/compare/v0.5.1...v0.6.0)
 ## [0.5.1](https://github.com/Flayms/Good-Gallery/releases/tag/v0.5.1) · 2026-11-05
 
 ### 🔧 Maintenance
