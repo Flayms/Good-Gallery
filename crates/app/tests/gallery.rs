@@ -587,3 +587,152 @@ fn req_018_10_caption_buttons_at_the_left() {
     assert!(harness.get_by_label("Maximize window").rect().right() <= show.left());
     harness.snapshot("caption_left_sidebar_hidden_linux");
 }
+
+/// 40 photos for each of `years`, newest year first, around noon in the middle of June, one day each.
+fn photos_of_years(years: &[i64]) -> Vec<IndexedFile> {
+    let mut files = Vec::new();
+    for (y, year) in years.iter().enumerate() {
+        // Whole years of 365.25 days from 2020-06-15.
+        let taken_at = 1_592_222_400_000 + (year - 2020) * 31_557_600_000;
+        for i in 0..40 {
+            let name = format!("{year}-{i}.jpg");
+            files.push(file(&name, (400, 400), taken_at - (y * 40 + i) as i64, None));
+        }
+    }
+    files
+}
+
+fn right_edge(harness: &egui_kittest::Harness<'_, app::AppState>) -> f32 {
+    harness.ctx.content_rect().right()
+}
+
+/// REQ-006-16: the years show only near the scrollbar, and clicking one scrolls to its first item.
+#[test]
+fn req_006_16_shows_years_near_the_scrollbar_and_jumps_to_one() {
+    let fixture = Fixture::new();
+    let mut harness = common::harness_with_step(
+        fixture.state(index(&photos_of_years(&[2024, 2023, 2022, 2020]))),
+        1.0 / 60.0,
+    );
+    settle(&mut harness);
+    harness.hover_at(egui::pos2(500.0, 400.0));
+    harness.run_steps(20);
+    assert!(harness.query_by_label("2023").is_none(), "hidden away from the bar");
+
+    harness.hover_at(egui::pos2(right_edge(&harness) - 30.0, 400.0));
+    harness.run_steps(20);
+    let y = |year: &str| harness.get_by_label(year).rect().center().y;
+    let (y2024, y2023, y2022, y2020) = (y("2024"), y("2023"), y("2022"), y("2020"));
+    // By items, as each year holds as many; 2021 has none and takes no room. (The first year also holds the space
+    // above the first row.)
+    assert!(y2024 < y2023 && y2023 < y2022 && y2022 < y2020);
+    assert!(
+        ((y2022 - y2023) - (y2020 - y2022)).abs() < 2.0,
+        "{y2023} {y2022} {y2020}"
+    );
+    let y2023 = y("2023");
+    harness.snapshot(common::snapshot_name("gallery_years"));
+
+    harness.get_by_label("2023").click();
+    harness.run_steps(5);
+    assert_eq!(gallery(&harness).first_visible(), 40);
+    // The bar's own click goes to the same place: the label sits where the thumb is when scrolled there.
+    let offset = gallery(&harness).offset();
+    harness.state_mut().gallery.as_mut().unwrap().scroll_to(0.0);
+    harness.run_steps(5);
+    click_on_bar(&mut harness, y2023);
+    assert!((gallery(&harness).offset() - offset).abs() < 2.0);
+}
+
+fn click_on_bar(harness: &mut egui_kittest::Harness<'_, app::AppState>, y: f32) {
+    let pos = egui::pos2(right_edge(harness) - 5.0, y);
+    harness.hover_at(pos);
+    harness.run_steps(2);
+    press(harness, egui::PointerButton::Primary, pos, true);
+    harness.step();
+    press(harness, egui::PointerButton::Primary, pos, false);
+    harness.run_steps(5);
+}
+
+/// REQ-006-16: labels never overlap, however many years there are.
+#[test]
+fn req_006_16_leaves_out_years_too_close_together() {
+    let fixture = Fixture::new();
+    // One photo a year for 60 years under many of the newest year: most of them share the end of the bar.
+    let mut files = photos_of_years(&[2024, 2023, 2022]);
+    for year in 1950..2010 {
+        files.push(file(
+            &format!("old-{year}.jpg"),
+            (400, 400),
+            1_592_179_200_000 + (year - 2020) * 31_557_600_000,
+            None,
+        ));
+    }
+    let mut harness = common::harness_with_step(fixture.state(index(&files)), 1.0 / 60.0);
+    settle(&mut harness);
+    harness.hover_at(egui::pos2(right_edge(&harness) - 30.0, 400.0));
+    harness.run_steps(20);
+    let mut rects: Vec<egui::Rect> = (1950..=2024)
+        .filter_map(|year| harness.query_by_label(&year.to_string()).map(|node| node.rect()))
+        .collect();
+    assert!(rects.len() >= 2 && rects.len() < 63, "{} labels", rects.len());
+    rects.sort_by(|a, b| a.top().total_cmp(&b.top()));
+    for pair in rects.windows(2) {
+        assert!(pair[0].bottom() <= pair[1].top(), "{pair:?}");
+    }
+}
+
+/// REQ-006-16: another sort has no years.
+#[test]
+fn req_006_16_shows_no_years_for_other_sorts() {
+    let fixture = Fixture::new();
+    let mut harness = common::harness_with_step(fixture.state(index(&photos_of_years(&[2024, 2023]))), 1.0 / 60.0);
+    settle(&mut harness);
+    let mut by_name = gallery(&harness).search().clone();
+    by_name.sort_by = domain::search::SortBy::Name;
+    harness.state_mut().gallery.as_mut().unwrap().set_search(by_name);
+    settle(&mut harness);
+    harness.hover_at(egui::pos2(right_edge(&harness) - 30.0, 400.0));
+    harness.run_steps(20);
+    assert!(harness.query_by_label("2023").is_none());
+}
+
+/// REQ-006-16: a gallery that fits the window has no scrollbar to put years beside.
+#[test]
+fn req_006_16_shows_no_years_without_a_scrollbar() {
+    let fixture = Fixture::new();
+    let few = &photos_of_years(&[2024])[..2];
+    let mut harness = common::harness_with_step(fixture.state(index(few)), 1.0 / 60.0);
+    settle(&mut harness);
+    harness.hover_at(egui::pos2(right_edge(&harness) - 30.0, 400.0));
+    harness.run_steps(20);
+    assert!(harness.query_by_label("2024").is_none());
+}
+
+/// REQ-006-17: dragging the scrollbar shows the month and year at the top of the gallery, until released.
+#[test]
+fn req_006_17_shows_the_month_while_dragging_the_scrollbar() {
+    use egui::PointerButton::Primary;
+    let fixture = Fixture::new();
+    let mut harness =
+        common::harness_with_step(fixture.state(index(&photos_of_years(&[2024, 2023, 2020]))), 1.0 / 60.0);
+    settle(&mut harness);
+    let x = right_edge(&harness) - 5.0;
+    let start = egui::pos2(x, 90.0);
+    harness.hover_at(start);
+    harness.run_steps(2);
+    press(&harness, Primary, start, true);
+    harness.run_steps(2);
+    assert!(harness.query_by_label("June 2024").is_some());
+
+    // Dragged off the bar, as a hand does: it stays.
+    harness.hover_at(egui::pos2(x - 300.0, 790.0));
+    harness.run_steps(10);
+    assert!(gallery(&harness).offset() > 100.0);
+    assert!(harness.query_by_label("June 2020").is_some());
+    harness.snapshot(common::snapshot_name("gallery_years_dragging"));
+
+    press(&harness, Primary, egui::pos2(x - 300.0, 790.0), false);
+    harness.run_steps(20);
+    assert!(harness.query_by_label("June 2020").is_none());
+}

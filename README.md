@@ -10,7 +10,7 @@ Written in Rust (egui on wgpu).
 
 ## Features
 
-- **Four views:** Masonry, Justified, Grid and List, grouped by day. Scrolling stays smooth with hundreds of thousands of items.
+- **Four views:** Masonry, Justified, Grid and List, grouped by day. Scrolling stays smooth with hundreds of thousands of items, and the scrollbar shows the years to jump to.
 - **Smart albums:** keep a search under a name in the sidebar. It stays up to date as photos are added, tagged and rated.
 - **Libraries anywhere:** add local folders or network shares (`\\server\share`). Thumbnails are cached on your computer, so an offline share stays browsable.
 - **Always up to date:** changes on disk are picked up as they happen, with periodic checks for anything missed.

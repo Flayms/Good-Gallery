@@ -117,6 +117,11 @@ pub fn day(day: chrono::NaiveDate) -> String {
     day.format("%A, %-d %B %Y").to_string()
 }
 
+/// The month and year of a day: "June 2023" (REQ-006-17). English until REQ-013-13.
+pub fn month_year(day: chrono::NaiveDate) -> String {
+    day.format("%B %Y").to_string()
+}
+
 fn count_of(n: u32, one: &str, many: &str) -> String {
     format!("{} {}", count(u64::from(n)), if n == 1 { one } else { many })
 }
@@ -188,6 +193,14 @@ mod tests {
         assert_eq!(
             day(NaiveDate::from_ymd_opt(2026, 10, 26).unwrap()),
             "Monday, 26 October 2026"
+        );
+    }
+
+    #[test]
+    fn req_006_17_names_the_month_and_year() {
+        assert_eq!(
+            month_year(chrono::NaiveDate::from_ymd_opt(2023, 6, 15).unwrap()),
+            "June 2023"
         );
     }
 
