@@ -14,7 +14,7 @@ Users who sort out a shoot want to act on many items at once instead of opening 
 - **When** the user clicks an item
 - **Then** only that item is selected, as in the file manager; it doesn't open (REQ-025-08)
 - **And** a Ctrl-click, or Space on the focused item, selects the item or no longer selects it if it was, and keeps the rest of the selection
-- **And** a selected item shows a ring and a check mark (a row in the List view: the selected background and a check mark)
+- **And** a selected item shows a ring (a row in the List view: the selected background), and nothing else marks it or an item that could join it
 
 ### REQ-025-02 · Select a range
 
