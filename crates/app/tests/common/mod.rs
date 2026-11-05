@@ -120,6 +120,17 @@ pub fn harness_with_step(state: AppState, step_dt: f32) -> Harness<'static, AppS
         .build_ui_state(whole_window, state)
 }
 
+/// A harness drawing with `render_state`, the one the thumbnails' textures are made on, so they can be drawn.
+pub fn harness_on(state: AppState, render_state: eframe::egui_wgpu::RenderState) -> Harness<'static, AppState> {
+    pin_dates();
+    Harness::builder()
+        .with_size([900.0, 600.0])
+        .with_step_dt(1.0 / 60.0)
+        .with_context_setup(app::setup)
+        .renderer(egui_kittest::wgpu::WgpuTestRenderer::from_render_state(render_state))
+        .build_ui_state(whole_window, state)
+}
+
 /// Draws the app over the whole window, as eframe does. kittest insets its UI by 8 px, but the Linux caption buttons
 /// align to the window's edge, so they would sit above the toolbar row (#110).
 fn whole_window(ui: &mut egui::Ui, state: &mut AppState) {
