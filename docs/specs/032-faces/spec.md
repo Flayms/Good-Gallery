@@ -31,7 +31,6 @@ Users with large libraries want to find people without tagging each photo by han
 - **And** the one thing the app can't work out, how a recognition model expects its pixels, is a choice that says what it means, set to what most models use
 - **And** a file the app can't run as that kind of model is refused with the reason, and leaves nothing behind
 - **And** while a file is over the window the section shows where to drop it; a dropped file that isn't `.onnx` is refused with the reason, of several the first is added and a toast says so, and on any other page a dropped file does nothing
-- **And** a model added by link in an earlier version keeps working
 
 ### REQ-032-04 · Off until chosen
 
