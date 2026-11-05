@@ -136,14 +136,14 @@ pub fn show(
 }
 
 fn icon_button(ui: &mut egui::Ui, rect: Rect, icon: Icon, label: &str, tooltip: &str) -> egui::Response {
-    let response = ui
-        .put(
-            rect,
-            egui::Button::image(icon.small())
-                .frame(false)
-                .corner_radius(theme::CONTROL_HEIGHT / 2.0),
-        )
-        .on_hover_text(tooltip);
+    let response = crate::viewer::put_button(
+        ui,
+        rect,
+        egui::Button::image(icon.small())
+            .frame(false)
+            .corner_radius(theme::CONTROL_HEIGHT / 2.0),
+    )
+    .on_hover_text(tooltip);
     let label = label.to_owned();
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
     response

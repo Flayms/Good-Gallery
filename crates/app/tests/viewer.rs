@@ -165,6 +165,22 @@ fn req_009_01_req_009_04_opens_the_clicked_item_with_its_original() {
     harness.snapshot(common::snapshot_name("viewer"));
 }
 
+/// REQ-013-18: neighbours in the control bar don't touch, so two pressed toggles stay two circles.
+#[test]
+fn req_013_18_the_viewers_bar_buttons_stay_apart() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture, 3, &[]);
+    open(&mut harness, "1.png");
+    let rect = |label: &str| harness.get_by_role_and_label(Role::Button, label).rect();
+    let (info, filmstrip, close) = (rect("Info"), rect("Filmstrip"), rect("Close"));
+    for (left, right) in [(info, filmstrip), (filmstrip, close)] {
+        assert!(
+            right.left() - left.right() >= 2.0,
+            "{left:?} and {right:?} should have a gap between them"
+        );
+    }
+}
+
 /// REQ-009-01: Enter on a focused tile opens it too.
 #[test]
 fn req_009_01_opens_the_focused_tile_with_enter() {

@@ -128,6 +128,12 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 - **Then** translucent surfaces are opaque as in REQ-013-06 from the next frame on, and stay so after a restart
 - **And** while the OS asks for reduced transparency they are opaque whatever the setting says
 
+### REQ-013-18 · Viewer bar buttons stay apart
+
+- **Given** the viewer's control bar
+- **When** buttons next to each other are pressed or under the pointer
+- **Then** each one's highlight stays in its own place, with a gap between neighbours (#179)
+
 ## Out of scope
 
 - A light theme or following the OS light / dark setting (the app stays dark).
@@ -164,3 +170,4 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 | REQ-013-15 | `crates/app/src/gallery/mod.rs` › req_013_15_the_scrollbar_starts_below_the_toolbar | pass (Settings starts its bar below its header the same way) |
 | REQ-013-16 | `crates/app/src/icons.rs` › req_013_16_given_stars_are_filled_and_missing_ones_outlined | pass |
 | REQ-013-17 | `crates/app/src/theme.rs` › req_013_17_the_setting_or_the_os_reduces_transparency; `crates/app/tests/settings.rs` › req_013_17_the_setting_turns_glass_off_and_stays_after_a_restart; `crates/db/src/settings.rs` › req_010_01_starts_with_defaults_and_persists_updates | pass |
+| REQ-013-18 | `crates/app/tests/viewer.rs` › req_013_18_the_viewers_bar_buttons_stay_apart; snapshot `viewer_faces` for what is painted | pass |
