@@ -730,6 +730,7 @@ impl AppState {
             source: request.source,
             recipe: request.recipe,
             copy: request.copy,
+            keep_original: request.keep_original,
             mtime: self.settings.mtime_on_save,
             subject: request.subject,
             sidecar_orientation: request.sidecar_orientation,

@@ -5,11 +5,12 @@
 
 use crate::icons::Icon;
 use crate::originals::OriginalState;
-use crate::theme;
+use crate::{format, theme};
 use domain::crop::{self, Grip, Ratio};
 use domain::edit::{
-    Adjustment, BlurKind, CURVE_SAMPLES, Channel, Geometry, HISTOGRAM_BINS, Histogram, History, LocalMask, MAX_MASKS,
-    Mask, MaskShape, Params, Part, Pyramid, Recipe, SavedEdit, Section, blur_lod,
+    Adjustment, BlurKind, CURVE_SAMPLES, Channel, DEFAULT_QUALITY, Geometry, HISTOGRAM_BINS, Histogram, History,
+    LocalMask, MAX_MASKS, MIN_LONG_EDGE, MIN_QUALITY, Mask, MaskShape, Params, Part, Pyramid, Recipe, SavedEdit,
+    Section, blur_lod, scaled_size,
 };
 use domain::look::{Look, LookChoice};
 use domain::paint::{MAX_PAINTINGS, MAX_POINTS, Painting, Stroke};
@@ -49,6 +50,23 @@ pub struct Target {
     pub sidecar_orientation: Option<u8>,
 }
 
+/// What the save buttons say on hover (REQ-021-23).
+const TIP_SAVE: &str = "Replaces the photo with the edited one. The original is kept as a backup, so you can change the edit or go back \
+     to the original later.";
+const TIP_WITHOUT_BACKUP: &str = "Replaces the photo with the edited one and deletes the original. Takes the least \
+                                  space, but the edit can't be changed or undone afterwards.";
+
+/// How a save treats the file and its original (REQ-021-09, REQ-021-10, REQ-021-22).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveMode {
+    /// Replace the file, keeping the unedited original as a backup.
+    Replace,
+    /// Save the edited photo beside the file.
+    Copy,
+    /// Replace the file and keep no original.
+    WithoutBackup,
+}
+
 /// What the viewer asks the app to save (REQ-021-09, REQ-021-10).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SaveEdit {
@@ -59,6 +77,8 @@ pub struct SaveEdit {
     pub source: String,
     pub recipe: Recipe,
     pub copy: bool,
+    /// Replacing keeps a backup of the unedited original (REQ-021-22).
+    pub keep_original: bool,
     /// The subject the preview showed, for a recipe with parts (REQ-022-05).
     pub subject: Option<Arc<Mask>>,
     /// Turns an original without an orientation of its own (REQ-004-12).
@@ -83,6 +103,8 @@ pub enum Dialog {
     Leave(Leave),
     /// The first replacement of an original: confirm, then leave as asked.
     Replace(Option<Leave>),
+    /// Saving without a backup, every time (REQ-021-22).
+    WithoutBackup(Option<Leave>),
 }
 
 /// What the panel or a dialog asked for.
@@ -143,6 +165,8 @@ pub struct EditSession {
     /// Whether the _Look_ section is open.
     look_open: bool,
     geometry_open: bool,
+    /// The _Size_ section (REQ-029-09, REQ-021-21).
+    size_open: bool,
     /// Whether the crop's frame is shown over the whole photo (REQ-029-02).
     cropping: bool,
     crop_ratio: Ratio,
@@ -200,6 +224,7 @@ impl EditSession {
             open: [true, false, true, false],
             look_open: true,
             geometry_open: true,
+            size_open: false,
             cropping: false,
             crop_ratio: Ratio::Free,
             crop_portrait: false,
@@ -563,14 +588,15 @@ impl EditSession {
     }
 
     /// The request to save the shown recipe.
-    pub fn save_request(&self, copy: bool) -> Option<SaveEdit> {
+    pub fn save_request(&self, mode: SaveMode) -> Option<SaveEdit> {
         Some(SaveEdit {
             media: self.target.media,
             root_id: self.target.root_id,
             rel_path: self.target.rel_path.clone(),
             source: self.source.clone()?,
             recipe: self.draft.clone(),
-            copy,
+            copy: mode == SaveMode::Copy,
+            keep_original: mode != SaveMode::WithoutBackup,
             subject: match &self.subject {
                 Subject::Found(mask, _) if self.draft.needs_subject() => Some(mask.clone()),
                 _ => None,
@@ -580,16 +606,23 @@ impl EditSession {
     }
 
     /// _Save_ (over the original): asks first the first time, then saves and leaves as asked.
-    pub fn save(&mut self, copy: bool, then: Option<Leave>) -> Option<Outcome> {
+    pub fn save(&mut self, mode: SaveMode, then: Option<Leave>) -> Option<Outcome> {
         if self.saving || !self.is_loaded() {
             return None;
         }
-        if !copy && self.replaces_original() && self.dialog != Some(Dialog::Replace(then)) {
-            self.dialog = Some(Dialog::Replace(then));
+        let ask = match mode {
+            SaveMode::Replace if self.replaces_original() => Some(Dialog::Replace(then)),
+            SaveMode::WithoutBackup => Some(Dialog::WithoutBackup(then)),
+            _ => None,
+        };
+        if let Some(ask) = ask
+            && self.dialog != Some(ask)
+        {
+            self.dialog = Some(ask);
             return None;
         }
         self.dialog = None;
-        let request = self.save_request(copy)?;
+        let request = self.save_request(mode)?;
         self.saving = true;
         Some(Outcome::Save(Box::new(request), then))
     }
@@ -1268,19 +1301,105 @@ impl EditSession {
                 )
                 .fill(theme::text());
                 let changed = self.has_changes();
-                if ui.add_enabled(ready && changed, save).clicked() {
-                    outcome = self.save(false, None);
+                // Also for a photo saved with an edit before, whose backup it deletes (REQ-021-22).
+                let without = ready && (changed || !self.draft.is_neutral());
+                let more = icon_button(ui, Icon::ChevronUp, "More ways to save", "More ways to save", without);
+                egui::Popup::menu(&more).align(egui::RectAlign::TOP_END).show(|ui| {
+                    crate::glass::behind_menu(ui, |ui| {
+                        if ui
+                            .button("Save without backup")
+                            .on_hover_text(TIP_WITHOUT_BACKUP)
+                            .clicked()
+                        {
+                            outcome = self.save(SaveMode::WithoutBackup, None);
+                        }
+                    });
+                });
+                if ui.add_enabled(ready && changed, save).on_hover_text(TIP_SAVE).clicked() {
+                    outcome = self.save(SaveMode::Replace, None);
                 }
+                let copy = egui::Button::new("Save as copy");
+                let tip = format!(
+                    "Keeps the photo as it is and saves the edited one next to it, as “{}”.",
+                    domain::edit::copy_name(&self.target.file_name, |_| false)
+                );
                 if ui
-                    .add_enabled(ready && !self.draft.is_neutral(), egui::Button::new("Save as copy"))
+                    .add_enabled(ready && !self.draft.is_neutral(), copy)
+                    .on_hover_text(tip)
                     .clicked()
                 {
-                    outcome = self.save(true, None);
+                    outcome = self.save(SaveMode::Copy, None);
                 }
             });
         });
         // Clicks and wheel turns on the panel stay in it.
         (outcome, compare)
+    }
+
+    /// The long edge, with shortcuts and the size it gives, and the quality for formats that have one.
+    fn size(&mut self, ui: &mut egui::Ui) {
+        let [width, height] = self.target.full_size;
+        if width > 0 && height > 0 {
+            let (cropped_width, cropped_height) = self.draft.geometry().output_size(width, height);
+            let full = cropped_width.max(cropped_height);
+            let edge = self.draft.long_edge.unwrap_or(full).min(full);
+            let mut current = f64::from(edge);
+            let low = MIN_LONG_EDGE.min(full) as f32;
+            let text = format!("{} px", format::count(u64::from(edge)));
+            let response = slider_row(ui, "Long edge", &text, &mut current, (low, full as f32), 1.0);
+            if response.changed() {
+                self.draft.long_edge = Some(current.round() as u32).filter(|&edge| edge < full);
+            }
+            if response.drag_stopped() || response.clicked() || (response.changed() && !response.dragged()) {
+                self.commit(self.draft.clone());
+            }
+            ui.horizontal_wrapped(|ui| {
+                for percent in [100, 75, 50, 25] {
+                    let target = (full * percent / 100).max(1);
+                    let label = format!("{percent} %");
+                    if ui.add(egui::Button::selectable(edge == target, label)).clicked() {
+                        let mut recipe = self.draft.clone();
+                        recipe.long_edge = (percent < 100).then_some(target);
+                        self.commit(recipe);
+                    }
+                }
+            });
+            let (saved_width, saved_height) = scaled_size(cropped_width, cropped_height, self.draft.long_edge);
+            ui.label(
+                egui::RichText::new(format!(
+                    "Saved at {} × {}",
+                    format::count(u64::from(saved_width)),
+                    format::count(u64::from(saved_height))
+                ))
+                .size(theme::SIZE_CAPTION)
+                .color(theme::muted()),
+            );
+            ui.add_space(4.0);
+        }
+        if self.has_quality() {
+            let quality = self.draft.quality();
+            let mut current = f64::from(quality);
+            let response = slider_row(
+                ui,
+                "Quality",
+                &quality.to_string(),
+                &mut current,
+                (f32::from(MIN_QUALITY), 100.0),
+                1.0,
+            );
+            if response.changed() {
+                self.draft.quality = Some(current.round() as u8).filter(|&quality| quality != DEFAULT_QUALITY);
+            }
+            if response.drag_stopped() || response.clicked() || (response.changed() && !response.dragged()) {
+                self.commit(self.draft.clone());
+            }
+        }
+    }
+
+    /// The photo is saved in a format with a quality: JPEG or WebP (REQ-021-21).
+    fn has_quality(&self) -> bool {
+        let name = self.target.rel_path.to_lowercase();
+        [".jpg", ".jpeg", ".webp"].iter().any(|ext| name.ends_with(ext))
     }
 
     fn sections(&mut self, ui: &mut egui::Ui) {
@@ -1311,6 +1430,14 @@ impl EditSession {
                 if self.cropping {
                     self.crop_shapes(ui);
                 }
+                ui.add_space(8.0);
+            }
+        }
+        // The size and quality of the saved photo (REQ-029-09, REQ-021-21).
+        if self.part == Part::Photo {
+            section_header(ui, "Size", &mut self.size_open);
+            if self.size_open {
+                self.size(ui);
                 ui.add_space(8.0);
             }
         }
@@ -3211,15 +3338,15 @@ mod tests {
 
         // The first save over the original asks; confirmed, it saves.
         session.dialog = None;
-        assert_eq!(session.save(false, None), None);
+        assert_eq!(session.save(SaveMode::Replace, None), None);
         assert_eq!(session.dialog, Some(Dialog::Replace(None)));
-        let Some(Outcome::Save(request, None)) = session.save(false, None) else {
+        let Some(Outcome::Save(request, None)) = session.save(SaveMode::Replace, None) else {
             panic!("saves once confirmed")
         };
         assert_eq!((request.source.as_str(), request.copy), ("a.jpg", false));
         assert!(session.saving);
         // While saving, nothing else starts.
-        assert_eq!(session.save(true, None), None);
+        assert_eq!(session.save(SaveMode::Copy, None), None);
         assert_eq!(session.leave(Leave::Exit), None);
     }
 

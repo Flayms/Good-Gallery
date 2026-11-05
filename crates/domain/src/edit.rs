@@ -360,6 +360,29 @@ pub struct Recipe {
     /// for the whole photo.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub crop: Option<[f32; 4]>,
+    /// The saved photo's long edge in pixels, after the crop and turns (REQ-029-09); `None` for its own size.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub long_edge: Option<u32>,
+    /// JPEG and WebP quality, 10 to 100 (REQ-021-21); `None` for [`DEFAULT_QUALITY`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality: Option<u8>,
+}
+
+/// The quality saved JPEGs and WebPs get unless the edit sets one (REQ-021-21).
+pub const DEFAULT_QUALITY: u8 = 95;
+/// The lowest quality and the shortest long edge an edit can ask for.
+pub const MIN_QUALITY: u8 = 10;
+pub const MIN_LONG_EDGE: u32 = 16;
+
+/// The size of a `width` × `height` photo with its long edge at most `long_edge`, aspect ratio kept and never
+/// enlarged (REQ-029-09).
+pub fn scaled_size(width: u32, height: u32, long_edge: Option<u32>) -> (u32, u32) {
+    let long = width.max(height);
+    let Some(edge) = long_edge.filter(|&edge| edge < long) else {
+        return (width, height);
+    };
+    let scale = |side: u32| ((f64::from(side) * f64::from(edge) / f64::from(long)).round() as u32).max(1);
+    (scale(width), scale(height))
 }
 
 fn is_zero(turns: &u8) -> bool {
@@ -399,6 +422,8 @@ impl Default for Recipe {
             look: None,
             quarter_turns: 0,
             crop: None,
+            long_edge: None,
+            quality: None,
         }
     }
 }
@@ -415,6 +440,8 @@ impl Recipe {
             && self.curves.is_identity()
             && self.look.is_none()
             && self.geometry().is_identity()
+            && self.long_edge.is_none()
+            && self.quality.is_none()
             && [&self.subject, &self.background]
                 .into_iter()
                 .all(|part| part.as_ref().is_none_or(|part| part.is_neutral()))
@@ -480,6 +507,17 @@ impl Recipe {
             *mask.recipe = light_and_color(&mask.recipe);
         }
         self.tidy_paintings();
+        // The defaults are no change (REQ-021-21, REQ-029-09).
+        self.quality = self
+            .quality
+            .map(|quality| quality.clamp(MIN_QUALITY, 100))
+            .filter(|&quality| quality != DEFAULT_QUALITY);
+        self.long_edge = self.long_edge.map(|edge| edge.max(MIN_LONG_EDGE));
+    }
+
+    /// The quality to save at (REQ-021-21).
+    pub fn quality(&self) -> u8 {
+        self.quality.unwrap_or(DEFAULT_QUALITY)
     }
 
     /// Drops the paintings no mask uses any more, and has the masks name the rest by their new places.
@@ -1855,6 +1893,43 @@ pub fn dither(x: u32, y: u32, channel: u32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn req_029_09_scales_the_long_edge_down_and_never_up() {
+        assert_eq!(scaled_size(4000, 3000, Some(1920)), (1920, 1440));
+        assert_eq!(scaled_size(3000, 4000, Some(1000)), (750, 1000));
+        assert_eq!(scaled_size(4000, 3000, None), (4000, 3000));
+        // Not larger than the photo, also after a crop made it smaller.
+        assert_eq!(scaled_size(1200, 900, Some(1920)), (1200, 900));
+        // A thin panorama keeps at least a pixel.
+        assert_eq!(scaled_size(10000, 10, Some(100)), (100, 1));
+    }
+
+    #[test]
+    fn req_029_09_req_021_21_size_and_quality_are_changes_and_round_trip() {
+        let mut recipe = Recipe {
+            long_edge: Some(1920),
+            ..Recipe::default()
+        };
+        assert!(!recipe.is_neutral());
+        assert_eq!(Recipe::from_json(&recipe.to_json()), Some(recipe.clone()));
+        recipe.long_edge = None;
+        recipe.quality = Some(60);
+        assert!(!recipe.is_neutral());
+        assert_eq!(recipe.quality(), 60);
+        assert_eq!(Recipe::from_json(&recipe.to_json()), Some(recipe.clone()));
+        // The default quality is no change, and nothing goes below the lowest.
+        recipe.quality = Some(DEFAULT_QUALITY);
+        recipe.tidy();
+        assert!(recipe.is_neutral());
+        recipe.quality = Some(1);
+        recipe.long_edge = Some(2);
+        recipe.tidy();
+        assert_eq!(
+            (recipe.quality, recipe.long_edge),
+            (Some(MIN_QUALITY), Some(MIN_LONG_EDGE))
+        );
+    }
+
     use super::*;
 
     const SIZE: [f32; 2] = [100.0, 100.0];
