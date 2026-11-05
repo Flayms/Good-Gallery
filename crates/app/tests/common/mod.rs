@@ -151,26 +151,24 @@ pub fn snapshot_name(name: &str) -> String {
     }
 }
 
-/// Two clicks at `pos` a frame apart, as a double-click is; half a second after any earlier click, which would make it
-/// a triple-click.
-pub fn double_click_at(harness: &mut Harness<'_, AppState>, pos: egui::Pos2) {
+/// A click at `pos`, half a second after any earlier one, so the two aren't taken as a double-click.
+pub fn click_at(harness: &mut Harness<'_, AppState>, pos: egui::Pos2) {
     harness.run_steps(30);
     harness.hover_at(pos);
     harness.run_steps(1);
-    for _ in 0..2 {
-        for pressed in [true, false] {
-            harness.event(egui::Event::PointerButton {
-                pos,
-                button: egui::PointerButton::Primary,
-                pressed,
-                modifiers: egui::Modifiers::NONE,
-            });
-            harness.run_steps(1);
-        }
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(1);
     }
 }
 
-/// Opens the tile or list row of `name` in the viewer with a double-click (REQ-025-08), selected or not.
+/// Opens the tile or list row of `name` in the viewer with a click (REQ-025-10). With a selection the click selects
+/// it instead.
 pub fn open_item(harness: &mut Harness<'_, AppState>, name: &str) {
     use egui::accesskit::Role;
     use egui_kittest::kittest::Queryable as _;
@@ -182,5 +180,5 @@ pub fn open_item(harness: &mut Harness<'_, AppState>, name: &str) {
         .unwrap_or_else(|| panic!("no tile or row {name}"))
         .rect()
         .center();
-    double_click_at(harness, pos);
+    click_at(harness, pos);
 }

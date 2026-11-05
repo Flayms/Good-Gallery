@@ -27,14 +27,6 @@ async function click(page, point) {
   await page.mouse.up();
 }
 
-/** Double-clicks like a person, as opening an item takes (REQ-025-08): two clicks shortly after each other. */
-async function doubleClick(page, point) {
-  await click(page, point);
-  await page.waitForTimeout(50);
-  await page.mouse.down();
-  await page.mouse.up();
-}
-
 /** The files below `dir` in the page's storage (Origin Private File System). */
 function storedFiles(page) {
   return page.evaluate(async () => {
@@ -112,7 +104,7 @@ test("REQ-019-01 to REQ-019-13: pick, scan, browse, search, view, reload, pick a
   });
 
   await test.step("REQ-019-07: the viewer shows a photo in original quality", async () => {
-    await doubleClick(page, PORTRAIT_TILE);
+    await click(page, PORTRAIT_TILE);
     await settle();
     await expect(page).toHaveScreenshot("viewer.png");
     await page.keyboard.press("Escape");

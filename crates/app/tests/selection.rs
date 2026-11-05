@@ -101,35 +101,33 @@ fn click(harness: &mut App, name: &str, modifiers: Modifiers) {
     settle(harness);
 }
 
-/// Double-clicks the tile of `name`, selected or not.
-fn double_click(harness: &mut App, name: &str) {
+/// Selects or deselects the tile of `name` with its circle, which shows under the pointer or with a selection.
+fn tick(harness: &mut App, name: &str) {
     let selected = format!("{name}, selected");
-    let pos = harness
+    let tile = harness
         .query_by_role_and_label(Role::Image, name)
         .unwrap_or_else(|| harness.get_by_role_and_label(Role::Image, &selected))
         .rect()
         .center();
-    double_click_at(harness, pos);
+    harness.hover_at(tile);
+    harness.run_steps(2);
+    harness
+        .get_by_role_and_label(Role::CheckBox, &format!("Select {name}"))
+        .click();
     settle(harness);
 }
 
-/// Two clicks a frame apart, as a double-click is; half a second after any earlier click, which would make it a
-/// triple-click.
-fn double_click_at(harness: &mut App, pos: egui::Pos2) {
-    harness.run_steps(30);
-    harness.hover_at(pos);
-    harness.run_steps(1);
-    for _ in 0..2 {
-        for pressed in [true, false] {
-            harness.event(egui::Event::PointerButton {
-                pos,
-                button: egui::PointerButton::Primary,
-                pressed,
-                modifiers: Modifiers::NONE,
-            });
-            harness.run_steps(1);
-        }
-    }
+/// Holds the pointer over the tile of `name`, with `modifiers` held.
+fn hover_tile(harness: &mut App, name: &str, modifiers: Modifiers) {
+    let selected = format!("{name}, selected");
+    let tile = harness
+        .query_by_role_and_label(Role::Image, name)
+        .unwrap_or_else(|| harness.get_by_role_and_label(Role::Image, &selected))
+        .rect()
+        .center();
+    harness.hover_at(tile);
+    harness.event(egui::Event::ModifiersChanged(modifiers));
+    harness.run_steps(3);
 }
 
 fn selected(harness: &App) -> Vec<i64> {
@@ -157,15 +155,15 @@ fn indexed(harness: &App, name: &str) -> Option<i64> {
     .unwrap()
 }
 
-/// REQ-025-01, REQ-025-06: Ctrl-click selects and deselects an item, keeping the others; the toolbar shows how many
-/// are selected next to the search bar.
+/// REQ-025-06, REQ-025-12: circles select and deselect an item, keeping the others; the toolbar shows how many are
+/// selected next to the search bar.
 #[test]
-fn req_025_01_req_025_06_ctrl_click_selects() {
+fn req_025_06_req_025_12_circles_select_and_the_toolbar_counts() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, 4, false, None);
 
-    click(&mut harness, "1.png", Modifiers::COMMAND);
-    click(&mut harness, "3.png", Modifiers::COMMAND);
+    tick(&mut harness, "1.png");
+    tick(&mut harness, "3.png");
     assert_eq!(selected_names(&harness), ["1.png", "3.png"]);
     assert!(harness.query_by_label("2 selected").is_some());
     assert!(harness.query_by_label("Clear selection").is_some());
@@ -173,10 +171,10 @@ fn req_025_01_req_025_06_ctrl_click_selects() {
         harness.query_by_label(app::search_bar::LABEL).is_some(),
         "the search bar stays"
     );
-    assert!(harness.state().viewer.is_none(), "Ctrl-click doesn't open the viewer");
+    assert!(harness.state().viewer.is_none(), "a circle doesn't open the viewer");
     harness.snapshot(common::snapshot_name("selection"));
 
-    click(&mut harness, "1.png", Modifiers::COMMAND);
+    tick(&mut harness, "1.png");
     assert_eq!(selected_names(&harness), ["3.png"]);
     harness.get_by_label("Clear selection").click();
     settle(&mut harness);
@@ -184,36 +182,146 @@ fn req_025_01_req_025_06_ctrl_click_selects() {
     assert!(harness.query_by_label("Clear selection").is_none());
 }
 
+/// REQ-025-10: without a selection a click opens the item; a double-click does nothing more.
+#[test]
+fn req_025_10_a_click_opens() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, 4, false, None);
+    click(&mut harness, "2.png", Modifiers::NONE);
+    let viewer = harness.state().viewer.as_ref().expect("a click opens the viewer");
+    assert_eq!(viewer.index(), 2);
+    assert!(selected(&harness).is_empty(), "and selects nothing");
+}
+
+/// REQ-025-10: Ctrl-click is a plain click.
+#[test]
+fn req_025_10_ctrl_does_nothing_special() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, 4, false, None);
+    click(&mut harness, "2.png", Modifiers::COMMAND);
+    assert!(harness.state().viewer.is_some(), "opens");
+    assert!(selected(&harness).is_empty());
+}
+
+/// REQ-025-12: with a selection too, Ctrl-click is a plain click.
+#[test]
+fn req_025_12_ctrl_does_nothing_special() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, 4, false, None);
+    tick(&mut harness, "0.png");
+    click(&mut harness, "2.png", Modifiers::COMMAND);
+    assert_eq!(
+        selected_names(&harness),
+        ["0.png", "2.png"],
+        "adds, as a plain click would"
+    );
+}
+
+/// REQ-025-11: the circle shows under the pointer and only there, while nothing is selected.
+#[test]
+fn req_025_11_the_circle_shows_under_the_pointer() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, 4, false, None);
+    let circles = |harness: &App| harness.query_all_by_role(Role::CheckBox).count();
+    harness.hover_at(egui::pos2(0.0, 0.0));
+    harness.run_steps(2);
+    assert_eq!(circles(&harness), 0);
+    hover_tile(&mut harness, "1.png", Modifiers::NONE);
+    assert_eq!(circles(&harness), 1);
+    harness.get_by_role_and_label(Role::CheckBox, "Select 1.png");
+    harness.snapshot(common::snapshot_name("selection_hover"));
+}
+
+/// REQ-025-11: _Select_ in an item's context menu, for where nothing can hover.
+#[test]
+fn req_025_11_the_context_menu_selects() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, 4, false, None);
+    harness.get_by_role_and_label(Role::Image, "1.png").click_secondary();
+    settle(&mut harness);
+    harness.get_by_label("Select").click();
+    settle(&mut harness);
+    assert_eq!(selected_names(&harness), ["1.png"]);
+    assert!(harness.state().viewer.is_none());
+}
+
+/// REQ-025-12: with a selection every item has a circle and a click anywhere on it selects or deselects it; without
+/// one again, a click opens.
+#[test]
+fn req_025_12_a_selection_makes_clicks_select() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, 4, false, None);
+    tick(&mut harness, "0.png");
+    assert_eq!(harness.query_all_by_role(Role::CheckBox).count(), 4, "all items");
+
+    click(&mut harness, "2.png", Modifiers::NONE);
+    assert_eq!(selected_names(&harness), ["0.png", "2.png"]);
+    assert!(harness.state().viewer.is_none());
+
+    click(&mut harness, "2.png", Modifiers::NONE);
+    click(&mut harness, "0.png", Modifiers::NONE);
+    assert!(selected(&harness).is_empty(), "the last one leaves the mode");
+    harness.hover_at(egui::pos2(0.0, 0.0));
+    harness.run_steps(2);
+    assert_eq!(harness.query_all_by_role(Role::CheckBox).count(), 0);
+
+    click(&mut harness, "2.png", Modifiers::NONE);
+    assert!(harness.state().viewer.is_some(), "a click opens again");
+}
+
+/// REQ-025-12: Enter on the focused item opens it also with a selection.
+#[test]
+fn req_025_12_enter_still_opens() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, 4, false, None);
+    tick(&mut harness, "0.png");
+    harness.get_by_role_and_label(Role::Image, "2.png").focus();
+    harness.run_steps(2);
+    harness.key_press(Key::Enter);
+    settle(&mut harness);
+    let viewer = harness.state().viewer.as_ref().expect("Enter opens the viewer");
+    assert_eq!(viewer.index(), 2);
+}
+
 /// REQ-025-02: Shift-click adds the range from the anchor, in gallery order.
 #[test]
 fn req_025_02_shift_click_adds_a_range() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, 6, false, None);
-    click(&mut harness, "4.png", Modifiers::COMMAND);
+    tick(&mut harness, "4.png");
     click(&mut harness, "1.png", Modifiers::SHIFT);
     assert_eq!(selected_names(&harness), ["1.png", "2.png", "3.png", "4.png"]);
 }
 
-/// REQ-025-01, REQ-025-08: a click selects only that item and doesn't open it; a double-click opens it.
+/// REQ-025-02: Shift-click without a selection selects that one item, and doesn't open it.
 #[test]
-fn req_025_01_req_025_08_a_click_selects_and_a_double_click_opens() {
+fn req_025_02_shift_click_without_a_selection_selects_one() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, 4, false, None);
-    click(&mut harness, "0.png", Modifiers::NONE);
-    assert_eq!(selected_names(&harness), ["0.png"]);
-    assert!(harness.state().viewer.is_none(), "a click doesn't open the viewer");
-    click(&mut harness, "2.png", Modifiers::NONE);
-    assert_eq!(selected_names(&harness), ["2.png"], "a click selects only that item");
-    click(&mut harness, "0.png", Modifiers::COMMAND);
-    assert_eq!(selected_names(&harness), ["0.png", "2.png"]);
+    click(&mut harness, "2.png", Modifiers::SHIFT);
+    assert_eq!(selected_names(&harness), ["2.png"]);
+    assert!(harness.state().viewer.is_none());
+}
 
-    double_click(&mut harness, "3.png");
-    let viewer = harness
-        .state()
-        .viewer
-        .as_ref()
-        .expect("a double-click opens the viewer");
-    assert_eq!(viewer.index(), 3);
+/// REQ-025-13: an item under the pointer is darker; REQ-025-14 covers what Shift does instead.
+#[test]
+fn req_025_13_req_025_14_shift_shows_what_a_click_would_add() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, 6, false, None);
+    let preview = |harness: &App| harness.state().gallery.as_ref().unwrap().range_preview();
+
+    hover_tile(&mut harness, "1.png", Modifiers::SHIFT);
+    assert_eq!(preview(&harness), None, "only with a selection");
+    hover_tile(&mut harness, "1.png", Modifiers::NONE);
+
+    tick(&mut harness, "4.png");
+    hover_tile(&mut harness, "1.png", Modifiers::NONE);
+    assert_eq!(preview(&harness), None, "only while Shift is held");
+    hover_tile(&mut harness, "1.png", Modifiers::SHIFT);
+    assert_eq!(preview(&harness), Some(1..=4));
+    harness.snapshot(common::snapshot_name("selection_preview"));
+    hover_tile(&mut harness, "1.png", Modifiers::NONE);
+    assert_eq!(preview(&harness), None, "gone when Shift is released");
 }
 
 /// REQ-025-04: _Select all_ in the toolbar selects the whole search; a click beside the items clears it.
@@ -292,8 +400,8 @@ fn req_025_07_rates_the_selection() {
     let Some(exiftool) = exiftool() else { return };
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, 4, true, Some(&exiftool));
-    click(&mut harness, "1.png", Modifiers::COMMAND);
-    click(&mut harness, "2.png", Modifiers::COMMAND);
+    tick(&mut harness, "1.png");
+    tick(&mut harness, "2.png");
 
     harness.key_press(Key::Num4);
     settle(&mut harness);

@@ -33,7 +33,7 @@ Glass is drawn by the app, not the OS: the tiles under a glass surface are rende
 Rules:
 
 - **Fallback:** when the _Reduce transparency_ setting is on, Windows' _Transparency effects_ are off, or the GPU can't run the blur pass, glass becomes Raised with the same Rim.
-- **Never on tiles.** No blur on tiles, list rows or anything repeated per media item. Badges on tiles are solid (`rgb(0 0 0 / 0.6)`).
+- **Never on tiles.** No blur on tiles, list rows or anything repeated per media item. Badges on tiles are solid (`rgb(0 0 0 / 0.6)`). A tile under the pointer is darkened by `rgb(0 0 0 / 0.15)`, one a Shift-click would add brightened by `rgb(255 255 255 / 0.18)` (spec 025).
 - **No glass on glass.** A glass surface blurs the gallery below it, not other glass. Overlays (menus, popovers) sit on their own layer above the toolbar and blur the gallery directly.
 - **Few layers.** At most the toolbar plus one open overlay blur at the same time while the gallery scrolls.
 - **Text on Glass bar** is Paper only. Secondary text and placeholders sit on a Field.

@@ -4,28 +4,24 @@
 
 ## Goal
 
-Users who sort out a shoot want to act on many items at once instead of opening each one. A selection in the gallery holds them, in every view, up to all items of a search, and the first thing it does is rate them all (spec 024). Later actions (tags, People and Places, #32) use the same selection.
+Users who sort out a shoot want to act on many items at once instead of opening each one. A selection in the gallery holds them, in every view, up to all items of a search, and the first thing it does is rate them all (spec 024). Later actions (tags, People and Places, #32) use the same selection. A click still opens a photo as long as nothing is selected, so browsing stays one click.
 
 ## Requirements
 
-### REQ-025-01 · Select items
+### ~~REQ-025-01 · Select items~~
 
-- **Given** the gallery in any view
-- **When** the user clicks an item
-- **Then** only that item is selected, as in the file manager; it doesn't open (REQ-025-08)
-- **And** a Ctrl-click, or Space on the focused item, selects the item or no longer selects it if it was, and keeps the rest of the selection
-- **And** a selected item shows a ring (a row in the List view: the selected background), and nothing else marks it or an item that could join it
+Deprecated (#191): replaced by REQ-025-10 to REQ-025-12. A click opens again, and a selection starts at a circle.
 
 ### REQ-025-02 · Select a range
 
-- **Given** the gallery, and the item last clicked or Ctrl-clicked (the anchor)
+- **Given** the gallery, and the item last selected or deselected (the anchor)
 - **When** the user Shift-clicks another item
-- **Then** all items from the anchor to that item, in gallery order, are added to the selection
-- **And** without an anchor only the clicked item is added
+- **Then** all items from the anchor to that item, in gallery order, are added to the selection, and nothing opens
+- **And** without an anchor only the clicked item is added, which also starts a selection
 
 ### ~~REQ-025-03 · Selection mode~~
 
-Deprecated (#164): a click always selects (REQ-025-01) and a double-click opens (REQ-025-08), so there is no mode in which a click does something else.
+Deprecated (#164). A selection changes what a click does again since #191, see REQ-025-12.
 
 ### REQ-025-04 · Select all, clear
 
@@ -56,17 +52,49 @@ Deprecated (#164): a click always selects (REQ-025-01) and a double-click opens 
 - **And** files that can't be written keep their rating and are counted in a toast that names the first one and why (REQ-024-04); the others are rated
 - **And** the browser version doesn't show _Rate_ (REQ-024-05)
 
-### REQ-025-08 · Open with a double-click
+### ~~REQ-025-08 · Open with a double-click~~
 
-- **Given** the gallery in any view
-- **When** the user double-clicks an item, or presses Enter on the focused item
-- **Then** the viewer opens on it (REQ-009-01); the first click of the double-click selected it (REQ-025-01)
+Deprecated (#191): a click opens (REQ-025-10), and a double-click does nothing more.
 
 ### REQ-025-09 · Select a folder's items
 
 - **Given** a library or folder in the sidebar
 - **When** the user right-clicks it and picks _Select all in library_ or _Select all in folder_
 - **Then** the gallery shows that library or folder, as a click on it does, and all its items are selected (REQ-025-04)
+
+### REQ-025-10 · Open with a click
+
+- **Given** the gallery in any view, with nothing selected
+- **When** the user clicks an item, with or without Ctrl, or presses Enter on the focused item
+- **Then** the viewer opens on it (REQ-009-01)
+
+### REQ-025-11 · Start with a circle
+
+- **Given** the gallery with nothing selected
+- **When** the pointer is over an item
+- **Then** a slightly transparent tick circle shows in its top-left corner (a row: on its small thumbnail), and clicking it selects the item without opening it
+- **And** _Select_ in an item's context menu does the same, also where nothing can hover
+
+### REQ-025-12 · Selection mode
+
+- **Given** at least one selected item
+- **When** the gallery shows
+- **Then** every item shows a circle, empty or ticked, and a selected item keeps its ring (a row: the selected background)
+- **And** a click anywhere on an item, or Space on the focused item, selects it or no longer does, and keeps the rest of the selection; Ctrl changes nothing; Enter on the focused item opens it
+- **And** once nothing is selected any more a click opens again (REQ-025-10), and only the circle under the pointer shows
+
+### REQ-025-13 · Darker under the pointer
+
+- **Given** the gallery in a tile view
+- **When** the pointer is over a tile
+- **Then** the tile is slightly darker
+
+### REQ-025-14 · Seeing a range before it is added
+
+- **Given** a selection, and the pointer over an item
+- **When** the user holds Shift
+- **Then** the items a click would add (REQ-025-02) are slightly brighter, and the item under the pointer is too, instead of darker
+- **And** letting go of Shift takes that away at once
 
 ## Out of scope
 
@@ -84,12 +112,17 @@ Deprecated (#164): a click always selects (REQ-025-01) and a double-click opens 
 
 | REQ        | Test | Result |
 | ---------- | ---- | ------ |
-| REQ-025-01 | `crates/domain/src/selection.rs` › req_025_01_a_click_selects_only_that_item, req_025_01_toggles_items; `crates/app/tests/selection.rs` › req_025_01_req_025_06_ctrl_click_selects, req_025_01_req_025_08_a_click_selects_and_a_double_click_opens; snapshot `selection` | pass |
-| REQ-025-02 | `crates/domain/src/selection.rs` › req_025_02_adds_the_range_from_the_anchor; `crates/app/tests/selection.rs` › req_025_02_shift_click_adds_a_range | pass |
+| ~~REQ-025-01~~ | — | no test (deprecated) |
+| REQ-025-02 | `crates/domain/src/selection.rs` › req_025_02_adds_the_range_from_the_anchor; `crates/app/tests/selection.rs` › req_025_02_shift_click_adds_a_range, req_025_02_shift_click_without_a_selection_selects_one | pass |
 | ~~REQ-025-03~~ | — | no test (deprecated) |
 | REQ-025-04 | `crates/domain/src/selection.rs` › req_025_04_selects_all_and_clears; `crates/app/tests/selection.rs` › req_025_04_req_025_05_selects_all_and_clears, req_025_04_select_all_button_and_a_click_on_the_background | pass |
 | REQ-025-05 | `crates/domain/src/selection.rs` › req_025_05_forgets_items_that_left; `crates/app/tests/selection.rs` › req_025_04_req_025_05_selects_all_and_clears | pass |
-| REQ-025-06 | `crates/app/tests/selection.rs` › req_025_01_req_025_06_ctrl_click_selects | pass |
+| REQ-025-06 | `crates/app/tests/selection.rs` › req_025_06_req_025_12_circles_select_and_the_toolbar_counts | pass |
 | REQ-025-07 | `crates/db/src/media.rs` › req_025_07_finds_the_files_of_the_selection; `crates/app/tests/selection.rs` › req_025_07_rates_the_selection, req_025_07_counts_the_files_it_cant_rate, req_025_07_asks_before_rating_many | pass |
-| REQ-025-08 | `crates/app/tests/selection.rs` › req_025_01_req_025_08_a_click_selects_and_a_double_click_opens; `crates/app/tests/viewer.rs` › req_009_01_opens_the_focused_tile_with_enter | pass |
+| ~~REQ-025-08~~ | — | no test (deprecated) |
 | REQ-025-09 | `crates/app/tests/selection.rs` › req_025_09_selects_a_library_or_folder_from_the_sidebar | pass |
+| REQ-025-10 | `crates/app/tests/selection.rs` › req_025_10_a_click_opens, req_025_10_ctrl_does_nothing_special; `crates/app/tests/viewer.rs` › req_009_01_opens_the_focused_tile_with_enter | pass |
+| REQ-025-11 | `crates/app/tests/selection.rs` › req_025_11_the_circle_shows_under_the_pointer (snapshot `selection_hover`), req_025_11_the_context_menu_selects | pass |
+| REQ-025-12 | `crates/domain/src/selection.rs` › req_025_12_toggles_items, req_025_12_the_last_item_leaves_no_anchor; `crates/app/tests/selection.rs` › req_025_06_req_025_12_circles_select_and_the_toolbar_counts (snapshot `selection`), req_025_12_a_selection_makes_clicks_select, req_025_12_ctrl_does_nothing_special, req_025_12_enter_still_opens | pass |
+| REQ-025-13 | `crates/app/tests/selection.rs` › req_025_11_the_circle_shows_under_the_pointer (snapshot `selection_hover`), req_025_13_req_025_14_shift_shows_what_a_click_would_add | pass |
+| REQ-025-14 | `crates/domain/src/selection.rs` › req_025_14_says_what_a_shift_click_covers; `crates/app/tests/selection.rs` › req_025_13_req_025_14_shift_shows_what_a_click_would_add (snapshot `selection_preview`) | pass |
