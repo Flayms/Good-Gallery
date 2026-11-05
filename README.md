@@ -45,7 +45,7 @@ Both include exiftool, ffmpeg and libmpv. The downloads aren't code-signed yet, 
 
 Your index, settings and thumbnails live in `%APPDATA%\good-gallery`. Updates reuse it, and uninstalling leaves it in place.
 
-The app asks GitHub once a day whether there is a newer version and shows a notice if there is. Nothing is downloaded until you press _Update and restart_ (or use the release page, for the portable zip and on Linux). You can turn the check off in the settings.
+The app asks GitHub when it starts whether there is a newer version and shows a notice if there is. _Check now_ in the settings asks at any time. Nothing is downloaded until you press _Update and restart_ (or use the release page, for the portable zip and on Linux). You can turn the check off in the settings.
 
 ### Linux
 

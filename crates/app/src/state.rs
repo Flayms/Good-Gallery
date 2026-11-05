@@ -634,14 +634,21 @@ impl AppState {
         }
     }
 
-    /// Asks for the latest version when it is due, without blocking (REQ-031-01).
+    /// Asks for the latest version when the app starts, without blocking (REQ-031-01).
     fn check_for_updates(&mut self) {
-        if !self
-            .updates
-            .start_check(self.settings.check_for_updates, Instant::now())
-        {
-            return;
+        if self.updates.start_check(self.settings.check_for_updates) {
+            self.spawn_update_check();
         }
+    }
+
+    /// Asks for the latest version because the user said so (REQ-031-11).
+    pub fn check_for_updates_now(&mut self) {
+        if self.updates.ask_check() {
+            self.spawn_update_check();
+        }
+    }
+
+    fn spawn_update_check(&mut self) {
         let Some(updater) = self.updates.updater() else { return };
         self.spawn(move || {
             Event::UpdateChecked(

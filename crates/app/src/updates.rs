@@ -5,11 +5,6 @@ use crate::theme;
 use domain::update::Version;
 use eframe::egui::{self, RichText, Stroke, vec2};
 use std::sync::Arc;
-use std::time::Duration;
-use web_time::Instant;
-
-/// How often the app asks while it stays open (REQ-031-01).
-const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// The running version.
 pub fn current_version() -> Version {
@@ -42,12 +37,23 @@ pub enum Asked {
     SeeWhatsNew,
 }
 
+/// How a check the user asked for went (REQ-031-11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AskedCheck {
+    Running,
+    /// Nothing newer than the running version.
+    Latest,
+    Failed,
+}
+
 #[derive(Default)]
 pub struct Updates {
     updater: Option<Arc<dyn Updater>>,
-    /// When to ask next; `None` until the first check.
-    next_check: Option<Instant>,
+    /// The check at the app's start, or after turning checking on, has been made.
+    asked: bool,
     checking: bool,
+    /// The check the user asked for, until they leave the app or change the setting.
+    pub asked_check: Option<AskedCheck>,
     pub phase: Phase,
     /// The installer runs: the app should close (REQ-031-05).
     pub close: bool,
@@ -65,40 +71,56 @@ impl Updates {
         self.updater.clone()
     }
 
-    /// Whether a check is due at `now`; if so, the next one is a day later.
-    pub fn start_check(&mut self, enabled: bool, now: Instant) -> bool {
-        let due = self.updater.is_some()
-            && enabled
-            && !self.checking
-            && !matches!(self.phase, Phase::Installing(_))
-            && self.next_check.is_none_or(|next| now >= next);
+    /// Whether a check is due: once, when the app starts (REQ-031-01).
+    pub fn start_check(&mut self, enabled: bool) -> bool {
+        let due = self.updater.is_some() && enabled && !self.asked && !self.busy();
         if due {
             self.checking = true;
-            self.next_check = Some(now + CHECK_EVERY);
+            self.asked = true;
         }
         due
     }
 
-    /// How long until the next check, so that an idle window wakes up for it.
-    pub fn wake_in(&self, enabled: bool, now: Instant) -> Option<Duration> {
-        let next = self.next_check.filter(|_| enabled && self.updater.is_some())?;
-        Some(next.saturating_duration_since(now))
+    /// The user asked for a check, also with checking turned off (REQ-031-11). Whether it can start.
+    pub fn ask_check(&mut self) -> bool {
+        let can = self.updater.is_some() && !self.busy();
+        if can {
+            self.checking = true;
+            self.asked_check = Some(AskedCheck::Running);
+        }
+        can
     }
 
-    /// The check answered. An older or equal version, or a failed check, shows nothing (REQ-031-03, REQ-031-04).
+    /// A check is running or an update is being installed, so no check can start.
+    pub fn busy(&self) -> bool {
+        self.checking || matches!(self.phase, Phase::Installing(_))
+    }
+
+    /// The check answered. An older or equal version, or a failed check, shows nothing unless the user asked for this
+    /// check (REQ-031-03, REQ-031-04, REQ-031-11).
     pub fn checked(&mut self, latest: Option<Version>, enabled: bool) {
         self.checking = false;
-        if !enabled || matches!(self.phase, Phase::Installing(_)) {
+        let asked = self.asked_check == Some(AskedCheck::Running);
+        if asked {
+            self.asked_check = Some(if latest.is_some() {
+                AskedCheck::Latest
+            } else {
+                AskedCheck::Failed
+            });
+        }
+        if (!enabled && !asked) || matches!(self.phase, Phase::Installing(_)) {
             return;
         }
         if let Some(latest) = latest.filter(|latest| *latest > current_version()) {
             self.phase = Phase::Available(latest);
+            self.asked_check = None;
         }
     }
 
     /// _Check for updates_ was turned off, or on again, which checks right away (REQ-031-02).
     pub fn enabled_changed(&mut self) {
-        self.next_check = None;
+        self.asked = false;
+        self.asked_check = None;
         if matches!(self.phase, Phase::Available(_)) {
             self.phase = Phase::Unknown;
         }
@@ -159,6 +181,22 @@ fn action(ui: &mut egui::Ui, label: &str) -> bool {
         .clicked()
 }
 
+/// The row of _About_ that checks when the user asks; whether they did. Nothing in a build that can't check, or while an
+/// update is being installed (REQ-031-11).
+pub fn check_row(state: &Updates) -> Option<(String, bool)> {
+    state.updater.as_ref()?;
+    if matches!(state.phase, Phase::Installing(_)) {
+        return None;
+    }
+    let says = match state.asked_check {
+        Some(AskedCheck::Running) => "Checking…".to_owned(),
+        Some(AskedCheck::Latest) => format!("{} is the latest version.", current_version()),
+        Some(AskedCheck::Failed) => "Couldn't reach GitHub. Check your connection and try again.".to_owned(),
+        None => "Asks GitHub right away, even with automatic checks turned off.".to_owned(),
+    };
+    Some((says, !state.busy()))
+}
+
 /// The real thing: GitHub through `media::update`. Keeps the download in `folder`.
 #[cfg(not(target_arch = "wasm32"))]
 pub struct GitHub {
@@ -214,35 +252,53 @@ mod tests {
     }
 
     #[test]
-    fn req_031_01_checks_at_the_start_and_then_daily() {
+    fn req_031_01_checks_at_the_start_and_only_then() {
         let mut updates = Updates::new(Arc::new(Fake));
-        let start = Instant::now();
-        assert!(updates.start_check(true, start), "at the start");
-        assert!(!updates.start_check(true, start), "not while it runs");
+        assert!(updates.start_check(true), "at the start");
+        assert!(!updates.start_check(true), "not while it runs");
         updates.checked(None, true);
-        assert!(!updates.start_check(true, start + Duration::from_secs(60)));
-        assert_eq!(updates.wake_in(true, start), Some(CHECK_EVERY));
-        assert!(updates.start_check(true, start + CHECK_EVERY), "a day later");
+        assert!(!updates.start_check(true), "not again until the next start");
     }
 
     #[test]
     fn req_031_01_a_build_without_an_updater_never_checks() {
         let mut updates = Updates::default();
-        assert!(!updates.start_check(true, Instant::now()));
-        assert_eq!(updates.wake_in(true, Instant::now()), None);
+        assert!(!updates.start_check(true));
+        assert!(!updates.ask_check());
+        assert_eq!(check_row(&updates), None);
     }
 
     #[test]
     fn req_031_02_turned_off_it_doesnt_check_and_turned_on_it_checks_at_once() {
         let mut updates = Updates::new(Arc::new(Fake));
-        let start = Instant::now();
-        assert!(!updates.start_check(false, start));
-        assert!(updates.start_check(true, start));
+        assert!(!updates.start_check(false));
+        assert!(updates.start_check(true));
         updates.checked(None, true);
         updates.enabled_changed();
-        assert!(!updates.start_check(false, start));
+        assert!(!updates.start_check(false));
         updates.enabled_changed();
-        assert!(updates.start_check(true, start));
+        assert!(updates.start_check(true));
+    }
+
+    /// REQ-031-11: an answer to a check the user asked for always shows; only one check runs at a time.
+    #[test]
+    fn req_031_11_says_how_a_check_the_user_asked_for_went() {
+        let mut updates = Updates::new(Arc::new(Fake));
+        assert!(updates.ask_check());
+        assert!(!updates.ask_check(), "not while one runs");
+        assert_eq!(check_row(&updates).map(|(_, can)| can), Some(false));
+        updates.checked(None, false);
+        assert_eq!(updates.asked_check, Some(AskedCheck::Failed));
+
+        assert!(updates.ask_check());
+        updates.checked(Some(current_version()), false);
+        assert_eq!(updates.asked_check, Some(AskedCheck::Latest));
+
+        assert!(updates.ask_check());
+        let newer = Version::parse("99.0.0").unwrap();
+        updates.checked(Some(newer), false);
+        assert_eq!(updates.phase, Phase::Available(newer), "also with checking turned off");
+        assert_eq!(updates.asked_check, None);
     }
 
     #[test]
