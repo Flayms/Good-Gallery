@@ -471,6 +471,95 @@ fn req_032_03_adds_a_file_it_can_run_and_refuses_one_it_cant() {
     assert_eq!(harness.state().faces.models.len(), 1);
 }
 
+/// A file dropped in a test.
+#[derive(Debug)]
+struct Dropped(PathBuf);
+
+impl egui::DroppedFile for Dropped {
+    fn path(&self) -> &Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|error| error.to_string())
+    }
+}
+
+/// Drops `files` on the window.
+fn drop_files(harness: &mut App, files: &[PathBuf]) {
+    harness.input_mut().dropped_files = files
+        .iter()
+        .map(|file| Arc::new(Dropped(file.clone())) as egui::DroppedFileHandle)
+        .collect();
+    settle(harness);
+}
+
+/// REQ-032-03: a model comes from a file, not from a link.
+#[test]
+fn req_032_03_has_no_link_field_and_says_a_file_can_be_dropped() {
+    let fixture = Fixture::new();
+    let harness = settings(&fixture, false);
+    assert!(harness.query_by_label("Link to a model").is_none());
+    harness.get_by_label("Choose file…");
+    harness.get_by_label_contains("drop it here");
+}
+
+/// REQ-032-03: a dropped `.onnx` file is added like a chosen one, and a file that can't run is refused.
+#[test]
+fn req_032_03_adds_a_dropped_file_and_refuses_one_it_cant_run() {
+    let fixture = Fixture::new();
+    let mut harness = settings(&fixture, false);
+    let junk = fixture.dir.path().join("junk.onnx");
+    std::fs::write(&junk, b"no model").unwrap();
+    drop_files(&mut harness, &[junk]);
+    assert!(harness.state().faces.models.is_empty());
+    harness.get_by_label_contains("Couldn't get the model");
+
+    drop_files(&mut harness, &[yunet()]);
+    harness.get_by_label("Use YuNet");
+}
+
+/// REQ-032-03: what isn't an ONNX file is refused with the reason, and of several files the first is added.
+#[test]
+fn req_032_03_says_why_a_dropped_file_isnt_added() {
+    let fixture = Fixture::new();
+    let mut harness = settings(&fixture, false);
+    let photo = fixture.dir.path().join("photo.jpg");
+    std::fs::write(&photo, b"a photo").unwrap();
+    drop_files(&mut harness, std::slice::from_ref(&photo));
+    assert!(harness.state().faces.models.is_empty());
+    harness.get_by_label_contains("photo.jpg isn't an ONNX file");
+
+    drop_files(&mut harness, &[yunet(), photo]);
+    harness.get_by_label("Use YuNet");
+    harness.get_by_label_contains("one model at a time");
+}
+
+/// REQ-032-03: dropping a file on another page does nothing.
+#[test]
+fn req_032_03_a_file_dropped_on_another_page_is_ignored() {
+    let fixture = Fixture::new();
+    let mut harness = settings(&fixture, false);
+    harness.state_mut().page = app::Page::Gallery;
+    settle(&mut harness);
+    drop_files(&mut harness, &[yunet()]);
+    assert!(harness.state().faces.models.is_empty());
+}
+
+/// REQ-032-03: while a file is over the window, the section says where it goes.
+#[test]
+fn req_032_03_shows_where_to_drop_a_file() {
+    let fixture = Fixture::new();
+    let mut harness = settings(&fixture, false);
+    assert!(harness.query_by_label("Drop the model here").is_none());
+    harness.input_mut().hovered_files = vec![egui::HoveredFile {
+        path: Some(yunet()),
+        ..Default::default()
+    }];
+    harness.run_steps(2);
+    harness.get_by_label("Drop the model here");
+}
+
 #[test]
 fn req_032_19_says_what_choosing_does_and_in_use_stays() {
     let fixture = Fixture::new();

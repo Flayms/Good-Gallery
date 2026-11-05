@@ -85,3 +85,8 @@
 
 **Decided:** YuNet, SFace, RetinaFace and AuraFace have a download button. EdgeFace and `buffalo_l` are not in the code: the info page describes them, with a disclaimer for `buffalo_l`, and they are added by link or file. RetinaFace's and AuraFace's open questions are on the page. Only AuraFace's `glintr100.onnx` is downloaded, since its repository also holds InsightFace's non-commercial files.
 **Rejected:** download buttons for models whose publisher says non-commercial.
+
+### 2026-11-05 · Models come from a file, not a link
+
+**Decided:** _Add another model_ takes a chosen or dropped `.onnx` file (#176). A link box was odd to use, and the app no longer downloads anything but the catalog's pinned files. Models added by link earlier stay in the data folder and keep working.
+**Rejected:** keeping the link next to the file. It saved one download by hand for the few who add their own model.

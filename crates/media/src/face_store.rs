@@ -22,8 +22,6 @@ pub enum StoreError {
     Cancelled,
     #[error("the download differs from the published model")]
     WrongHash,
-    #[error("only https links can be added")]
-    NotHttps,
     #[error("{0}")]
     Failed(String),
 }
@@ -124,20 +122,6 @@ impl FaceStore {
     pub fn download(&self, model: &CatalogModel, progress: Progress) -> Result<StoredModel, StoreError> {
         let kind = model.kind;
         self.fetch(model.url, Some(model.sha256), model.name, &|_| Ok(kind), progress)
-    }
-
-    /// Downloads an unlisted model from an `https` link, as what `identify` makes of it (REQ-032-03).
-    pub fn add_link(
-        &self,
-        url: &str,
-        identify: &dyn Fn(&Path) -> Result<ModelKind, String>,
-        progress: Progress,
-    ) -> Result<StoredModel, StoreError> {
-        if !url.to_ascii_lowercase().starts_with("https://") {
-            return Err(StoreError::NotHttps);
-        }
-        let name = name_from_url(url);
-        self.fetch(url, None, &name, identify, progress)
     }
 
     /// Copies an unlisted model from a file, as what `identify` makes of it (REQ-032-03).
@@ -254,18 +238,6 @@ fn copy_hashing(
         file.write_all(&buffer[..read]).map_err(failed)?;
     }
     Ok(hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect())
-}
-
-/// The file's name in a link, without its query.
-fn name_from_url(url: &str) -> String {
-    let path = url.split(['?', '#']).next().unwrap_or(url);
-    let last = path.trim_end_matches('/').rsplit('/').next().unwrap_or_default();
-    let name = last.strip_suffix(".onnx").unwrap_or(last);
-    if name.is_empty() || name.contains(':') {
-        "Model".to_owned()
-    } else {
-        name.to_owned()
-    }
 }
 
 /// The catalog's entry for a stored model, for its size and license.
@@ -422,16 +394,5 @@ mod tests {
 
         store.remove(&model.sha256).unwrap();
         assert!(store.models().is_empty());
-    }
-
-    #[test]
-    fn req_032_03_links_must_be_https_and_name_the_model_by_their_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = FaceStore::in_data_folder(dir.path());
-        let refused = store.add_link("http://example.com/a.onnx", &|_| Ok(KIND), &mut |_, _| true);
-        assert_eq!(refused, Err(StoreError::NotHttps));
-        assert_eq!(name_from_url("https://host/dir/my_model.onnx?x=1#y"), "my_model");
-        assert_eq!(name_from_url("https://host/"), "host");
-        assert_eq!(name_from_url("https://"), "Model");
     }
 }

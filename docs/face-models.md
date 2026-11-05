@@ -50,7 +50,7 @@ If you use Good Gallery for work, such as for a photography business, non-commer
 
 ## Using a model that isn't listed
 
-In _Settings › Faces › Add another model_, paste an `https` link or choose an ONNX file you downloaded yourself. The app works out by itself whether it finds or recognizes faces. Detection models need code for their output, so only YuNet's and RetinaFace's formats work.
+In _Settings › Faces › Add another model_, choose an ONNX file you downloaded yourself, or drop it on the section. The app works out by itself whether it finds or recognizes faces. Detection models need code for their output, so only YuNet's and RetinaFace's formats work.
 
 The one thing a file doesn't say is what pixel values a recognition model expects:
 

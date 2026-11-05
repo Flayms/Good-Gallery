@@ -154,8 +154,12 @@ fn section_title(ui: &mut egui::Ui, title: &str) {
 
 /// Rows in a bordered group, divided by hairlines.
 fn group(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
+    group_with_border(ui, Stroke::new(1.0, theme::rim()), add);
+}
+
+fn group_with_border(ui: &mut egui::Ui, border: Stroke, add: impl FnOnce(&mut egui::Ui)) {
     Frame::new()
-        .stroke(Stroke::new(1.0, theme::rim()))
+        .stroke(border)
         .corner_radius(CornerRadius::same(theme::RADIUS_PANEL))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
@@ -712,29 +716,32 @@ fn faces(ui: &mut egui::Ui, state: &mut AppState) {
     ui.add_space(theme::SPACE * 4.0);
     ui.label(RichText::new("Add another model").font(FontId::new(theme::SIZE_BODY, theme::semibold())));
     ui.add_space(theme::SPACE);
-    group(ui, |ui| {
+    let dropped: Vec<std::path::PathBuf> = ui.input(|input| {
+        let dropped = input.raw.dropped_files.iter();
+        dropped.map(|file| file.path().to_path_buf()).collect()
+    });
+    state.add_dropped_face_files(&dropped);
+    let hovering = ui.input(|input| !input.raw.hovered_files.is_empty());
+    let border = if hovering {
+        Stroke::new(2.0, theme::ring())
+    } else {
+        Stroke::new(1.0, theme::rim())
+    };
+    group_with_border(ui, border, |ui| {
         Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = theme::SPACE * 2.0;
-            ui.add(
-                egui::Label::new(
-                    RichText::new(
-                        "An ONNX file you trust. The app works out what it does. Its license is yours to check.",
-                    )
-                    .color(theme::muted()),
+            let hint = if hovering {
+                RichText::new("Drop the model here").color(theme::text())
+            } else {
+                RichText::new(
+                    "An ONNX file you trust. The app works out what it does. Its license is yours to check. \
+                     Choose one, or drop it here.",
                 )
-                .wrap(),
-            );
+                .color(theme::muted())
+            };
+            ui.add(egui::Label::new(hint).wrap());
             ui.horizontal(|ui| {
-                let field = ui.add(
-                    egui::TextEdit::singleline(&mut state.faces.link)
-                        .hint_text("https://…/model.onnx")
-                        .desired_width(320.0),
-                );
-                field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Link to a model"));
                 let busy = state.faces.arriving().contains_key("added");
-                if ui.add_enabled(!busy, egui::Button::new("Add link")).clicked() {
-                    state.add_face_link();
-                }
                 if ui.add_enabled(!busy, egui::Button::new("Choose file…")).clicked() {
                     state.add_face_file();
                 }
