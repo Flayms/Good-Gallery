@@ -119,6 +119,7 @@ Users with large libraries want to find people without tagging each photo by han
 - **Given** unknown faces of the chosen recognition model
 - **When** the user opens _People_ from the sidebar's People group
 - **Then** similar faces form groups, largest first, without groups of fewer than three
+- **And** each face in a group on screen shows as a crop of its photo, soon after and while the page stays open; a photo without a thumbnail shows an empty square
 - **And** the user can name a group, which asks first and then writes to all its photos, _Ignore_ it, or take a wrong face out of it
 
 ### REQ-032-16 · Changing models
@@ -153,7 +154,9 @@ Users with large libraries want to find people without tagging each photo by han
 
 - **Given** a chosen finding model
 - **When** the user opens the _Faces_ section
-- **Then** its first line says what is going on: looking, recognizing, paused, waiting for an offline library, finished or stopped by a problem, with how far it has come, and offers _Pause_ or _Resume_
+- **Then** its first line says what is going on: finding faces, finding and recognizing them, only recognizing, paused, waiting for an offline library, finished or stopped by a problem, with how far it has come, and offers _Pause_ or _Resume_
+- **And** while photos are waiting it counts photos and the faces found, for both steps when both models are chosen (REQ-032-23): `1,234 of 50,000 photos done, 321 faces found`; only recognizing, it counts faces: `120 of 3,210 faces recognized`
+- **And** the real number of photos shows from the start, before the first photo is done, and it never says `0 of 0`
 - **And** pausing stops after the current photo and keeps everything found, and faces and suggestions stay visible
 - **And** while it works, the processing icon shows on every page; its menu says what the first line says and leads to the _Faces_ section (#175)
 
@@ -208,11 +211,11 @@ Users with large libraries want to find people without tagging each photo by han
 | REQ-032-12 | `crates/media/src/face_regions.rs` › req_032_12_a_new_region_goes_into_the_file_and_reads_back_where_it_was_drawn; `crates/app/tests/faces.rs` › req_032_12_draws_a_face_and_saves_it_where_it_was_drawn | pass |
 | REQ-032-13 | `crates/media/src/face_regions.rs` › req_032_13_removes_and_renames_one_region_of_any_program, req_032_13_a_person_with_another_region_stays_in_person_in_image; `crates/app/tests/faces.rs` › req_032_13_renames_and_removes_a_region_on_the_photo, req_032_13_removing_on_the_photo_takes_the_region_and_the_keyword; `crates/app/tests/tagging.rs` › req_032_13_the_people_tags_remove_button_takes_the_region | pass |
 | REQ-032-14 | `crates/domain/src/faces.rs` › req_032_14_stored_rect_undoes_turning_upright; `crates/media/src/face_regions.rs` › req_032_14_other_regions_and_fields_survive, req_032_14_changes_the_microsoft_region_only_where_it_exists, req_032_14_stores_rectangles_for_the_files_orientation, req_032_14_uses_the_sidecar_when_only_it_has_regions, req_032_14_a_read_only_file_shows_why_and_stays, req_032_14_is_read_back_by_the_indexing_rules; `crates/app/tests/faces.rs` › req_032_14_confirming_a_suggestion_writes_it_and_nothing_before_that, req_032_14_rejecting_and_ignoring_leave_the_file_alone | pass |
-| REQ-032-15 | `crates/domain/src/face_models.rs` › req_032_15_groups_similar_faces_largest_first_without_small_groups; `crates/db/src/faces.rs` › req_032_15_groups_only_faces_without_a_name; `crates/app/src/people_page.rs` › req_032_15_crops_faces_without_stretching_them; `crates/app/tests/faces.rs` › req_032_15_names_a_group_after_asking_and_writes_to_all_its_photos, req_032_15_ignoring_a_group_or_taking_a_face_out_leaves_too_few, req_032_15_no_people_page_without_models, req_032_15_people_page_looks_as_designed (snapshot `people_page`) | pass |
+| REQ-032-15 | `crates/domain/src/face_models.rs` › req_032_15_groups_similar_faces_largest_first_without_small_groups; `crates/db/src/faces.rs` › req_032_15_groups_only_faces_without_a_name; `crates/app/src/people_page.rs` › req_032_15_crops_faces_without_stretching_them; `crates/app/tests/faces.rs` › req_032_15_names_a_group_after_asking_and_writes_to_all_its_photos, req_032_15_ignoring_a_group_or_taking_a_face_out_leaves_too_few, req_032_15_no_people_page_without_models, req_032_15_shows_the_faces_of_a_group, req_032_15_loads_only_the_faces_of_groups_near_the_screen, req_032_15_people_page_looks_as_designed (snapshot `people_page`) | pass |
 | REQ-032-16 | `crates/indexer/src/faces.rs` › req_032_16_another_recognition_model_recognizes_again_and_going_back_repeats_nothing; `crates/db/src/faces.rs` › req_032_16_decisions_carry_over_to_another_detector_and_earlier_work_stays | pass |
 | REQ-032-18 | `crates/domain/src/face_models.rs` › req_032_18_recommends_one_for_speed_and_one_for_accuracy, req_032_18_descriptions_have_no_scores_and_no_second_link; `crates/app/tests/faces.rs` › req_032_18_says_why_a_model_is_recommended | pass |
 | REQ-032-19 | `crates/app/tests/faces.rs` › req_032_19_says_what_choosing_does_and_in_use_stays | pass |
-| REQ-032-20 | `crates/app/src/state/faces.rs` › req_032_20_says_what_the_search_is_doing, req_032_20_a_notice_only_while_it_works; `crates/app/tests/faces.rs` › req_032_20_pause_and_resume, req_032_20_the_icon_shows_on_every_page_and_leads_to_the_settings | pass |
+| REQ-032-20 | `crates/app/src/state/faces.rs` › req_032_20_says_what_the_search_is_doing, req_032_20_never_says_none_of_none, req_032_20_a_notice_only_while_it_works; `crates/indexer/src/faces.rs` › req_032_20_counts_the_photos_before_the_first_is_done; `crates/app/tests/faces.rs` › req_032_20_pause_and_resume, req_032_20_the_icon_shows_on_every_page_and_leads_to_the_settings | pass |
 | REQ-032-21 | `crates/db/src/faces.rs` › req_032_21_says_whether_a_photo_was_looked_at; `crates/app/tests/faces.rs` › req_032_21_details_say_whether_a_photo_was_looked_at | pass |
 | REQ-032-22 | `crates/db/src/faces.rs` › req_032_22_looks_again_and_decisions_stay; `crates/app/tests/faces.rs` › req_032_22_look_again_from_the_details, req_032_22_look_through_all_again_asks_first | pass |
 | REQ-032-23 | `crates/indexer/src/faces.rs` › req_032_23_recognizes_a_photos_faces_right_after_looking_at_it, req_032_23_only_looks_without_a_recognition_model_and_catches_up_with_one; `crates/db/src/faces.rs` › req_032_23_only_the_open_faces_of_that_photo | pass |

@@ -48,6 +48,8 @@ pub enum WorkError {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FaceStatus {
     pub progress: FaceProgress,
+    /// Whether `progress` has been counted yet (REQ-032-20).
+    pub counted: bool,
     /// Working on something right now.
     pub working: bool,
     pub problem: Option<String>,
@@ -148,6 +150,8 @@ impl Drop for FaceService {
 }
 
 fn run(shared: &Shared, mut deps: FaceDeps) {
+    // Whether the status still shows the count made after the last round.
+    let mut counted = false;
     loop {
         {
             let mut control = shared.lock();
@@ -157,21 +161,27 @@ fn run(shared: &Shared, mut deps: FaceDeps) {
             control.kicked = false;
             control.status.working = true;
         }
+        // Before the first photo, which also loads the models, so the numbers show from the start (REQ-032-20).
+        if !counted {
+            let progress = count(&deps.conn);
+            let mut control = shared.lock();
+            control.status.counted = progress.is_some();
+            control.status.progress = progress.unwrap_or_default();
+            drop(control);
+            (deps.on_change)();
+        }
         let round = std::panic::catch_unwind(AssertUnwindSafe(|| round(shared, &mut deps)));
         let (more, problem) = match round {
             Ok(Ok(more)) => (more, None),
             Ok(Err(problem)) => (false, Some(problem)),
             Err(_) => (false, Some("Looking for faces stopped unexpectedly.".to_owned())),
         };
-        let progress = chosen(&deps.conn, faces::DETECTOR_KEY)
-            .and_then(|detector| {
-                let recognizer = chosen(&deps.conn, faces::RECOGNIZER_KEY);
-                faces::progress(&deps.conn, &detector, recognizer.as_deref()).ok()
-            })
-            .unwrap_or_default();
+        let progress = count(&deps.conn);
+        counted = more;
         {
             let mut control = shared.lock();
-            control.status.progress = progress;
+            control.status.counted = progress.is_some();
+            control.status.progress = progress.unwrap_or_default();
             control.status.problem = problem;
             control.status.working = more;
             shared.changed.notify_all();
@@ -192,6 +202,13 @@ fn run(shared: &Shared, mut deps: FaceDeps) {
             );
         }
     }
+}
+
+/// How far the search has come; `None` without a chosen detection model or if it can't be counted.
+fn count(conn: &Connection) -> Option<FaceProgress> {
+    let detector = chosen(conn, faces::DETECTOR_KEY)?;
+    let recognizer = chosen(conn, faces::RECOGNIZER_KEY);
+    faces::progress(conn, &detector, recognizer.as_deref()).ok()
 }
 
 fn chosen(conn: &Connection, key: &str) -> Option<String> {
@@ -463,12 +480,17 @@ mod tests {
         detected: Arc<AtomicUsize>,
         recognized: Arc<AtomicUsize>,
         broken_model: Arc<AtomicBool>,
+        /// Keeps the search at its first photo while set.
+        held: Arc<AtomicBool>,
         /// What happened to which photo, in order.
         steps: Arc<std::sync::Mutex<Vec<String>>>,
     }
 
     impl FaceWork for Fake {
         fn detect(&mut self, _detector: &str, photo: &FacePhoto) -> Result<Vec<Detection>, WorkError> {
+            while self.held.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(2));
+            }
             if self.broken_model.load(Ordering::SeqCst) {
                 return Err(WorkError::Model("broken".into()));
             }
@@ -520,6 +542,34 @@ mod tests {
             .query_row("SELECT count(*) FROM faces_scanned", [], |row| row.get(0))
             .unwrap();
         assert_eq!(stored, 0);
+    }
+
+    /// REQ-032-20: the numbers are there while the first photo, and with it the loading of the models, still takes time.
+    #[test]
+    fn req_032_20_counts_the_photos_before_the_first_is_done() {
+        let (_dir, conn, path) = index();
+        for name in ["a.jpg", "b.jpg", "c.jpg"] {
+            add_photo(&conn, name);
+        }
+        choose(&conn, faces::DETECTOR_KEY, "d");
+        let fake = Fake::default();
+        fake.held.store(true, Ordering::SeqCst);
+        let service = start(&path, &fake, true);
+        let mut status = service.status();
+        for _ in 0..1000 {
+            if status.counted {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+            status = service.status();
+        }
+        fake.held.store(false, Ordering::SeqCst);
+        assert!(status.counted, "still not counted");
+        assert_eq!(status.progress.photos, 3);
+        assert_eq!(status.progress.photos_done, 0);
+        assert!(status.working);
+        service.wait_idle();
+        assert_eq!(service.status().progress.photos_done, 3);
     }
 
     #[test]

@@ -991,6 +991,13 @@ impl Gallery {
         self.face_groups.as_ref()?.as_deref()
     }
 
+    /// Takes in finished thumbnails. Once per frame, on every page that draws them, before it does.
+    pub fn begin_thumbnails(&mut self) {
+        if let Some(thumbnails) = &mut self.thumbnails {
+            thumbnails.streamer.begin_frame();
+        }
+    }
+
     /// Asks for these media items' thumbnails, for the People page, which draws no tiles.
     pub fn want_thumbnails(&mut self, wanted: &[(i64, ThumbKey)]) {
         let Some(thumbnails) = &mut self.thumbnails else { return };
@@ -1359,9 +1366,7 @@ impl Gallery {
     /// Shows the gallery in `ui`, leaving room at the top for the toolbar.
     pub fn show(&mut self, ui: &mut egui::Ui) {
         self.poll();
-        if let Some(thumbnails) = &mut self.thumbnails {
-            thumbnails.streamer.begin_frame();
-        }
+        self.begin_thumbnails();
         let area = ui.max_rect();
         self.handle_zoom_wheel(ui, area);
         if let Some(error) = &self.error

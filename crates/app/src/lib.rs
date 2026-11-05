@@ -64,15 +64,9 @@ pub fn setup(ctx: &egui::Context) {
 pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     state.poll();
     let ctx = ui.ctx().clone();
-    // The installer waits for the window to close (REQ-031-05); an idle window wakes up for the daily check.
+    // The installer waits for the window to close (REQ-031-05).
     if std::mem::take(&mut state.updates.close) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-    }
-    if let Some(wake) = state
-        .updates
-        .wake_in(state.settings.check_for_updates, web_time::Instant::now())
-    {
-        ctx.request_repaint_after(wake);
     }
     // A later start of the app handed over a file or asked for the window (REQ-027-02).
     if std::mem::take(&mut state.bring_to_front) {

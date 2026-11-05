@@ -20,6 +20,11 @@
 
 ## Decisions
 
+### 2026-11-05 · Once at the start, and _Check now_ (#181)
+
+**Decided:** the app asks when it starts, and when the user presses _Check now_. An answer to a check the user asked for always shows, also with _Check for updates_ off, and a failure says so.
+**Rejected:** asking again every 24 hours while the app stays open: the button covers an app left open, and an idle window no longer wakes up for it.
+
 ### 2026-11-03 · The system's `curl`, a signature of our own
 
 **Decided:** the system's `curl` makes the connection, by its full path on Windows. The app stays free of network crates and of a TLS stack it would have to keep patched, and `no_network.rs` keeps guarding that. A failed check is quiet, so a Linux system without `curl` loses only the notice. Windows gets no Authenticode signature (#29), so an Ed25519 signature made with a key from `packaging/new-update-key.sh` vouches for the installer. It covers the file's name as well as its contents, so an older signed installer can't pass for a newer version. URLs are built from a version that can only be digits and dots, so GitHub's answer can't point a download elsewhere.

@@ -149,6 +149,73 @@ fn req_031_02_the_settings_turn_it_off_and_on() {
     harness.get_by_label(&format!("Version {NEWER} is available"));
 }
 
+/// Opens the settings, tall enough for _About_, with `github` asked for nothing since they opened.
+fn settings_with(fixture: &Fixture, github: Arc<FakeGitHub>, automatic: bool) -> Harness<'static, AppState> {
+    let conn = db::open_in_memory().unwrap();
+    let settings = db::settings::Settings {
+        check_for_updates: automatic,
+        ..Default::default()
+    };
+    db::settings::save(&conn, &settings).unwrap();
+    let mut harness = common::harness(fixture.state(conn).with_updater(github));
+    harness.state_mut().page = Page::Settings;
+    harness.set_size(eframe::egui::vec2(900.0, 2600.0));
+    settle(&mut harness);
+    harness
+}
+
+#[test]
+fn req_031_11_check_now_says_it_is_the_latest_version() {
+    let fixture = Fixture::new();
+    let github = Arc::new(FakeGitHub::latest(&current_version().to_string()));
+    let mut harness = settings_with(&fixture, github.clone(), true);
+    assert_eq!(github.checks.load(Ordering::SeqCst), 1, "at the start");
+    harness.get_by_label("Check now").click();
+    settle(&mut harness);
+    assert_eq!(github.checks.load(Ordering::SeqCst), 2);
+    harness.get_by_label_contains("is the latest version");
+    no_notice(&harness);
+}
+
+#[test]
+fn req_031_11_check_now_works_with_automatic_checks_off_and_offers_the_update() {
+    let fixture = Fixture::new();
+    let github = Arc::new(FakeGitHub::latest(NEWER));
+    let mut harness = settings_with(&fixture, github.clone(), false);
+    assert_eq!(github.checks.load(Ordering::SeqCst), 0, "not on its own");
+    harness.get_by_label("Check now").click();
+    settle(&mut harness);
+    assert_eq!(github.checks.load(Ordering::SeqCst), 1);
+    harness.get_by_label(&format!("Version {NEWER} is available"));
+}
+
+#[test]
+fn req_031_11_a_check_the_user_asked_for_says_when_it_failed() {
+    let fixture = Fixture::new();
+    let github = Arc::new(FakeGitHub {
+        latest: Err("no network".into()),
+        ..FakeGitHub::latest(NEWER)
+    });
+    let mut harness = settings_with(&fixture, github, true);
+    assert!(
+        harness.query_by_label_contains("Couldn't reach GitHub").is_none(),
+        "quiet on its own"
+    );
+    harness.get_by_label("Check now").click();
+    settle(&mut harness);
+    harness.get_by_label_contains("Couldn't reach GitHub");
+}
+
+#[test]
+fn req_031_11_no_button_without_an_updater() {
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness(db::open_in_memory().unwrap());
+    harness.state_mut().page = Page::Settings;
+    harness.set_size(eframe::egui::vec2(900.0, 2600.0));
+    settle(&mut harness);
+    assert!(harness.query_by_label("Check now").is_none());
+}
+
 #[test]
 fn req_031_03_a_failed_check_shows_nothing() {
     let fixture = Fixture::new();
