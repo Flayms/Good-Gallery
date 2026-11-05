@@ -59,6 +59,7 @@ impl Gallery {
     ) {
         let Some(data) = self.data.clone() else { return };
         let groups = &arranged.groups;
+        self.begin_items(ui, &data.ids);
         let count = data.ids.len();
         let width = ui.max_rect().width();
         self.list_width = width;
@@ -123,9 +124,14 @@ impl Gallery {
     fn draw_row(&mut self, ui: &mut egui::Ui, rect: Rect, index: usize, id: i64, frame: &mut FrameState) {
         let response = ui.interact(rect, ui.make_persistent_id(("row", id)), self.tile_sense());
         self.respond(ui, &response, index);
+        // Also over the row's circle, which is a widget of its own.
+        let under_pointer = response.contains_pointer();
+        if under_pointer {
+            self.hovered = Some(index);
+        }
         let selected = self.selection.contains(id);
         response.context_menu(|ui| {
-            if let Some(action) = super::context_menu(ui) {
+            if let Some(action) = super::context_menu(ui, selected) {
                 self.menu_action = Some((index, action));
             }
         });
@@ -146,13 +152,23 @@ impl Gallery {
         let row = Rect::from_min_max(rect.min + vec2(4.0, 0.0), rect.max - vec2(4.0, 0.0));
         if selected {
             ui.painter().rect_filled(row, theme::RADIUS_CONTROL, theme::selected());
-        } else if response.hovered() {
+        } else if under_pointer || self.range_preview.as_ref().is_some_and(|range| range.contains(&index)) {
             ui.painter().rect_filled(row, theme::RADIUS_CONTROL, theme::hover());
         }
         let [thumb, name, folder, date, size, dims, rating] = columns(rect.left(), rect.width());
         let y = rect.center().y;
         let thumb_rect = Rect::from_center_size(pos2(thumb.0 + THUMB / 2.0, y), Vec2::splat(THUMB));
         self.paint_thumbnail(ui, thumb_rect, 4, id, frame);
+        let Some(item) = self.items.get(&id) else { return };
+        // On a row's small thumbnail, which has no room for it in a corner.
+        let selecting = self.selected_count() > 0;
+        if (selecting || under_pointer) && self.tile_sense() != egui::Sense::hover() {
+            let spot = Rect::from_center_size(thumb_rect.center(), Vec2::splat(18.0));
+            let name = item.file_name.clone();
+            if super::tiles::selection_circle(ui, spot, id, &name, selected, selecting).clicked() {
+                self.circle_clicked(ui, index);
+            }
+        }
         let Some(item) = self.items.get(&id) else { return };
         name_cell(ui, name, y, item);
         text_cell(ui, folder, y, folder_of(&item.rel_path), theme::muted(), false);

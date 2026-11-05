@@ -135,6 +135,8 @@ pub enum MediaAction {
     Edit,
     /// Only in the viewer, for an edit saved over its original (REQ-021-12).
     Revert,
+    /// Only in the gallery: selects the item or no longer does, also where nothing can hover (REQ-025-11).
+    Select,
 }
 
 /// A media item's details as loaded: `Ok(None)` when it isn't indexed (any more).
@@ -434,6 +436,10 @@ pub struct Gallery {
     face_groups: Option<Option<Vec<FaceGroup>>>,
     /// A context menu's choice this frame.
     menu_action: Option<(usize, MediaAction)>,
+    /// The item under the pointer in the last frame.
+    hovered: Option<usize>,
+    /// The items a Shift-click would add, shown brighter (REQ-025-14).
+    range_preview: Option<std::ops::RangeInclusive<usize>>,
     /// Where the tiles were drawn in the last frame: the content's origin and the visible area (REQ-013-12).
     tiles_frame: Option<(egui::Pos2, Rect)>,
     /// Autoscroll with the middle mouse button, and where it started on screen (REQ-006-14).
@@ -501,6 +507,8 @@ impl Gallery {
             faces: None,
             face_groups: None,
             menu_action: None,
+            hovered: None,
+            range_preview: None,
             autoscroll: Autoscroll::Off,
             autoscroll_at: egui::Pos2::ZERO,
             swallow_click: false,
@@ -795,17 +803,12 @@ impl Gallery {
         self.selection.select_all();
     }
 
-    /// Clicks on the item at `index` (a tile or a row): a double-click or Enter on the focused item opens it
-    /// (REQ-025-08, REQ-009-01); a click selects only it, Ctrl or Space on the focused item toggles it, Shift adds
-    /// the range from the anchor (REQ-025-01, REQ-025-02).
+    /// Clicks on the item at `index` (a tile or a row): without a selection a click opens it, with one it selects or
+    /// deselects it (REQ-025-10, REQ-025-12). Enter on the focused item always opens it, Space always toggles it, and
+    /// Shift adds the range from the anchor (REQ-025-02).
     fn respond(&mut self, ui: &egui::Ui, response: &egui::Response, index: usize) {
         let Some(data) = self.data.clone() else { return };
         let Some(&id) = data.ids.get(index) else { return };
-        // The first click of a double-click already selected the item.
-        if response.double_clicked() {
-            self.opened = Some(index);
-            return;
-        }
         if !response.clicked() {
             return;
         }
@@ -819,13 +822,46 @@ impl Gallery {
         let focused = response.has_focus();
         if modifiers.shift {
             self.selection.add_range(&data.ids, id);
-        } else if modifiers.command || (space && focused) {
+        } else if space && focused {
             self.selection.toggle(id);
-        } else if enter && focused {
+        } else if (enter && focused) || self.selection.is_empty(&data.ids) {
             self.opened = Some(index);
         } else {
-            self.selection.select_only(id);
+            self.selection.toggle(id);
         }
+    }
+
+    /// The circle of the item at `index` was clicked (REQ-025-11, REQ-025-02).
+    fn circle_clicked(&mut self, ui: &egui::Ui, index: usize) {
+        let Some(data) = self.data.clone() else { return };
+        let Some(&id) = data.ids.get(index) else { return };
+        if ui.input(|input| input.modifiers.shift) {
+            self.selection.add_range(&data.ids, id);
+        } else {
+            self.selection.toggle(id);
+        }
+    }
+
+    /// Selects the item at `index`, or no longer (REQ-025-11).
+    pub fn toggle_selected_at(&mut self, index: usize) {
+        if let Some(&id) = self.data.as_ref().and_then(|data| data.ids.get(index)) {
+            self.selection.toggle(id);
+        }
+    }
+
+    /// Before drawing items: what a Shift-click on the item under the pointer would add, without any scanning of the
+    /// search unless Shift is held over an item with a selection (REQ-025-14).
+    fn begin_items(&mut self, ui: &egui::Ui, ids: &[i64]) {
+        let hovered = self.hovered.take();
+        self.range_preview = hovered
+            .filter(|_| ui.input(|input| input.modifiers.shift) && !self.selection.is_empty(ids))
+            .and_then(|index| ids.get(index))
+            .and_then(|&id| self.selection.range_to(ids, id));
+    }
+
+    /// The items a Shift-click would add right now, those already selected too (REQ-025-14).
+    pub fn range_preview(&self) -> Option<std::ops::RangeInclusive<usize>> {
+        self.range_preview.clone()
     }
 
     /// Changes whenever a new result arrived, so positions may have moved.
@@ -1634,32 +1670,41 @@ fn paint_autoscroll_marker(ctx: &egui::Context, at: egui::Pos2) {
 }
 
 /// _Show in Explorer_ and _Information_ in a context menu (REQ-009-11); what was chosen.
-pub fn context_menu(ui: &mut egui::Ui) -> Option<MediaAction> {
-    context_menu_with(ui, false, false)
+pub fn context_menu(ui: &mut egui::Ui, selected: bool) -> Option<MediaAction> {
+    crate::glass::behind_menu(ui, |ui| {
+        let select = ui.button(if selected { "Deselect" } else { "Select" }).clicked();
+        if select {
+            ui.close();
+            return Some(MediaAction::Select);
+        }
+        menu_items(ui, false, false)
+    })
 }
 
 /// The context menu with _Edit_ and _Revert to original_ where they apply (the viewer's, spec 021).
 pub fn context_menu_with(ui: &mut egui::Ui, edit: bool, revert: bool) -> Option<MediaAction> {
-    crate::glass::behind_menu(ui, |ui| {
-        let mut action = None;
-        // The browser can't open a file manager (REQ-019-13).
-        if !crate::WEB && ui.button(crate::state::SHOW_IN_FOLDER).clicked() {
-            action = Some(MediaAction::ShowInExplorer);
-        }
-        if ui.button("Information").clicked() {
-            action = Some(MediaAction::Information);
-        }
-        if edit && ui.button("Edit").clicked() {
-            action = Some(MediaAction::Edit);
-        }
-        if revert && ui.button("Revert to original").clicked() {
-            action = Some(MediaAction::Revert);
-        }
-        if action.is_some() {
-            ui.close();
-        }
-        action
-    })
+    crate::glass::behind_menu(ui, |ui| menu_items(ui, edit, revert))
+}
+
+fn menu_items(ui: &mut egui::Ui, edit: bool, revert: bool) -> Option<MediaAction> {
+    let mut action = None;
+    // The browser can't open a file manager (REQ-019-13).
+    if !crate::WEB && ui.button(crate::state::SHOW_IN_FOLDER).clicked() {
+        action = Some(MediaAction::ShowInExplorer);
+    }
+    if ui.button("Information").clicked() {
+        action = Some(MediaAction::Information);
+    }
+    if edit && ui.button("Edit").clicked() {
+        action = Some(MediaAction::Edit);
+    }
+    if revert && ui.button("Revert to original").clicked() {
+        action = Some(MediaAction::Revert);
+    }
+    if action.is_some() {
+        ui.close();
+    }
+    action
 }
 
 /// The ThumbHash placeholder of an item as a small texture (REQ-005-06).

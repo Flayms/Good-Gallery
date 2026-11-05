@@ -440,6 +440,7 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
                 }
             }
             Some((index, gallery::MediaAction::Information)) => state.info_sheet = gallery.id_at(index),
+            Some((index, gallery::MediaAction::Select)) => gallery.toggle_selected_at(index),
             Some((_, gallery::MediaAction::Edit | gallery::MediaAction::Revert)) | None => {}
         }
     }

@@ -15,6 +15,10 @@ use web_time::Instant;
 
 /// Solid badges on tiles (`docs/design.md`: never glass on tiles).
 const BADGE: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 153);
+/// A tile under the pointer is this much darker (REQ-025-13).
+const HOVER_DARKEN: Color32 = Color32::from_black_alpha(38);
+/// A tile a Shift-click would add is this much brighter (REQ-025-14).
+const PREVIEW_BRIGHTEN: Color32 = Color32::from_rgba_premultiplied(46, 46, 46, 46);
 /// Room a video badge takes in a tile's bottom-right corner, which tag indicators leave free.
 const VIDEO_BADGE_ROOM: f32 = 88.0;
 
@@ -29,6 +33,8 @@ impl Gallery {
     ) {
         let Some(data) = self.data.clone() else { return };
         let layout = &arranged.tiles;
+        self.begin_items(ui, &data.ids);
+        let selecting = !self.selection.is_empty(&data.ids);
         // Below the toolbar floating over the gallery.
         let mut visible = ui.clip_rect();
         visible.min.y += TOOLBAR_HEIGHT;
@@ -66,8 +72,14 @@ impl Gallery {
             let id = data.ids[index];
             let response = ui.interact(rect, ui.make_persistent_id(("tile", id)), self.tile_sense());
             self.respond(ui, &response, index);
+            // Also over the tile's circle, which is a widget of its own.
+            let under_pointer = response.contains_pointer();
+            if under_pointer {
+                self.hovered = Some(index);
+            }
+            let selected = self.selection.contains(id);
             response.context_menu(|ui| {
-                if let Some(action) = super::context_menu(ui) {
+                if let Some(action) = super::context_menu(ui, selected) {
                     self.menu_action = Some((index, action));
                 }
             });
@@ -93,7 +105,14 @@ impl Gallery {
                 continue;
             }
             self.paint_thumbnail(ui, rect, radius, id, &mut frame);
+            let previewed = !selected && self.range_preview.as_ref().is_some_and(|range| range.contains(&index));
+            if previewed {
+                ui.painter().rect_filled(rect, radius, PREVIEW_BRIGHTEN);
+            } else if under_pointer {
+                ui.painter().rect_filled(rect, radius, HOVER_DARKEN);
+            }
             let Some(item) = self.items.get(&id) else { continue };
+            let name = item.file_name.clone();
             let video = item.kind == MediaKind::Video;
             if video {
                 video_badge(ui, rect, item.duration);
@@ -101,8 +120,14 @@ impl Gallery {
             if !indicators.is_empty() {
                 indicator_badge(ui, rect, &indicators, video);
             }
-            if self.selection.contains(id) {
+            if selected {
                 selected_mark(ui, rect, radius);
+            }
+            if (selecting || under_pointer) && self.tile_sense() != egui::Sense::hover() {
+                let spot = circle_spot(rect);
+                if selection_circle(ui, spot, id, &name, selected, selecting).clicked() {
+                    self.circle_clicked(ui, index);
+                }
             }
         }
         if frame.fading {
@@ -198,7 +223,7 @@ fn video_badge(ui: &egui::Ui, tile: Rect, duration: Option<f64>) {
     }
 }
 
-/// A selected tile (REQ-025-01): a ring like the focus ring, Paper inside a dark one, so it shows on any photo.
+/// A selected tile (REQ-025-12): a ring like the focus ring, Paper inside a dark one, so it shows on any photo.
 pub(super) fn selected_mark(ui: &egui::Ui, tile: Rect, radius: u8) {
     let painter = ui.painter();
     let inner = tile.shrink(2.0);
@@ -214,6 +239,53 @@ pub(super) fn selected_mark(ui: &egui::Ui, tile: Rect, radius: u8) {
         egui::Stroke::new(2.0, theme::ring()),
         egui::StrokeKind::Middle,
     );
+}
+
+/// Where a tile's circle goes: its top-left corner, smaller on small tiles.
+fn circle_spot(tile: Rect) -> Rect {
+    let size = if tile.width() < 80.0 { 16.0 } else { 20.0 };
+    Rect::from_min_size(tile.min + vec2(6.0, 6.0), Vec2::splat(size))
+}
+
+/// The circle that selects an item: a faint tick while only hovering (REQ-025-11), empty or ticked with a selection
+/// (REQ-025-12). Not a tab stop: Space selects the focused item. A larger area than it shows takes the click.
+pub(super) fn selection_circle(
+    ui: &mut egui::Ui,
+    spot: Rect,
+    id: i64,
+    name: &str,
+    selected: bool,
+    selecting: bool,
+) -> egui::Response {
+    /// How much of a hint shows until the pointer is on it.
+    const HINT: f32 = 0.7;
+    let area = spot.expand(3.0);
+    let response = ui.interact(area, ui.make_persistent_id(("select", id)), egui::Sense::CLICK);
+    let spoken = format!("Select {name}");
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, selected, &spoken));
+    let (center, radius) = (spot.center(), spot.width() / 2.0);
+    let tick = Rect::from_center_size(center, Vec2::splat(spot.width() * 0.7));
+    let painter = ui.painter();
+    if selected {
+        painter.circle_filled(center, radius, theme::ring());
+        Icon::Check
+            .image(tick.width(), theme::ring_outer().to_opaque())
+            .paint_at(ui, tick);
+    } else if selecting {
+        painter.circle(center, radius - 1.0, BADGE, egui::Stroke::new(2.0, Color32::WHITE));
+    } else {
+        let strength = if response.hovered() { 1.0 } else { HINT };
+        painter.circle(
+            center,
+            radius - 1.0,
+            BADGE.gamma_multiply(strength),
+            egui::Stroke::new(2.0, Color32::WHITE.gamma_multiply(strength)),
+        );
+        Icon::Check
+            .image(tick.width(), Color32::WHITE.gamma_multiply(strength))
+            .paint_at(ui, tick);
+    }
+    response
 }
 
 /// Stars and tag icons in the tile's bottom-left corner, cut short before the video badge (REQ-017-01), each named

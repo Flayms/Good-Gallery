@@ -1237,7 +1237,7 @@ fn req_013_12_the_photo_grows_from_its_tile_and_back() {
     harness.ctx.all_styles_mut(|style| style.animation_time = 0.12);
     let tile = harness.get_by_role_and_label(Role::Image, "1.png").rect();
 
-    common::double_click_at(&mut harness, tile.center());
+    common::click_at(&mut harness, tile.center());
     harness.run_steps(1);
     let start = viewer(&harness).photo_rect().unwrap();
     assert!(

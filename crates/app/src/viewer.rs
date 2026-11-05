@@ -955,7 +955,7 @@ impl Viewer {
                         Some(MediaAction::Information) => self.info_open = true,
                         Some(MediaAction::Edit) => self.toggle_edit = true,
                         Some(MediaAction::Revert) => action = revert.clone().map(Action::Revert),
-                        None => {}
+                        Some(MediaAction::Select) | None => {}
                     });
                 }
                 if closing {

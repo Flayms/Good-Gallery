@@ -4,6 +4,11 @@
 
 ### Decisions
 
+### 2026-11-05 · One click opens, a circle starts a selection (#191)
+
+**Decided:** back from "a click selects" (#164, #174). A click opens while nothing is selected, a circle on the item starts a selection, and with a selection a click anywhere on an item toggles it. "Selection mode" is no state of its own, only "the selection isn't empty", so Ctrl+A and _Select all_ enter it without further ado. A selected item keeps the ring and also gets a ticked circle. _Select_ in the context menu serves touch screens, where nothing can hover and a long press opens that menu.
+**Rejected:** selecting only by the circle in selection mode (many small targets for the most frequent action of that mode), a long press that selects (egui gives it to the context menu), caching the anchor's position for the Shift preview (a scan of 500,000 ids takes well under a millisecond and runs only while Shift is held over an item).
+
 #31 left two questions open. As proposed on the issue, and decided as such since the user said to go ahead:
 
 1. **A plain click opens the viewer while nothing is selected, and selects in selection mode.** Ctrl-click (or Space on the focused item) starts a selection. Once one exists, a plain click toggles items, as in Google Photos, so the selection isn't lost by accident. Escape or _Clear_ ends it.
