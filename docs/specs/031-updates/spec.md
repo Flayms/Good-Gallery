@@ -11,20 +11,21 @@ Users learn that a newer version exists without looking for it, and on Windows c
 ### REQ-031-01 · Checked by default
 
 - **Given** an installed or portable app, with _Check for updates_ on, as it is by default
-- **When** the app starts, and then every day it stays open
-- **Then** it asks GitHub for the latest published release, without slowing anything down
+- **When** the app starts
+- **Then** it asks GitHub for the latest published release, once, without slowing anything down
 - **And** a development build, a screenshot run and the browser version never ask
 
 ### REQ-031-02 · Turning it off
 
 - **Given** _Check for updates_ turned off in the settings
 - **When** the app runs
-- **Then** it asks nothing, and shows no notice
+- **Then** it asks nothing on its own, and shows no notice
+- **And** a check the user asks for still runs (REQ-031-11)
 
 ### REQ-031-03 · A failed check stays quiet
 
 - **Given** no network, no `curl`, or an answer from GitHub that can't be read
-- **When** the check runs
+- **When** the check at the start runs
 - **Then** the app shows nothing and tries again at the next check
 
 ### REQ-031-04 · The notice
@@ -72,6 +73,13 @@ Users learn that a newer version exists without looking for it, and on Windows c
 - **When** it checks for or downloads an update
 - **Then** the only connection is made by the system's `curl`, over HTTPS, to GitHub's release of this repository; the app itself has no network code and depends on no network crate
 
+### REQ-031-11 · Checking now
+
+- **Given** the settings' _About_, in an app that can check
+- **When** the user presses _Check now_
+- **Then** it says _Checking…_ with the button disabled, then offers the update (REQ-031-04), or says that the running version is the latest, or that GitHub couldn't be reached
+- **And** this also works with _Check for updates_ turned off, and a development build, a screenshot run and the browser version have no such button
+
 ## Out of scope
 
 - Updating the portable zip or the Linux packages from the app.
@@ -88,7 +96,7 @@ Users learn that a newer version exists without looking for it, and on Windows c
 
 | REQ | Test | Result |
 | --- | ---- | ------ |
-| REQ-031-01 | `crates/app/src/updates.rs` › req_031_01_checks_at_the_start_and_then_daily, req_031_01_a_build_without_an_updater_never_checks; `crates/app/tests/updates.rs` › req_031_01_checks_when_the_app_starts_and_only_once, req_031_01_is_on_by_default_and_without_an_updater_nothing_shows; `xtask/tests/packaging.rs` › req_031_01_the_linux_packages_recommend_curl | pass |
+| REQ-031-01 | `crates/app/src/updates.rs` › req_031_01_checks_at_the_start_and_only_then, req_031_01_a_build_without_an_updater_never_checks; `crates/app/tests/updates.rs` › req_031_01_checks_when_the_app_starts_and_only_once, req_031_01_is_on_by_default_and_without_an_updater_nothing_shows; `xtask/tests/packaging.rs` › req_031_01_the_linux_packages_recommend_curl | pass |
 | REQ-031-02 | `crates/app/src/updates.rs` › req_031_02_turned_off_it_doesnt_check_and_turned_on_it_checks_at_once, req_031_02_an_answer_after_turning_it_off_shows_nothing; `crates/app/tests/updates.rs` › req_031_02_turned_off_it_asks_nothing_and_hides_the_notice, req_031_02_the_settings_turn_it_off_and_on | pass |
 | REQ-031-03 | `crates/domain/src/update.rs` › req_031_03_an_unreadable_answer_has_no_version; `crates/app/tests/updates.rs` › req_031_03_a_failed_check_shows_nothing | pass |
 | REQ-031-04 | `crates/domain/src/update.rs` › req_031_04_compares_each_part_as_a_number; `crates/app/src/updates.rs` › req_031_04_a_later_check_doesnt_disturb_a_running_update; `crates/app/tests/updates.rs` › req_031_04_a_newer_version_shows_the_notice_and_its_release, req_031_04_the_notice_and_its_menu_look_right, req_031_04_the_same_or_an_older_version_shows_nothing | pass |
@@ -98,3 +106,4 @@ Users learn that a newer version exists without looking for it, and on Windows c
 | REQ-031-08 | `xtask/tests/packaging.rs` › req_031_08_an_update_waits_for_the_app_and_restarts_it; `xtask/tests/workflows.rs` › req_031_08_the_installer_is_tested_before_a_release; `packaging/smoke-test.ps1`, run by `windows-packages.yml`. The 30-second limit has no test | partial |
 | REQ-031-09 | `crates/media/src/update.rs` › req_031_09_the_app_has_the_public_key_built_in; `crates/domain/src/update.rs` › req_031_09_the_signature_covers_the_name_and_the_contents; `xtask/tests/packaging.rs` › req_031_09_the_app_verifies_what_the_release_signs; `xtask/tests/workflows.rs` › req_031_09_the_release_signs_the_installer | partial: needs the key |
 | REQ-031-10 | `crates/domain/src/update.rs` › req_031_10_reads_only_plain_versions, req_031_10_downloads_only_from_this_repositorys_releases; `crates/media/src/update.rs` › req_031_10_curl_stays_on_https_and_within_its_bounds; `xtask/tests/no_network.rs` › req_031_10_only_the_updater_starts_curl | pass |
+| REQ-031-11 | `crates/app/src/updates.rs` › req_031_11_says_how_a_check_the_user_asked_for_went; `crates/app/tests/updates.rs` › req_031_11_check_now_says_it_is_the_latest_version, req_031_11_check_now_works_with_automatic_checks_off_and_offers_the_update, req_031_11_a_check_the_user_asked_for_says_when_it_failed, req_031_11_no_button_without_an_updater | pass |

@@ -490,6 +490,7 @@ fn about(ui: &mut egui::Ui, state: &mut AppState) {
     section_title(ui, "About");
     let mut open = false;
     let mut update = None;
+    let mut check_now = false;
     let mut settings = state.settings;
     group(ui, |ui| {
         setting_row(
@@ -509,7 +510,7 @@ fn about(ui: &mut egui::Ui, state: &mut AppState) {
             setting_row(
                 ui,
                 "Check for updates",
-                "Asks GitHub once a day whether there is a newer version. Nothing is downloaded until you choose to update.",
+                "Asks GitHub when the app starts whether there is a newer version. Nothing is downloaded until you choose to update.",
                 24.0,
                 |ui| {
                     let on = settings.check_for_updates;
@@ -518,6 +519,13 @@ fn about(ui: &mut egui::Ui, state: &mut AppState) {
                     });
                 },
             );
+            if let Some((says, can_ask)) = crate::updates::check_row(&state.updates) {
+                divider(ui);
+                setting_row(ui, "Is there an update?", &says, 100.0, |ui| {
+                    let button = egui::Button::new("Check now").stroke(Stroke::new(1.0, theme::rim()));
+                    check_now = ui.add_enabled(can_ask, button).clicked();
+                });
+            }
             if state.updates.phase != crate::updates::Phase::Unknown {
                 divider(ui);
                 Frame::new().inner_margin(Margin::same(12)).show(ui, |ui| {
@@ -528,6 +536,9 @@ fn about(ui: &mut egui::Ui, state: &mut AppState) {
     });
     if settings != state.settings {
         state.update_settings(settings);
+    }
+    if check_now {
+        state.check_for_updates_now();
     }
     if let Some(update) = update {
         state.answer_update(update, ui.ctx());
