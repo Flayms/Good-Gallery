@@ -31,6 +31,15 @@ pub struct Asked {
     pub read_again: Option<ReadAgain>,
     /// _Update and restart_ or _See what's new_ in the update's menu (REQ-031-04).
     pub update: Option<crate::updates::Asked>,
+    /// _Faces settings_ in the menu of what's running (REQ-032-20).
+    pub face_settings: bool,
+}
+
+/// The notices the toolbar may show beside its controls.
+pub struct Notices<'a> {
+    pub unreadable: &'a Unreadable,
+    pub updates: &'a crate::updates::Updates,
+    pub work: &'a [crate::processing::Work],
 }
 
 /// Draws the toolbar over the top of `area`; without a gallery (no libraries yet) it stays empty.
@@ -40,8 +49,7 @@ pub fn show(
     gallery: Option<&mut Gallery>,
     bar_state: &mut SearchBar,
     sidebar_hidden: bool,
-    unreadable: &Unreadable,
-    updates: &crate::updates::Updates,
+    notices: Notices<'_>,
 ) -> Asked {
     let bar = Rect::from_min_size(area.min, vec2(area.width(), TOOLBAR_HEIGHT));
     // Tiles scrolled under the bar don't react to the pointer; its empty space moves the window.
@@ -82,9 +90,10 @@ pub fn show(
                 }
             }
             // Also without a gallery: the first thing a new install could show.
-            asked.update = crate::updates::notice(ui, updates);
+            asked.update = crate::updates::notice(ui, notices.updates);
+            asked.face_settings = crate::processing::button(ui, notices.work);
             if gallery.is_some() {
-                asked.read_again = crate::unreadable::notice(ui, unreadable);
+                asked.read_again = crate::unreadable::notice(ui, notices.unreadable);
                 ui.add_space(8.0);
             }
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {

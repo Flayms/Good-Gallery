@@ -35,8 +35,13 @@ fn req_002_08_shows_which_library_is_scanned_with_counts_and_waiting_scans() {
 
     tx.send(IndexerEvent::Status(status(ScanKind::Full))).unwrap();
     settle(&mut harness);
+    // Nothing covers the sidebar's foot (#167): the details wait behind the icon.
+    assert!(harness.query_by_label("Indexing Photos").is_none());
+    harness.get_by_label("What's running").click();
+    settle(&mut harness);
     harness.get_by_label("Indexing Photos");
     harness.get_by_label("1,204 files · 310 updated · 1 queued");
+    harness.snapshot(common::snapshot_name("processing_menu"));
 
     tx.send(IndexerEvent::Status(status(ScanKind::Quick))).unwrap();
     settle(&mut harness);
@@ -45,6 +50,7 @@ fn req_002_08_shows_which_library_is_scanned_with_counts_and_waiting_scans() {
     tx.send(IndexerEvent::Status(IndexerStatus::default())).unwrap();
     settle(&mut harness);
     assert!(harness.query_by_label("Checking Photos").is_none());
+    assert!(harness.query_by_label("What's running").is_none(), "idle, it's gone");
 }
 
 #[test]
