@@ -206,6 +206,7 @@ fn round(shared: &Shared, deps: &mut FaceDeps) -> Result<bool, String> {
     let Some(detector) = chosen(&deps.conn, faces::DETECTOR_KEY) else {
         return Ok(false);
     };
+    let recognizer = chosen(&deps.conn, faces::RECOGNIZER_KEY);
     let photos = faces::pending_photos(&deps.conn, &detector, PHOTOS_PER_ROUND).map_err(|error| error.to_string())?;
     let mut unreachable: Vec<String> = Vec::new();
     let mut did_some = false;
@@ -233,11 +234,17 @@ fn round(shared: &Shared, deps: &mut FaceDeps) -> Result<bool, String> {
         };
         faces::store_scan(&mut deps.conn, photo, &detector, &found).map_err(|error| error.to_string())?;
         did_some = true;
+        // Right away, while the photo is still decoded (REQ-032-23).
+        if let Some(recognizer) = &recognizer {
+            let waiting = faces::pending_faces_in(&deps.conn, photo.media, &detector, recognizer)
+                .map_err(|error| error.to_string())?;
+            recognize_photo(deps, recognizer, photo, &waiting.iter().collect::<Vec<_>>())?;
+        }
     }
     if !photos.is_empty() && did_some {
         return Ok(true);
     }
-    let Some(recognizer) = chosen(&deps.conn, faces::RECOGNIZER_KEY) else {
+    let Some(recognizer) = recognizer else {
         return Ok(false);
     };
     let waiting =
@@ -260,24 +267,38 @@ fn round(shared: &Shared, deps: &mut FaceDeps) -> Result<bool, String> {
             unreachable.push(photo.root_path.clone());
             continue;
         }
-        let landmarks: Vec<[[f32; 2]; 5]> = group.iter().map(|face| face.landmarks).collect();
-        let work = &mut deps.work;
-        let recognized = std::panic::catch_unwind(AssertUnwindSafe(|| work.recognize(&recognizer, photo, &landmarks)))
-            .unwrap_or_else(|_| Err(WorkError::Photo("reading it failed unexpectedly".into())));
-        let vectors = match recognized {
-            Ok(vectors) => vectors,
-            Err(WorkError::Photo(reason)) => {
-                tracing::warn!("no faces recognized in {}: {reason}", photo.rel_path);
-                vec![Vec::new(); group.len()]
-            }
-            Err(WorkError::Model(reason)) => return Err(reason),
-        };
-        for (face, vector) in group.iter().zip(vectors) {
-            faces::store_embedding(&deps.conn, face.face, &recognizer, &vector).map_err(|error| error.to_string())?;
-        }
+        recognize_photo(deps, &recognizer, photo, &group)?;
         did_some = true;
     }
     Ok(did_some)
+}
+
+/// Recognizes a photo's faces and stores what comes out. A file that can't be read costs only its faces.
+fn recognize_photo(
+    deps: &mut FaceDeps,
+    recognizer: &str,
+    photo: &FacePhoto,
+    group: &[&faces::FaceToRecognize],
+) -> Result<(), String> {
+    if group.is_empty() {
+        return Ok(());
+    }
+    let landmarks: Vec<[[f32; 2]; 5]> = group.iter().map(|face| face.landmarks).collect();
+    let work = &mut deps.work;
+    let recognized = std::panic::catch_unwind(AssertUnwindSafe(|| work.recognize(recognizer, photo, &landmarks)))
+        .unwrap_or_else(|_| Err(WorkError::Photo("reading it failed unexpectedly".into())));
+    let vectors = match recognized {
+        Ok(vectors) => vectors,
+        Err(WorkError::Photo(reason)) => {
+            tracing::warn!("no faces recognized in {}: {reason}", photo.rel_path);
+            vec![Vec::new(); group.len()]
+        }
+        Err(WorkError::Model(reason)) => return Err(reason),
+    };
+    for (face, vector) in group.iter().zip(vectors) {
+        faces::store_embedding(&deps.conn, face.face, recognizer, &vector).map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 /// The longest side a photo is decoded at; more shows no more faces, and a panorama shouldn't fill the memory.
@@ -442,6 +463,8 @@ mod tests {
         detected: Arc<AtomicUsize>,
         recognized: Arc<AtomicUsize>,
         broken_model: Arc<AtomicBool>,
+        /// What happened to which photo, in order.
+        steps: Arc<std::sync::Mutex<Vec<String>>>,
     }
 
     impl FaceWork for Fake {
@@ -450,6 +473,7 @@ mod tests {
                 return Err(WorkError::Model("broken".into()));
             }
             self.detected.fetch_add(1, Ordering::SeqCst);
+            self.steps.lock().unwrap().push(format!("detect {}", photo.rel_path));
             if photo.rel_path.contains("bad") {
                 return Err(WorkError::Photo("unreadable".into()));
             }
@@ -463,8 +487,14 @@ mod tests {
             }])
         }
 
-        fn recognize(&mut self, _: &str, _: &FacePhoto, faces: &[[[f32; 2]; 5]]) -> Result<Vec<Vec<f32>>, WorkError> {
+        fn recognize(
+            &mut self,
+            _: &str,
+            photo: &FacePhoto,
+            faces: &[[[f32; 2]; 5]],
+        ) -> Result<Vec<Vec<f32>>, WorkError> {
             self.recognized.fetch_add(faces.len(), Ordering::SeqCst);
+            self.steps.lock().unwrap().push(format!("recognize {}", photo.rel_path));
             Ok(vec![vec![1.0, 0.0]; faces.len()])
         }
     }
@@ -516,6 +546,44 @@ mod tests {
         service.wait_idle();
         assert_eq!(fake.detected.load(Ordering::SeqCst), 3);
         assert_eq!(fake.recognized.load(Ordering::SeqCst), 2);
+    }
+
+    /// REQ-032-23: a photo's faces are recognized before the next photo, so suggestions show during the first pass and
+    /// the photo is still decoded.
+    #[test]
+    fn req_032_23_recognizes_a_photos_faces_right_after_looking_at_it() {
+        let (_dir, conn, path) = index();
+        for name in ["a.jpg", "bad.jpg", "c.jpg"] {
+            add_photo(&conn, name);
+        }
+        choose(&conn, faces::DETECTOR_KEY, "d");
+        choose(&conn, faces::RECOGNIZER_KEY, "r");
+        let fake = Fake::default();
+        let service = start(&path, &fake, true);
+        service.wait_idle();
+        let steps = fake.steps.lock().unwrap().clone();
+        assert_eq!(steps.len(), 5, "{steps:?}");
+        for name in ["a.jpg", "c.jpg"] {
+            let detect = steps.iter().position(|step| step == &format!("detect {name}")).unwrap();
+            assert_eq!(steps[detect + 1], format!("recognize {name}"), "{steps:?}");
+        }
+    }
+
+    /// REQ-032-23: without a recognition model the search only looks for faces, and recognizes them once one is chosen.
+    #[test]
+    fn req_032_23_only_looks_without_a_recognition_model_and_catches_up_with_one() {
+        let (_dir, conn, path) = index();
+        add_photo(&conn, "a.jpg");
+        choose(&conn, faces::DETECTOR_KEY, "d");
+        let fake = Fake::default();
+        let service = start(&path, &fake, true);
+        service.wait_idle();
+        assert_eq!(*fake.steps.lock().unwrap(), ["detect a.jpg"]);
+
+        choose(&conn, faces::RECOGNIZER_KEY, "r");
+        service.kick();
+        service.wait_idle();
+        assert_eq!(*fake.steps.lock().unwrap(), ["detect a.jpg", "recognize a.jpg"]);
     }
 
     #[test]
