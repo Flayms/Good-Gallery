@@ -137,7 +137,7 @@ Users with large libraries want to find people without tagging each photo by han
 
 - **Given** the models with a download button in the _Faces_ section
 - **When** the user looks at them
-- **Then** one finding and one recognizing model each are marked as recommended for speed and for accuracy, and each says why, based on the measurements in `docs/face-models.md`
+- **Then** one finding and one recognizing model each are marked as recommended for speed and for accuracy, and each says why in words, based on the measurements in `docs/face-models.md`, without the scores themselves
 - **And** a model with a button that isn't recommended says what it is there for
 - **And** no model labeled for research only has a button
 
@@ -209,7 +209,7 @@ Users with large libraries want to find people without tagging each photo by han
 | REQ-032-14 | `crates/domain/src/faces.rs` › req_032_14_stored_rect_undoes_turning_upright; `crates/media/src/face_regions.rs` › req_032_14_other_regions_and_fields_survive, req_032_14_changes_the_microsoft_region_only_where_it_exists, req_032_14_stores_rectangles_for_the_files_orientation, req_032_14_uses_the_sidecar_when_only_it_has_regions, req_032_14_a_read_only_file_shows_why_and_stays, req_032_14_is_read_back_by_the_indexing_rules; `crates/app/tests/faces.rs` › req_032_14_confirming_a_suggestion_writes_it_and_nothing_before_that, req_032_14_rejecting_and_ignoring_leave_the_file_alone | pass |
 | REQ-032-15 | `crates/domain/src/face_models.rs` › req_032_15_groups_similar_faces_largest_first_without_small_groups; `crates/db/src/faces.rs` › req_032_15_groups_only_faces_without_a_name; `crates/app/src/people_page.rs` › req_032_15_crops_faces_without_stretching_them; `crates/app/tests/faces.rs` › req_032_15_names_a_group_after_asking_and_writes_to_all_its_photos, req_032_15_ignoring_a_group_or_taking_a_face_out_leaves_too_few, req_032_15_no_people_page_without_models, req_032_15_people_page_looks_as_designed (snapshot `people_page`) | pass |
 | REQ-032-16 | `crates/indexer/src/faces.rs` › req_032_16_another_recognition_model_recognizes_again_and_going_back_repeats_nothing; `crates/db/src/faces.rs` › req_032_16_decisions_carry_over_to_another_detector_and_earlier_work_stays | pass |
-| REQ-032-18 | `crates/domain/src/face_models.rs` › req_032_18_recommends_one_for_speed_and_one_for_accuracy; `crates/app/tests/faces.rs` › req_032_18_says_why_a_model_is_recommended | pass |
+| REQ-032-18 | `crates/domain/src/face_models.rs` › req_032_18_recommends_one_for_speed_and_one_for_accuracy, req_032_18_descriptions_have_no_scores_and_no_second_link; `crates/app/tests/faces.rs` › req_032_18_says_why_a_model_is_recommended | pass |
 | REQ-032-19 | `crates/app/tests/faces.rs` › req_032_19_says_what_choosing_does_and_in_use_stays | pass |
 | REQ-032-20 | `crates/app/src/state/faces.rs` › req_032_20_says_what_the_search_is_doing, req_032_20_a_notice_only_while_it_works; `crates/app/tests/faces.rs` › req_032_20_pause_and_resume, req_032_20_the_notice_shows_on_every_page | pass |
 | REQ-032-21 | `crates/db/src/faces.rs` › req_032_21_says_whether_a_photo_was_looked_at; `crates/app/tests/faces.rs` › req_032_21_details_say_whether_a_photo_was_looked_at | pass |

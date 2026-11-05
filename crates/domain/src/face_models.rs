@@ -96,7 +96,7 @@ pub const CATALOG: &[CatalogModel] = &[
         sha256: "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
         bytes: 232_589,
         license: "MIT",
-        why: "Recommended for speed. About 5 times as fast as the other, and finds 91% of large faces.",
+        why: "Recommended for speed. Small and fast, but misses more small faces.",
     },
     CatalogModel {
         name: "RetinaFace (MobileNetV2)",
@@ -104,8 +104,8 @@ pub const CATALOG: &[CatalogModel] = &[
         url: "https://github.com/yakhyo/retinaface-pytorch/releases/download/v0.0.1/retinaface_mv2.onnx",
         sha256: "3ca44c045651cabeed1193a1fae8946ad1f3a55da8fa74b341feab5a8319f757",
         bytes: 12_506_811,
-        license: "MIT, see the comparison page",
-        why: "Recommended for accuracy. Finds 98% of large faces and more small ones, but takes about 5 times as long.",
+        license: "MIT",
+        why: "Recommended for accuracy. Finds more small faces, but takes about 5 times as long.",
     },
     CatalogModel {
         name: "EdgeFace S",
@@ -116,8 +116,8 @@ pub const CATALOG: &[CatalogModel] = &[
         url: "https://github.com/yakhyo/edgeface-onnx/releases/download/weights/edgeface_s_gamma_05.onnx",
         sha256: "b850767cf791bda585600b5c4c7d7432b2f998ccd862caae34ef1afa967d2e54",
         bytes: 14_805_514,
-        license: "Non-commercial, see the comparison page",
-        why: "Recommended for speed. Names 98.3% of known people, and takes little time and memory.",
+        license: "Non-commercial",
+        why: "Recommended for speed. Takes little time and memory.",
     },
     CatalogModel {
         name: "EdgeFace Base",
@@ -128,8 +128,8 @@ pub const CATALOG: &[CatalogModel] = &[
         url: "https://github.com/yakhyo/edgeface-onnx/releases/download/weights/edgeface_base.onnx",
         sha256: "b56942f072c67385f44734b9458b0ccc4a2226888a113f77e0c802ad0c77b4c3",
         bytes: 73_084_333,
-        license: "Non-commercial, see the comparison page",
-        why: "Recommended for accuracy. Names 98.8% of known people, taking about twice as long per face.",
+        license: "Non-commercial",
+        why: "Recommended for accuracy. Takes about twice as long per face.",
     },
     CatalogModel {
         name: "SFace",
@@ -141,7 +141,7 @@ pub const CATALOG: &[CatalogModel] = &[
         sha256: "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
         bytes: 38_696_353,
         license: "Apache-2.0",
-        why: "For work use: the only one here with a clear commercial license. Names 95.9% of known people.",
+        why: "For work use: the only one here with a clear commercial license.",
     },
 ];
 
@@ -812,6 +812,15 @@ mod tests {
         }
         assert!(CATALOG.iter().all(|model| !model.why.is_empty()));
         assert!(CATALOG.iter().all(|model| !model.name.contains("buffalo")));
+    }
+
+    /// REQ-032-18: a description says why in words; the numbers and the link to them are on the comparison page.
+    #[test]
+    fn req_032_18_descriptions_have_no_scores_and_no_second_link() {
+        for model in CATALOG {
+            assert!(!model.why.contains('%'), "{}", model.why);
+            assert!(!model.license.contains("comparison"), "{}", model.license);
+        }
     }
 
     /// REQ-032-02: hashes are the published files', links are pinned, and nothing non-commercial has a button.

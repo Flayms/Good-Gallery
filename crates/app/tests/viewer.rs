@@ -165,6 +165,22 @@ fn req_009_01_req_009_04_opens_the_clicked_item_with_its_original() {
     harness.snapshot(common::snapshot_name("viewer"));
 }
 
+/// REQ-013-18: neighbours in the control bar don't touch, so two pressed toggles stay two circles.
+#[test]
+fn req_013_18_the_viewers_bar_buttons_stay_apart() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture, 3, &[]);
+    open(&mut harness, "1.png");
+    let rect = |label: &str| harness.get_by_role_and_label(Role::Button, label).rect();
+    let (info, filmstrip, close) = (rect("Info"), rect("Filmstrip"), rect("Close"));
+    for (left, right) in [(info, filmstrip), (filmstrip, close)] {
+        assert!(
+            right.left() - left.right() >= 2.0,
+            "{left:?} and {right:?} should have a gap between them"
+        );
+    }
+}
+
 /// REQ-009-01: Enter on a focused tile opens it too.
 #[test]
 fn req_009_01_opens_the_focused_tile_with_enter() {
@@ -302,6 +318,50 @@ fn req_009_16_click_toggles_between_fitted_and_actual_pixels() {
 
 /// REQ-009-05: the wheel zooms around the pointer, `+` / `-` around the center, `0` fits; dragging pans a zoomed photo
 /// but never into empty space.
+/// REQ-009-05: a touchpad's pinch zooms around the pointer. Windows reports it as Ctrl + wheel, other systems as a zoom
+/// event. The gallery behind the viewer keeps its own zoom.
+#[test]
+fn req_009_05_a_touchpad_pinch_zooms() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture, 3, &[]);
+    let tile = harness.state().gallery.as_ref().unwrap().tile_rect(0);
+    assert!(tile.is_some());
+    open(&mut harness, "1.png");
+    harness.hover_at(CENTER);
+    harness.run_steps(1);
+
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: egui::vec2(0.0, 3.0),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Wheel,
+        modifiers: Modifiers::CTRL,
+    });
+    harness.run_steps(2);
+    let view = viewer(&harness).view();
+    assert!((view.scale - (300.0f32 * 0.002).exp()).abs() < 1e-3, "{view:?}");
+
+    let before = view.scale;
+    harness.event(egui::Event::Zoom(1.5));
+    harness.run_steps(2);
+    assert!((viewer(&harness).view().scale - before * 1.5).abs() < 1e-3);
+
+    harness.event(egui::Event::Zoom(0.01));
+    harness.run_steps(2);
+    assert!(!viewer(&harness).view().is_zoomed(), "no smaller than fitted");
+    assert_eq!(
+        harness
+            .state()
+            .gallery
+            .as_ref()
+            .unwrap()
+            .tile_rect(0)
+            .map(|rect| rect.width()),
+        tile.map(|rect| rect.width()),
+        "the gallery's own zoom stays"
+    );
+}
+
 #[test]
 fn req_009_05_zooms_and_pans() {
     let fixture = Fixture::new();
