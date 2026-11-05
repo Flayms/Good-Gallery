@@ -1,0 +1,217 @@
+//! Smart albums (spec 034): saving a search from the Filters menu, the sidebar group, renaming and deleting.
+
+mod common;
+
+use common::{Fixture, settle};
+use db::libraries::LibraryStatus;
+use db::rusqlite::Connection;
+use db::writer::{IndexWriter, IndexedFile};
+use domain::media::{MediaKind, MediaMetadata};
+use domain::search::GallerySearch;
+use eframe::egui::{self, accesskit::Role};
+use egui_kittest::Harness;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
+
+type App = Harness<'static, app::AppState>;
+
+fn file(rel_path: &str, rating: Option<i64>, tags: &[&str]) -> IndexedFile {
+    IndexedFile {
+        rel_path: rel_path.into(),
+        file_name: rel_path.into(),
+        kind: MediaKind::Image,
+        size: 1,
+        mtime: 1_000,
+        sidecar_mtime: None,
+        metadata: MediaMetadata {
+            width: Some(400),
+            height: Some(300),
+            taken_at: Some(1_000),
+            rating,
+            tags: tags.iter().map(|tag| vec![tag.to_string()]).collect(),
+            ..Default::default()
+        },
+        read_error: None,
+    }
+}
+
+/// Beach (2, one rated 5), Berlin (1).
+fn index() -> Connection {
+    let conn = db::open_in_memory().unwrap();
+    let root = db::libraries::insert(&conn, "D:\\Photos", "Photos", LibraryStatus::Online)
+        .unwrap()
+        .id;
+    let mut writer = IndexWriter::new(conn);
+    writer
+        .write(
+            root,
+            &[
+                file("beach.jpg", Some(5), &["Beach"]),
+                file("dunes.jpg", None, &["Beach"]),
+                file("berlin.jpg", None, &["Berlin"]),
+            ],
+        )
+        .unwrap();
+    writer.into()
+}
+
+fn search(harness: &App) -> GallerySearch {
+    harness.state().gallery.as_ref().unwrap().search().clone()
+}
+
+fn set_search(harness: &mut App, search: GallerySearch) {
+    harness.state_mut().gallery.as_mut().unwrap().set_search(search);
+    settle(harness);
+}
+
+fn beach() -> GallerySearch {
+    GallerySearch {
+        tags: vec!["Beach".into()],
+        ..GallerySearch::default()
+    }
+}
+
+/// Whether the sidebar marks a row as active.
+fn active(harness: &App, label: &str) -> bool {
+    let row = harness.get_by_role_and_label(Role::Button, label);
+    row.accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
+}
+
+/// The dialog's field: the search bar's comes first.
+fn name_field<'a>(harness: &'a App) -> egui_kittest::Node<'a> {
+    harness
+        .query_all_by_role(Role::TextInput)
+        .last()
+        .expect("the dialog is open")
+}
+
+/// Saves the current search under `name` through the Filters menu.
+fn save_as(harness: &mut App, name: &str) {
+    harness.get_by_label_contains("Filters").click();
+    harness.run();
+    harness.get_by_label("Save as smart album…").click();
+    harness.run();
+    let field = name_field(harness);
+    field.set_text_value_accesskit(name);
+    harness.run();
+    harness.get_by_label("Save").click();
+    settle(harness);
+}
+
+/// REQ-034-01, REQ-034-02: a search that isn't the default one is saved under a suggested name and listed with its
+/// count; the default search can't be saved, and without albums there is no group.
+#[test]
+fn req_034_01_req_034_02_saves_a_search_and_lists_it_with_its_count() {
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness(index());
+    settle(&mut harness);
+    assert!(harness.query_by_label("Smart albums").is_none());
+    harness.get_by_label_contains("Filters").click();
+    harness.run();
+    assert!(
+        harness
+            .get_by_label("Save as smart album…")
+            .accesskit_node()
+            .is_disabled()
+    );
+    harness.key_press(egui::Key::Escape);
+    harness.run();
+
+    set_search(&mut harness, beach());
+    harness.get_by_label_contains("Filters").click();
+    harness.run();
+    harness.get_by_label("Save as smart album…").click();
+    harness.run();
+    // The name is suggested from the tags.
+    assert_eq!(name_field(&harness).value().as_deref(), Some("Beach"));
+    harness.snapshot(common::snapshot_name("smart_album_save"));
+    name_field(&harness).set_text_value_accesskit("Seaside");
+    harness.run();
+    harness.get_by_label("Save").click();
+    settle(&mut harness);
+
+    harness.get_by_label("Smart albums");
+    assert!(active(&harness, "Seaside"), "the search is the album's");
+    harness.snapshot(common::snapshot_name("smart_album_sidebar"));
+}
+
+/// REQ-034-01: an empty name can't be saved, and _Cancel_ saves nothing.
+#[test]
+fn req_034_01_needs_a_name() {
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness(index());
+    settle(&mut harness);
+    set_search(&mut harness, beach());
+    harness.get_by_label_contains("Filters").click();
+    harness.run();
+    harness.get_by_label("Save as smart album…").click();
+    harness.run();
+    let field = name_field(&harness);
+    field.set_text_value_accesskit("   ");
+    harness.run();
+    assert!(harness.get_by_label("Save").accesskit_node().is_disabled());
+    harness.get_by_label("Cancel").click();
+    settle(&mut harness);
+    assert!(harness.query_by_label("Smart albums").is_none());
+}
+
+/// REQ-034-03: clicking a smart album shows its search; changing the search leaves the album as it was.
+#[test]
+fn req_034_03_opens_a_smart_album() {
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness(index());
+    settle(&mut harness);
+    let five = GallerySearch {
+        ratings: vec![5],
+        descending: false,
+        ..GallerySearch::default()
+    };
+    set_search(&mut harness, five.clone());
+    save_as(&mut harness, "Best");
+    set_search(&mut harness, GallerySearch::default());
+    assert!(!active(&harness, "Best"));
+
+    harness.get_by_role_and_label(Role::Button, "Best").click();
+    settle(&mut harness);
+    assert_eq!(search(&harness), five);
+    assert_eq!(harness.state().gallery.as_ref().unwrap().count(), Some(1));
+    assert!(active(&harness, "Best"));
+
+    let mut changed = five.clone();
+    changed.ratings.push(0);
+    set_search(&mut harness, changed);
+    assert!(!active(&harness, "Best"));
+    harness.get_by_role_and_label(Role::Button, "Best").click();
+    settle(&mut harness);
+    assert_eq!(search(&harness), five);
+}
+
+/// REQ-034-05: _Rename…_ and _Delete_ in a smart album's context menu.
+#[test]
+fn req_034_05_renames_and_deletes_a_smart_album() {
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness(index());
+    settle(&mut harness);
+    set_search(&mut harness, beach());
+    save_as(&mut harness, "Sea");
+
+    harness.get_by_role_and_label(Role::Button, "Sea").click_secondary();
+    harness.run();
+    harness.get_by_label("Rename…").click();
+    harness.run();
+    let field = name_field(&harness);
+    assert_eq!(field.value().as_deref(), Some("Sea"));
+    field.set_text_value_accesskit("Coast");
+    harness.run();
+    harness.get_by_label("Rename").click();
+    settle(&mut harness);
+    assert!(harness.query_by_label("Sea").is_none());
+
+    harness.get_by_role_and_label(Role::Button, "Coast").click_secondary();
+    harness.run();
+    harness.get_by_label("Delete").click();
+    settle(&mut harness);
+    assert!(harness.query_by_label("Coast").is_none());
+    assert!(harness.query_by_label("Smart albums").is_none());
+    // Only the album: the search shown stays.
+    assert_eq!(search(&harness), beach());
+}

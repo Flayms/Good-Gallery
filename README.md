@@ -11,6 +11,7 @@ Written in Rust (egui on wgpu).
 ## Features
 
 - **Four views:** Masonry, Justified, Grid and List, grouped by day. Scrolling stays smooth with hundreds of thousands of items, and the scrollbar shows the years to jump to.
+- **Smart albums:** keep a search under a name in the sidebar. It stays up to date as photos are added, tagged and rated.
 - **Libraries anywhere:** add local folders or network shares (`\\server\share`). Thumbnails are cached on your computer, so an offline share stays browsable.
 - **Always up to date:** changes on disk are picked up as they happen, with periodic checks for anything missed.
 - **Search by what's in your files:** tags from EXIF, IPTC, XMP and `.xmp` sidecars (Lightroom, digiKam, darktable and others), including hierarchies like `Places|Italy|Rome` and face regions as _People_. Filter by file name, folder, date, rating and type, and sort by date, name, path or size.

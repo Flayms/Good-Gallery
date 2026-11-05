@@ -29,6 +29,21 @@ impl SortBy {
         }
     }
 
+    /// How it is stored in a smart album (REQ-034-07).
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Taken => "taken",
+            Self::Modified => "modified",
+            Self::Path => "path",
+            Self::Size => "size",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|sort| sort.key() == key)
+    }
+
     /// Date sorts group by day (REQ-016-04).
     pub fn is_date(self) -> bool {
         matches!(self, Self::Taken | Self::Modified)

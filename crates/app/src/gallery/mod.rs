@@ -2,6 +2,7 @@
 //! only what is near the viewport drawn: tiles (`tiles`) or list rows (`list`), with thumbnails streamed from the
 //! thumbnail cache.
 
+mod albums;
 mod list;
 mod tiles;
 mod years;
@@ -155,6 +156,8 @@ pub struct SidebarData {
     pub other_tags: Vec<TagCount>,
     /// The folder tree of the selected library.
     pub folders: Option<(i64, Vec<FolderNode>)>,
+    /// Smart albums by name, with their counts (REQ-034-02).
+    pub albums: Vec<db::smart_albums::AlbumRow>,
 }
 
 /// Most used tags outside both categories in the sidebar (REQ-008-05).
@@ -195,6 +198,7 @@ fn load_sidebar(conn: &Connection, library: Option<i64>) -> db::Result<SidebarDa
         popular: db::tags::popular(conn, POPULAR_TAGS)?,
         other_tags: db::tags::popular(conn, SUGGESTED_TAGS)?,
         folders,
+        albums: db::smart_albums::rows(conn)?,
     })
 }
 
@@ -435,6 +439,8 @@ pub struct Gallery {
     faces: Option<(i64, Option<Vec<db::faces::ShownFace>>)>,
     /// The groups of unknown faces, until something changes (REQ-032-15).
     face_groups: Option<Option<Vec<FaceGroup>>>,
+    /// The dialog naming a smart album, while open (REQ-034-01, REQ-034-05).
+    album_dialog: Option<albums::NameDialog>,
     /// A context menu's choice this frame.
     menu_action: Option<(usize, MediaAction)>,
     /// The item under the pointer in the last frame.
@@ -507,6 +513,7 @@ impl Gallery {
             detail: None,
             faces: None,
             face_groups: None,
+            album_dialog: None,
             menu_action: None,
             hovered: None,
             range_preview: None,
@@ -546,7 +553,7 @@ impl Gallery {
         self.reload_sidebar();
     }
 
-    fn reload_sidebar(&mut self) {
+    pub(crate) fn reload_sidebar(&mut self) {
         self.loader.send(Request::Sidebar {
             library: self.search.library,
         });
