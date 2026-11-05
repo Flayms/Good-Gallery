@@ -428,17 +428,17 @@ fn req_008_10_req_008_11_orders_and_hides_groups_from_the_settings_and_remembers
             .is_disabled()
     };
     let mut harness = open_settings(index());
-    // Default: People (Anna), Places (Italy), Ratings (5 stars), Tags (Beach).
+    // Default: Smart albums (none, so hidden), People (Anna), Places (Italy), Ratings (5 stars), Tags (Beach).
     assert!(row_top(&harness, "Anna") < row_top(&harness, "Italy"));
     assert!(row_top(&harness, "Italy") < row_top(&harness, "5 stars"));
     assert!(row_top(&harness, "5 stars") < row_top(&harness, "Beach"));
     assert!(disabled(&harness, "Reset to default"), "nothing to reset");
-    assert!(disabled(&harness, "Move People up"));
+    assert!(disabled(&harness, "Move Smart albums up"));
     assert!(disabled(&harness, "Move Tags down"));
     harness.snapshot(common::snapshot_name("settings_sidebar"));
 
     // Tags to the top, Ratings off.
-    for _ in 0..3 {
+    for _ in 0..4 {
         harness.get_by_role_and_label(Role::Button, "Move Tags up").click();
         // Two frames: the rows show where they moved to.
         harness.run_steps(2);

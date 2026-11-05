@@ -7,9 +7,11 @@ use crate::state::Page;
 use crate::{format, theme};
 use db::libraries::{Library, LibraryStatus};
 use db::rusqlite::Connection;
+use db::smart_albums::Missing;
 use domain::folders::{FolderNode, TagNode, folder_ancestors};
 use domain::search::{GallerySearch, TagMode};
 use domain::sidebar::{SidebarGroup, SidebarLayout};
+use domain::smart_albums::SmartAlbum;
 use eframe::egui::{self, Color32, Rect, Vec2, pos2, vec2};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -190,6 +192,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
     let mut search = gallery.search().clone();
     // _Select all in library_ or _folder_ was picked (REQ-025-09).
     let mut select_all = false;
+    // _Rename…_ or _Delete_ on a smart album (REQ-034-05), done once the sidebar's data isn't borrowed.
+    let mut album_action = None;
     let empty = SidebarData::default();
     let data = gallery.sidebar().unwrap_or(&empty);
     // Folders leading to the active folder start expanded (REQ-008-02).
@@ -215,6 +219,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
             let shown: Vec<SidebarGroup> = state.layout.shown().collect();
             for group in shown {
                 match group {
+                    SidebarGroup::Albums => {
+                        if let Some(action) = albums(ui, state, &mut search, data, input.db.as_ref()) {
+                            album_action = Some(action);
+                        }
+                    }
                     SidebarGroup::People => {
                         if input.people {
                             let unknown = Row {
@@ -250,6 +259,67 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
         *input.page = Page::Gallery;
         gallery.select_all();
     }
+    match album_action {
+        Some(AlbumAction::Rename(album)) => gallery.ask_rename_album(&album),
+        Some(AlbumAction::Delete(id)) => gallery.delete_album(id),
+        None => {}
+    }
+}
+
+/// What a smart album's context menu asks for (REQ-034-05).
+enum AlbumAction {
+    Rename(SmartAlbum),
+    Delete(i64),
+}
+
+/// Smart albums by name with their counts; hidden without any (REQ-034-02, REQ-034-03, REQ-034-06).
+fn albums(
+    ui: &mut egui::Ui,
+    state: &mut SidebarState,
+    search: &mut GallerySearch,
+    data: &SidebarData,
+    db: Option<&Arc<Mutex<Connection>>>,
+) -> Option<AlbumAction> {
+    if data.albums.is_empty() || !collapsible(ui, state, "albums", "Smart albums", db) {
+        return None;
+    }
+    let mut action = None;
+    for album_row in &data.albums {
+        let album = &album_row.album;
+        let tooltip = match album_row.missing {
+            Some(Missing::Library) => Some("Its library was removed".to_string()),
+            Some(Missing::Folder) => Some("Its folder has no photos or videos any more".to_string()),
+            None => None,
+        };
+        let icon = match album_row.missing {
+            Some(_) => (Icon::TriangleAlert, theme::alert()),
+            None => (Icon::Search, theme::text()),
+        };
+        let (response, _) = row(
+            ui,
+            Row {
+                depth: 0,
+                chevron: None,
+                icon: Some(icon),
+                label: &album.name,
+                active: *search == album.search,
+                trailing: Some(format::count(album_row.count)),
+                tooltip,
+            },
+        );
+        if response.clicked() {
+            *search = album.search.clone();
+        }
+        response.context_menu(|ui| {
+            if ui.button("Rename…").clicked() {
+                action = Some(AlbumAction::Rename(album.clone()));
+            }
+            if ui.button("Delete").clicked() {
+                action = Some(AlbumAction::Delete(album.id));
+            }
+        });
+    }
+    action
 }
 
 /// _Select all in library_ or _folder_ in a row's context menu (REQ-025-09); whether it was picked.

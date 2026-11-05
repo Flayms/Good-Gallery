@@ -21,6 +21,7 @@ pub mod rating;
 pub mod search;
 pub mod selection;
 pub mod sidebar;
+pub mod smart_albums;
 pub mod tagging;
 pub mod tags;
 pub mod thumbs;

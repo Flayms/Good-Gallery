@@ -55,7 +55,7 @@ The user browses by structure rather than by typing: libraries and their folders
 
 ### REQ-008-07 · Remember collapsed groups
 
-- **Given** the collapsible People, Places and Ratings groups
+- **Given** the collapsible Smart albums (spec 034), People, Places and Ratings groups
 - **When** the user collapses or expands one
 - **Then** that state is kept across sessions
 
@@ -74,7 +74,7 @@ The user browses by structure rather than by typing: libraries and their folders
 
 ### REQ-008-10 · Order and choose the groups
 
-- **Given** the _Sidebar_ section of the Settings page, which lists the People, Places, Ratings and Tags groups in their current order, each with a switch and _Move up_ / _Move down_ buttons
+- **Given** the _Sidebar_ section of the Settings page, which lists the Smart albums (spec 034), People, Places, Ratings and Tags groups in their current order, each with a switch and _Move up_ / _Move down_ buttons
 - **When** the user moves a group up or down, or switches it off or on
 - **Then** the sidebar shows the switched-on groups in that order below the libraries, from the next frame on
 - **And** the libraries stay first and can't be hidden, and _Settings_ stays at the bottom
@@ -85,7 +85,7 @@ The user browses by structure rather than by typing: libraries and their folders
 - **Given** the user reordered or switched off sidebar groups
 - **When** the app starts the next time
 - **Then** the sidebar shows the same groups in the same order, for all libraries alike
-- **And** _Reset to default_ in the _Sidebar_ section brings back People, Places, Ratings, Tags, all switched on. It is disabled while that is already the case
+- **And** _Reset to default_ in the _Sidebar_ section brings back Smart albums, People, Places, Ratings, Tags, all switched on. It is disabled while that is already the case
 - **And** a stored choice that lacks a group (e.g. one added by an update) shows that group switched on at the end, and unknown or repeated entries are ignored
 
 ## Out of scope
