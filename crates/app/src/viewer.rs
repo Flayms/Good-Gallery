@@ -1405,12 +1405,10 @@ impl Viewer {
             self.view = zoom::zoom_to(self.view, self.view.scale * factor, (0.0, 0.0), content, viewport);
         }
         if backdrop.hovered() {
-            let delta = wheel(ui).y;
-            // egui's delta is positive when scrolling up, a browser's deltaY then negative: up zooms in.
-            if delta != 0.0
+            let factor = zoom_factor(ui);
+            if factor != 1.0
                 && let Some(pos) = backdrop.hover_pos()
             {
-                let factor = (delta * WHEEL_SENSITIVITY).exp();
                 self.view = zoom::zoom_to(self.view, self.view.scale * factor, relative(pos), content, viewport);
             }
         }
@@ -1990,7 +1988,16 @@ impl Layout {
     }
 }
 
-/// This frame's wheel movement in points (lines count 100), without Ctrl.
+/// A wheel event's movement in points (lines count 100).
+fn wheel_points(unit: egui::MouseWheelUnit, delta: Vec2) -> Vec2 {
+    match unit {
+        egui::MouseWheelUnit::Point => delta,
+        egui::MouseWheelUnit::Line => delta * WHEEL_LINE,
+        egui::MouseWheelUnit::Page => vec2(delta.x.signum(), delta.y.signum()) * WHEEL_LINE,
+    }
+}
+
+/// This frame's wheel movement in points, without Ctrl.
 fn wheel(ui: &egui::Ui) -> Vec2 {
     ui.input(|input| {
         input
@@ -2000,14 +2007,25 @@ fn wheel(ui: &egui::Ui) -> Vec2 {
             .filter_map(|event| match event {
                 egui::Event::MouseWheel {
                     unit, delta, modifiers, ..
-                } if !modifiers.ctrl => Some(match unit {
-                    egui::MouseWheelUnit::Point => *delta,
-                    egui::MouseWheelUnit::Line => *delta * WHEEL_LINE,
-                    egui::MouseWheelUnit::Page => vec2(delta.x.signum(), delta.y.signum()) * WHEEL_LINE,
-                }),
+                } if !modifiers.ctrl => Some(wheel_points(*unit, *delta)),
                 _ => None,
             })
             .fold(Vec2::ZERO, |sum, delta| sum + delta)
+    })
+}
+
+/// How much this frame's wheel, touchpad scrolling and pinching zoom a photo (REQ-009-05). Windows reports a pinch as
+/// Ctrl + wheel, other systems as a zoom event. egui's delta is positive when scrolling up, a browser's deltaY then
+/// negative: up zooms in.
+fn zoom_factor(ui: &egui::Ui) -> f32 {
+    ui.input(|input| {
+        input.raw.events.iter().fold(1.0, |factor, event| match event {
+            egui::Event::MouseWheel { unit, delta, .. } => {
+                factor * (wheel_points(*unit, *delta).y * WHEEL_SENSITIVITY).exp()
+            }
+            egui::Event::Zoom(zoom) => factor * zoom,
+            _ => factor,
+        })
     })
 }
 
