@@ -10,6 +10,8 @@ const MAX_WIDTH: f32 = 720.0;
 const CROP: f32 = 72.0;
 /// Faces shown per group; the name applies to all of them.
 const SHOWN_FACES: usize = 8;
+/// How far beyond the screen, in screens, faces are loaded ahead of scrolling.
+const NEAR_SCREENS: f32 = 0.5;
 
 /// A name typed for a group and waiting for the user to confirm it.
 pub struct NamingGroup {
@@ -43,6 +45,10 @@ fn crop_uv([x, y, w, h]: [f32; 4], size: [u32; 2]) -> Rect {
 fn crop(ui: &mut egui::Ui, state: &mut AppState, media: i64, rect: [f32; 4]) -> egui::Response {
     let (area, response) = ui.allocate_exact_size(Vec2::splat(CROP), Sense::hover());
     ui.painter().rect_filled(area, theme::RADIUS_CONTROL, theme::selected());
+    // Asking marks a thumbnail as in use, so only for what is on screen.
+    if !ui.is_rect_visible(area) {
+        return response;
+    }
     let texture = state.gallery.as_mut().and_then(|gallery| gallery.thumbnail(media));
     if let Some(texture) = texture {
         let uv = crop_uv(rect, texture.size);
@@ -55,6 +61,9 @@ fn crop(ui: &mut egui::Ui, state: &mut AppState, media: i64, rect: [f32; 4]) -> 
 }
 
 pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
+    if let Some(gallery) = &mut state.gallery {
+        gallery.begin_thumbnails();
+    }
     let groups = state
         .gallery
         .as_mut()
@@ -78,19 +87,35 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
                         ui.label(RichText::new("No groups of unknown faces yet.").color(theme::muted()));
                     }
                     Some(groups) => {
-                        let wanted: Vec<(i64, ThumbKey)> = groups
-                            .iter()
-                            .flat_map(|group| group.iter().take(SHOWN_FACES))
-                            .filter_map(|(face, key)| Some((face.media, key.clone()?)))
-                            .collect();
-                        if let Some(gallery) = &mut state.gallery {
-                            gallery.want_thumbnails(&wanted);
-                        }
+                        // What's asked for can't be evicted, so groups out of reach aren't: a page of them would
+                        // pass the textures' budget for good.
+                        let view = ui.clip_rect();
+                        let near = view.expand2(vec2(0.0, view.height() * NEAR_SCREENS));
+                        let (mut on_screen, mut ahead) = (Vec::new(), Vec::new());
                         for group in groups {
-                            if let Some(chosen) = group_card(ui, state, group) {
+                            let (chosen, card) = group_card(ui, state, group);
+                            if let Some(chosen) = chosen {
                                 action = Some(chosen);
                             }
+                            if near.intersects(card) {
+                                let wanted = if view.intersects(card) {
+                                    &mut on_screen
+                                } else {
+                                    &mut ahead
+                                };
+                                wanted.extend(
+                                    group
+                                        .iter()
+                                        .take(SHOWN_FACES)
+                                        .filter_map(|(face, key)| Some((face.media, key.clone()?))),
+                                );
+                            }
                             ui.add_space(theme::SPACE * 6.0);
+                        }
+                        on_screen.append(&mut ahead);
+                        let wanted: Vec<(i64, ThumbKey)> = on_screen;
+                        if let Some(gallery) = &mut state.gallery {
+                            gallery.want_thumbnails(&wanted);
                         }
                     }
                 }
@@ -106,11 +131,16 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     confirm_naming(ui.ctx(), state);
 }
 
-/// One group with its faces, a field for the name, and _Ignore_. Without saying who, nothing is written.
-fn group_card(ui: &mut egui::Ui, state: &mut AppState, group: &crate::gallery::FaceGroup) -> Option<FaceAction> {
+/// One group with its faces, a field for the name, and _Ignore_. Without saying who, nothing is written. What the user
+/// chose, and where the card is.
+fn group_card(
+    ui: &mut egui::Ui,
+    state: &mut AppState,
+    group: &crate::gallery::FaceGroup,
+) -> (Option<FaceAction>, Rect) {
     let key = group.first().map_or(0, |(face, _)| face.id);
     let mut action = None;
-    egui::Frame::new()
+    let card = egui::Frame::new()
         .stroke(Stroke::new(1.0, theme::rim()))
         .corner_radius(theme::RADIUS_PANEL)
         .inner_margin(Margin::same(12))
@@ -166,7 +196,7 @@ fn group_card(ui: &mut egui::Ui, state: &mut AppState, group: &crate::gallery::F
                 }
             });
         });
-    action
+    (action, card.response.rect)
 }
 
 fn clean_name(name: &str) -> Option<String> {

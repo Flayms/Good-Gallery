@@ -833,10 +833,153 @@ fn req_032_09_a_faces_popup_looks_as_designed() {
 #[test]
 fn req_032_15_people_page_looks_as_designed() {
     let fixture = Fixture::new();
-    let (mut harness, _) = app(&fixture, true, None);
-    harness.set_size(egui::vec2(1000.0, 700.0));
-    settle(&mut harness);
-    harness.get_by_label("Unknown faces").click();
-    settle(&mut harness);
+    let (conn, _dir) = library(&fixture, true);
+    let mut harness = people_page_with_thumbnails(&fixture, conn, egui::vec2(1000.0, 700.0));
+    let shown = group_photos(&mut harness);
+    wait_for_thumbnails(&mut harness, &shown[0]);
     harness.snapshot(common::snapshot_name("people_page"));
+}
+
+/// REQ-032-15: the faces of a group on screen show, without the gallery having been drawn.
+#[test]
+fn req_032_15_shows_the_faces_of_a_group() {
+    let fixture = Fixture::new();
+    let (conn, _dir) = library(&fixture, true);
+    let mut harness = people_page_with_thumbnails(&fixture, conn, egui::vec2(1000.0, 700.0));
+    let groups = group_photos(&mut harness);
+    wait_for_thumbnails(&mut harness, &groups[0]);
+}
+
+/// REQ-032-15: only groups on screen or nearly so hold thumbnails, or the page could pass the textures' budget for good.
+#[test]
+fn req_032_15_loads_only_the_faces_of_groups_near_the_screen() {
+    let fixture = Fixture::new();
+    let conn = many_groups(&fixture, 8);
+    let mut harness = people_page_with_thumbnails(&fixture, conn, egui::vec2(1000.0, 300.0));
+    let groups = group_photos(&mut harness);
+    assert_eq!(groups.len(), 8);
+    wait_for_thumbnails(&mut harness, &groups[0]);
+    // Long enough for all of them, had they been asked for.
+    for _ in 0..200 {
+        harness.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let gallery = harness.state_mut().gallery.as_mut().unwrap();
+    for media in &groups[7] {
+        assert!(gallery.thumbnail(*media).is_none(), "photo {media} is far off screen");
+    }
+}
+
+/// A library with `groups` groups of three unknown faces each, all unlike each other.
+fn many_groups(fixture: &Fixture, groups: usize) -> db::rusqlite::Connection {
+    let dir = fixture.folder("photos");
+    let conn = db::open_in_memory().unwrap();
+    let root = db::libraries::insert(&conn, &dir, "Photos", LibraryStatus::Online)
+        .unwrap()
+        .id;
+    let files: Vec<IndexedFile> = (0..groups * 3)
+        .map(|i| IndexedFile {
+            rel_path: format!("{i}.png"),
+            file_name: format!("{i}.png"),
+            kind: MediaKind::Image,
+            size: 1,
+            mtime: 1_000,
+            sidecar_mtime: None,
+            metadata: MediaMetadata {
+                width: Some(400),
+                height: Some(300),
+                ..Default::default()
+            },
+            read_error: None,
+        })
+        .collect();
+    let mut writer = IndexWriter::new(conn);
+    writer.write(root, &files).unwrap();
+    let mut conn: db::rusqlite::Connection = writer.into();
+    let set = |key: &str, value: &str| db::settings::set_value(&conn, key, &json!(value)).unwrap();
+    set(faces::DETECTOR_KEY, "detector");
+    set(faces::RECOGNIZER_KEY, "recognizer");
+    set(faces::THRESHOLD_KEY, "0.5");
+    for photo in faces::pending_photos(&conn, "detector", files.len()).unwrap() {
+        faces::store_scan(&mut conn, &photo, "detector", &[detection(STRANGER)]).unwrap();
+    }
+    for waiting in faces::pending_faces(&conn, "detector", "recognizer", files.len()).unwrap() {
+        let number: usize = waiting.photo.rel_path.trim_end_matches(".png").parse().unwrap();
+        let mut vector = vec![0.0; groups];
+        vector[number / 3] = 1.0;
+        faces::store_embedding(&conn, waiting.face, "recognizer", &vector).unwrap();
+    }
+    conn
+}
+
+/// The app on the People page, the gallery never drawn, with every photo's thumbnails in a real cache and streamer.
+fn people_page_with_thumbnails(fixture: &Fixture, conn: db::rusqlite::Connection, size: egui::Vec2) -> App {
+    let cache = indexer::thumb_cache::ThumbCache::open(fixture.dir.path().join("thumbs"), u64::MAX);
+    cache.wait_ready();
+    let media: Vec<i64> = conn
+        .prepare("SELECT id FROM media")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    for id in media {
+        let key = db::thumbs::thumb_source(&conn, id).unwrap().unwrap().key;
+        let shade = (id * 37 % 200) as u8 + 40;
+        let pixels = [shade, 90, 255 - shade].repeat(400 * 300);
+        let thumbnail = webp::Encoder::from_rgb(&pixels, 400, 300).encode_lossless();
+        for width in domain::thumbs::THUMB_WIDTHS {
+            let path = cache.path(&key, width);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, &*thumbnail).unwrap();
+        }
+    }
+    let render_state = egui_kittest::wgpu::create_render_state(
+        egui_kittest::wgpu::default_wgpu_setup(),
+        eframe::egui_wgpu::RendererOptions::PREDICTABLE,
+    );
+    let mut state = fixture.state(conn).with_faces(&fixture.dir.path().join("data"), None);
+    state.gallery = state.gallery.take().map(|gallery| {
+        gallery.with_thumbnails(app::gallery::Thumbnails {
+            streamer: app::textures::TextureStreamer::new(
+                render_state.clone(),
+                cache.clone(),
+                app::textures::DEFAULT_BUDGET,
+                egui::Context::default(),
+            ),
+            cache,
+            service: None,
+            ready: std::sync::mpsc::channel().1,
+        })
+    });
+    state.page = Page::People;
+    let mut harness = common::harness_on(state, render_state);
+    harness.set_size(size);
+    settle(&mut harness);
+    harness
+}
+
+/// Each group's photos, largest group first.
+fn group_photos(harness: &mut App) -> Vec<Vec<i64>> {
+    let gallery = harness.state_mut().gallery.as_mut().unwrap();
+    gallery.wait_for_loads();
+    let groups = gallery.face_groups().expect("the groups have loaded");
+    groups
+        .iter()
+        .map(|group| group.iter().map(|(face, _)| face.media).collect())
+        .collect()
+}
+
+/// Draws frames until these photos' thumbnails are there, as they come in on other threads.
+fn wait_for_thumbnails(harness: &mut App, media: &[i64]) {
+    for _ in 0..500 {
+        harness.run_steps(1);
+        let gallery = harness.state_mut().gallery.as_mut().unwrap();
+        if media.iter().all(|media| gallery.thumbnail(*media).is_some()) {
+            harness.run_steps(40);
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("the thumbnails of {media:?} never showed");
 }
