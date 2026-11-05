@@ -170,6 +170,13 @@ Users with large libraries want to find people without tagging each photo by han
 - **Then** those photos are looked at again in the background
 - **And** what the user decided about a face stays (REQ-032-11), and names are untouched
 
+### REQ-032-23 · Recognized right after being found
+
+- **Given** a chosen detection and recognition model, and photos not looked at yet
+- **When** the search works through them
+- **Then** each photo's faces are recognized right after it was looked at, before the next photo, so suggestions appear during the first pass, and the photo is read and decoded once for both steps
+- **And** faces waiting for a recognition model chosen later are recognized once no photos are waiting (REQ-032-16)
+
 ## Out of scope
 
 - Videos, pets and the browser version.
@@ -208,4 +215,5 @@ Users with large libraries want to find people without tagging each photo by han
 | REQ-032-20 | `crates/app/src/state/faces.rs` › req_032_20_says_what_the_search_is_doing, req_032_20_a_notice_only_while_it_works; `crates/app/tests/faces.rs` › req_032_20_pause_and_resume, req_032_20_the_notice_shows_on_every_page | pass |
 | REQ-032-21 | `crates/db/src/faces.rs` › req_032_21_says_whether_a_photo_was_looked_at; `crates/app/tests/faces.rs` › req_032_21_details_say_whether_a_photo_was_looked_at | pass |
 | REQ-032-22 | `crates/db/src/faces.rs` › req_032_22_looks_again_and_decisions_stay; `crates/app/tests/faces.rs` › req_032_22_look_again_from_the_details, req_032_22_look_through_all_again_asks_first | pass |
+| REQ-032-23 | `crates/indexer/src/faces.rs` › req_032_23_recognizes_a_photos_faces_right_after_looking_at_it, req_032_23_only_looks_without_a_recognition_model_and_catches_up_with_one; `crates/db/src/faces.rs` › req_032_23_only_the_open_faces_of_that_photo | pass |
 | REQ-032-17 | `crates/domain/src/face_models.rs` › req_032_17_notices_a_model_that_tells_nobody_apart; `crates/db/src/faces.rs` › req_032_17_a_model_telling_people_apart_seems_right; `crates/app/tests/faces.rs` › req_032_17_warns_when_the_model_tells_nobody_apart | pass |
