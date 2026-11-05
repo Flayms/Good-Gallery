@@ -26,10 +26,12 @@ Users with large libraries want to find people without tagging each photo by han
 ### REQ-032-03 · Adding another model
 
 - **Given** an ONNX model that isn't listed
-- **When** the user pastes an `https` link or picks a file
+- **When** the user picks a file or drops one on the _Faces_ section of the settings
 - **Then** the app works out by itself whether it finds or recognizes faces, the model is copied into the data folder and it is available like a listed one, under the file's name
 - **And** the one thing the app can't work out, how a recognition model expects its pixels, is a choice that says what it means, set to what most models use
 - **And** a file the app can't run as that kind of model is refused with the reason, and leaves nothing behind
+- **And** while a file is over the window the section shows where to drop it; a dropped file that isn't `.onnx` is refused with the reason, of several the first is added and a toast says so, and on any other page a dropped file does nothing
+- **And** a model added by link in an earlier version keeps working
 
 ### REQ-032-04 · Off until chosen
 
@@ -188,7 +190,7 @@ Users with large libraries want to find people without tagging each photo by han
 | ---------- | ---- | ------ |
 | REQ-032-01 | `crates/app/tests/faces.rs` › req_032_01_lists_the_models_with_their_licenses, req_032_19_says_what_choosing_does_and_in_use_stays, req_032_01_settings_section_looks_as_designed (snapshot `settings_faces`) | pass |
 | REQ-032-02 | `crates/domain/src/face_models.rs` › req_032_02_the_catalog_pins_what_it_downloads; `crates/media/src/face_store.rs` › req_032_02_keeps_a_download_only_if_its_hash_matches, req_032_02_a_cancelled_or_failed_download_leaves_nothing, req_032_02_downloads_a_small_real_model_over_https (ignored in CI, run by hand) | partial: progress and cancelling are covered in `media`, not on the page |
-| REQ-032-03 | `crates/media/src/face_models.rs` › req_032_03_refuses_a_file_that_is_no_model_or_the_wrong_kind; `crates/media/src/face_models.rs` › req_032_03_works_out_what_a_model_is; `crates/media/src/face_store.rs` › req_032_03_adds_a_file_only_if_it_runs, req_032_03_links_must_be_https_and_name_the_model_by_their_file; `crates/app/tests/faces.rs` › req_032_03_adds_a_file_it_can_run_and_refuses_one_it_cant | pass |
+| REQ-032-03 | `crates/media/src/face_models.rs` › req_032_03_refuses_a_file_that_is_no_model_or_the_wrong_kind; `crates/media/src/face_models.rs` › req_032_03_works_out_what_a_model_is; `crates/media/src/face_store.rs` › req_032_03_adds_a_file_only_if_it_runs; `crates/app/tests/faces.rs` › req_032_03_adds_a_file_it_can_run_and_refuses_one_it_cant, req_032_03_has_no_link_field_and_says_a_file_can_be_dropped, req_032_03_adds_a_dropped_file_and_refuses_one_it_cant_run, req_032_03_says_why_a_dropped_file_isnt_added, req_032_03_a_file_dropped_on_another_page_is_ignored, req_032_03_shows_where_to_drop_a_file | pass |
 | REQ-032-04 | `crates/indexer/src/faces.rs` › req_032_04_looks_for_nothing_without_a_chosen_model; `crates/db/src/faces.rs` › req_032_04_deletes_all_face_data_but_no_named_regions; `crates/app/tests/faces.rs` › req_032_04_delete_face_data_asks_and_stops_the_search | pass |
 | REQ-032-05 | `crates/db/src/faces.rs` › req_032_05_works_through_photos_once_and_again_when_they_change, req_032_05_skips_offline_libraries; `crates/indexer/src/faces.rs` › req_032_05_works_through_all_photos_and_a_bad_file_costs_only_itself, req_032_05_stops_for_an_unreachable_share_or_when_paused, req_032_05_a_model_that_cant_run_says_so_and_a_panic_costs_only_that_file | pass |
 | REQ-032-06 | `crates/domain/src/face_models.rs` › req_032_06_finds_the_same_face_only_once, req_032_06_decodes_yunets_output, req_032_06_decodes_retinafaces_output, req_032_06_chooses_passes_by_what_the_first_found, req_032_06_turns_what_a_pass_found_into_photo_pixels_and_drops_tiny_faces; `crates/media/src/face_models.rs` › req_032_06_finds_a_real_face_with_its_landmarks, req_032_06_finds_small_faces_on_a_large_photo, req_032_06_finds_a_face_that_fills_the_photo, req_032_06_retinaface_finds_a_real_face (ignored in CI, run by hand); `crates/indexer/src/faces.rs` › req_032_06_finds_the_face_of_a_turned_photo_with_the_real_model, req_032_06_detections_become_fractions_of_the_upright_photo | pass, with rates measured on WIDER FACE (`docs/face-models.md`), not on a real library |

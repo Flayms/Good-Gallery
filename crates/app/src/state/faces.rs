@@ -137,7 +137,6 @@ pub struct Faces {
     pub paused: bool,
     /// By the catalog model's hash, or `"added"` for one being added.
     arriving: Arc<Mutex<HashMap<String, Arriving>>>,
-    pub link: String,
     /// How a recognition model being added expects its pixels.
     pub added_style: AddedStyle,
     pub confirm_delete: bool,
@@ -294,22 +293,6 @@ impl AppState {
         }
     }
 
-    /// Adds a model from the pasted link (REQ-032-03).
-    pub fn add_face_link(&mut self) {
-        let Some(store) = self.faces.store.clone() else { return };
-        let url = self.faces.link.trim().to_owned();
-        if url.is_empty() {
-            return;
-        }
-        let style = self.faces.added_style.0;
-        let mut progress = self.arriving_progress("added".to_owned());
-        self.spawn(move || Event::FaceModelArrived {
-            key: "added".to_owned(),
-            name: url.clone(),
-            result: store.add_link(&url, &|file| identify(file, style), &mut progress),
-        });
-    }
-
     /// Adds a model from a file the user picks (REQ-032-03).
     pub fn add_face_file(&mut self) {
         let Some(store) = self.faces.store.clone() else { return };
@@ -341,6 +324,28 @@ impl AppState {
         });
     }
 
+    /// Adds a model from files dropped on the settings: the first, if it can be one (REQ-032-03).
+    pub fn add_dropped_face_files(&mut self, files: &[PathBuf]) {
+        let Some(file) = files.first() else { return };
+        let is_onnx = file
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("onnx"));
+        if !is_onnx {
+            let name = file.file_name().unwrap_or_default().to_string_lossy();
+            self.toasts.error(format!("{name} isn't an ONNX file"));
+            return;
+        }
+        if self.faces.arriving().contains_key("added") {
+            self.toasts.error("Another model is still being added");
+            return;
+        }
+        self.add_face_file_at(file.clone());
+        if files.len() > 1 {
+            self.toasts
+                .success("Adding the first file: the app adds one model at a time");
+        }
+    }
+
     /// Removes a model from this computer; what it found stays, for when it comes back.
     pub fn remove_face_model(&mut self, sha256: &str) {
         let Some(store) = self.faces.store.clone() else { return };
@@ -363,9 +368,6 @@ impl AppState {
         }
         match result {
             Ok(model) => {
-                if key == "added" {
-                    self.faces.link.clear();
-                }
                 self.toasts.success(format!("{} is ready", model.name));
             }
             Err(StoreError::Cancelled) => {}
