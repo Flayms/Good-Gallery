@@ -209,15 +209,37 @@ pub fn pending_faces(
     );
     let faces = conn
         .prepare_cached(&sql)?
-        .query_map(params![detector, recognizer, limit as i64], |row| {
-            Ok(FaceToRecognize {
-                photo: photo_from_row(row)?,
-                face: row.get(7)?,
-                landmarks: landmarks_from_blob(&row.get::<_, Vec<u8>>(8)?),
-            })
-        })?
+        .query_map(params![detector, recognizer, limit as i64], face_to_recognize)?
         .collect::<rusqlite::Result<_>>()?;
     Ok(faces)
+}
+
+/// The faces of one photo that `recognizer` hasn't seen, like [`pending_faces`] (REQ-032-23).
+pub fn pending_faces_in(
+    conn: &Connection,
+    media: i64,
+    detector: &str,
+    recognizer: &str,
+) -> Result<Vec<FaceToRecognize>> {
+    let sql = format!(
+        "SELECT {PHOTO_COLUMNS}, f.id, f.landmarks FROM detected_faces f
+         JOIN media m ON m.id = f.media_id JOIN library_roots r ON r.id = m.root_id
+         LEFT JOIN face_embeddings e ON e.face_id = f.id AND e.recognizer = ?3
+         WHERE f.media_id = ?1 AND f.detector = ?2 AND f.state = 'open' AND e.face_id IS NULL"
+    );
+    let faces = conn
+        .prepare_cached(&sql)?
+        .query_map(params![media, detector, recognizer], face_to_recognize)?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(faces)
+}
+
+fn face_to_recognize(row: &rusqlite::Row<'_>) -> rusqlite::Result<FaceToRecognize> {
+    Ok(FaceToRecognize {
+        photo: photo_from_row(row)?,
+        face: row.get(7)?,
+        landmarks: landmarks_from_blob(&row.get::<_, Vec<u8>>(8)?),
+    })
 }
 
 /// Stores what `recognizer` made of `face`. An empty vector marks a face it can't read, so it isn't tried again.
@@ -651,6 +673,30 @@ mod tests {
             params![media, name, x],
         )
         .unwrap();
+    }
+
+    /// REQ-032-23: only that photo's open faces this recognition model hasn't seen.
+    #[test]
+    fn req_032_23_only_the_open_faces_of_that_photo() {
+        let (mut conn, root) = setup();
+        let id = insert(&conn, root, "a.jpg", "image");
+        let found = photo(&conn, "d");
+        store_scan(&mut conn, &found, "d", &[face(0.1), face(0.5), face(0.8)]).unwrap();
+        let other = insert(&conn, root, "b.jpg", "image");
+        let found = pending_photos(&conn, "d", 10).unwrap().remove(0);
+        assert_eq!(found.media, other);
+        store_scan(&mut conn, &found, "d", &[face(0.1)]).unwrap();
+
+        let faces = pending_faces_in(&conn, id, "d", "r").unwrap();
+        assert_eq!(faces.len(), 3);
+        assert!(faces.iter().all(|face| face.photo.media == id));
+        set_state(&conn, faces[0].face, FaceState::Ignored).unwrap();
+        store_embedding(&conn, faces[1].face, "r", &[1.0]).unwrap();
+        let left = pending_faces_in(&conn, id, "d", "r").unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].face, faces[2].face);
+        assert_eq!(pending_faces_in(&conn, id, "d", "other").unwrap().len(), 2);
+        assert!(pending_faces_in(&conn, id, "another detector", "r").unwrap().is_empty());
     }
 
     #[test]
