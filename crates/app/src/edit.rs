@@ -119,6 +119,8 @@ struct Loaded {
     /// (REQ-021-19). Not destroyed when editing ends: a frame's queued preview may still draw it (#69); wgpu frees it
     /// with its last view.
     view: Option<wgpu::TextureView>,
+    /// The lens blur's pyramid of `view`, built the first time a lens blur shows (REQ-023-05); freed with the session.
+    lens: Option<wgpu::TextureView>,
     /// Once read back from the viewer's texture, or decoded with it.
     small: Option<image::RgbaImage>,
     /// The CPU preview, and the recipe, the part of the photo and the flags it shows.
@@ -314,6 +316,8 @@ impl EditSession {
                         self.read_small(view.clone());
                         self.base = Base::Loaded(Box::new(Loaded {
                             view: Some(view),
+
+                            lens: None,
                             small: None,
                             cpu: None,
                         }));
@@ -1145,6 +1149,7 @@ impl EditSession {
                 flags |= 8 | if self.part == Part::Background { 16 } else { 0 };
             }
         }
+        let lens_shown = self.draft.blur_lens && self.draft.blur_kind != BlurKind::None && !compare;
         if let (Some(view), Some(render_state)) = (&loaded.view, &self.render_state)
             && render_state
                 .renderer
@@ -1152,6 +1157,16 @@ impl EditSession {
                 .callback_resources
                 .contains::<EditResources>()
         {
+            // The lens pyramid the first time a lens blur shows (REQ-023-05).
+            if lens_shown && loaded.lens.is_none() {
+                let renderer = render_state.renderer.read();
+                if let Some(res) = renderer.callback_resources.get::<EditResources>() {
+                    let device = &render_state.device;
+                    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+                    loaded.lens = res.build_lens(device, &mut encoder, view);
+                    render_state.queue.submit([encoder.finish()]);
+                }
+            }
             let ppp = ctx.pixels_per_point();
             let shown = rect.intersect(clip);
             if shown.is_positive() {
@@ -1173,6 +1188,7 @@ impl EditSession {
                             view: view.clone(),
                             mask: mask_view,
                             paintings: paintings_view,
+                            lens: loaded.lens.clone().filter(|_| lens_shown),
                             uniform,
                             group: std::sync::OnceLock::new(),
                         },
@@ -1732,6 +1748,24 @@ impl EditSession {
                 }
             }
         });
+        // How it blurs: softly, or in discs as a lens does (REQ-023-05).
+        if self.draft.blur_kind != BlurKind::None {
+            ui.horizontal(|ui| {
+                for (lens, label, hover) in [
+                    (false, "Soft", "An even, soft blur"),
+                    (true, "Lens", "Lights spread into discs, as with a camera's lens"),
+                ] {
+                    let response = ui
+                        .add(egui::Button::selectable(self.draft.blur_lens == lens, label))
+                        .on_hover_text(hover);
+                    if response.clicked() && self.draft.blur_lens != lens {
+                        let mut recipe = self.draft.clone();
+                        recipe.blur_lens = lens;
+                        self.commit(recipe);
+                    }
+                }
+            });
+        }
         match (&self.subject, self.draft.blur_kind) {
             (Subject::Unknown | Subject::Finding(_), BlurKind::Background) => {
                 ui.horizontal(|ui| {
@@ -2084,6 +2118,7 @@ fn load(target: &Target, source: &str, render_state: Option<&egui_wgpu::RenderSt
     });
     Ok(Loaded {
         view,
+        lens: None,
         small: Some(small),
         cpu: None,
     })
@@ -2197,6 +2232,14 @@ fn cpu_preview(
         let pixels = small.pixels().map(|p| p.0.map(|c| f32::from(c) / 255.0)).collect();
         Pyramid::new(width, height, pixels)
     });
+    // Lights spread into discs (REQ-023-05).
+    let lens = (blurs && params.blur_lens).then(|| {
+        let pixels = small
+            .pixels()
+            .map(|p| domain::edit::lens_weighted(p.0.map(|c| f32::from(c) / 255.0)))
+            .collect();
+        Pyramid::new(width, height, pixels)
+    });
     let mut rgba = Vec::with_capacity(small.as_raw().len());
     for (x, y, pixel) in small.enumerate_pixels() {
         let uv = [(x as f32 + 0.5) / width as f32, (y as f32 + 0.5) / height as f32];
@@ -2213,7 +2256,8 @@ fn cpu_preview(
             }
             if blurs {
                 let sigma = params.blur_sigma(uv, size, subject) * scale;
-                rgba_in = pyramid.blurred(rgba_in, uv, blur_lod(sigma, pyramid.levels()));
+                let small_size = [width as f32, height as f32];
+                rgba_in = domain::edit::blur_pixel(pyramid, lens.as_ref(), rgba_in, uv, sigma, small_size);
             }
         }
         let rgb = [rgba_in[0], rgba_in[1], rgba_in[2]];
@@ -2310,7 +2354,7 @@ fn uniform(
         params.blur_focus[0],
         params.blur_focus[1],
         f32::from(geometry.quarter_turns()),
-        0.0,
+        f32::from(u8::from(params.blur_lens)),
     ]);
     floats.extend_from_slice(&geometry.crop());
     floats.extend_from_slice(&[
@@ -2350,7 +2394,16 @@ struct EditResources {
     no_subject: wgpu::TextureView,
     /// The paintings while there are none.
     no_paintings: wgpu::TextureView,
+    /// The lens blur's pyramid while there is none.
+    no_lens: wgpu::TextureView,
+    /// What builds a lens pyramid from a photo (`lens.wgsl`): weighing, then halving (REQ-023-05).
+    lens_layout: wgpu::BindGroupLayout,
+    weigh: wgpu::RenderPipeline,
+    halve: wgpu::RenderPipeline,
 }
+
+/// The lens pyramid's pixels: weighted values, beyond 1.
+const LENS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 impl EditResources {
     fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
@@ -2407,6 +2460,16 @@ impl EditResources {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -2447,7 +2510,13 @@ impl EditResources {
             ..Default::default()
         });
         let no_subject = mask_texture(device, 1, 1).create_view(&wgpu::TextureViewDescriptor::default());
+        let (lens_layout, weigh, halve) = lens_pipelines(device);
+        let no_lens = lens_texture(device, [1, 1], 1).create_view(&wgpu::TextureViewDescriptor::default());
         Self {
+            no_lens,
+            lens_layout,
+            weigh,
+            halve,
             pipeline,
             layout,
             sampler,
@@ -2462,6 +2531,7 @@ impl EditResources {
         view: &wgpu::TextureView,
         mask: Option<&wgpu::TextureView>,
         paintings: Option<&wgpu::TextureView>,
+        lens: Option<&wgpu::TextureView>,
         uniform: &[f32],
     ) -> wgpu::BindGroup {
         let buffer = wgpu::util::DeviceExt::create_buffer_init(
@@ -2496,9 +2566,145 @@ impl EditResources {
                     binding: 4,
                     resource: wgpu::BindingResource::TextureView(paintings.unwrap_or(&self.no_paintings)),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::TextureView(lens.unwrap_or(&self.no_lens)),
+                },
             ],
         })
     }
+
+    /// The lens pyramid of `photo`, built on `encoder`; `None` for a photo too small to have one (REQ-023-05).
+    fn build_lens(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        photo: &wgpu::TextureView,
+    ) -> Option<wgpu::TextureView> {
+        let texture = photo.texture();
+        let levels = texture.mip_level_count();
+        if levels < 2 {
+            return None;
+        }
+        let size = [texture.width() / 2, texture.height() / 2];
+        let lens = lens_texture(device, size, levels - 1);
+        let level = |texture: &wgpu::Texture, level: u32| {
+            texture.create_view(&wgpu::TextureViewDescriptor {
+                base_mip_level: level,
+                mip_level_count: Some(1),
+                ..Default::default()
+            })
+        };
+        for target in 0..levels - 1 {
+            let (source, pipeline) = if target == 0 {
+                (level(texture, 0), &self.weigh)
+            } else {
+                (level(&lens, target - 1), &self.halve)
+            };
+            let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("edit lens"),
+                layout: &self.lens_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&source),
+                }],
+            });
+            let target = level(&lens, target);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("edit lens"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+        Some(lens.create_view(&wgpu::TextureViewDescriptor::default()))
+    }
+}
+
+/// A texture for a lens pyramid of `levels` levels.
+fn lens_texture(device: &wgpu::Device, [width, height]: [u32; 2], levels: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("edit lens"),
+        size: wgpu::Extent3d {
+            width: width.max(1),
+            height: height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: levels,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: LENS_FORMAT,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    })
+}
+
+/// The bind group layout and the two pipelines of `lens.wgsl`.
+fn lens_pipelines(device: &wgpu::Device) -> (wgpu::BindGroupLayout, wgpu::RenderPipeline, wgpu::RenderPipeline) {
+    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("edit lens"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("lens.wgsl").into()),
+    });
+    let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("edit lens"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        }],
+    });
+    let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("edit lens"),
+        bind_group_layouts: &[Some(&layout)],
+        immediate_size: 0,
+    });
+    let pipeline = |entry: &str| {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("edit lens"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: LENS_FORMAT,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
+    };
+    let (weigh, halve) = (pipeline("weigh"), pipeline("halve"));
+    (layout, weigh, halve)
 }
 
 /// What the preview samples of a recipe's paintings: a layer per painting, kept up to date with what changed.
@@ -2690,6 +2896,8 @@ struct PreviewCallback {
     mask: Option<wgpu::TextureView>,
     /// The recipe's paintings, if it has any.
     paintings: Option<wgpu::TextureView>,
+    /// The photo's lens pyramid, while a lens blur shows (REQ-023-05).
+    lens: Option<wgpu::TextureView>,
     uniform: Vec<f32>,
     /// Made in `prepare`; dropped with the frame, so the photo's texture isn't kept alive after editing ends.
     group: std::sync::OnceLock<wgpu::BindGroup>,
@@ -2710,6 +2918,7 @@ impl CallbackTrait for PreviewCallback {
                 &self.view,
                 self.mask.as_ref(),
                 self.paintings.as_ref(),
+                self.lens.as_ref(),
                 &self.uniform,
             ));
         }
@@ -2826,7 +3035,13 @@ mod tests {
         let mask = mask.map(|mask| upload_mask(render_state, mask));
         let mut paint = PaintTexture::new(device, [width as f32, height as f32]);
         paint.sync(queue, &recipe.paintings);
-        let group = resources.bind(device, &view, mask.as_ref(), Some(&paint.view), &uniform);
+        let mut lens_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let lens = recipe
+            .blur_lens
+            .then(|| resources.build_lens(device, &mut lens_encoder, &view))
+            .flatten();
+        queue.submit([lens_encoder.finish()]);
+        let group = resources.bind(device, &view, mask.as_ref(), Some(&paint.view), lens.as_ref(), &uniform);
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("edit test"),
             size: wgpu::Extent3d {
@@ -3035,10 +3250,19 @@ mod tests {
         };
         let mut lit = blur(BlurKind::Radial, [0.3, 0.6], 10.0);
         Adjustment::Exposure.set(&mut lit, 0.5);
+        // Lens blur (REQ-023-05): discs from the lens pyramid, at a strong and a weak strength.
+        let lens = |mut recipe: Recipe, strength: f32| {
+            recipe.blur_lens = true;
+            recipe.blur = strength;
+            recipe
+        };
         let cases = [
             (blur(BlurKind::TiltShift, [0.5, 0.3], 20.0), None, 0),
             (lit, None, 0),
             (blur(BlurKind::Background, [0.5, 0.5], 30.0), Some(&mask), 4),
+            (lens(blur(BlurKind::Radial, [0.3, 0.6], 10.0), 100.0), None, 0),
+            (lens(blur(BlurKind::Radial, [0.3, 0.6], 10.0), 15.0), None, 0),
+            (lens(blur(BlurKind::Background, [0.5, 0.5], 30.0), 60.0), Some(&mask), 4),
         ];
         for (recipe, mask, flags) in cases {
             let gpu = render_gpu(&render_state, &image, &recipe, mask, flags);
@@ -3319,6 +3543,8 @@ mod tests {
         let mut session = EditSession::new(target, None);
         session.base = Base::Loaded(Box::new(Loaded {
             view: None,
+
+            lens: None,
             small: Some(image::RgbaImage::from_pixel(10, 10, image::Rgba([200, 150, 100, 255]))),
             cpu: None,
         }));
@@ -3376,6 +3602,8 @@ mod tests {
         let mut session = EditSession::new(target, Some(render_state.clone()));
         session.base = Base::Loaded(Box::new(Loaded {
             view: Some(view.clone()),
+
+            lens: None,
             small: Some(pattern()),
             cpu: None,
         }));
@@ -3383,6 +3611,7 @@ mod tests {
             view,
             mask: None,
             paintings: None,
+            lens: None,
             uniform: uniform(
                 &Params::new(&Recipe::default()),
                 Geometry::new(None, 0),
@@ -3464,6 +3693,8 @@ mod tests {
         let warm = image::RgbaImage::from_pixel(10, 10, image::Rgba([190, 160, 130, 255]));
         session.base = Base::Loaded(Box::new(Loaded {
             view: None,
+
+            lens: None,
             small: Some(warm.clone()),
             cpu: None,
         }));
@@ -3505,6 +3736,8 @@ mod tests {
         assert_eq!(session.recipe(), &recipe);
         session.base = Base::Loaded(Box::new(Loaded {
             view: None,
+
+            lens: None,
             small: Some(image::RgbaImage::from_pixel(10, 10, image::Rgba([60, 140, 60, 255]))),
             cpu: None,
         }));

@@ -5,7 +5,8 @@
 
 use crate::thumbnail::{decode_error, limits};
 use domain::edit::{
-    Geometry, Mask, MtimeOnSave, Params, Pyramid, Recipe, backup_rel_path, blur_lod, copy_name, dither,
+    Geometry, Mask, MtimeOnSave, Params, Pyramid, Recipe, backup_rel_path, blur_lod, blur_pixel, copy_name, dither,
+    lens_weighted,
 };
 use image::{DynamicImage, ImageReader, Rgba32FImage};
 use std::io::{Cursor, Write as _};
@@ -394,6 +395,12 @@ pub fn render(params: &Params, image: &mut Rgba32FImage, subject: Option<&Mask>)
         Pyramid::new(width, height, pixels)
     });
     let pyramid = pyramid.as_ref();
+    // Lights spread into discs: a pyramid of weighted pixels (REQ-023-05).
+    let lens = (params.blur > 0.0 && params.blur_lens).then(|| {
+        let pixels = image.pixels().map(|pixel| lens_weighted(pixel.0)).collect();
+        Pyramid::new(width, height, pixels)
+    });
+    let lens = lens.as_ref();
     let threads = std::thread::available_parallelism().map_or(1, usize::from);
     let row = width as usize * 4;
     let rows_per_chunk = (height as usize).div_ceil(threads).max(1);
@@ -414,9 +421,9 @@ pub fn render(params: &Params, image: &mut Rgba32FImage, subject: Option<&Mask>)
                             glow =
                                 params.halation_glow([sharp[0], sharp[1], sharp[2]], [around[0], around[1], around[2]]);
                         }
-                        let lod = blur_lod(params.blur_sigma(uv, size, inside), pyramid.levels());
+                        let sigma = params.blur_sigma(uv, size, inside);
                         // Transparency stays sharp, as in the preview.
-                        pixel[..3].copy_from_slice(&pyramid.blurred(sharp, uv, lod)[..3]);
+                        pixel[..3].copy_from_slice(&blur_pixel(pyramid, lens, sharp, uv, sigma, size)[..3]);
                     }
                     let rgb = [pixel[0], pixel[1], pixel[2]];
                     let [r, g, b] = params.pixel_glowing(rgb, glow, uv, size, subject.map(|_| inside));
@@ -1299,6 +1306,40 @@ mod tests {
         let soft = image.get_pixel(126, 240)[0];
         assert!(soft > 0.15 && soft < 0.5, "{soft}");
         assert!((image.get_pixel(20, 240)[0] - 0.1).abs() < 1e-4);
+    }
+
+    /// REQ-023-05: saving with a lens blur spreads a small light into a disc, which a soft blur leaves faint.
+    #[test]
+    fn req_023_05_saving_spreads_a_light_into_a_disc() {
+        let light = |x: u32, y: u32| (127..=129).contains(&x) && (127..=129).contains(&y);
+        let photo = || {
+            Rgba32FImage::from_fn(256, 256, |x, y| {
+                let v = if light(x, y) { 1.0 } else { 0.1 };
+                image::Rgba([v, v, v, 1.0])
+            })
+        };
+        let saved = |lens: bool| {
+            let recipe = Recipe {
+                blur_kind: domain::edit::BlurKind::Radial,
+                blur_focus: [0.0, 0.0],
+                blur_size: 0.0,
+                blur: 100.0,
+                blur_lens: lens,
+                ..Recipe::default()
+            };
+            let mut image = photo();
+            render(&Params::new(&recipe), &mut image, None);
+            image
+        };
+        let (lens, soft) = (saved(true), saved(false));
+        // A quarter of the disc's radius from the light, and three quarters.
+        let radius = 0.015 * 256.0 * domain::edit::LENS_RADIUS_PER_SIGMA;
+        for at in [0.25, 0.75] {
+            let x = 128 + (radius * at) as u32;
+            let (with, without) = (lens.get_pixel(x, 128)[0] - 0.1, soft.get_pixel(x, 128)[0] - 0.1);
+            assert!(with > 0.01 && with > 3.0 * without, "{at}: lens {with}, soft {without}");
+        }
+        assert!((lens.get_pixel(20, 20)[0] - 0.1).abs() < 1e-3, "flat stays flat");
     }
 
     #[test]

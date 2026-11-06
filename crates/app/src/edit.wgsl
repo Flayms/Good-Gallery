@@ -47,7 +47,7 @@ struct Edit {
     // Blur (spec 023): the strongest as σ in parts of the longer side (x), the kind (y: 0 none, 1 background,
     // 2 tilt-shift, 3 radial), half the sharp area's size (z) and the transition (w), in parts of the longer side.
     blur: vec4<f32>,
-    // The focus (xy), 0–1 across the photo, and the quarter turns clockwise (z).
+    // The focus (xy), 0–1 across the photo, the quarter turns clockwise (z), and the lens blur on (w, REQ-023-05).
     focus: vec4<f32>,
     // The crop on the upright, unturned photo: x, y, w, h (spec 029).
     crop: vec4<f32>,
@@ -69,6 +69,8 @@ struct Edit {
 @group(0) @binding(3) var subject_mask: texture_2d<f32>;
 // What the recipe's paintings select (spec 030), one layer each.
 @group(0) @binding(4) var paintings: texture_2d_array<f32>;
+// The lens blur's pyramid (`lens.wgsl`), 1 × 1 while there is none.
+@group(0) @binding(5) var lens: texture_2d<f32>;
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
@@ -370,6 +372,32 @@ fn bspline(level: u32, uv: vec2<f32>) -> vec4<f32> {
     return g0.y * (g0.x * a + g1.x * b) + g1.y * (g0.x * c + g1.x * d);
 }
 
+// `domain::edit::lens_blurred`: the disc of `radius` pixels of the photo's texture around `uv`, from the lens pyramid,
+// whose level 0 is the photo's level 1. Alpha −1 where there is no disc to sample: the soft blur takes over.
+fn lens_blurred(uv: vec2<f32>, radius: f32) -> vec4<f32> {
+    let levels = textureNumLevels(photo);
+    if radius < 1.0 || levels < 2u || textureDimensions(lens, 0u).x < 2u {
+        return vec4<f32>(-1.0);
+    }
+    let dims = vec2<f32>(textureDimensions(photo, 0u));
+    // `domain::edit::lens_lod`.
+    let spacing = radius * sqrt(3.14159265 / 48.0);
+    let lod = max(clamp(log2(spacing / 0.65), 0.0, f32(levels - 1u)), 1.0);
+    var sum = vec4<f32>(0.0);
+    for (var i = 0u; i < 48u; i++) {
+        // `domain::edit::lens_tap`, read as `domain::edit::Pyramid::trilinear`: the lens pyramid's level 0 is the
+        // photo's level 1.
+        let r = sqrt((f32(i) + 0.5) / 48.0);
+        let angle = f32(i) * 2.399963;
+        let tap = uv + vec2<f32>(r * cos(angle), r * sin(angle)) * radius / dims;
+        sum += textureSampleLevel(lens, photo_sampler, tap, lod - 1.0);
+    }
+    if sum.a <= 0.0 {
+        return vec4<f32>(-1.0);
+    }
+    return vec4<f32>(sum.rgb / sum.a, 1.0);
+}
+
 // `domain::edit::Pyramid::blurred`: `sharp` at lod 0, else between the levels around `lod`.
 fn blurred(sharp: vec4<f32>, uv: vec2<f32>, sigma: f32) -> vec4<f32> {
     let levels = textureNumLevels(photo);
@@ -418,7 +446,17 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     if (flags & 1u) == 0u {
         let sigma = blur_sigma(uv, subject);
         if sigma > 0.0 {
-            rgb = blurred(texel, uv, sigma).rgb;
+            // `domain::edit::blur_pixel`: discs where the lens blur can sample them (REQ-023-05).
+            var disc = vec4<f32>(-1.0);
+            if edit.focus.w > 0.5 {
+                let base = f32(textureDimensions(photo, 0u).x) / edit.size.x;
+                disc = lens_blurred(uv, sigma * base * 2.0);
+            }
+            if disc.a < 0.0 {
+                rgb = blurred(texel, uv, sigma).rgb;
+            } else {
+                rgb = disc.rgb;
+            }
             stored = rgb;
         }
         var glow = vec3<f32>(0.0);
