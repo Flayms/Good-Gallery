@@ -187,3 +187,7 @@ Add every pitfall you hit. A trap in a tool, library, OS or our tests that we ca
 * **A model's published accuracy may not survive another pipeline.** AuraFace's card says 99.65% on LFW; through ours, as for every other model, it reached 99.20%. Compare models only with `cargo xtask face-bench`.
 * **Decoding costs more than detecting on large photos.** A 24 MP JPEG takes about 660 ms to decode on the dev VM, a YuNet look 90 ms.
 * **Never leave a photo unmarked after a crash in the search.** It would be picked first every round and block the rest. `indexer::faces` catches a panic per photo and marks it looked at.
+
+## Content search (spike, #200)
+
+* **Pad CLIP text input with 0, not with the end token.** MobileCLIP's text half pools at the highest token id; with end-token padding every search text gave nearly the same vector in `tract`, so every search ranked the photos alike. open_clip pads with 0. Details in `docs/content-search.md`.
