@@ -66,8 +66,8 @@ There is no async runtime: work runs on OS threads that talk over channels (`cro
 | Scan workers (`io_concurrency`) | stat and metadata reads of one scan | results to the indexer thread |
 | Scheduler | a read connection | queues scans on the indexer |
 | Thumbnail service (`io_concurrency`) | rendering, its own write connection | a callback per finished thumbnail |
-| Faces (1) | its own write connection, the loaded face models | a status the settings read, a repaint |
-| Content (1) | its own write connection, the loaded image half of the content model (spec 036) | a status the settings read, a repaint |
+| Faces (1, and up to half the cores while it works) | its own write connection, the loaded face models; a batch of photos decoded and looked at at once (spec 037) | a status the settings read, a repaint |
+| Content (1, and up to half the cores while it works) | its own write connection, the loaded image half of the content model (spec 036), run on a batch of items at once (spec 037) | a status the settings read, a repaint |
 | Gallery loader | a read connection | layout, tile data, suggestions, sidebar lists |
 | Texture workers (4) | thumbnail decode, mips, `wgpu::Texture` creation | finished textures, registered by the UI within 3 ms per frame |
 | Originals workers (2) | full-size decodes for the viewer | finished textures |

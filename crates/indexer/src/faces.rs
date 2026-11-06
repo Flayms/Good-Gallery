@@ -32,11 +32,44 @@ pub trait FaceWork: Send {
         faces: &[[[f32; 2]; 5]],
     ) -> Result<Vec<Vec<f32>>, WorkError>;
 
+    /// How many photos [`FaceWork::detect_many`] and [`FaceWork::recognize_many`] take at once (REQ-037-02).
+    fn batch(&self) -> usize {
+        1
+    }
+
+    /// The faces in each of `photos`, in their order. A panic costs only its photo.
+    fn detect_many(&mut self, detector: &str, photos: &[FacePhoto]) -> Vec<Result<Vec<Detection>, WorkError>> {
+        photos
+            .iter()
+            .map(|photo| {
+                std::panic::catch_unwind(AssertUnwindSafe(|| self.detect(detector, photo)))
+                    .unwrap_or_else(|_| Err(WorkError::Photo("reading it failed unexpectedly".into())))
+            })
+            .collect()
+    }
+
+    /// The vectors of each photo's faces, as [`FaceWork::recognize`], in their order. A panic costs only its photo.
+    fn recognize_many(&mut self, recognizer: &str, photos: &[(FacePhoto, Vec<Landmarks>)]) -> Vec<Recognized> {
+        photos
+            .iter()
+            .map(|(photo, faces)| {
+                std::panic::catch_unwind(AssertUnwindSafe(|| self.recognize(recognizer, photo, faces)))
+                    .unwrap_or_else(|_| Err(WorkError::Photo("reading it failed unexpectedly".into())))
+            })
+            .collect()
+    }
+
     /// Nothing is left to do for now: what's only kept for the next question can go.
     fn rest(&mut self) {}
 }
 
-#[derive(Debug, PartialEq)]
+/// A face's five landmarks, in fractions of the upright photo.
+pub type Landmarks = [[f32; 2]; 5];
+
+/// One vector per face of a photo, or why there are none.
+pub type Recognized = Result<Vec<Vec<f32>>, WorkError>;
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum WorkError {
     /// This photo can't be read; it isn't tried again until it changes.
     Photo(String),
@@ -226,36 +259,52 @@ fn round(shared: &Shared, deps: &mut FaceDeps) -> Result<bool, String> {
     let recognizer = chosen(&deps.conn, faces::RECOGNIZER_KEY);
     let photos = faces::pending_photos(&deps.conn, &detector, PHOTOS_PER_ROUND).map_err(|error| error.to_string())?;
     let mut unreachable: Vec<String> = Vec::new();
-    let mut did_some = false;
     for photo in &photos {
+        if !unreachable.contains(&photo.root_path) && !(deps.is_reachable)(Path::new(&photo.root_path)) {
+            unreachable.push(photo.root_path.clone());
+        }
+    }
+    let reachable: Vec<FacePhoto> = photos
+        .iter()
+        .filter(|photo| !unreachable.contains(&photo.root_path))
+        .cloned()
+        .collect();
+    let batch = deps.work.batch().max(1);
+    let mut did_some = false;
+    // Several photos at once; a pause or a kick stops between batches (REQ-037-02, REQ-037-04).
+    for photos in reachable.chunks(batch) {
         if shared.interrupted() {
             return Ok(true);
         }
-        if unreachable.contains(&photo.root_path) {
-            continue;
-        }
-        if !(deps.is_reachable)(Path::new(&photo.root_path)) {
-            unreachable.push(photo.root_path.clone());
-            continue;
-        }
         let work = &mut deps.work;
-        let detected = std::panic::catch_unwind(AssertUnwindSafe(|| work.detect(&detector, photo)))
-            .unwrap_or_else(|_| Err(WorkError::Photo("reading it failed unexpectedly".into())));
-        let found = match detected {
-            Ok(found) => found,
-            Err(WorkError::Photo(reason)) => {
-                tracing::warn!("no faces looked for in {}: {reason}", photo.rel_path);
-                Vec::new()
-            }
-            Err(WorkError::Model(reason)) => return Err(reason),
-        };
-        faces::store_scan(&mut deps.conn, photo, &detector, &found).map_err(|error| error.to_string())?;
-        did_some = true;
-        // Right away, while the photo is still decoded (REQ-032-23).
+        let detected = std::panic::catch_unwind(AssertUnwindSafe(|| work.detect_many(&detector, photos)))
+            .unwrap_or_else(|_| {
+                photos
+                    .iter()
+                    .map(|_| Err(WorkError::Photo("reading it failed unexpectedly".into())))
+                    .collect()
+            });
+        for (photo, detected) in photos.iter().zip(detected) {
+            let found = match detected {
+                Ok(found) => found,
+                Err(WorkError::Photo(reason)) => {
+                    tracing::warn!("no faces looked for in {}: {reason}", photo.rel_path);
+                    Vec::new()
+                }
+                Err(WorkError::Model(reason)) => return Err(reason),
+            };
+            faces::store_scan(&mut deps.conn, photo, &detector, &found).map_err(|error| error.to_string())?;
+            did_some = true;
+        }
+        // Right away, while the photos are still decoded (REQ-032-23).
         if let Some(recognizer) = &recognizer {
-            let waiting = faces::pending_faces_in(&deps.conn, photo.media, &detector, recognizer)
-                .map_err(|error| error.to_string())?;
-            recognize_photo(deps, recognizer, photo, &waiting.iter().collect::<Vec<_>>())?;
+            let mut groups = Vec::new();
+            for photo in photos {
+                let waiting = faces::pending_faces_in(&deps.conn, photo.media, &detector, recognizer)
+                    .map_err(|error| error.to_string())?;
+                groups.push((photo.clone(), waiting));
+            }
+            recognize_photos(deps, recognizer, &groups)?;
         }
     }
     if !photos.is_empty() && did_some {
@@ -266,54 +315,68 @@ fn round(shared: &Shared, deps: &mut FaceDeps) -> Result<bool, String> {
     };
     let waiting =
         faces::pending_faces(&deps.conn, &detector, &recognizer, FACES_PER_ROUND).map_err(|error| error.to_string())?;
-    let mut by_photo: Vec<(&FacePhoto, Vec<&faces::FaceToRecognize>)> = Vec::new();
-    for face in &waiting {
+    let mut by_photo: Vec<(FacePhoto, Vec<faces::FaceToRecognize>)> = Vec::new();
+    for face in waiting {
         match by_photo.iter_mut().find(|(photo, _)| photo.media == face.photo.media) {
             Some((_, faces)) => faces.push(face),
-            None => by_photo.push((&face.photo, vec![face])),
+            None => by_photo.push((face.photo.clone(), vec![face])),
         }
     }
-    for (photo, group) in by_photo {
-        if shared.interrupted() {
-            return Ok(true);
-        }
+    by_photo.retain(|(photo, _)| {
         if unreachable.contains(&photo.root_path) {
-            continue;
+            return false;
         }
         if !(deps.is_reachable)(Path::new(&photo.root_path)) {
             unreachable.push(photo.root_path.clone());
-            continue;
+            return false;
         }
-        recognize_photo(deps, &recognizer, photo, &group)?;
+        true
+    });
+    for groups in by_photo.chunks(batch) {
+        if shared.interrupted() {
+            return Ok(true);
+        }
+        recognize_photos(deps, &recognizer, groups)?;
         did_some = true;
     }
     Ok(did_some)
 }
 
-/// Recognizes a photo's faces and stores what comes out. A file that can't be read costs only its faces.
-fn recognize_photo(
+/// Recognizes the faces of several photos at once and stores what comes out. A file that can't be read costs only its
+/// faces.
+fn recognize_photos(
     deps: &mut FaceDeps,
     recognizer: &str,
-    photo: &FacePhoto,
-    group: &[&faces::FaceToRecognize],
+    groups: &[(FacePhoto, Vec<faces::FaceToRecognize>)],
 ) -> Result<(), String> {
-    if group.is_empty() {
+    let groups: Vec<&(FacePhoto, Vec<faces::FaceToRecognize>)> =
+        groups.iter().filter(|(_, faces)| !faces.is_empty()).collect();
+    if groups.is_empty() {
         return Ok(());
     }
-    let landmarks: Vec<[[f32; 2]; 5]> = group.iter().map(|face| face.landmarks).collect();
+    let jobs: Vec<(FacePhoto, Vec<Landmarks>)> = groups
+        .iter()
+        .map(|(photo, faces)| (photo.clone(), faces.iter().map(|face| face.landmarks).collect()))
+        .collect();
     let work = &mut deps.work;
-    let recognized = std::panic::catch_unwind(AssertUnwindSafe(|| work.recognize(recognizer, photo, &landmarks)))
-        .unwrap_or_else(|_| Err(WorkError::Photo("reading it failed unexpectedly".into())));
-    let vectors = match recognized {
-        Ok(vectors) => vectors,
-        Err(WorkError::Photo(reason)) => {
-            tracing::warn!("no faces recognized in {}: {reason}", photo.rel_path);
-            vec![Vec::new(); group.len()]
+    let recognized = std::panic::catch_unwind(AssertUnwindSafe(|| work.recognize_many(recognizer, &jobs)))
+        .unwrap_or_else(|_| {
+            jobs.iter()
+                .map(|_| Err(WorkError::Photo("reading it failed unexpectedly".into())))
+                .collect()
+        });
+    for ((photo, group), recognized) in groups.into_iter().zip(recognized) {
+        let vectors = match recognized {
+            Ok(vectors) => vectors,
+            Err(WorkError::Photo(reason)) => {
+                tracing::warn!("no faces recognized in {}: {reason}", photo.rel_path);
+                vec![Vec::new(); group.len()]
+            }
+            Err(WorkError::Model(reason)) => return Err(reason),
+        };
+        for (face, vector) in group.iter().zip(vectors) {
+            faces::store_embedding(&deps.conn, face.face, recognizer, &vector).map_err(|error| error.to_string())?;
         }
-        Err(WorkError::Model(reason)) => return Err(reason),
-    };
-    for (face, vector) in group.iter().zip(vectors) {
-        faces::store_embedding(&deps.conn, face.face, recognizer, &vector).map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -321,13 +384,32 @@ fn recognize_photo(
 /// The longest side a photo is decoded at; more shows no more faces, and a panorama shouldn't fill the memory.
 const MAX_SIDE: u32 = 8000;
 
-/// The real work: models from the store, photos from the library, the last photo kept for the next question.
+/// A photo as the models see it: upright, at most [`MAX_SIDE`], in RGB.
+fn decode(photo: &FacePhoto, ffmpeg: Option<&Path>) -> Result<image::RgbImage, WorkError> {
+    let file = photo
+        .file()
+        .ok_or_else(|| WorkError::Photo("its indexed path leaves its library".into()))?;
+    let rgba = media::original::load_original(&file, ffmpeg, MAX_SIDE, photo.sidecar_orientation)
+        .map_err(|error| WorkError::Photo(error.to_string()))?;
+    Ok(image::DynamicImage::ImageRgba8(rgba).to_rgb8())
+}
+
+/// Which version of which photo: a changed file is decoded again.
+fn key_of(photo: &FacePhoto) -> (i64, i64) {
+    (photo.media, photo.mtime)
+}
+
+/// The real work: models from the store, photos from the library, the last photos kept for the next question. Several
+/// photos are decoded and looked at at once, each on a thread of its own with the same loaded model (REQ-037-02).
 pub struct RunModels {
     store: FaceStore,
     ffmpeg: Option<PathBuf>,
     detectors: HashMap<String, Detector>,
     recognizers: HashMap<String, Recognizer>,
     photo: Option<(i64, i64, image::RgbImage)>,
+    /// The photos of the last batch, decoded, for their faces' recognition (REQ-032-23).
+    kept: Vec<((i64, i64), image::RgbImage)>,
+    threads: usize,
 }
 
 impl RunModels {
@@ -338,23 +420,22 @@ impl RunModels {
             detectors: HashMap::new(),
             recognizers: HashMap::new(),
             photo: None,
+            kept: Vec::new(),
+            threads: crate::analysis::threads(),
         }
+    }
+
+    /// Looks at up to `threads` photos at once.
+    pub fn with_threads(mut self, threads: usize) -> Self {
+        self.threads = threads.max(1);
+        self
     }
 
     fn decoded(&mut self, photo: &FacePhoto) -> Result<&image::RgbImage, WorkError> {
         let is_current = |kept: &(i64, i64, image::RgbImage)| kept.0 == photo.media && kept.1 == photo.mtime;
         if !self.photo.as_ref().is_some_and(is_current) {
-            let file = photo
-                .file()
-                .ok_or_else(|| WorkError::Photo("its indexed path leaves its library".into()))?;
-            let rgba =
-                media::original::load_original(&file, self.ffmpeg.as_deref(), MAX_SIDE, photo.sidecar_orientation)
-                    .map_err(|error| WorkError::Photo(error.to_string()))?;
-            self.photo = Some((
-                photo.media,
-                photo.mtime,
-                image::DynamicImage::ImageRgba8(rgba).to_rgb8(),
-            ));
+            self.photo = None;
+            self.photo = Some((photo.media, photo.mtime, decode(photo, self.ffmpeg.as_deref())?));
         }
         match &self.photo {
             Some((_, _, decoded)) => Ok(decoded),
@@ -398,6 +479,73 @@ impl FaceWork for RunModels {
         self.detectors.clear();
         self.recognizers.clear();
         self.photo = None;
+        self.kept.clear();
+    }
+
+    fn batch(&self) -> usize {
+        self.threads
+    }
+
+    fn detect_many(&mut self, detector: &str, photos: &[FacePhoto]) -> Vec<Result<Vec<Detection>, WorkError>> {
+        if let Err(error) = self.detector(detector) {
+            return photos.iter().map(|_| Err(error.clone())).collect();
+        }
+        // The last batch goes first, so no more photos than one batch are held decoded.
+        self.kept.clear();
+        self.photo = None;
+        let (Some(model), ffmpeg) = (self.detectors.get(detector), self.ffmpeg.as_deref()) else {
+            return Vec::new();
+        };
+        let looked = crate::analysis::map_in_order(photos, self.threads, |photo| {
+            std::panic::catch_unwind(AssertUnwindSafe(|| {
+                let decoded = decode(photo, ffmpeg)?;
+                let (width, height) = (decoded.width() as f32, decoded.height() as f32);
+                let found = model.find(&decoded).map_err(WorkError::Model)?;
+                let found: Vec<Detection> = found.into_iter().map(|face| fractions(face, width, height)).collect();
+                Ok((decoded, found))
+            }))
+            .unwrap_or_else(|_| Err(WorkError::Photo("reading it failed unexpectedly".into())))
+        });
+        photos
+            .iter()
+            .zip(looked)
+            .map(|(photo, looked)| {
+                looked.map(|(decoded, found)| {
+                    self.kept.push((key_of(photo), decoded));
+                    found
+                })
+            })
+            .collect()
+    }
+
+    fn recognize_many(&mut self, recognizer: &str, photos: &[(FacePhoto, Vec<Landmarks>)]) -> Vec<Recognized> {
+        if let Err(error) = self.recognizer(recognizer) {
+            return photos.iter().map(|_| Err(error.clone())).collect();
+        }
+        let (Some(model), kept, ffmpeg) = (self.recognizers.get(recognizer), &self.kept, self.ffmpeg.as_deref()) else {
+            return Vec::new();
+        };
+        crate::analysis::map_in_order(photos, self.threads, |(photo, faces)| {
+            std::panic::catch_unwind(AssertUnwindSafe(|| {
+                let decoded_now;
+                let decoded = match kept.iter().find(|(key, _)| *key == key_of(photo)) {
+                    Some((_, decoded)) => decoded,
+                    None => {
+                        decoded_now = decode(photo, ffmpeg)?;
+                        &decoded_now
+                    }
+                };
+                let (width, height) = (decoded.width() as f32, decoded.height() as f32);
+                faces
+                    .iter()
+                    .map(|landmarks| {
+                        let pixels = landmarks.map(|[x, y]| [x * width, y * height]);
+                        model.embed(decoded, &pixels).map_err(WorkError::Model)
+                    })
+                    .collect()
+            }))
+            .unwrap_or_else(|_| Err(WorkError::Photo("reading it failed unexpectedly".into())))
+        })
     }
 
     fn detect(&mut self, detector: &str, photo: &FacePhoto) -> Result<Vec<Detection>, WorkError> {
@@ -484,6 +632,10 @@ mod tests {
         held: Arc<AtomicBool>,
         /// What happened to which photo, in order.
         steps: Arc<std::sync::Mutex<Vec<String>>>,
+        /// Photos looked at at once.
+        batch: usize,
+        /// How many photos each batch had.
+        batches: Arc<std::sync::Mutex<Vec<usize>>>,
     }
 
     impl FaceWork for Fake {
@@ -518,6 +670,21 @@ mod tests {
             self.recognized.fetch_add(faces.len(), Ordering::SeqCst);
             self.steps.lock().unwrap().push(format!("recognize {}", photo.rel_path));
             Ok(vec![vec![1.0, 0.0]; faces.len()])
+        }
+
+        fn batch(&self) -> usize {
+            self.batch.max(1)
+        }
+
+        fn detect_many(&mut self, detector: &str, photos: &[FacePhoto]) -> Vec<Result<Vec<Detection>, WorkError>> {
+            self.batches.lock().unwrap().push(photos.len());
+            photos
+                .iter()
+                .map(|photo| {
+                    std::panic::catch_unwind(AssertUnwindSafe(|| self.detect(detector, photo)))
+                        .unwrap_or_else(|_| Err(WorkError::Photo("reading it failed unexpectedly".into())))
+                })
+                .collect()
         }
     }
 
@@ -755,6 +922,122 @@ mod tests {
         let [x, y, w, h] = found[0].rect;
         let (cx, cy) = ((x + w / 2.0) * 512.0, (y + h / 2.0) * 512.0);
         assert!((cx - 225.0).abs() < 40.0 && (cy - 95.0).abs() < 40.0, "{cx}, {cy}");
+    }
+
+    /// REQ-037-02: the search looks at photos in batches of as many as the work takes at once, then recognizes their
+    /// faces while they are still decoded.
+    #[test]
+    fn req_037_02_looks_at_several_photos_at_once() {
+        let (_dir, conn, path) = index();
+        for name in ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg", "f.jpg", "g.jpg"] {
+            add_photo(&conn, name);
+        }
+        choose(&conn, faces::DETECTOR_KEY, "d");
+        choose(&conn, faces::RECOGNIZER_KEY, "r");
+        let fake = Fake {
+            batch: 3,
+            ..Fake::default()
+        };
+        let service = start(&path, &fake, true);
+        service.wait_idle();
+        assert_eq!(*fake.batches.lock().unwrap(), [3, 3, 1]);
+        assert_eq!(fake.recognized.load(Ordering::SeqCst), 7);
+        let steps = fake.steps.lock().unwrap().clone();
+        let at = |step: &str| steps.iter().position(|done| done.starts_with(step)).unwrap();
+        // Newest first: g, f and e together, then their faces, then the next batch.
+        assert!(
+            at("detect e") < at("recognize g") && at("recognize e") < at("detect d"),
+            "{steps:?}"
+        );
+    }
+
+    /// REQ-037-04: pausing stops the search between batches; the batch in flight is stored, the rest stays waiting.
+    #[test]
+    fn req_037_04_stops_between_batches() {
+        let (_dir, conn, path) = index();
+        for name in ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg"] {
+            add_photo(&conn, name);
+        }
+        choose(&conn, faces::DETECTOR_KEY, "d");
+        let fake = Fake {
+            batch: 2,
+            ..Fake::default()
+        };
+        fake.held.store(true, Ordering::SeqCst);
+        let service = start(&path, &fake, true);
+        while fake.batches.lock().unwrap().is_empty() {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        choose(&conn, faces::SEARCH_KEY, "paused");
+        service.kick();
+        fake.held.store(false, Ordering::SeqCst);
+        service.wait_idle();
+        let scanned: i64 = conn
+            .query_row("SELECT count(*) FROM faces_scanned", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(scanned, 2, "the batch in flight");
+        assert_eq!(*fake.batches.lock().unwrap(), [2]);
+    }
+
+    /// REQ-037-01: several photos at once find the same faces as one at a time, with the real model.
+    #[test]
+    fn req_037_01_several_at_once_find_the_same_faces_with_the_real_model() {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../media/tests/fixtures/faces");
+        let library = tempfile::tempdir().unwrap();
+        let astronaut = image::open(fixtures.join("astronaut.jpg")).unwrap();
+        let names = ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg"];
+        for (i, name) in names.iter().enumerate() {
+            let photo = match i {
+                0 => astronaut.clone(),
+                1 => astronaut.fliph(),
+                2 => astronaut.resize(300, 300, image::imageops::FilterType::Triangle),
+                3 => astronaut.crop_imm(100, 0, 400, 300),
+                _ => astronaut.rotate180(),
+            };
+            photo.save(library.path().join(name)).unwrap();
+        }
+        let found = |threads: usize| {
+            let data = tempfile::tempdir().unwrap();
+            let store = FaceStore::in_data_folder(data.path());
+            let kind = ModelKind::Detect(DetectorFormat::YuNet);
+            let model = store
+                .add_file(
+                    &fixtures.join("face_detection_yunet_2023mar.onnx"),
+                    &|_| Ok(kind),
+                    &mut |_, _| true,
+                )
+                .unwrap();
+            let path = data.path().join("gallery.db");
+            let conn = db::open(&path).unwrap();
+            libraries::insert(&conn, library.path().to_str().unwrap(), "Photos", LibraryStatus::Online).unwrap();
+            for name in names {
+                add_photo(&conn, name);
+            }
+            choose(&conn, faces::DETECTOR_KEY, &model.sha256);
+            let service = FaceService::start(FaceDeps {
+                conn: db::open(&path).unwrap(),
+                work: Box::new(RunModels::new(data.path(), None).with_threads(threads)),
+                is_reachable: Arc::new(|_| true),
+                on_change: Box::new(|| {}),
+            });
+            service.wait_idle();
+            assert_eq!(service.status().problem, None);
+            (1..=names.len() as i64)
+                .map(|media| {
+                    faces::unknown_faces_on(&conn, media, &model.sha256, "")
+                        .unwrap()
+                        .into_iter()
+                        .map(|face| face.rect)
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        };
+        let one_at_a_time = found(1);
+        assert!(
+            one_at_a_time.iter().filter(|faces| !faces.is_empty()).count() >= 3,
+            "{one_at_a_time:?}"
+        );
+        assert_eq!(found(3), one_at_a_time);
     }
 
     #[test]
