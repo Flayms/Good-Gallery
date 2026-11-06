@@ -74,6 +74,8 @@ fn open_dialog(harness: &mut App) {
             .as_ref()
             .is_some_and(|dialog| !dialog.rows().is_empty());
         if loaded {
+            // The rows can arrive in a frame after it was drawn: draw them before anything asks for them.
+            harness.run_steps(2);
             return;
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
