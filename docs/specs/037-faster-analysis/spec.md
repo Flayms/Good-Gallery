@@ -50,7 +50,7 @@ Looking for faces (spec 032) and making photos searchable by what they show (spe
 
 | REQ        | Test | Result  |
 | ---------- | ---- | ------- |
-| REQ-037-01 | —    | pending |
-| REQ-037-02 | —    | pending |
-| REQ-037-03 | —    | pending |
-| REQ-037-04 | —    | pending |
+| REQ-037-01 | —    | no test |
+| REQ-037-02 | —    | no test |
+| REQ-037-03 | —    | no test |
+| REQ-037-04 | —    | no test |
