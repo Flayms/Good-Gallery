@@ -320,6 +320,14 @@ impl Viewer {
         Some(viewer)
     }
 
+    /// Shows the item in its place from the first frame, without growing out of its tile or fading in (REQ-027-07).
+    pub fn open_at_once(&mut self) {
+        self.opening = Transition {
+            start: Some(f64::NEG_INFINITY),
+            tile: None,
+        };
+    }
+
     /// Opens the viewer on a file outside every library, from its scratch index's gallery (REQ-033-01, REQ-033-03).
     pub fn open_loose(gallery: &Gallery, index: usize) -> Option<Self> {
         let mut viewer = Self::open(gallery, index)?;

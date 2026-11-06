@@ -47,6 +47,14 @@ Deprecated (#162): such a file is shown at once from a scratch index, and its fo
 - **And** the switch shows whether the entries are there now; if they can't be changed, an error message says why and the switch stays as it was
 - **And** the portable app, Linux and the browser version don't show the switch: they register nothing (REQ-027-05)
 
+### REQ-027-07 · Straight to the file
+
+- **Given** the app started with an indexed file of a library (REQ-027-01)
+- **When** its window shows
+- **Then** nothing but the window's background shows until the viewer shows the file, and the file appears in its place at once, without growing out of a tile
+- **And** if the viewer can't show it within two seconds (a very large library on a slow share), the gallery shows until it can
+- **And** closing the viewer shows the gallery of that library as usual
+
 ## Out of scope
 
 - Making Good Gallery the default app (Windows only lets the user choose that), the Explorer context menu beyond _Open with_, opening several files at once (the first one is shown), folders.
@@ -66,3 +74,4 @@ Deprecated (#162): such a file is shown at once from a scratch index, and its fo
 | REQ-027-04 | `crates/app/tests/open_with.rs` › req_027_04_says_why_a_file_cant_be_opened | pass |
 | REQ-027-05 | `xtask/tests/packaging.rs` › req_027_05_the_installer_registers_every_indexed_format, req_027_05_the_desktop_file_lists_every_indexed_format | partial: _Open with_ in Explorer and a Linux file manager by hand |
 | REQ-027-06 | `crates/app/src/open_with.rs` › req_027_06_adds_and_removes_the_installers_entries; `crates/app/tests/settings.rs` › req_027_06_switches_open_with_in_the_settings | partial: the app's own registry in Explorer by hand |
+| REQ-027-07 | `crates/app/tests/open_with.rs` › req_027_07_started_with_a_file_the_viewer_comes_first | partial: the two-second fallback has no test |
