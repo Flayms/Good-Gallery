@@ -102,7 +102,7 @@ enum Loaded {
         id: i64,
         result: Result<Vec<db::faces::ShownFace>, String>,
     },
-    FaceGroups(Result<Vec<FaceGroup>, String>),
+    FaceGroups(Result<FaceGroups, String>),
     Layout {
         generation: u64,
         result: Result<GalleryLayout, String>,
@@ -203,27 +203,45 @@ fn load_sidebar(conn: &Connection, library: Option<i64>) -> db::Result<SidebarDa
 }
 
 /// Runs one of the gallery's queries.
-/// A group of unknown faces, with what is needed to show its thumbnails (REQ-032-15).
+/// A group of faces, with what is needed to show its thumbnails (REQ-032-15).
 pub type FaceGroup = Vec<(db::faces::GroupFace, Option<ThumbKey>)>;
 
-/// Groups shown; a library with more has far smaller ones further down.
+/// What _Unconfirmed faces_ shows: faces to confirm by suggested person (REQ-032-24), then groups of unknown faces
+/// (REQ-032-15).
+#[derive(Debug, Clone, Default)]
+pub struct FaceGroups {
+    pub suggested: Vec<(String, FaceGroup)>,
+    pub unknown: Vec<FaceGroup>,
+}
+
+/// Groups shown of each kind; a library with more has far smaller ones further down.
 const FACE_GROUPS: usize = 40;
 
-fn load_face_groups(conn: &Connection, detector: &str, recognizer: &str, threshold: f32) -> db::Result<Vec<FaceGroup>> {
-    let mut groups = db::faces::face_groups(conn, detector, recognizer, threshold)?;
-    groups.truncate(FACE_GROUPS);
-    groups
-        .into_iter()
-        .map(|faces| {
-            faces
-                .into_iter()
-                .map(|face| {
-                    let key = db::thumbs::thumb_source(conn, face.media)?.map(|source| source.key);
-                    Ok((face, key))
-                })
-                .collect()
-        })
-        .collect()
+fn load_face_groups(conn: &Connection, detector: &str, recognizer: &str, threshold: f32) -> db::Result<FaceGroups> {
+    let groups = db::faces::face_groups(conn, detector, recognizer, threshold)?;
+    let with_keys = |faces: Vec<db::faces::GroupFace>| -> db::Result<FaceGroup> {
+        faces
+            .into_iter()
+            .map(|face| {
+                let key = db::thumbs::thumb_source(conn, face.media)?.map(|source| source.key);
+                Ok((face, key))
+            })
+            .collect()
+    };
+    Ok(FaceGroups {
+        suggested: groups
+            .suggested
+            .into_iter()
+            .take(FACE_GROUPS)
+            .map(|(name, faces)| Ok((name, with_keys(faces)?)))
+            .collect::<db::Result<_>>()?,
+        unknown: groups
+            .unknown
+            .into_iter()
+            .take(FACE_GROUPS)
+            .map(with_keys)
+            .collect::<db::Result<_>>()?,
+    })
 }
 
 fn run(conn: &Connection, request: Request) -> Loaded {
@@ -440,7 +458,7 @@ pub struct Gallery {
     /// The unknown faces on the item the viewer shows (REQ-032-09).
     faces: Option<(i64, Option<Vec<db::faces::ShownFace>>)>,
     /// The groups of unknown faces, until something changes (REQ-032-15).
-    face_groups: Option<Option<Vec<FaceGroup>>>,
+    face_groups: Option<Option<FaceGroups>>,
     /// The dialog naming a smart album, while open (REQ-034-01, REQ-034-05).
     album_dialog: Option<albums::NameDialog>,
     /// A context menu's choice this frame.
@@ -994,8 +1012,9 @@ impl Gallery {
         self.face_groups = None;
     }
 
-    /// The groups of unknown faces, `None` while loading or without chosen models (REQ-032-15).
-    pub fn face_groups(&mut self) -> Option<&[FaceGroup]> {
+    /// The faces to confirm and the groups of unknown faces, `None` while loading or without chosen models
+    /// (REQ-032-15, REQ-032-24).
+    pub fn face_groups(&mut self) -> Option<&FaceGroups> {
         if self.face_groups.is_none() {
             let (detector, recognizer) = (
                 self.setting(db::faces::DETECTOR_KEY)?,
@@ -1009,7 +1028,7 @@ impl Gallery {
                 threshold,
             });
         }
-        self.face_groups.as_ref()?.as_deref()
+        self.face_groups.as_ref()?.as_ref()
     }
 
     /// Takes in finished thumbnails. Once per frame, on every page that draws them, before it does.
@@ -1164,7 +1183,7 @@ impl Gallery {
             Loaded::FaceGroups(result) => {
                 self.face_groups = Some(Some(result.unwrap_or_else(|error| {
                     tracing::error!("can't load the groups of faces: {error}");
-                    Vec::new()
+                    Default::default()
                 })));
             }
             Loaded::Detail { id, result } => {

@@ -73,6 +73,9 @@ pub struct GallerySearch {
     pub to: Option<NaiveDate>,
     /// Ratings to match, `0` meaning unrated; empty for any (REQ-007-09).
     pub ratings: Vec<u8>,
+    /// Only these media items, empty for any: a group's photos from _Unconfirmed faces_ (REQ-032-26). Not kept in
+    /// smart albums.
+    pub media: Vec<i64>,
     pub sort_by: SortBy,
     pub descending: bool,
 }
@@ -90,6 +93,7 @@ impl Default for GallerySearch {
             from: None,
             to: None,
             ratings: Vec::new(),
+            media: Vec::new(),
             sort_by: SortBy::Taken,
             descending: true,
         }
