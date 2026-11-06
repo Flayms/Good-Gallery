@@ -471,7 +471,7 @@ pub struct AppState {
     /// A file opened with the app, shown in the viewer once the gallery lists it (REQ-027-01).
     pending_open: Option<PendingOpen>,
     /// A group's photos from _Unconfirmed faces_ in the viewer, and the search to go back to (REQ-032-26).
-    pub(crate) face_photos: Option<faces::FacePhotos>,
+    face_photos: Option<FacePhotos>,
     /// The installed Windows app's _Open with_ entries, and whether they are on (REQ-027-06).
     open_with: Option<(Arc<dyn crate::open_with::OpenWithEntries>, bool)>,
     /// A file whose folder is being added as a library from the viewer, opened once the library is there (REQ-033-04).
@@ -483,6 +483,14 @@ pub struct AppState {
     /// A file outside every library, shown from its scratch index (spec 033).
     #[cfg(not(target_arch = "wasm32"))]
     pub loose: Option<crate::loose::Loose>,
+}
+
+/// A group's photos shown in the viewer from _Unconfirmed faces_ (REQ-032-26).
+struct FacePhotos {
+    /// The photo to open on, until the viewer is open.
+    at: Option<i64>,
+    /// The gallery's search before.
+    back: domain::search::GallerySearch,
 }
 
 /// A file opened with the app (REQ-027-01): where it is, and its media item once the index has it.
@@ -1892,4 +1900,55 @@ fn forget_index_entry(
 /// so the connection is still usable.
 fn lock<T>(db: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     db.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+impl AppState {
+    /// Opens the viewer on photo `at` with its faces shown, going through `photos` only; closing it brings back the
+    /// gallery's search (REQ-032-26).
+    pub fn show_face_photos(&mut self, photos: &[i64], at: i64) {
+        let Some(gallery) = &mut self.gallery else { return };
+        let back = match self.face_photos.take() {
+            Some(open) => open.back,
+            None => gallery.search().clone(),
+        };
+        let mut media: Vec<i64> = photos.to_vec();
+        media.sort_unstable();
+        media.dedup();
+        gallery.set_search(domain::search::GallerySearch { media, ..back.clone() });
+        self.face_photos = Some(FacePhotos { at: Some(at), back });
+    }
+
+    /// Opens the viewer once the gallery lists the photo (REQ-032-26). Called every frame.
+    pub fn show_face_photo(&mut self) {
+        let (Some(FacePhotos { at: Some(at), .. }), Some(gallery)) = (&self.face_photos, &self.gallery) else {
+            return;
+        };
+        if gallery.is_loading() {
+            return;
+        }
+        let at = *at;
+        let viewer = gallery
+            .position_of(at)
+            .and_then(|index| crate::viewer::Viewer::open(gallery, index));
+        if let Some(face_photos) = &mut self.face_photos {
+            face_photos.at = None;
+        }
+        match viewer {
+            Some(mut viewer) => {
+                viewer.show_faces();
+                self.viewer = Some(viewer);
+            }
+            // Gone meanwhile: back to the search as it was.
+            None => self.face_photos_closed(),
+        }
+    }
+
+    /// The viewer closed: the gallery's search as it was before a group's photos (REQ-032-26).
+    fn face_photos_closed(&mut self) {
+        if let Some(open) = self.face_photos.take()
+            && let Some(gallery) = &mut self.gallery
+        {
+            gallery.set_search(open.back);
+        }
+    }
 }
