@@ -225,24 +225,42 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
                         }
                     }
                     SidebarGroup::People => {
-                        if input.people {
+                        // Unconfirmed faces lead the group, below its heading (REQ-032-27).
+                        let page = &mut *input.page;
+                        let unconfirmed = input.people.then_some(|ui: &mut egui::Ui| {
                             let unknown = Row {
                                 depth: 0,
                                 chevron: None,
                                 icon: Some((Icon::ScanFace, theme::text())),
                                 label: "Unconfirmed faces",
-                                active: *input.page == Page::People,
+                                active: *page == Page::People,
                                 trailing: None,
                                 tooltip: None,
                             };
                             if row(ui, unknown).0.clicked() {
-                                *input.page = Page::People;
+                                *page = Page::People;
                             }
-                        }
-                        category(ui, state, &mut search, group, &data.people, input.db.as_ref());
+                        });
+                        category(
+                            ui,
+                            state,
+                            &mut search,
+                            group,
+                            &data.people,
+                            input.db.as_ref(),
+                            unconfirmed,
+                        );
                     }
                     SidebarGroup::Places => {
-                        category(ui, state, &mut search, group, &data.places, input.db.as_ref());
+                        category(
+                            ui,
+                            state,
+                            &mut search,
+                            group,
+                            &data.places,
+                            input.db.as_ref(),
+                            None::<fn(&mut egui::Ui)>,
+                        );
                     }
                     SidebarGroup::Ratings => ratings(ui, state, &mut search, data, input.db.as_ref()),
                     SidebarGroup::Tags => popular(ui, &mut search, data),
@@ -622,7 +640,8 @@ fn tag_row(ui: &mut egui::Ui, state: &mut SidebarState, search: &mut GallerySear
     }
 }
 
-/// People or Places as a tree, 10 top-level tags until _Show all_; hidden without tags (REQ-008-03).
+/// People or Places as a tree, 10 top-level tags until _Show all_; hidden without tags (REQ-008-03) unless `first`
+/// draws a row that leads the group (REQ-032-27).
 fn category(
     ui: &mut egui::Ui,
     state: &mut SidebarState,
@@ -630,10 +649,14 @@ fn category(
     group: SidebarGroup,
     nodes: &[TagNode],
     db: Option<&Arc<Mutex<Connection>>>,
+    first: Option<impl FnOnce(&mut egui::Ui)>,
 ) {
     let (id, label) = (group.key(), group.label());
-    if nodes.is_empty() || !collapsible(ui, state, id, label, db) {
+    if (nodes.is_empty() && first.is_none()) || !collapsible(ui, state, id, label, db) {
         return;
+    }
+    if let Some(first) = first {
+        first(ui);
     }
     let shown = if state.show_all.contains(id) {
         nodes.len()

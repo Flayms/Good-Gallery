@@ -81,6 +81,12 @@ fn library(fixture: &Fixture, models: bool) -> (db::rusqlite::Connection, PathBu
                     width: Some(400),
                     height: Some(300),
                     taken_at: Some(2_000_000 - i as i64),
+                    // Photo tools write a named face's keyword too (REQ-004-09).
+                    tags: if i == 0 {
+                        vec![vec!["People".into(), "Ben".into()]]
+                    } else {
+                        Vec::new()
+                    },
                     faces,
                     ..Default::default()
                 },
@@ -521,6 +527,41 @@ fn req_032_15_no_people_page_without_models() {
     let fixture = Fixture::new();
     let (harness, _) = app(&fixture, false, None);
     assert!(harness.query_by_label("Unconfirmed faces").is_none());
+}
+
+#[test]
+fn req_032_27_unconfirmed_faces_is_the_first_row_of_people() {
+    let fixture = Fixture::new();
+    let (harness, _) = app(&fixture, true, None);
+    let heading = harness.get_by_label("People").rect();
+    let unconfirmed = harness.get_by_label("Unconfirmed faces").rect();
+    let ben = harness.get_by_label("Ben").rect();
+    assert!(heading.bottom() <= unconfirmed.top(), "below the heading");
+    assert!(unconfirmed.bottom() <= ben.top(), "above the people's tags");
+}
+
+#[test]
+fn req_032_27_people_shows_without_tags_and_collapses_with_it() {
+    let fixture = Fixture::new();
+    let (conn, _) = library(&fixture, true);
+    conn.execute_batch("DELETE FROM media_tags; DELETE FROM tags;").unwrap();
+    let state = fixture.state(conn).with_faces(&fixture.dir.path().join("data"), None);
+    let mut harness = common::harness_with_step(state, 1.0 / 60.0);
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+    settle(&mut harness);
+    assert!(harness.query_by_label("Ben").is_none());
+    let heading = harness.get_by_label("People").rect();
+    assert!(heading.bottom() <= harness.get_by_label("Unconfirmed faces").rect().top());
+
+    harness.get_by_label("People").click();
+    settle(&mut harness);
+    assert!(
+        harness.query_by_label("Unconfirmed faces").is_none(),
+        "collapsed with the group"
+    );
+    harness.get_by_label("People").click();
+    settle(&mut harness);
+    harness.get_by_label("Unconfirmed faces");
 }
 
 fn settings(fixture: &Fixture, models: bool) -> App {
