@@ -3,6 +3,7 @@
 // Rebuilt when another worktree built into the same target folder (`.cargo/config.toml`).
 const _: Option<&str> = option_env!("GOOD_GALLERY_WORKTREE");
 
+mod analysis_bench;
 mod check_specs;
 mod dist;
 mod face_bench;
@@ -39,6 +40,7 @@ fn main() -> ExitCode {
             ExitCode::from(code as u8)
         }
         Some("libraries") => report(libraries::run(&args[1..])),
+        Some("analysis-bench") => report(analysis_bench::run(&args[1..])),
         Some("face-bench") => report(face_bench::run(&args[1..])),
         Some("gallery-bench") => report(gallery_bench::run(&args[1..])),
         Some("icons") => report(icons::run(&args[1..])),

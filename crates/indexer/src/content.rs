@@ -21,11 +21,27 @@ pub trait ContentWork: Send {
     /// What `model` makes of `item`.
     fn vector(&mut self, model: &str, item: &ContentItem) -> Result<Vec<f32>, WorkError>;
 
+    /// How many items [`ContentWork::vectors`] takes at once (REQ-037-02).
+    fn batch(&self) -> usize {
+        1
+    }
+
+    /// What `model` makes of each of `items`, in their order. A panic costs only its item.
+    fn vectors(&mut self, model: &str, items: &[ContentItem]) -> Vec<Result<Vec<f32>, WorkError>> {
+        items
+            .iter()
+            .map(|item| {
+                std::panic::catch_unwind(AssertUnwindSafe(|| self.vector(model, item)))
+                    .unwrap_or_else(|_| Err(WorkError::Item("reading it failed unexpectedly".into())))
+            })
+            .collect()
+    }
+
     /// Nothing is left to do for now: what's only kept for the next item can go.
     fn rest(&mut self) {}
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum WorkError {
     /// This file can't be read; it isn't tried again until it changes.
     Item(String),
@@ -206,26 +222,35 @@ fn round(shared: &Shared, deps: &mut ContentDeps, skip: &mut usize) -> Result<bo
         return Ok(false);
     };
     let items = content::pending(&deps.conn, &model, ITEMS_PER_ROUND, *skip).map_err(|error| error.to_string())?;
-    for item in &items {
+    // Several at once, each batch stored in one transaction; a pause or a kick stops between batches (REQ-037-04).
+    for batch in items.chunks(deps.work.batch().max(1)) {
         if shared.interrupted() {
             return Ok(true);
         }
         let work = &mut deps.work;
-        let made = std::panic::catch_unwind(AssertUnwindSafe(|| work.vector(&model, item)))
-            .unwrap_or_else(|_| Err(WorkError::Item("reading it failed unexpectedly".into())));
-        let stored = match made {
-            Ok(vector) => domain::content::quantize(&vector),
-            Err(WorkError::Item(reason)) => {
-                tracing::warn!("content not looked at in {}: {reason}", item.rel_path);
-                Vec::new()
-            }
-            Err(WorkError::Away) => {
-                *skip += 1;
-                continue;
-            }
-            Err(WorkError::Model(reason)) => return Err(reason),
-        };
-        content::store(&deps.conn, item, &model, &stored).map_err(|error| error.to_string())?;
+        let made = std::panic::catch_unwind(AssertUnwindSafe(|| work.vectors(&model, batch))).unwrap_or_else(|_| {
+            batch
+                .iter()
+                .map(|_| Err(WorkError::Item("reading it failed unexpectedly".into())))
+                .collect()
+        });
+        let tx = deps.conn.unchecked_transaction().map_err(|error| error.to_string())?;
+        for (item, made) in batch.iter().zip(made) {
+            let stored = match made {
+                Ok(vector) => domain::content::quantize(&vector),
+                Err(WorkError::Item(reason)) => {
+                    tracing::warn!("content not looked at in {}: {reason}", item.rel_path);
+                    Vec::new()
+                }
+                Err(WorkError::Away) => {
+                    *skip += 1;
+                    continue;
+                }
+                Err(WorkError::Model(reason)) => return Err(reason),
+            };
+            content::store(&tx, item, &model, &stored).map_err(|error| error.to_string())?;
+        }
+        tx.commit().map_err(|error| error.to_string())?;
     }
     Ok(items.len() == ITEMS_PER_ROUND)
 }
@@ -242,6 +267,8 @@ pub struct RunContent {
     ffmpeg: Option<PathBuf>,
     is_reachable: Arc<dyn Fn(&Path) -> bool + Send + Sync>,
     loaded: Option<(String, ImageHalf)>,
+    /// Items the model runs on at once (REQ-037-02).
+    threads: usize,
 }
 
 impl RunContent {
@@ -257,7 +284,14 @@ impl RunContent {
             ffmpeg,
             is_reachable,
             loaded: None,
+            threads: crate::analysis::threads(),
         }
+    }
+
+    /// Runs the model on up to `threads` items at once.
+    pub fn with_threads(mut self, threads: usize) -> Self {
+        self.threads = threads.max(1);
+        self
     }
 
     fn image_half(&mut self, id: &str) -> Result<&ImageHalf, WorkError> {
@@ -309,6 +343,28 @@ impl ContentWork for RunContent {
         half.vector(&picture).map_err(WorkError::Model)
     }
 
+    fn batch(&self) -> usize {
+        self.threads
+    }
+
+    /// On up to `threads` threads at once; the loaded model runs for each of them with a state of its own.
+    fn vectors(&mut self, model: &str, items: &[ContentItem]) -> Vec<Result<Vec<f32>, WorkError>> {
+        if let Err(error) = self.image_half(model) {
+            return items.iter().map(|_| Err(error.clone())).collect();
+        }
+        let this = &*self;
+        let Some((_, half)) = &this.loaded else {
+            return Vec::new();
+        };
+        crate::analysis::map_in_order(items, this.threads, |item| {
+            std::panic::catch_unwind(AssertUnwindSafe(|| {
+                let picture = this.picture(item)?;
+                half.vector(&picture).map_err(WorkError::Model)
+            }))
+            .unwrap_or_else(|_| Err(WorkError::Item("reading it failed unexpectedly".into())))
+        })
+    }
+
     fn rest(&mut self) {
         self.loaded = None;
     }
@@ -343,17 +399,29 @@ mod tests {
         db::settings::set_value(conn, key, &serde_json::json!(value)).unwrap();
     }
 
-    /// The same vector for every item; `bad` ones can't be read, `away` ones are away, `panic` ones panic.
+    /// The same vector for every item, or one made from its name; `bad` ones can't be read, `away` ones are away,
+    /// `panic` ones panic. With a `gate`, the first item waits until it opens.
     #[derive(Clone, Default)]
     struct Fake {
         done: Arc<Mutex<Vec<String>>>,
         broken: Arc<AtomicBool>,
         calls: Arc<AtomicUsize>,
+        batch: usize,
+        by_name: bool,
+        gate: Option<Arc<(Mutex<bool>, std::sync::Condvar)>>,
     }
 
     impl ContentWork for Fake {
         fn vector(&mut self, _: &str, item: &ContentItem) -> Result<Vec<f32>, WorkError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0
+                && let Some(gate) = &self.gate
+            {
+                let (open, opened) = &**gate;
+                let mut open = open.lock().unwrap();
+                while !*open {
+                    open = opened.wait(open).unwrap();
+                }
+            }
             if self.broken.load(Ordering::SeqCst) {
                 return Err(WorkError::Model("broken".into()));
             }
@@ -367,7 +435,15 @@ mod tests {
             if item.rel_path.contains("bad") {
                 return Err(WorkError::Item("unreadable".into()));
             }
+            if self.by_name {
+                let first = f32::from(item.rel_path.as_bytes()[0]);
+                return Ok(vec![first / 255.0, 1.0 - first / 255.0, 0.5]);
+            }
             Ok(vec![0.6, 0.8])
+        }
+
+        fn batch(&self) -> usize {
+            self.batch.max(1)
         }
     }
 
@@ -455,6 +531,78 @@ mod tests {
         service.kick();
         service.wait_idle();
         assert_eq!(fake.calls.load(Ordering::SeqCst), 2, "going back repeats nothing");
+    }
+
+    /// REQ-037-01: items looked at several at once get the same vectors as one at a time, also around a bad, an away
+    /// and a panicking one.
+    #[test]
+    fn req_037_01_several_at_once_store_the_same_vectors() {
+        let stored = |batch: usize| {
+            let (_dir, conn, path) = index();
+            for (taken, name) in [
+                "a.jpg",
+                "bad.jpg",
+                "c.jpg",
+                "away.jpg",
+                "e.jpg",
+                "panic.jpg",
+                "g.jpg",
+                "h.jpg",
+            ]
+            .iter()
+            .enumerate()
+            {
+                add(&conn, name, "image", taken as i64);
+            }
+            choose(&conn, content::MODEL_KEY, "m");
+            let fake = Fake {
+                batch,
+                by_name: true,
+                ..Fake::default()
+            };
+            let service = start(&path, &fake);
+            service.wait_idle();
+            assert_eq!(service.status().problem, None);
+            let mut stored = Vec::new();
+            content::each_vector(&conn, "m", |media, vector| stored.push((media, vector.to_vec()))).unwrap();
+            stored.sort();
+            stored
+        };
+        let one_at_a_time = stored(1);
+        // The bad and the panicking one are stored without a vector, the away one waits.
+        assert_eq!(one_at_a_time.len(), 5, "{one_at_a_time:?}");
+        assert_eq!(stored(3), one_at_a_time);
+        assert_eq!(stored(8), one_at_a_time);
+    }
+
+    /// REQ-037-04: pausing stops the pass between batches; the batch in flight is stored, the rest stays waiting.
+    #[test]
+    fn req_037_04_stops_between_batches() {
+        let (_dir, conn, path) = index();
+        for (taken, name) in ["a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg", "f.jpg"]
+            .iter()
+            .enumerate()
+        {
+            add(&conn, name, "image", taken as i64);
+        }
+        choose(&conn, content::MODEL_KEY, "m");
+        let gate: Arc<(Mutex<bool>, std::sync::Condvar)> = Arc::default();
+        let fake = Fake {
+            batch: 2,
+            gate: Some(gate.clone()),
+            ..Fake::default()
+        };
+        let service = start(&path, &fake);
+        while fake.calls.load(Ordering::SeqCst) == 0 {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        choose(&conn, content::PASS_KEY, "paused");
+        service.kick();
+        *gate.0.lock().unwrap() = true;
+        gate.1.notify_all();
+        service.wait_idle();
+        assert_eq!(vectors(&conn, "m"), 2, "the batch in flight");
+        assert_eq!(fake.calls.load(Ordering::SeqCst), 2);
     }
 
     /// REQ-036-04: a model that can't run says so and stops the pass.
