@@ -466,6 +466,7 @@ impl AppState {
             A::Ignore { faces } => faces.iter().try_for_each(|face| decide(*face, FaceState::Ignored)),
             A::NotAFace { face } => decide(*face, FaceState::NotAFace),
             A::NotThisPerson { face, name } => faces::reject(&lock(&db), *face, name),
+            A::Ungroup { face } => faces::ungroup(&lock(&db), *face),
             A::LookAgain { media } => faces::look_again(&lock(&db), Some(*media)),
             A::Name { .. } | A::Remove { .. } | A::Rename { .. } => Ok(()),
         };
@@ -473,7 +474,11 @@ impl AppState {
             self.toasts.error(format!("Couldn't save that: {error}"));
         }
         let changes: Vec<(i64, RegionChange)> = match action {
-            A::Ignore { .. } | A::NotAFace { .. } | A::NotThisPerson { .. } | A::LookAgain { .. } => Vec::new(),
+            A::Ignore { .. }
+            | A::Ungroup { .. }
+            | A::NotAFace { .. }
+            | A::NotThisPerson { .. }
+            | A::LookAgain { .. } => Vec::new(),
             A::Name { name, places } => places
                 .into_iter()
                 .map(|(media, rect)| {

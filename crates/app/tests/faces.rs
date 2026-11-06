@@ -385,7 +385,7 @@ fn req_032_15_names_a_group_after_asking_and_writes_to_all_its_photos() {
     let Some(exiftool) = exiftool() else { return };
     let fixture = Fixture::new();
     let (mut harness, dir) = app(&fixture, true, Some(&exiftool));
-    harness.get_by_label("Unknown faces").click();
+    harness.get_by_label("Unconfirmed faces").click();
     settle(&mut harness);
     assert_eq!(harness.state().page, Page::People);
     harness.get_by_label("3 faces");
@@ -407,7 +407,7 @@ fn req_032_15_names_a_group_after_asking_and_writes_to_all_its_photos() {
 fn req_032_15_ignoring_a_group_or_taking_a_face_out_leaves_too_few() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, true, None);
-    harness.get_by_label("Unknown faces").click();
+    harness.get_by_label("Unconfirmed faces").click();
     settle(&mut harness);
     harness
         .query_all_by_label_contains("out of the group")
@@ -415,14 +415,112 @@ fn req_032_15_ignoring_a_group_or_taking_a_face_out_leaves_too_few() {
         .unwrap()
         .click();
     settle(&mut harness);
-    harness.get_by_label("No groups of unknown faces yet.");
+    assert!(harness.query_by_label("3 faces").is_none());
+    assert!(harness.query_by_label("2 faces").is_none(), "too few for a group");
+    harness.get_by_label("Ben? · 1 face");
+}
+
+/// REQ-032-24: a face like Ben is to confirm, under his name; _Yes, all_ asks, then writes him into the photo.
+#[test]
+fn req_032_24_confirm_or_reject_a_suggested_group() {
+    let Some(exiftool) = exiftool() else { return };
+    let fixture = Fixture::new();
+    let (mut harness, dir) = app(&fixture, true, Some(&exiftool));
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    harness.get_by_label("To confirm");
+    harness.get_by_label("Ben? · 1 face");
+    harness.get_by_label("3 faces");
+
+    harness.get_by_label("Yes, all are Ben").click();
+    settle(&mut harness);
+    assert!(regions(&exiftool, &dir.join("a.png")).is_empty(), "it asks first");
+    harness.get_by_label("Write Ben into 1 file?");
+    harness.get_all_by_label("Name them").last().unwrap().click();
+    settle(&mut harness);
+    assert_eq!(regions(&exiftool, &dir.join("a.png")), ["Ben"]);
+}
+
+/// REQ-032-24: _Not Ben_ takes the face out of his group, and he isn't suggested for it again.
+#[test]
+fn req_032_24_a_face_that_isnt_the_person_leaves_the_group() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    harness.get_by_label_contains("isn't Ben").click();
+    settle(&mut harness);
+    assert!(harness.query_by_label("Ben? · 1 face").is_none());
+    assert!(harness.query_by_label("To confirm").is_none());
+    harness.get_by_label("3 faces");
+
+    harness.state_mut().page = Page::Gallery;
+    settle(&mut harness);
+    open_with_faces(&mut harness, "a.png");
+    assert!(harness.query_by_label("Unknown face: Ben?").is_none());
+}
+
+/// REQ-032-25: a face taken out of its group stays an unknown face in the viewer.
+#[test]
+fn req_032_25_taking_a_face_out_keeps_it_in_the_viewer() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    harness
+        .query_all_by_label_contains("out of the group")
+        .next()
+        .unwrap()
+        .click();
+    settle(&mut harness);
+    assert!(harness.query_by_label("3 faces").is_none());
+
+    harness.state_mut().page = Page::Gallery;
+    settle(&mut harness);
+    open_with_faces(&mut harness, "b.png");
+    harness.get_by_label("Unknown face: Who is this?");
+}
+
+/// REQ-032-26: a face opens its photo with the faces shown; the filmstrip holds the group's photos; closing comes
+/// back to the page with the search as it was.
+#[test]
+fn req_032_26_a_face_opens_its_photo_among_its_groups() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    let group = group_photos(&mut harness);
+    // Ben's face first, then the strangers' group: its second face.
+    let at = group[1][1];
+    harness
+        .query_all_by_label_contains("in its photo")
+        .nth(2)
+        .unwrap()
+        .click();
+    settle(&mut harness);
+    let viewer = harness.state().viewer.as_ref().expect("the viewer opened");
+    assert!(viewer.faces_shown());
+    let gallery = harness.state().gallery.as_ref().unwrap();
+    assert_eq!(gallery.position_of(at), Some(viewer.index()));
+    assert_eq!(gallery.count(), Some(3), "only the group's photos");
+    harness.get_by_label("Unknown face: Who is this?");
+
+    harness.key_press(Key::Escape);
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    settle(&mut harness);
+    assert!(harness.state().viewer.is_none());
+    assert_eq!(harness.state().page, Page::People);
+    let gallery = harness.state_mut().gallery.as_mut().unwrap();
+    gallery.wait_for_loads();
+    assert!(gallery.search().media.is_empty());
+    assert_eq!(gallery.count(), Some(4));
 }
 
 #[test]
 fn req_032_15_no_people_page_without_models() {
     let fixture = Fixture::new();
     let (harness, _) = app(&fixture, false, None);
-    assert!(harness.query_by_label("Unknown faces").is_none());
+    assert!(harness.query_by_label("Unconfirmed faces").is_none());
 }
 
 fn settings(fixture: &Fixture, models: bool) -> App {
@@ -832,8 +930,8 @@ fn req_032_15_people_page_looks_as_designed() {
     let fixture = Fixture::new();
     let (conn, _dir) = library(&fixture, true);
     let mut harness = people_page_with_thumbnails(&fixture, conn, egui::vec2(1000.0, 700.0));
-    let shown = group_photos(&mut harness);
-    wait_for_thumbnails(&mut harness, &shown[0]);
+    let shown: Vec<i64> = group_photos(&mut harness).concat();
+    wait_for_thumbnails(&mut harness, &shown);
     harness.snapshot(common::snapshot_name("people_page"));
 }
 
@@ -962,7 +1060,10 @@ fn group_photos(harness: &mut App) -> Vec<Vec<i64>> {
     gallery.wait_for_loads();
     let groups = gallery.face_groups().expect("the groups have loaded");
     groups
+        .suggested
         .iter()
+        .map(|(_, group)| group)
+        .chain(&groups.unknown)
         .map(|group| group.iter().map(|(face, _)| face.media).collect())
         .collect()
 }

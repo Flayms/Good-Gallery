@@ -294,6 +294,8 @@ pub struct UnknownFace {
     pub rect: [f32; 4],
     pub vector: Option<Vec<f32>>,
     pub rejected: Vec<String>,
+    /// Taken out of the groups (REQ-032-25).
+    pub ungrouped: bool,
 }
 
 fn regions(conn: &Connection, media: Option<i64>) -> Result<HashMap<i64, Vec<FaceRegion>>> {
@@ -369,18 +371,19 @@ pub fn unknown_faces_on(conn: &Connection, media: i64, detector: &str, recognize
                 rect,
                 vector: vector.and_then(usable),
                 rejected: rejections(conn, id)?,
+                ungrouped: false,
             });
         }
     }
     Ok(faces)
 }
 
-/// Every face without a name that `recognizer` has seen, for the groups (REQ-032-15). Faces of a person who was taken
-/// off a face stay.
+/// Every face without a name that `recognizer` has seen, for the groups (REQ-032-15), with the people it isn't
+/// (REQ-032-10). Faces of a person who was taken off a face stay.
 pub fn unknown_faces(conn: &Connection, detector: &str, recognizer: &str) -> Result<Vec<UnknownFace>> {
     let named = regions(conn, None)?;
     let mut stmt = conn.prepare_cached(
-        "SELECT f.id, f.media_id, f.x, f.y, f.w, f.h, e.vector FROM detected_faces f
+        "SELECT f.id, f.media_id, f.x, f.y, f.w, f.h, e.vector, f.ungrouped FROM detected_faces f
          JOIN face_embeddings e ON e.face_id = f.id AND e.recognizer = ?2
          WHERE f.detector = ?1 AND f.state = 'open' ORDER BY f.id",
     )?;
@@ -390,11 +393,18 @@ pub fn unknown_faces(conn: &Connection, detector: &str, recognizer: &str) -> Res
             row.get::<_, i64>(1)?,
             [row.get::<_, f32>(2)?, row.get(3)?, row.get(4)?, row.get(5)?],
             row.get::<_, Vec<u8>>(6)?,
+            row.get::<_, bool>(7)?,
         ))
     })?;
+    let mut rejected: HashMap<i64, Vec<String>> = HashMap::new();
+    let mut names = conn.prepare_cached("SELECT face_id, name FROM face_rejections ORDER BY name")?;
+    for row in names.query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)))? {
+        let (face, name) = row?;
+        rejected.entry(face).or_default().push(name);
+    }
     let mut faces = Vec::new();
     for row in rows {
-        let (id, media, rect, vector) = row?;
+        let (id, media, rect, vector, ungrouped) = row?;
         if region_of(rect, named.get(&media)).is_some() {
             continue;
         }
@@ -404,7 +414,8 @@ pub fn unknown_faces(conn: &Connection, detector: &str, recognizer: &str) -> Res
                 media,
                 rect,
                 vector: Some(vector),
-                rejected: Vec::new(),
+                rejected: rejected.remove(&id).unwrap_or_default(),
+                ungrouped,
             });
         }
     }
@@ -595,24 +606,59 @@ pub struct GroupFace {
     pub rect: [f32; 4],
 }
 
-/// Similar faces without a name, largest group first (REQ-032-15).
-pub fn face_groups(conn: &Connection, detector: &str, recognizer: &str, threshold: f32) -> Result<Vec<Vec<GroupFace>>> {
+/// The faces of _Unconfirmed faces_: those with a suggestion by person (REQ-032-24), the others in groups of similar
+/// faces (REQ-032-15), without those taken out of them (REQ-032-25). Largest first.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FaceGroups {
+    pub suggested: Vec<(String, Vec<GroupFace>)>,
+    pub unknown: Vec<Vec<GroupFace>>,
+}
+
+pub fn face_groups(conn: &Connection, detector: &str, recognizer: &str, threshold: f32) -> Result<FaceGroups> {
     const MIN_GROUP: usize = 3;
     let faces = unknown_faces(conn, detector, recognizer)?;
-    let vectors: Vec<&[f32]> = faces.iter().filter_map(|face| face.vector.as_deref()).collect();
-    Ok(group(&vectors, threshold, MIN_GROUP)
+    let known = known_faces(conn, detector, recognizer)?;
+    let known: Vec<(&str, &[f32])> = known
+        .iter()
+        .map(|(name, vector)| (name.as_str(), vector.as_slice()))
+        .collect();
+    let shown = |face: &UnknownFace| GroupFace {
+        id: face.id,
+        media: face.media,
+        rect: face.rect,
+    };
+    let mut suggested: HashMap<&str, Vec<GroupFace>> = HashMap::new();
+    let mut rest = Vec::new();
+    for face in &faces {
+        let rejected: Vec<&str> = face.rejected.iter().map(String::as_str).collect();
+        let suggestion = face
+            .vector
+            .as_deref()
+            .and_then(|vector| suggest(vector, &known, threshold, &rejected));
+        match suggestion {
+            Some((name, _)) => suggested.entry(name).or_default().push(shown(face)),
+            None if !face.ungrouped => rest.push(face),
+            None => {}
+        }
+    }
+    let mut suggested: Vec<(String, Vec<GroupFace>)> = suggested
         .into_iter()
-        .map(|members| {
-            members
-                .into_iter()
-                .map(|index| GroupFace {
-                    id: faces[index].id,
-                    media: faces[index].media,
-                    rect: faces[index].rect,
-                })
-                .collect()
-        })
-        .collect())
+        .map(|(name, faces)| (name.to_owned(), faces))
+        .collect();
+    suggested.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
+    let vectors: Vec<&[f32]> = rest.iter().filter_map(|face| face.vector.as_deref()).collect();
+    let unknown = group(&vectors, threshold, MIN_GROUP)
+        .into_iter()
+        .map(|members| members.into_iter().map(|index| shown(rest[index])).collect())
+        .collect();
+    Ok(FaceGroups { suggested, unknown })
+}
+
+/// Takes a face out of the groups of unknown faces for good; it stays unknown (REQ-032-25).
+pub fn ungroup(conn: &Connection, face: i64) -> Result<()> {
+    conn.prepare_cached("UPDATE detected_faces SET ungrouped = 1 WHERE id = ?1")?
+        .execute([face])?;
+    Ok(())
 }
 
 /// Whether known faces suggest the recognition model is set up wrongly (REQ-032-17).
@@ -832,14 +878,78 @@ mod tests {
     #[test]
     fn req_032_15_groups_only_faces_without_a_name() {
         let (mut conn, root) = setup();
-        let ids = people(&mut conn, root);
-        let groups = face_groups(&conn, "d", "r", 0.5).unwrap();
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].iter().map(|face| face.media).collect::<Vec<_>>(), ids[3..6]);
+        people(&mut conn, root);
+        let ids = strangers(&mut conn, root, 3);
+        let groups = face_groups(&conn, "d", "r", 0.5).unwrap().unknown;
+        assert_eq!(groups.len(), 1, "named faces and those like Anna aren't in it");
+        assert_eq!(groups[0].iter().map(|face| face.media).collect::<Vec<_>>(), ids);
 
         // With one ignored, too few remain.
         set_state(&conn, groups[0][0].id, FaceState::Ignored).unwrap();
-        assert!(face_groups(&conn, "d", "r", 0.5).unwrap().is_empty());
+        assert!(face_groups(&conn, "d", "r", 0.5).unwrap().unknown.is_empty());
+    }
+
+    /// Photos with one face each like nobody known (REQ-032-15).
+    fn strangers(conn: &mut Connection, root: i64, count: usize) -> Vec<i64> {
+        (0..count)
+            .map(|n| {
+                let id = insert(conn, root, &format!("stranger {n}.jpg"), "image");
+                let found = photo(conn, "d");
+                store_scan(conn, &found, "d", &[face(0.1)]).unwrap();
+                let waiting = pending_faces(conn, "d", "r", 1).unwrap().remove(0);
+                store_embedding(conn, waiting.face, "r", &[0.0, -1.0]).unwrap();
+                id
+            })
+            .collect()
+    }
+
+    /// REQ-032-24: faces with a suggestion form one group per person; a face that isn't the person leaves it.
+    #[test]
+    fn req_032_24_groups_suggested_faces_by_person() {
+        let (mut conn, root) = setup();
+        let ids = people(&mut conn, root);
+        let groups = face_groups(&conn, "d", "r", 0.5).unwrap();
+        assert!(groups.unknown.is_empty(), "{groups:?}");
+        assert_eq!(groups.suggested.len(), 1);
+        let (name, faces) = &groups.suggested[0];
+        assert_eq!(name, "Anna");
+        assert_eq!(faces.iter().map(|face| face.media).collect::<Vec<_>>(), ids[3..6]);
+
+        reject(&conn, faces[0].id, "Anna").unwrap();
+        let groups = face_groups(&conn, "d", "r", 0.5).unwrap();
+        assert_eq!(groups.suggested[0].1.len(), 2);
+        assert!(groups.unknown.is_empty(), "one face alone is no group");
+    }
+
+    /// REQ-032-25: a face taken out of its group isn't grouped again, and stays an unknown face with its suggestion.
+    #[test]
+    fn req_032_25_a_face_taken_out_stays_unknown() {
+        let (mut conn, root) = setup();
+        let anna = people(&mut conn, root);
+        let ids = strangers(&mut conn, root, 4);
+        let groups = face_groups(&conn, "d", "r", 0.5).unwrap();
+        assert_eq!(groups.unknown[0].len(), 4);
+        let out = groups.unknown[0][0].clone();
+        ungroup(&conn, out.id).unwrap();
+
+        let groups = face_groups(&conn, "d", "r", 0.5).unwrap();
+        assert_eq!(groups.unknown.len(), 1);
+        assert!(groups.unknown[0].iter().all(|face| face.id != out.id), "{groups:?}");
+        assert_eq!(groups.unknown[0].len(), 3);
+        assert!(ids.contains(&out.media));
+        let shown = shown_faces(&conn, out.media, "d", Some("r"), 0.5).unwrap();
+        assert_eq!(
+            shown.iter().map(|face| face.id).collect::<Vec<_>>(),
+            [out.id],
+            "still in the viewer"
+        );
+
+        // Taken out, a face like Anna is still one to confirm.
+        let like_anna = face_groups(&conn, "d", "r", 0.5).unwrap().suggested[0].1[0].clone();
+        ungroup(&conn, like_anna.id).unwrap();
+        let suggested = face_groups(&conn, "d", "r", 0.5).unwrap().suggested;
+        assert!(suggested[0].1.iter().any(|face| face.id == like_anna.id));
+        assert_eq!(like_anna.media, anna[3]);
     }
 
     #[test]

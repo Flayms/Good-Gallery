@@ -196,6 +196,11 @@ fn filters(conn: &Connection, search: &GallerySearch) -> Result<(String, Vec<rus
             .collect();
         conditions.push(format!("({})", ratings.join(" OR ")));
     }
+    // Ids are numbers, so they go into the statement as they are (REQ-032-26).
+    if !search.media.is_empty() {
+        let ids: Vec<String> = search.media.iter().map(i64::to_string).collect();
+        conditions.push(format!("media.id IN ({})", ids.join(",")));
+    }
     // `lower()` on both sides: SQLite's ASCII-only folding must match the generated `file_name_lower` column. The
     // matches come from the name index, which holds `file_name_lower`: walking the rows computes `lower()` for each
     // (REQ-007-14).
@@ -838,6 +843,27 @@ mod tests {
                 .execute("UPDATE tags SET media_count = 200000 WHERE name = 'Common'", [])
                 .unwrap();
             assert_eq!(index.ids(&tags(&["common"], &["rare"])).len(), 5994);
+        }
+
+        /// REQ-032-26: a search of only some items, combined with the other filters.
+        #[test]
+        fn req_032_26_a_search_of_only_some_items() {
+            let index = Index::new();
+            let a = index.media(index.root, "a.jpg", "rating = 5");
+            let b = index.media(index.root, "b.jpg", "");
+            index.media(index.root, "c.jpg", "rating = 5");
+            let mut ids = index.ids(&GallerySearch {
+                media: vec![a, b],
+                ..Default::default()
+            });
+            ids.sort();
+            assert_eq!(ids, [a.min(b), a.max(b)]);
+            let rated = index.ids(&GallerySearch {
+                media: vec![a, b],
+                ratings: vec![5],
+                ..Default::default()
+            });
+            assert_eq!(rated, [a]);
         }
 
         #[test]
