@@ -76,6 +76,8 @@ pub struct GallerySearch {
     /// Only these media items, empty for any: a group's photos from _Unconfirmed faces_ (REQ-032-26). Not kept in
     /// smart albums.
     pub media: Vec<i64>,
+    /// Words describing what the photos show (REQ-036-05); matched by content search's model before the query runs.
+    pub content: Option<String>,
     pub sort_by: SortBy,
     pub descending: bool,
 }
@@ -94,6 +96,7 @@ impl Default for GallerySearch {
             to: None,
             ratings: Vec::new(),
             media: Vec::new(),
+            content: None,
             sort_by: SortBy::Taken,
             descending: true,
         }
@@ -108,7 +111,28 @@ fn start_of(day: NaiveDate) -> i64 {
         .unwrap_or_else(|| day.and_time(chrono::NaiveTime::MIN).and_utc().timestamp_millis())
 }
 
+/// An id no media item has: `media` holding only it matches nothing (ids start at 1).
+pub const NO_ITEM: i64 = 0;
+
 impl GallerySearch {
+    /// This search with its content words replaced by the media items they match, which the index can query
+    /// (REQ-036-05): both restrictions apply, and no match means no item.
+    pub fn with_content_matches(&self, matches: &[i64]) -> Self {
+        let mut ids: Vec<i64> = if self.media.is_empty() {
+            matches.to_vec()
+        } else {
+            matches.iter().copied().filter(|id| self.media.contains(id)).collect()
+        };
+        if ids.is_empty() {
+            ids.push(NO_ITEM);
+        }
+        Self {
+            media: ids,
+            content: None,
+            ..self.clone()
+        }
+    }
+
     /// Removes a tag from both lists, compared by normalized name.
     pub fn without_tag(&mut self, name: &str) {
         let norm = normalize_tag(name);
@@ -186,6 +210,27 @@ impl GallerySearch {
 
 #[cfg(test)]
 mod tests {
+
+    /// REQ-036-05: content words become the items they match, within the search's own items, and nothing when none
+    /// match.
+    #[test]
+    fn req_036_05_content_words_become_the_items_they_match() {
+        let search = GallerySearch {
+            content: Some("grass".into()),
+            ratings: vec![5],
+            ..GallerySearch::default()
+        };
+        let resolved = search.with_content_matches(&[3, 7]);
+        assert_eq!((resolved.media.clone(), resolved.content.clone()), (vec![3, 7], None));
+        assert_eq!(resolved.ratings, [5], "the other filters stay");
+        let within = GallerySearch {
+            media: vec![7, 9],
+            ..search.clone()
+        };
+        assert_eq!(within.with_content_matches(&[3, 7]).media, [7]);
+        assert_eq!(search.with_content_matches(&[]).media, [NO_ITEM]);
+    }
+
     use super::*;
     use chrono::{Local, TimeZone};
 

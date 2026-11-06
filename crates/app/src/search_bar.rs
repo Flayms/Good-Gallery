@@ -30,10 +30,11 @@ pub struct SearchBar {
     popup: Option<Rect>,
 }
 
-/// A suggestion: a tag with its count, or the file name filter.
+/// A suggestion: a tag with its count, the file name filter, or what the photos show (REQ-036-05).
 enum Choice {
     Tag(String),
     FileName(String),
+    Content(String),
 }
 
 /// Draws the search bar into `ui`'s remaining width.
@@ -78,7 +79,13 @@ pub fn show(ui: &mut egui::Ui, bar: &mut SearchBar, gallery: &mut Gallery) {
             {
                 next.name = None;
             }
-            let hint = if chips.is_empty() && search.name.is_none() {
+            // Searching while the model reads the words (REQ-036-05).
+            if let Some(words) = &search.content
+                && content_chip(ui, words, gallery.is_loading())
+            {
+                next.content = None;
+            }
+            let hint = if chips.is_empty() && search.name.is_none() && search.content.is_none() {
                 LABEL
             } else {
                 ""
@@ -150,7 +157,12 @@ pub fn show(ui: &mut egui::Ui, bar: &mut SearchBar, gallery: &mut Gallery) {
         .collect();
     // Exclusions only exist for tags.
     let file_name = bar.query.trim().to_string();
-    let mut choices: Vec<Choice> = tags.iter().map(|(name, _)| Choice::Tag(name.clone())).collect();
+    let mut choices: Vec<Choice> = Vec::new();
+    // What the photos show comes first while content search is on (REQ-036-05).
+    if mode == TagMode::Include && !file_name.is_empty() && gallery.content_search_on() {
+        choices.push(Choice::Content(file_name.clone()));
+    }
+    choices.extend(tags.iter().map(|(name, _)| Choice::Tag(name.clone())));
     if mode == TagMode::Include && !file_name.is_empty() {
         choices.push(Choice::FileName(file_name.clone()));
     }
@@ -177,9 +189,11 @@ pub fn show(ui: &mut egui::Ui, bar: &mut SearchBar, gallery: &mut Gallery) {
         picked = Some(bar.highlighted);
     }
     if backspace && was_empty {
-        // The file name filter first, then the last tag.
+        // The file name filter first, then the content words, then the last tag.
         if next.name.is_some() {
             next.name = None;
+        } else if next.content.is_some() {
+            next.content = None;
         } else if let Some(last) = next.exclude.last().or(next.tags.last()).cloned() {
             next.without_tag(&last);
         }
@@ -206,13 +220,13 @@ pub fn show(ui: &mut egui::Ui, bar: &mut SearchBar, gallery: &mut Gallery) {
                 .show(ui, |ui| {
                     crate::glass::behind_frame(ui, egui::Margin::same(4), |ui| {
                         ui.set_width(width - 8.0);
-                        if loaded && choices.is_empty() {
+                        if loaded && tags.is_empty() && choices.is_empty() {
                             ui.label(egui::RichText::new("No matching tags").color(theme::muted()));
                         }
                         for (index, choice) in choices.iter().enumerate() {
                             let count = match choice {
                                 Choice::Tag(name) => tags.iter().find(|(n, _)| n == name).map(|(_, c)| *c),
-                                Choice::FileName(_) => None,
+                                Choice::FileName(_) | Choice::Content(_) => None,
                             };
                             if suggestion_row(ui, choice, count, mode, index == bar.highlighted).clicked() {
                                 picked = Some(index);
@@ -232,6 +246,8 @@ pub fn show(ui: &mut egui::Ui, bar: &mut SearchBar, gallery: &mut Gallery) {
         match &choices[index] {
             Choice::Tag(name) => next.with_tag(name, mode),
             Choice::FileName(name) => next.name = Some(name.clone()),
+            // One content chip: another replaces it (REQ-036-05).
+            Choice::Content(words) => next.content = Some(words.clone()),
         }
         bar.query.clear();
         // The suggestions stay open for the next tag.
@@ -307,6 +323,30 @@ fn file_name_chip(ui: &mut egui::Ui, name: &str) -> bool {
     removed
 }
 
+/// The content words as a chip, spinning while the model reads them; true when its × was clicked (REQ-036-05).
+fn content_chip(ui: &mut egui::Ui, words: &str, searching: bool) -> bool {
+    let mut removed = false;
+    egui::Frame::new()
+        .stroke(egui::Stroke::new(1.0, theme::rim()))
+        .corner_radius(theme::RADIUS_CONTROL)
+        .inner_margin(egui::Margin::symmetric(4, 1))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            if searching {
+                ui.add(egui::Spinner::new().size(12.0));
+            } else {
+                ui.add(Icon::Image.image(12.0, theme::text()));
+            }
+            let label = ui
+                .label(egui::RichText::new(words).size(theme::SIZE_CAPTION))
+                .on_hover_text("Photos showing this");
+            let spoken = format!("Photos showing {words}");
+            label.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &spoken));
+            removed = remove_button(ui, &format!("Remove photos showing {words}"));
+        });
+    removed
+}
+
 fn remove_button(ui: &mut egui::Ui, label: &str) -> bool {
     let response = ui.add(egui::Button::image(Icon::X.image(12.0, theme::muted())).frame(false));
     let label = label.to_string();
@@ -334,6 +374,7 @@ fn suggestion_row(
         Choice::Tag(name) if mode == TagMode::Exclude => (Icon::Minus, theme::alert(), name.clone()),
         Choice::Tag(name) => (Icon::Plus, theme::text(), name.clone()),
         Choice::FileName(name) => (Icon::FileSearch, theme::text(), format!("File name contains “{name}”")),
+        Choice::Content(words) => (Icon::Image, theme::text(), format!("Photos showing “{words}”")),
     };
     let icon_rect = Rect::from_min_size(pos2(rect.left() + 8.0, rect.center().y - 8.0), Vec2::splat(16.0));
     icon.image(16.0, color).paint_at(ui, icon_rect);

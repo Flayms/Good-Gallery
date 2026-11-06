@@ -268,7 +268,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
 
 /// What a smart album's context menu asks for (REQ-034-05).
 enum AlbumAction {
-    Rename(SmartAlbum),
+    Rename(Box<SmartAlbum>),
     Delete(i64),
 }
 
@@ -312,7 +312,7 @@ fn albums(
         }
         response.context_menu(|ui| {
             if ui.button("Rename…").clicked() {
-                action = Some(AlbumAction::Rename(album.clone()));
+                action = Some(AlbumAction::Rename(Box::new(album.clone())));
             }
             if ui.button("Delete").clicked() {
                 action = Some(AlbumAction::Delete(album.id));

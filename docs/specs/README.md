@@ -39,6 +39,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [033-files-outside-libraries](033-files-outside-libraries/spec.md) | Show a file outside every library without indexing it; add its folder from the viewer | Implemented |
 | [034-smart-albums](034-smart-albums/spec.md)             | Searches kept under a name in the sidebar, with live counts        | Implemented |
 | [035-rename](035-rename/spec.md)                         | Rename a selection with search and replace and placeholders, with undo | Implemented |
+| [036-content-search](036-content-search/spec.md)     | Find photos by what they show, with a model on this computer     | Implemented |
 
 ## Conventions
 

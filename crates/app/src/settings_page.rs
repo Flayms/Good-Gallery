@@ -87,6 +87,11 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
                         faces(ui, state);
                         ui.add_space(theme::SPACE * 10.0);
                     }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if state.content.enabled() {
+                        content_search(ui, state);
+                        ui.add_space(theme::SPACE * 10.0);
+                    }
                     if !crate::WEB {
                         indexing(ui, state);
                         ui.add_space(theme::SPACE * 10.0);
@@ -110,6 +115,8 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     confirm_delete_faces(ui.ctx(), state);
     #[cfg(not(target_arch = "wasm32"))]
     confirm_look_again(ui.ctx(), state);
+    #[cfg(not(target_arch = "wasm32"))]
+    confirm_delete_content(ui.ctx(), state);
     confirm_remove(ui.ctx(), state);
     confirm_clear(ui.ctx(), state);
 }
@@ -834,6 +841,145 @@ fn faces(ui: &mut egui::Ui, state: &mut AppState) {
             },
         );
     });
+}
+
+/// _Content search_: what the pass is doing, the models, and the data (REQ-036-01 … REQ-036-04).
+#[cfg(not(target_arch = "wasm32"))]
+fn content_search(ui: &mut egui::Ui, state: &mut AppState) {
+    use domain::content::CATALOG;
+    section_title(ui, "Content search");
+    ui.add(
+        egui::Label::new(
+            RichText::new(
+                "Find photos by what they show, such as \"a dog on a beach\", by typing it into the search bar. A model \
+                 on this computer looks at each photo once, in the background, from its thumbnail. Nothing leaves this \
+                 computer.",
+            )
+            .color(theme::muted()),
+        )
+        .wrap(),
+    );
+    ui.add_space(theme::SPACE * 2.0);
+    let summary = state.content.summary();
+    group(ui, |ui| {
+        let can_pause = state.content.model.is_some();
+        let paused = state.content.paused;
+        setting_row(ui, summary.title, &summary.detail, 90.0, |ui| {
+            if !can_pause {
+                return;
+            }
+            let label = if paused { "Resume" } else { "Pause" };
+            let response = ui.button(label);
+            response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, format!("{label} content search")));
+            if response.clicked() {
+                state.set_content_pass(!paused);
+            }
+        });
+        if let Some(share) = summary.share {
+            Frame::new().inner_margin(Margin::symmetric(12, 0)).show(ui, |ui| {
+                ui.add(egui::ProgressBar::new(share).desired_height(4.0));
+                ui.add_space(12.0);
+            });
+        }
+    });
+    ui.add_space(theme::SPACE * 4.0);
+    ui.label(RichText::new("Models").font(FontId::new(theme::SIZE_BODY, theme::semibold())));
+    ui.add(
+        egui::Label::new(
+            RichText::new("Choosing a model starts looking at your photos. Another model looks at them again.")
+                .color(theme::muted()),
+        )
+        .wrap(),
+    );
+    ui.add_space(theme::SPACE);
+    let downloading = state.content.downloading();
+    group(ui, |ui| {
+        for (i, model) in CATALOG.iter().enumerate() {
+            if i > 0 {
+                divider(ui);
+            }
+            let name = if model.recommended {
+                format!("{} (recommended)", model.name)
+            } else {
+                model.name.to_owned()
+            };
+            let description = format!("{}\n{}. {}", model.note, megabytes(model.bytes()), model.license);
+            let present = state.content.has(model);
+            let chosen = state.content.model.as_deref() == Some(model.id);
+            let mut command = None;
+            let button = |ui: &mut egui::Ui, text: &str, spoken: String, selected: bool| {
+                let response = ui.add(egui::Button::new(text).selected(selected));
+                response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &spoken));
+                response.clicked()
+            };
+            setting_row(ui, &name, &description, 180.0, |ui| {
+                if let Some(arriving) = downloading.get(model.id) {
+                    if button(ui, "Cancel", format!("Cancel {}", model.name), false) {
+                        command = Some("cancel");
+                    }
+                    let share = arriving.bytes as f32 / arriving.total.max(1) as f32;
+                    ui.add(egui::ProgressBar::new(share).desired_width(90.0).show_percentage());
+                } else if present {
+                    if button(ui, "Delete", format!("Delete {}", model.name), false) {
+                        command = Some("delete");
+                    }
+                    let (text, spoken) = if chosen {
+                        ("In use", format!("Using {}", model.name))
+                    } else {
+                        ("Use", format!("Use {}", model.name))
+                    };
+                    if button(ui, text, spoken, chosen) && !chosen {
+                        command = Some("use");
+                    }
+                } else if button(ui, "Download", format!("Download {}", model.name), false) {
+                    command = Some("download");
+                }
+            });
+            match command {
+                Some("cancel") => state.cancel_content_download(model),
+                Some("delete") => state.remove_content_model(model),
+                Some("use") => state.choose_content_model(Some(model)),
+                Some("download") => state.download_content_model(model),
+                _ => {}
+            }
+        }
+    });
+    ui.add_space(theme::SPACE * 4.0);
+    group(ui, |ui| {
+        setting_row(
+            ui,
+            "Search data",
+            "Removes what the models found in your photos. Your files stay as they are.",
+            150.0,
+            |ui| {
+                if ui.button("Delete search data").clicked() {
+                    state.content.confirm_delete = true;
+                }
+            },
+        );
+    });
+}
+
+/// "Delete what content search stored?" (REQ-036-03).
+#[cfg(not(target_arch = "wasm32"))]
+fn confirm_delete_content(ctx: &egui::Context, state: &mut AppState) {
+    if !state.content.confirm_delete {
+        return;
+    }
+    if let Some(delete) = confirm(
+        ctx,
+        "confirm-delete-content",
+        "Delete search data",
+        "Delete what the models found in your photos? Your files stay as they are. Content search stops until you \
+         choose a model again.",
+        "Delete",
+    ) {
+        state.content.confirm_delete = false;
+        if delete {
+            state.delete_content_data();
+        }
+    }
 }
 
 /// "Look through all photos again?" (REQ-032-22).

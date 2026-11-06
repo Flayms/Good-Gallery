@@ -1,6 +1,8 @@
 //! App state and the background jobs that feed it.
 
 #[cfg(not(target_arch = "wasm32"))]
+pub mod content;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod faces;
 
 use crate::format;
@@ -337,6 +339,11 @@ enum Event {
     #[cfg(not(target_arch = "wasm32"))]
     FaceModelChecked(bool),
     #[cfg(not(target_arch = "wasm32"))]
+    ContentModelArrived {
+        model: &'static domain::content::ContentModel,
+        result: Result<(), media::face_store::StoreError>,
+    },
+    #[cfg(not(target_arch = "wasm32"))]
     FaceRegionsWritten {
         written: Vec<(i64, String)>,
         failed: Option<String>,
@@ -393,6 +400,9 @@ pub struct AppState {
     /// Face models and the search for faces (spec 032).
     #[cfg(not(target_arch = "wasm32"))]
     pub faces: faces::Faces,
+    /// Content search (spec 036).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub content: content::Content,
     /// Wakes the UI from a background job's progress.
     #[cfg(not(target_arch = "wasm32"))]
     repaint: Option<eframe::egui::Context>,
@@ -1264,6 +1274,8 @@ impl AppState {
             #[cfg(not(target_arch = "wasm32"))]
             faces: faces::Faces::default(),
             #[cfg(not(target_arch = "wasm32"))]
+            content: content::Content::default(),
+            #[cfg(not(target_arch = "wasm32"))]
             repaint: None,
             db: None,
             error: None,
@@ -1725,6 +1737,8 @@ impl AppState {
             Event::FaceModelArrived { key, name, result } => self.face_model_arrived(&key, &name, result),
             #[cfg(not(target_arch = "wasm32"))]
             Event::FaceModelChecked(wrong) => self.face_model_checked(wrong),
+            #[cfg(not(target_arch = "wasm32"))]
+            Event::ContentModelArrived { model, result } => self.content_model_arrived(model, result),
             #[cfg(not(target_arch = "wasm32"))]
             Event::FaceRegionsWritten { written, failed } => self.face_regions_written(written, failed),
             Event::LibraryAdded(result) => {

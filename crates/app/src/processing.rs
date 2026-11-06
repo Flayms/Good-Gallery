@@ -56,6 +56,15 @@ pub fn running(state: &AppState) -> Vec<Work> {
                 faces: true,
             });
         }
+        // So does content search's pass (REQ-036-04).
+        let summary = state.content.summary();
+        if summary.working {
+            work.push(Work {
+                title: format!("Content search: {}", summary.title.to_lowercase()),
+                details: summary.detail,
+                faces: false,
+            });
+        }
     }
     work
 }

@@ -7,6 +7,7 @@ pub mod ambient;
 pub mod appearance;
 pub mod autoscroll;
 pub mod caption;
+pub mod content;
 pub mod crop;
 pub mod date_groups;
 pub mod edit;
