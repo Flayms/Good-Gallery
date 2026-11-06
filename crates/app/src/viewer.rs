@@ -324,6 +324,14 @@ impl Viewer {
         Some(viewer)
     }
 
+    /// Shows the item in its place from the first frame, without growing out of its tile or fading in (REQ-027-07).
+    pub fn open_at_once(&mut self) {
+        self.opening = Transition {
+            start: Some(f64::NEG_INFINITY),
+            tile: None,
+        };
+    }
+
     /// Opens the viewer on a file outside every library, from its scratch index's gallery (REQ-033-01, REQ-033-03).
     pub fn open_loose(gallery: &Gallery, index: usize) -> Option<Self> {
         let mut viewer = Self::open(gallery, index)?;
@@ -918,7 +926,12 @@ impl Viewer {
                                 .cached_detail(item.id)
                                 .map_or(&[][..], |detail| &detail.faces)
                                 .to_vec();
-                            self.faces_drawn = draw_faces(ui, layout.media, drawn, &faces);
+                            let area = if self.view.is_zoomed() {
+                                layout.stage
+                            } else {
+                                layout.media
+                            };
+                            self.faces_drawn = draw_faces(ui, area, drawn, &faces);
                             let unknown = gallery.faces_on(item.id).to_vec();
                             if item.kind == MediaKind::Image && !crate::WEB {
                                 if let Some(target) =
@@ -1246,8 +1259,10 @@ impl Viewer {
             }
             self.edited_size = edited_size;
         }
-        let viewport = Size::new(area.width(), area.height());
-        let fitted = zoom::fit_size(natural, viewport);
+        let fitted = zoom::fit_size(natural, Size::new(area.width(), area.height()));
+        // Zoomed, the photo spreads beyond the media area over the whole stage (REQ-009-20).
+        let stage = layout.stage;
+        let viewport = Size::new(stage.width(), stage.height());
         let photo = item.kind == MediaKind::Image;
         let picking = editing && self.edit.as_ref().is_some_and(EditSession::is_picking);
         let cropping = editing && !compare && self.edit.as_ref().is_some_and(EditSession::is_cropping);
@@ -1294,7 +1309,7 @@ impl Viewer {
             }
             self.close_at = None;
         } else if photo && !over_chrome {
-            self.handle_zoom(ui, backdrop, area, natural, fitted, viewport, keys);
+            self.handle_zoom(ui, backdrop, area, stage, natural, fitted, viewport, keys);
             // A click beside the photo doesn't close while editing.
             if editing {
                 self.close_at = None;
@@ -1322,14 +1337,14 @@ impl Viewer {
                     lerp_rect(cover, full, progress),
                 )
             }
-            None => (target, area, full),
+            None => (target, stage, full),
         };
         if photo
             && !over_chrome
             && !cropping
             && let Some(pos) = backdrop.hover_pos()
         {
-            let icon = if !target.intersect(area).contains(pos) {
+            let icon = if !target.intersect(stage).contains(pos) {
                 CursorIcon::Default
             } else if picking {
                 CursorIcon::Crosshair
@@ -1417,6 +1432,7 @@ impl Viewer {
         ui: &egui::Ui,
         backdrop: &egui::Response,
         area: Rect,
+        stage: Rect,
         natural: Size,
         fitted: Size,
         viewport: Size,
@@ -1425,7 +1441,7 @@ impl Viewer {
         let content = fitted;
         let relative = |pos: Pos2| (pos.x - area.center().x, pos.y - area.center().y);
         // Only where it is drawn: around a zoomed photo's clipped edges the scrim shows, and a click there closes.
-        let on_photo = |view: ZoomView, pos: Pos2| photo_rect(area, fitted, view).intersect(area).contains(pos);
+        let on_photo = |view: ZoomView, pos: Pos2| photo_rect(area, fitted, view).intersect(stage).contains(pos);
         let toggle = |view: ZoomView, pos: Pos2| {
             let scale = zoom::toggle_scale(view, natural.width, fitted.width);
             zoom::zoom_to(view, scale, relative(pos), content, viewport)
@@ -1989,6 +2005,8 @@ impl Viewer {
 struct Layout {
     screen: Rect,
     media: Rect,
+    /// Where a zoomed photo may spread: the window beside the info panel (REQ-009-20). Its middle is the media's.
+    stage: Rect,
     info: Option<Rect>,
     strip: Option<Rect>,
     /// Right edge of the area for the media, the arrows, the bar and the filmstrip.
@@ -2024,9 +2042,11 @@ impl Layout {
             pos2(screen.left() + SIDE_SPACE, screen.top() + margin),
             pos2(right - SIDE_SPACE, screen.bottom() - margin),
         );
+        let stage = Rect::from_min_max(screen.min, pos2(right, screen.bottom()));
         Self {
             screen,
             media,
+            stage,
             info,
             strip,
             right,

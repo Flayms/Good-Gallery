@@ -540,6 +540,8 @@ pub struct Gallery {
     tiles_frame: Option<(egui::Pos2, Rect)>,
     /// Autoscroll with the middle mouse button, and where it started on screen (REQ-006-14).
     autoscroll: Autoscroll,
+    /// Until when the years beside the scrollbar stay after the user scrolled (REQ-006-18), in egui's time.
+    years_until: f64,
     autoscroll_at: egui::Pos2,
     /// The click that stopped autoscroll: tiles and rows ignore it until every button is up again.
     swallow_click: bool,
@@ -610,6 +612,7 @@ impl Gallery {
             hovered: None,
             range_preview: None,
             autoscroll: Autoscroll::Off,
+            years_until: 0.0,
             autoscroll_at: egui::Pos2::ZERO,
             swallow_click: false,
             content_left: 0,
@@ -1597,6 +1600,9 @@ impl Gallery {
         } else if let Some(top) = self.viewed.and_then(|(index, _)| self.reveal(&arranged, index, count)) {
             scroll = scroll.vertical_scroll_offset(top);
         }
+        let before = self.offset;
+        // The user's wheel or touchpad, read before the scroll area takes it, not a jump of the app's (REQ-006-18).
+        let wheel = ui.input(|input| input.smooth_scroll_delta().y != 0.0);
         let output = scroll.show_viewport(ui, |ui, viewport| {
             self.offset = viewport.min.y;
             self.view_height = viewport.height() - inset_top;
@@ -1621,12 +1627,14 @@ impl Gallery {
                 self.selection.clear();
             }
         });
+        let scrolled = wheel && !self.autoscroll.is_on() && (self.offset - before).abs() > 0.5;
         self.year_labels(
             ui,
             &arranged,
             scroll_bar_rect(area, list),
             output.content_size.y,
             output.inner_rect.height(),
+            scrolled,
         );
         self.arranged = Some(arranged);
         if list {

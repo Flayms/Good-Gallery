@@ -90,6 +90,14 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     }
     ctx.layer_painter(egui::LayerId::background())
         .rect_filled(ctx.content_rect(), 0.0, theme::base());
+    // Started with a file: only the background until the viewer shows it (REQ-027-07).
+    if state.waiting_to_open() {
+        if let Some(gallery) = &mut state.gallery {
+            gallery.poll();
+        }
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        return;
+    }
     if state.is_active() {
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
