@@ -115,13 +115,27 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 - **Then** the years of the result show beside the scrollbar, each at the height the thumb has when the gallery is scrolled to that year's first item, so a year holding more items takes more of the bar
 - **And** a year too close to the one above it isn't shown, so labels never overlap
 - **And** clicking a year scrolls to its first item
-- **And** with the pointer elsewhere, under a menu or the viewer, during autoscroll, or for another sort, no years show
+- **And** with the pointer elsewhere (unless the gallery scrolls, REQ-006-18), under a menu or the viewer, during autoscroll, or for another sort, no years show
 
 ### REQ-006-17 · Month while dragging
 
 - **Given** a gallery sorted by a date
 - **When** the user drags the scrollbar
 - **Then** the month and year at the top of the gallery show beside the thumb ("June 2023"), and go away on release
+
+### REQ-006-18 · Years while scrolling
+
+- **Given** a gallery sorted by a date that doesn't fit the window
+- **When** the user scrolls it with the wheel or the touchpad, wherever the pointer is
+- **Then** the years show beside the scrollbar as in REQ-006-16, and fade out about a second after the scrolling stops
+- **And** a new result, or a jump to a year, doesn't show them by itself
+
+### REQ-006-19 · Month at the pointer
+
+- **Given** a gallery sorted by a date, with the years shown because the pointer is near the scrollbar (REQ-006-16)
+- **When** the pointer rests at a height of the bar, without dragging
+- **Then** the month and year the gallery would show at its top with the thumb at that height show beside the bar at the pointer ("June 2023"), above any year they would touch
+- **And** they follow the pointer, and go away with the years
 
 ## Out of scope
 
@@ -157,3 +171,5 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 | REQ-006-15 | `crates/indexer/src/thumbnails.rs` › req_006_15_renders_below_the_ui_threads_priority; `cargo xtask gallery-bench --originals` (Linux VM with lavapipe: cold p95 527 → 307 ms with the lowered priority, warm 223 ms) | partial (the 16 ms budget on an integrated laptop GPU not measured yet) |
 | REQ-006-16 | `crates/domain/src/scrollbar.rs` › req_006_16_marks_where_each_year_starts_in_either_order, req_006_16_places_a_year_where_the_thumb_is_when_scrolled_there, req_006_16_a_long_gallery_has_the_shortest_thumb, req_006_16_drops_years_too_close_together; `crates/app/tests/gallery.rs` › req_006_16_shows_years_near_the_scrollbar_and_jumps_to_one (snapshot `gallery_years`), req_006_16_leaves_out_years_too_close_together, req_006_16_shows_no_years_for_other_sorts, req_006_16_shows_no_years_without_a_scrollbar | pass |
 | REQ-006-17 | `crates/app/src/format.rs` › req_006_17_names_the_month_and_year; `crates/app/tests/gallery.rs` › req_006_17_shows_the_month_while_dragging_the_scrollbar (snapshot `gallery_years_dragging`) | pass |
+| REQ-006-18 | `crates/app/tests/gallery.rs` › req_006_18_scrolling_shows_the_years_until_it_stops, req_006_18_a_jump_shows_no_years | pass |
+| REQ-006-19 | `crates/domain/src/scrollbar.rs` › req_006_19_the_offset_at_a_height_undoes_the_thumbs_center; `crates/app/tests/gallery.rs` › req_006_19_shows_the_month_at_the_pointer (snapshot `gallery_years_hover`) | pass |
