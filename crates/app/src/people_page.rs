@@ -460,8 +460,8 @@ fn decided_menu(
         Decided::Ignored => ui
             .button("Not a face")
             .clicked()
-            .then(|| FaceAction::NotAFace { faces }),
-        Decided::NotAFace => ui.button("Ignore").clicked().then(|| FaceAction::Ignore { faces }),
+            .then_some(FaceAction::NotAFace { faces }),
+        Decided::NotAFace => ui.button("Ignore").clicked().then_some(FaceAction::Ignore { faces }),
     };
     if let Some(action) = other {
         chosen = Some(Chosen::Face(action));

@@ -1068,7 +1068,7 @@ mod tests {
         let out = groups.unknown[0][0].clone();
         ungroup(&conn, out.id).unwrap();
         let groups = face_groups(&conn, "d", "r", 0.5).unwrap();
-        assert_eq!(groups.others, [out.clone()]);
+        assert_eq!(groups.others, [out]);
 
         // Two more out: a group of one is no group, so all four are others.
         for face in &groups.unknown[0][..2] {
