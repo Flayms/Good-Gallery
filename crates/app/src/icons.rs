@@ -60,6 +60,7 @@ icons! {
     Minus => "minus",
     Pipette => "pipette",
     PanelLeft => "panel-left",
+    Pencil => "pencil",
     Pause => "pause",
     Play => "play",
     Plus => "plus",

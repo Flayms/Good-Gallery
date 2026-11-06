@@ -427,6 +427,8 @@ pub struct Gallery {
     selection: domain::selection::Selection,
     /// A rating or tag asked for the selection this frame (REQ-025-07, REQ-026-06).
     selection_change: Option<crate::state::Many>,
+    /// _Rename…_ was chosen for the selection (REQ-035-01).
+    rename_asked: bool,
     /// The item shown in the viewer: kept in view (REQ-016-06), its thumbnail wanted first (REQ-009-14).
     viewed: Option<(usize, i64)>,
     /// The item the viewer shows outside the result, and what the index says of it once known (REQ-009-18).
@@ -507,6 +509,7 @@ impl Gallery {
             opened: None,
             selection: Default::default(),
             selection_change: None,
+            rename_asked: false,
             viewed: None,
             outside: None,
             strip: 0..0,
@@ -766,6 +769,16 @@ impl Gallery {
         if self.selected_count() > 0 {
             self.selection_change = Some(crate::state::Many::Tag(path));
         }
+    }
+
+    /// Asks to rename the selection (REQ-035-01).
+    pub fn ask_rename(&mut self) {
+        self.rename_asked = self.selected_count() > 0;
+    }
+
+    /// _Rename…_ was chosen this frame.
+    pub fn take_rename_asked(&mut self) -> bool {
+        std::mem::take(&mut self.rename_asked)
     }
 
     /// The rating or tag asked for the selection this frame, if any (REQ-025-07, REQ-026-06).

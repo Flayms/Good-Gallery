@@ -38,7 +38,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [032-faces](032-faces/spec.md)                           | Find and recognize faces with models the user picks; suggested names, written to files when confirmed | Implemented |
 | [033-files-outside-libraries](033-files-outside-libraries/spec.md) | Show a file outside every library without indexing it; add its folder from the viewer | Implemented |
 | [034-smart-albums](034-smart-albums/spec.md)             | Searches kept under a name in the sidebar, with live counts        | Implemented |
-| [035-rename](035-rename/spec.md)                         | Rename a selection with search and replace and placeholders, with undo | Approved |
+| [035-rename](035-rename/spec.md)                         | Rename a selection with search and replace and placeholders, with undo | Implemented |
 
 ## Conventions
 

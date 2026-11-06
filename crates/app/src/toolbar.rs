@@ -114,6 +114,15 @@ pub fn show(
 /// right-to-left part, so from the right (REQ-025-06, REQ-025-07, REQ-026-06).
 fn selection_bar(ui: &mut egui::Ui, gallery: &mut Gallery) {
     if !crate::WEB {
+        // REQ-035-01: the icon alone, so the search bar keeps its room.
+        let rename = egui::Button::new(Icon::Pencil.small())
+            .frame(false)
+            .min_size(vec2(theme::CONTROL_HEIGHT, theme::CONTROL_HEIGHT));
+        let response = ui.add(rename).on_hover_text("Rename the selected files");
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Rename…"));
+        if response.clicked() {
+            gallery.ask_rename();
+        }
         {
             let button = egui::Button::new((
                 Icon::Plus.small(),

@@ -1292,6 +1292,40 @@ mod tests {
         assert!(f.paths().is_empty());
     }
 
+    /// REQ-035-07: a file the app renamed after moving its row is the same media item to the watcher's scan: nothing
+    /// is read again, removed or added, and its thumbnail stays.
+    #[test]
+    fn req_035_07_a_rename_by_the_app_keeps_the_media_item() {
+        let mut f = Fixture::new();
+        f.touch_past("a/x.jpg", "x");
+        f.touch_past("a/x.jpg.xmp", "<x/>");
+        f.scan(ScanScope::Full);
+        let id: i64 = f.value("SELECT id FROM media WHERE rel_path = 'a/x.jpg'");
+        f.writer
+            .conn()
+            .execute("UPDATE media SET thumb_status = 'ready'", [])
+            .unwrap();
+        f.metadata.reads.lock().unwrap().clear();
+
+        db::rename::rename(f.writer.conn(), f.root, &[("a/x.jpg".into(), "a/y.jpg".into())]).unwrap();
+        fs::rename(f.path("a/x.jpg"), f.path("a/y.jpg")).unwrap();
+        fs::rename(f.path("a/x.jpg.xmp"), f.path("a/y.jpg.xmp")).unwrap();
+        f.scan(ScanScope::Changes(
+            ["a/x.jpg", "a/y.jpg", "a/x.jpg.xmp", "a/y.jpg.xmp"]
+                .map(String::from)
+                .to_vec(),
+        ));
+
+        assert_eq!(f.paths(), ["a/y.jpg"]);
+        assert_eq!(f.value::<i64>("SELECT id FROM media WHERE rel_path = 'a/y.jpg'"), id);
+        assert_eq!(f.value::<String>("SELECT thumb_status FROM media"), "ready");
+        assert_eq!(
+            *f.metadata.reads.lock().unwrap(),
+            Vec::<String>::new(),
+            "nothing read again"
+        );
+    }
+
     #[test]
     fn touched_files_include_their_sidecars() {
         let touched: HashSet<String> = ["a/y.xmp", "b/z.jpg.xmp", "c/w.jpg"].map(String::from).into();

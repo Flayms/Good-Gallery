@@ -445,7 +445,10 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
         .with_thumbnails(thumbnails.clone())
         .with_gallery(gallery)
         .with_originals(originals)
-        .with_videos(videos);
+        .with_videos(videos)
+        .with_rename_journal(data_dir.join("rename-journal.json"));
+    // A rename the app was ended in is finished first (REQ-035-09).
+    state.recover_rename();
     // Saving edits copies metadata with exiftool, which needs our XMP namespace defined (spec 021).
     if let Some(exiftool) = media::exiftool::find_exiftool() {
         match media::edit::exiftool_config(data_dir) {

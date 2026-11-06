@@ -358,6 +358,9 @@ enum Event {
     Reverted(Result<Written, String>),
     /// A rating was written into the file and the index (REQ-024-03), or why not (REQ-024-04).
     Rated(Result<(i64, String), String>),
+    /// Files were renamed (spec 035), or why not.
+    #[cfg(not(target_arch = "wasm32"))]
+    Renamed(Result<crate::rename::RenameDone, String>),
     /// A tag was written into the file (REQ-026-03), or why not (REQ-026-04).
     Tagged(Result<(i64, String), String>),
     /// Several items were rated or tagged (REQ-025-07, REQ-026-06), or why none could be.
@@ -406,6 +409,12 @@ pub struct AppState {
     pub settings_page: SettingsPage,
     pub people_page: crate::people_page::PeoplePage,
     pub toasts: Toasts,
+    /// The rename dialog, while open (spec 035).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub rename_dialog: Option<crate::rename::RenameDialog>,
+    /// Where renames are journaled (REQ-035-08, REQ-035-09); renaming is off without it.
+    #[cfg(not(target_arch = "wasm32"))]
+    rename_journal: Option<PathBuf>,
     indexer_events: Option<Receiver<IndexerEvent>>,
     pub indexer_status: IndexerStatus,
     /// When written files were last shown; `None` until the running scan wrote its first files.
@@ -1280,6 +1289,10 @@ impl AppState {
             edit_tools: None,
             confirm_revert: None,
             confirm_many: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            rename_dialog: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            rename_journal: None,
             pending_copy: None,
             #[cfg(not(target_arch = "wasm32"))]
             open_requests: None,
@@ -1355,6 +1368,109 @@ impl AppState {
             let event = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).unwrap_or(Event::Failed);
             let _ = tx.send(event);
         });
+    }
+
+    /// Journals renames at `path` (REQ-035-08, REQ-035-09).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_rename_journal(mut self, path: PathBuf) -> Self {
+        self.rename_journal = Some(path);
+        self
+    }
+
+    /// Opens the rename dialog for `ids` (REQ-035-01).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn open_rename(&mut self, ids: Vec<i64>) {
+        let (Some(db), Some(journal)) = (self.db.clone(), &self.rename_journal) else {
+            return;
+        };
+        if ids.is_empty() {
+            return;
+        }
+        let undo = crate::rename::undo_job(&db, journal).is_some();
+        self.rename_dialog = Some(crate::rename::RenameDialog::open(db, &self.libraries, ids, undo));
+    }
+
+    /// Renames in the background, the index first (REQ-035-06, REQ-035-07).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn start_rename(&mut self, job: crate::rename::RenameJob) {
+        let (Some(db), Some(journal)) = (self.db.clone(), self.rename_journal.clone()) else {
+            return;
+        };
+        let cache = self.thumbnail_cache();
+        self.spawn_write(move || Event::Renamed(crate::rename::run(&db, cache.as_ref(), &journal, &job)));
+    }
+
+    /// Takes the last rename back (REQ-035-08).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn undo_rename(&mut self) {
+        let (Some(db), Some(journal)) = (self.db.clone(), &self.rename_journal) else {
+            return;
+        };
+        match crate::rename::undo_job(&db, journal) {
+            Some(job) => self.start_rename(job),
+            None => self
+                .toasts
+                .error("The last rename can't be undone: its files have other names now."),
+        }
+    }
+
+    /// Finishes a rename the app was ended in, once its libraries are there (REQ-035-09).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn recover_rename(&mut self) {
+        let (Some(db), Some(journal)) = (self.db.clone(), self.rename_journal.clone()) else {
+            return;
+        };
+        let cache = self.thumbnail_cache();
+        self.spawn_write(move || match crate::rename::recover(&db, cache.as_ref(), &journal) {
+            Ok(Some(done)) => Event::Renamed(Ok(done)),
+            Ok(None) => Event::Renamed(Ok(crate::rename::RenameDone::default())),
+            Err(error) => Event::Renamed(Err(error)),
+        });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn renamed(&mut self, result: Result<crate::rename::RenameDone, String>) {
+        let done = match result {
+            Ok(done) => done,
+            Err(error) => {
+                self.toasts.error(format!("Couldn't rename: {error}"));
+                return;
+            }
+        };
+        for (root_id, paths) in &done.touched {
+            self.scans.request_paths(*root_id, paths.clone());
+        }
+        if done.touched.is_empty() {
+            return;
+        }
+        self.refresh();
+        if let Some(gallery) = &mut self.gallery {
+            gallery.reload();
+        }
+        if let Some((name, error, count)) = &done.failed {
+            let others = if *count > 1 {
+                format!(" and {} more", crate::format::count(*count as u64 - 1))
+            } else {
+                String::new()
+            };
+            self.toasts.error(format!("Couldn't rename {name}{others}: {error}"));
+        }
+        if done.renamed > 0 {
+            let files = if done.renamed == 1 {
+                "file".to_string()
+            } else {
+                "files".to_string()
+            };
+            let text = if done.recovered {
+                format!(
+                    "Finished renaming {} {files}",
+                    crate::format::count(done.renamed as u64)
+                )
+            } else {
+                format!("Renamed {} {files}", crate::format::count(done.renamed as u64))
+            };
+            self.toasts.success_with(text, crate::toasts::ToastAction::UndoRename);
+        }
     }
 
     /// Runs `job`, a write into library files, on the writer thread after the writes queued before it, so changes to
@@ -1683,6 +1799,8 @@ impl AppState {
                 }
                 Err(error) => self.toasts.error(format!("Couldn't revert: {error}")),
             },
+            #[cfg(not(target_arch = "wasm32"))]
+            Event::Renamed(result) => self.renamed(result),
             Event::Rated(result) => match result {
                 Ok((root_id, rel_path)) => {
                     // A new sidecar is noted on the next read; the rating read then is the same.
