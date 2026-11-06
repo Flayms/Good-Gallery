@@ -51,6 +51,10 @@ const FILES: &[(&str, &str)] = &[
         "0017_ungrouped_faces",
         include_str!("../migrations/0017_ungrouped_faces.sql"),
     ),
+    (
+        "0018_content_vectors",
+        include_str!("../migrations/0018_content_vectors.sql"),
+    ),
 ];
 const JOURNAL: &str = include_str!("../migrations/meta/_journal.json");
 

@@ -211,7 +211,7 @@ impl FaceStore {
     }
 }
 
-fn copy_hashing(
+pub(crate) fn copy_hashing(
     mut reader: impl Read,
     mut file: &std::fs::File,
     total: Option<u64>,
