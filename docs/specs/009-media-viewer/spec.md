@@ -142,6 +142,13 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 - **When** the item matches the search again
 - **Then** the viewer follows it to its new position
 
+### REQ-009-19 · The photo in the middle
+
+- **Given** the viewer, with or without the filmstrip and the info panel
+- **When** the item is shown, and when the controls fade out (REQ-013-10)
+- **Then** the photo or video is centered in the area beside the info panel, with as much room above it as below, and it doesn't move when the controls fade
+- **And** the control bar with the file name and the buttons sits above it, in the title bar's strip, clear of the window controls
+
 ## Out of scope
 
 - Face regions in videos. Adding, editing and removing face regions and finding faces are spec 032.
@@ -177,4 +184,5 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 | REQ-009-15 | `crates/media/src/original.rs` › req_009_15_fails_for_missing_and_broken_files_and_avif_without_ffmpeg; `crates/app/src/originals.rs` › req_009_15_remembers_failures_until_wanted_anew; `crates/app/tests/viewer.rs` › req_009_15_says_when_the_original_fails | pass |
 | REQ-009-16 | `crates/domain/src/viewer.rs` › req_009_16_toggles_between_fitted_and_actual_pixels_at_least_2x; `crates/app/tests/viewer.rs` › req_009_16_click_toggles_between_fitted_and_actual_pixels, req_009_03_req_009_16_clicks_on_the_photo_and_double_clicks_dont_close | pass |
 | REQ-009-18 | `crates/domain/src/viewer.rs` › req_009_18_steps_from_the_place_the_item_had; `crates/app/tests/viewer.rs` › req_009_18_keeps_an_item_that_left_the_search, req_009_18_steps_back_from_an_item_that_left_the_search, req_009_18_closes_with_an_empty_result, req_009_18_follows_the_item_back_into_the_search, req_009_18_says_when_a_kept_item_is_gone | pass |
+| REQ-009-19 | `crates/app/src/viewer.rs` › req_009_19_centers_the_photo_with_the_bar_above_it, req_009_19_the_bar_keeps_clear_of_the_window_controls | pass |
 | REQ-009-17 | `crates/domain/src/faces.rs` › req_009_17_face_regions_are_hidden_until_shown; `crates/app/tests/viewer.rs` › req_009_17_shows_face_regions_and_remembers_the_choice (snapshot `viewer_faces`) | pass |
