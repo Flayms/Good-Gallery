@@ -1,6 +1,6 @@
 # Searching by what is in a photo (spike for #200)
 
-Can Good Gallery find photos by what they show ("grass", "skyscrapers", "a dog on a beach") without tags, on the user's own computer, at 50k–500k photos? This page records what a spike measured on 2026-11-06 and proposes how to build it. Nothing here is built yet.
+Can Good Gallery find photos by what they show ("grass", "skyscrapers", "a dog on a beach") without tags, on the user's own computer, at 50k–500k photos? This page records what a spike measured on 2026-11-06. It was then built as [spec 036](specs/036-content-search/spec.md); the plan there has the decisions.
 
 ## Short answer
 
@@ -62,18 +62,18 @@ Ranking (cosine similarity of the best match, then the best wrong one):
 | --- | --- | --- | --- |
 | MobileCLIP-S0 (Apple) | 43 + 161 MB | Apple AMLR (research use) | tested here; fastest |
 | MobileCLIP-S2 (Apple) | larger | Apple AMLR | more accurate, slower; not tested |
-| CLIP ViT-B/32 (OpenAI) | 335 + 242 MB (int8: 84 + 61 MB) | MIT | the classic; clear license; not tested, and whether `tract` runs the int8 files is open |
+| CLIP ViT-B/32 (OpenAI) | 335 + 242 MB | MIT | the classic, with a clear license; as fast per photo, but its scores lie closer together. Its 8-bit files (84 + 61 MB) run 6× slower in `tract` |
 
 As with faces, the user picks and downloads a model; the app ships none.
 
-## Proposal
+## What was built
 
-A Tier 3 spec, **036 · Content search**, modeled on spec 032 (faces):
+[Spec 036 · Content search](specs/036-content-search/spec.md), modeled on spec 032 (faces):
 
 - **Off until a model is chosen** in a _Search_ section of the settings (list, download, SHA-256, add your own ONNX).
 - **Background pass** over photos and video thumbnails, from the thumbnail cache, with progress in the processing icon, paused and resumed like the face search.
 - **Vectors in the index** (f16 or int8, per model, never written to files), deleted with _Delete search data_.
-- **The search bar searches by content** as well as by file name and tags. Results are best match first above a cutoff, combined with all filters, and can be kept as a smart album (spec 034).
+- **The search bar searches by content** as well as by file name and tags: matches above a cutoff, in the gallery's order, combined with all filters, and kept in smart albums (spec 034).
 - **Out of scope at first:** "find similar photos" from one photo (cheap to add later with the same vectors), languages other than English (needs a multilingual model), and a GPU.
 
-Next step if agreed: the spec with its REQs, then a plan. The plan's first task measures MobileCLIP-S0 against CLIP ViT-B/32 on a few hundred labeled photos to choose the default model and the cutoff.
+Still open: measuring the cutoffs on a few hundred labeled photos (the plan's task 9). The ones built in come from the 12 photos above.

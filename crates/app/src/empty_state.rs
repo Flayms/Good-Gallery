@@ -30,6 +30,20 @@ pub fn no_media(ui: &mut egui::Ui) {
     );
 }
 
+/// A content search that matches nothing, and how many photos its model hasn't looked at yet (REQ-036-05,
+/// REQ-036-06).
+pub fn no_content_matches(ui: &mut egui::Ui, words: &str, left: u64) {
+    let detail = if left > 0 {
+        format!(
+            "{} photos haven't been looked at yet and may still show it. Other words may find more.",
+            crate::format::count(left)
+        )
+    } else {
+        "Other words may find more.".to_owned()
+    };
+    message(ui, Icon::Image, &format!("No photos showing “{words}”"), Some(&detail));
+}
+
 pub fn error(ui: &mut egui::Ui, title: &str, detail: &str) {
     centered(ui, Icon::TriangleAlert, title, Some(detail), None);
 }

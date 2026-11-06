@@ -61,13 +61,14 @@ pub fn delete(conn: &Connection, id: i64) -> Result<()> {
 }
 
 /// All smart albums with their counts, and whether their library or folder is gone (REQ-034-02, REQ-034-06).
-pub fn rows(conn: &Connection) -> Result<Vec<AlbumRow>> {
+/// `resolve` turns an album's content words into the items they match (REQ-036-07).
+pub fn rows(conn: &Connection, resolve: &dyn Fn(&GallerySearch) -> GallerySearch) -> Result<Vec<AlbumRow>> {
     let mut rows = Vec::new();
     for album in list(conn)? {
         let missing = missing(conn, &album.search)?;
         let count = match missing {
             Some(_) => 0,
-            None => crate::gallery::count(conn, &album.search)?,
+            None => crate::gallery::count(conn, &resolve(&album.search))?,
         };
         rows.push(AlbumRow { album, count, missing });
     }
@@ -150,6 +151,37 @@ mod tests {
         assert_eq!(list(&conn).unwrap()[0].search, rated(5));
     }
 
+    /// REQ-036-07: an album with content words counts the items its resolver says they match.
+    #[test]
+    fn req_036_07_counts_an_albums_content_matches() {
+        let conn = crate::open_in_memory().unwrap();
+        let root = insert_library(&conn, "D:\\Photos", "Photos", LibraryStatus::Online)
+            .unwrap()
+            .id;
+        let mut writer = IndexWriter::new(conn);
+        writer
+            .write(
+                root,
+                &[file("a.jpg", Some(5)), file("b.jpg", Some(5)), file("c.jpg", None)],
+            )
+            .unwrap();
+        let conn: Connection = writer.into();
+        let dogs = GallerySearch {
+            content: Some("dogs".into()),
+            ..rated(5)
+        };
+        insert(&conn, "Dogs", &dogs).unwrap();
+        let first = crate::media::id_of(&conn, root, "a.jpg").unwrap().unwrap();
+        let third = crate::media::id_of(&conn, root, "c.jpg").unwrap().unwrap();
+        let resolve = |search: &GallerySearch| match &search.content {
+            Some(_) => search.with_content_matches(&[first, third]),
+            None => search.clone(),
+        };
+        let rows = rows(&conn, &resolve).unwrap();
+        assert_eq!(rows[0].count, 1, "a.jpg: matched and rated 5");
+        assert_eq!(rows[0].album.search.content.as_deref(), Some("dogs"));
+    }
+
     #[test]
     fn req_034_02_req_034_04_req_034_06_counts_albums_and_finds_what_is_gone() {
         let conn = crate::open_in_memory().unwrap();
@@ -186,7 +218,7 @@ mod tests {
         )
         .unwrap();
         let summary = |conn: &Connection| {
-            rows(conn)
+            rows(conn, &GallerySearch::clone)
                 .unwrap()
                 .into_iter()
                 .map(|row| (row.album.name, row.count, row.missing))

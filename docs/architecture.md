@@ -31,8 +31,9 @@ crates/
             No IO.
   db        rusqlite: migrations, connections, index writer, gallery and tag queries, settings
   media     exiftool process pool, metadata extraction, thumbnail rendering, originals, ffmpeg, editing, subject
-            detection, face models and their store, writing ratings, tags and face regions, helper lookup (desktop only)
-  indexer   scan queue, walk, scans, watcher, schedule, reachability, thumbnail cache and service, face search,
+            detection, face models and their store, content search's models and store, writing ratings, tags and face
+            regions, helper lookup (desktop only)
+  indexer   scan queue, walk, scans, watcher, schedule, reachability, thumbnail cache and service, face search, content pass,
             library operations
   app       eframe binary: UI, texture streaming, glass, viewer, video, editor, settings; `app::web` for the browser
 xtask/      check-specs, libraries CLI, benchmarks (gallery, search, face models), screenshots, dist, release, web, web-test
@@ -66,6 +67,7 @@ There is no async runtime: work runs on OS threads that talk over channels (`cro
 | Scheduler | a read connection | queues scans on the indexer |
 | Thumbnail service (`io_concurrency`) | rendering, its own write connection | a callback per finished thumbnail |
 | Faces (1) | its own write connection, the loaded face models | a status the settings read, a repaint |
+| Content (1) | its own write connection, the loaded image half of the content model (spec 036) | a status the settings read, a repaint |
 | Gallery loader | a read connection | layout, tile data, suggestions, sidebar lists |
 | Texture workers (4) | thumbnail decode, mips, `wgpu::Texture` creation | finished textures, registered by the UI within 3 ms per frame |
 | Originals workers (2) | full-size decodes for the viewer | finished textures |
@@ -84,6 +86,7 @@ There is no async runtime: work runs on OS threads that talk over channels (`cro
 - **Index:** SQLite in WAL mode in the data folder. One write connection (the indexer's), read-only connections for readers. Migrations are drizzle-compatible SQL files in `crates/db/migrations/`, so indexes made by earlier versions keep opening (REQ-001-08); a schema change is a new migration, never an edited one.
 - **Settings:** the `settings` table of the index, validated by `db::settings`.
 - **Faces:** `detected_faces`, `face_embeddings`, `face_rejections` and `faces_scanned` in the index. Names aren't there: a detected face overlapping a named region in `media_faces` is that person, worked out when read. Models are files named by their SHA-256 in `<data>/face-models/`, with a note on what each is.
+- **Content search:** `content_vectors` in the index, 512 signed bytes per media item and model, made from its cached thumbnail. A search's words are matched on the gallery's loader thread (`app::gallery::ContentMatches`, the text half loaded on the first search) and become the media items the query is restricted to. Models are folders of three files in `<data>/content-models/<id>/`, pinned by hash in `domain::content::CATALOG`.
 - **Scratch indexes:** a file opened from outside every library is read into `<data>/scratch/<pid>-<time>.db`, an index of the same schema with that folder as its one library, and shown by a second `Gallery` (`app::loose`). Its ids start at 2^50, so they never meet the index's in the originals and textures kept by id. It is deleted when the viewer closes; leftovers of a crash go at the next start.
 - **Thumbnail cache:** one WebP file per thumbnail and width under `<data>/thumbs/`, named by a hash of the file's identity, LRU by file mtime within a size limit.
 - **Data folder:** `%APPDATA%\good-gallery` (Windows) or `$XDG_DATA_HOME/good-gallery` (Linux) for the packaged app; development builds use `good-gallery-rust`. Logs are in `logs/` there.
@@ -112,7 +115,7 @@ Platform code sits behind `cfg(windows)`, `cfg(target_os = "linux")` and `cfg(ta
 ## Conventions
 
 - **Errors:** `thiserror` enums in library crates, `anyhow` in `app` and `xtask`. **Logging:** `tracing`, to stderr and `logs/app.log`.
-- **Network:** the desktop app connects only for what the user allowed: the update check and download (spec 031), through the system's `curl`, and a face model they asked for (spec 032). The browser version sends nothing (REQ-019-12); `xtask/tests/no_network.rs` keeps it that way.
+- **Network:** the desktop app connects only for what the user allowed: the update check and download (spec 031), through the system's `curl`, a face model they asked for (spec 032), and a content search model they asked for (spec 036). The browser version sends nothing (REQ-019-12); `xtask/tests/no_network.rs` keeps it that way.
 - **Specs and tests:** every test that covers a REQ names it (`fn req_007_01_…` or a doc comment); `cargo xtask check-specs` checks it.
 - **Visual checks:** `egui_kittest` snapshots (`UPDATE_SNAPSHOTS=1`), and `cargo run -p app -- --screenshot <file.png>` for the real window with glass.
 - **Pinned UI crates:** egui, eframe, egui_kittest and wgpu are pinned to exact versions.

@@ -186,7 +186,29 @@ impl TagPaths {
 /// The root a new place goes under (REQ-026-01).
 pub const PLACES_TAG_ROOT: &str = "Places";
 
-fn load_sidebar(conn: &Connection, library: Option<i64>) -> db::Result<SidebarData> {
+/// What content words match (REQ-036-05), asked on the loader's thread. The desktop app's runs the chosen model;
+/// without one, content words match nothing.
+pub trait ContentMatches: Send + Sync {
+    fn matches(&self, conn: &Connection, words: &str) -> Result<Vec<i64>, String>;
+}
+
+/// The matcher, set once the app has one, shared with the loader's thread.
+type ContentSlot = Arc<Mutex<Option<Arc<dyn ContentMatches>>>>;
+
+/// `search` as the index can query it: its content words replaced by the items they match (REQ-036-05).
+fn resolve(conn: &Connection, search: &GallerySearch, content: &ContentSlot) -> Result<GallerySearch, String> {
+    let Some(words) = &search.content else {
+        return Ok(search.clone());
+    };
+    let matcher = content.lock().unwrap_or_else(|p| p.into_inner()).clone();
+    let matches = match matcher {
+        Some(matcher) => matcher.matches(conn, words)?,
+        None => Vec::new(),
+    };
+    Ok(search.with_content_matches(&matches))
+}
+
+fn load_sidebar(conn: &Connection, library: Option<i64>, content: &ContentSlot) -> db::Result<SidebarData> {
     let folders = match library {
         Some(library) => Some((library, build_folder_tree(&db::tags::library_folders(conn, library)?))),
         None => None,
@@ -198,7 +220,10 @@ fn load_sidebar(conn: &Connection, library: Option<i64>) -> db::Result<SidebarDa
         popular: db::tags::popular(conn, POPULAR_TAGS)?,
         other_tags: db::tags::popular(conn, SUGGESTED_TAGS)?,
         folders,
-        albums: db::smart_albums::rows(conn)?,
+        // An album whose words can't be matched now counts nothing (REQ-036-07).
+        albums: db::smart_albums::rows(conn, &|search| {
+            resolve(conn, search, content).unwrap_or_else(|_| search.with_content_matches(&[]))
+        })?,
     })
 }
 
@@ -244,7 +269,7 @@ fn load_face_groups(conn: &Connection, detector: &str, recognizer: &str, thresho
     })
 }
 
-fn run(conn: &Connection, request: Request) -> Loaded {
+fn run(conn: &Connection, request: Request, content: &ContentSlot) -> Loaded {
     match request {
         Request::Faces {
             id,
@@ -263,14 +288,17 @@ fn run(conn: &Connection, request: Request) -> Loaded {
         } => Loaded::FaceGroups(load_face_groups(conn, &detector, &recognizer, threshold).map_err(|e| e.to_string())),
         Request::Layout { generation, search } => Loaded::Layout {
             generation,
-            result: db::gallery::layout(conn, &search).map_err(|e| e.to_string()),
+            result: resolve(conn, &search, content)
+                .and_then(|search| db::gallery::layout(conn, &search).map_err(|e| e.to_string())),
         },
         Request::Items { generation, chunk, ids } => Loaded::Items {
             generation,
             chunk,
             result: db::gallery::items(conn, &ids).map_err(|e| e.to_string()),
         },
-        Request::Sidebar { library } => Loaded::Sidebar(load_sidebar(conn, library).map_err(|e| e.to_string())),
+        Request::Sidebar { library } => {
+            Loaded::Sidebar(load_sidebar(conn, library, content).map_err(|e| e.to_string()))
+        }
         Request::Suggest { prefix, limit } => Loaded::Suggest {
             result: db::tags::autocomplete(conn, &prefix, limit).map_err(|e| e.to_string()),
             prefix,
@@ -297,6 +325,8 @@ struct Loader {
     conn: Arc<Mutex<Connection>>,
     #[cfg(target_arch = "wasm32")]
     outbox: Sender<Loaded>,
+    /// What content words match, once the app has a matcher.
+    content: ContentSlot,
     results: Receiver<Loaded>,
     /// Requests sent and not yet applied.
     pending: usize,
@@ -309,6 +339,7 @@ impl Loader {
         Self {
             conn,
             outbox,
+            content: ContentSlot::default(),
             results,
             pending: 0,
         }
@@ -316,7 +347,11 @@ impl Loader {
 
     #[cfg(target_arch = "wasm32")]
     fn send(&mut self, request: Request) {
-        let loaded = run(&self.conn.lock().unwrap_or_else(|p| p.into_inner()), request);
+        let loaded = run(
+            &self.conn.lock().unwrap_or_else(|p| p.into_inner()),
+            request,
+            &self.content,
+        );
         if self.outbox.send(loaded).is_ok() {
             self.pending += 1;
         }
@@ -326,12 +361,14 @@ impl Loader {
     fn start(conn: Arc<Mutex<Connection>>, ctx: Option<egui::Context>) -> Self {
         let (requests, inbox) = channel::<Request>();
         let (outbox, results) = channel();
+        let content = ContentSlot::default();
+        let shared = content.clone();
         std::thread::Builder::new()
             .name("gallery".into())
             .spawn(move || {
                 while let Ok(request) = inbox.recv() {
                     let conn = conn.lock().unwrap_or_else(|p| p.into_inner());
-                    let loaded = run(&conn, request);
+                    let loaded = run(&conn, request, &shared);
                     drop(conn);
                     if outbox.send(loaded).is_err() {
                         return;
@@ -344,6 +381,7 @@ impl Loader {
             .expect("can't start the gallery thread");
         Self {
             requests,
+            content,
             results,
             pending: 0,
         }
@@ -474,6 +512,8 @@ pub struct Gallery {
     autoscroll_at: egui::Pos2,
     /// The click that stopped autoscroll: tiles and rows ignore it until every button is up again.
     swallow_click: bool,
+    /// Photos content search's model hasn't looked at yet (REQ-036-06).
+    content_left: u64,
 }
 
 impl Gallery {
@@ -541,6 +581,7 @@ impl Gallery {
             autoscroll: Autoscroll::Off,
             autoscroll_at: egui::Pos2::ZERO,
             swallow_click: false,
+            content_left: 0,
             tiles_frame: None,
         }
     }
@@ -631,6 +672,33 @@ impl Gallery {
     }
 
     /// Shows another search, from the top (spec 007).
+    /// Lets content words match from now on (REQ-036-05); a search with words is loaded again.
+    pub fn set_content_matcher(&mut self, matcher: Arc<dyn ContentMatches>) {
+        *self.loader.content.lock().unwrap_or_else(|p| p.into_inner()) = Some(matcher);
+        if self.search.content.is_some() {
+            self.reload();
+        }
+    }
+
+    /// How many photos content search's model still has to look at, for the empty state (REQ-036-06).
+    pub fn set_content_left(&mut self, left: u64) {
+        self.content_left = left;
+    }
+
+    /// Whether content search is on: a model is chosen (REQ-036-03).
+    pub fn content_search_on(&self) -> bool {
+        self.setting(db::content::MODEL_KEY).is_some()
+    }
+
+    /// Searches for these words in what the photos show, or not at all (REQ-036-05).
+    pub fn set_content(&mut self, words: Option<String>) {
+        let words = words.map(|words| words.split_whitespace().collect::<Vec<_>>().join(" "));
+        self.set_search(GallerySearch {
+            content: words.filter(|words| !words.is_empty()),
+            ..self.search.clone()
+        });
+    }
+
     pub fn set_search(&mut self, search: GallerySearch) {
         if search == self.search {
             return;
@@ -1426,7 +1494,10 @@ impl Gallery {
             return;
         };
         if count == 0 {
-            empty_state::no_media(ui);
+            match &self.search.content {
+                Some(words) => empty_state::no_content_matches(ui, words, self.content_left),
+                None => empty_state::no_media(ui),
+            }
             return;
         }
 

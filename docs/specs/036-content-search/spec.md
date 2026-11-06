@@ -1,6 +1,6 @@
 # 036 · Content search
 
-**Status:** Draft
+**Status:** Implemented
 
 ## Goal
 
@@ -89,11 +89,11 @@ Most photos carry no tags, and nobody tags 100,000 photos by hand. Users still r
 
 | REQ | Test | Result |
 | --- | --- | --- |
-| REQ-036-01 | | no test |
-| REQ-036-02 | | no test |
-| REQ-036-03 | | no test |
-| REQ-036-04 | | no test |
-| REQ-036-05 | | no test |
-| REQ-036-06 | | no test |
-| REQ-036-07 | | no test |
-| REQ-036-08 | | no test |
+| REQ-036-01 | `crates/domain/src/content.rs` › req_036_01_lists_complete_models; `crates/app/tests/content.rs` › req_036_01_req_036_03_lists_the_models_and_starts_off, req_036_01_req_036_03_req_036_08_uses_a_model_and_deletes_the_data | pass |
+| REQ-036-02 | `crates/media/src/content.rs` › req_036_02_keeps_a_model_only_if_every_hash_matches | pass (the real download over HTTPS checked by hand) |
+| REQ-036-03 | `crates/indexer/src/content.rs` › req_036_03_looks_at_nothing_without_a_model; `crates/app/src/state/content.rs` › req_036_03_req_036_04_says_what_the_pass_is_doing; `crates/app/tests/content.rs` › req_036_01_req_036_03_lists_the_models_and_starts_off, req_036_01_req_036_03_req_036_08_uses_a_model_and_deletes_the_data, req_036_05_searches_by_what_the_photos_show | pass |
+| REQ-036-04 | `crates/domain/src/content.rs` › req_036_04_crops_the_center_square; `crates/db/src/content.rs` › req_036_04_photos_and_videos_wait_until_looked_at_in_their_version, req_036_04_an_offline_library_waits_only_with_thumbnails; `crates/indexer/src/content.rs` › req_036_04_works_through_photos_and_videos_newest_first, req_036_04_req_036_08_pauses_and_follows_the_chosen_model, req_036_04_a_model_that_cant_run_says_so, req_036_04_reads_the_cached_thumbnail_first; `crates/app/src/state/content.rs` › req_036_03_req_036_04_says_what_the_pass_is_doing; `crates/media/src/content.rs` › req_036_04_req_036_05_a_real_model_matches_words_and_photos | pass (the real model only where `GG_CONTENT_MODELS` is set) |
+| REQ-036-05 | `crates/domain/src/content.rs` › req_036_05_tokenizes_as_clip_does_and_pads_with_zero, req_036_05_maps_bytes_as_byte_level_bpe; `crates/domain/src/search.rs` › req_036_05_content_words_become_the_items_they_match; `crates/app/tests/content.rs` › req_036_05_searches_by_what_the_photos_show; `crates/app/src/state/content.rs` › req_036_05_req_036_06_a_real_model_finds_the_photo | pass (the real model only where `GG_CONTENT_MODELS` is set) |
+| REQ-036-06 | `crates/domain/src/content.rs` › req_036_06_compares_stored_vectors_with_text; `crates/db/src/content.rs` › req_036_06_req_036_08_reads_back_each_models_vectors; `crates/app/tests/content.rs` › req_036_06_says_when_nothing_shows_it; `crates/app/src/state/content.rs` › req_036_05_req_036_06_a_real_model_finds_the_photo | partial: the cutoffs come from 12 photos (plan task 9) |
+| REQ-036-07 | `crates/domain/src/smart_albums.rs` › req_036_07_keeps_the_content_words; `crates/db/src/smart_albums.rs` › req_036_07_counts_an_albums_content_matches; `crates/app/tests/content.rs` › req_036_07_a_smart_album_keeps_the_words | pass |
+| REQ-036-08 | `crates/indexer/src/content.rs` › req_036_04_req_036_08_pauses_and_follows_the_chosen_model; `crates/db/src/content.rs` › req_036_06_req_036_08_reads_back_each_models_vectors; `crates/app/tests/content.rs` › req_036_01_req_036_03_req_036_08_uses_a_model_and_deletes_the_data | pass |

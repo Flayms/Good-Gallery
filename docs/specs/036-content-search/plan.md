@@ -12,14 +12,14 @@ Built as faces are (spec 032), and beside them rather than inside them: a conten
 
 ## Tasks
 
-- [ ] 1. Spec, plan, `docs/content-search.md` (spike)
-- [ ] 2. `domain::content`: catalog, tokenizer, preprocessing, quantized vectors and similarity (REQ-036-01, REQ-036-06)
-- [ ] 3. `media::content`, `media::content_store`: engine, store, download (REQ-036-02); a test with the real model where it is on the machine
-- [ ] 4. `db::content`: table, pending, progress, vectors, delete (REQ-036-03, REQ-036-04, REQ-036-08)
-- [ ] 5. `indexer::content`: the service (REQ-036-04, REQ-036-08)
-- [ ] 6. `GallerySearch::content`, the matcher in the gallery's loader, smart albums (REQ-036-05 … REQ-036-07)
-- [ ] 7. Settings section, processing icon (REQ-036-01 … REQ-036-04)
-- [ ] 8. Search bar: suggestion, chip, searching and empty states; snapshots (REQ-036-05, REQ-036-06)
+- [x] 1. Spec, plan, `docs/content-search.md` (spike)
+- [x] 2. `domain::content`: catalog, tokenizer, preprocessing, quantized vectors and similarity (REQ-036-01, REQ-036-06)
+- [x] 3. `media::content`, `media::content_store`: engine, store, download (REQ-036-02); a test with the real model where it is on the machine
+- [x] 4. `db::content`: table, pending, progress, vectors, delete (REQ-036-03, REQ-036-04, REQ-036-08)
+- [x] 5. `indexer::content`: the service (REQ-036-04, REQ-036-08)
+- [x] 6. `GallerySearch::content`, the matcher in the gallery's loader, smart albums (REQ-036-05 … REQ-036-07)
+- [x] 7. Settings section, processing icon (REQ-036-01 … REQ-036-04)
+- [x] 8. Search bar: suggestion, chip, searching and empty states; snapshots (REQ-036-05, REQ-036-06)
 - [ ] 9. Cutoffs measured on a few hundred labeled photos, as `face-bench` does for faces
 
 ## Decisions

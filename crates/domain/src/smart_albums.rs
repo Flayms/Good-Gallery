@@ -23,7 +23,8 @@ pub fn clean_name(name: &str) -> Option<String> {
 /// (REQ-034-01).
 pub fn suggested_name(search: &GallerySearch) -> String {
     let leaf = |tag: &String| tag.rsplit('|').next().unwrap_or(tag).trim().to_string();
-    let mut parts: Vec<String> = search.tags.iter().map(leaf).collect();
+    let mut parts: Vec<String> = search.content.iter().map(|words| words.trim().to_string()).collect();
+    parts.extend(search.tags.iter().map(leaf));
     parts.extend(search.exclude.iter().map(|tag| format!("-{}", leaf(tag))));
     parts.extend(search.name.iter().map(|name| name.trim().to_string()));
     parts.retain(|part| !part.is_empty() && part != "-");
@@ -67,6 +68,9 @@ pub fn search_to_value(search: &GallerySearch) -> Value {
     if !search.ratings.is_empty() {
         put("ratings", json!(search.ratings));
     }
+    if let Some(content) = &search.content {
+        put("content", json!(content));
+    }
     let default = GallerySearch::default();
     if search.sort_by != default.sort_by {
         put("sort_by", json!(search.sort_by.key()));
@@ -97,6 +101,7 @@ pub fn search_from_value(value: &Value) -> GallerySearch {
     search.folder = text("folder");
     search.kind = text("kind").and_then(|kind| MediaKind::parse(&kind));
     search.name = text("name");
+    search.content = text("content");
     search.tags = texts("tags");
     search.exclude = texts("exclude");
     search.from = day("from");
@@ -135,9 +140,23 @@ mod tests {
             to: NaiveDate::from_ymd_opt(2023, 5, 14),
             ratings: vec![0, 4, 5],
             media: Vec::new(),
+            content: Some("a dog on a beach".into()),
             sort_by: SortBy::Name,
             descending: false,
         }
+    }
+
+    /// REQ-036-07: an album keeps a search's content words, and is named after them.
+    #[test]
+    fn req_036_07_keeps_the_content_words() {
+        let search = GallerySearch {
+            content: Some("dogs on a beach".into()),
+            tags: vec!["Trip".into()],
+            ..GallerySearch::default()
+        };
+        assert_eq!(search_to_value(&search)["content"], "dogs on a beach");
+        assert_eq!(search_from_value(&search_to_value(&search)), search);
+        assert_eq!(suggested_name(&search), "dogs on a beach, Trip");
     }
 
     #[test]
@@ -172,7 +191,7 @@ mod tests {
 
     #[test]
     fn req_034_01_suggests_a_name_from_tags_and_file_name() {
-        assert_eq!(suggested_name(&full()), "Rome, Anna, -Blurry, IMG");
+        assert_eq!(suggested_name(&full()), "a dog on a beach, Rome, Anna, -Blurry, IMG");
         let rated = GallerySearch {
             ratings: vec![5],
             ..GallerySearch::default()

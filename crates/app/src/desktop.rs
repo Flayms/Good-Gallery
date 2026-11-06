@@ -439,11 +439,26 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
             on_change: Box::new(move || repaint.request_repaint()),
         }))
     });
+    // Content search's pass reads the cached thumbnails (spec 036).
+    let content = open_faces_connection(data_dir).map(|conn| {
+        let repaint = ctx.clone();
+        Arc::new(indexer::content::ContentService::start(indexer::content::ContentDeps {
+            conn,
+            work: Box::new(indexer::content::RunContent::new(
+                data_dir,
+                thumbnails.cache().clone(),
+                media::ffmpeg::find_ffmpeg(),
+                is_reachable.clone(),
+            )),
+            on_change: Box::new(move || repaint.request_repaint()),
+        }))
+    });
     let mut state = state
         .with_faces(data_dir, faces)
         .with_repaint(ctx.clone())
         .with_thumbnails(thumbnails.clone())
         .with_gallery(gallery)
+        .with_content(data_dir, content)
         .with_originals(originals)
         .with_videos(videos)
         .with_rename_journal(data_dir.join("rename-journal.json"));
@@ -547,7 +562,8 @@ fn start_thumbnails(
     })
 }
 
-/// A write connection for the search for faces (spec 032). Without it, no faces are looked for.
+/// A write connection for the search for faces (spec 032) or content search's pass (spec 036). Without it, that part
+/// doesn't run.
 fn open_faces_connection(data_dir: &Path) -> Option<db::rusqlite::Connection> {
     db::open(&data_dir.join("gallery.db"))
         .inspect_err(|error| tracing::error!("can't open the index for faces: {error}"))
