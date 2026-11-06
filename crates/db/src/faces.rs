@@ -533,9 +533,11 @@ pub fn look_again(conn: &Connection, media: Option<i64>) -> Result<()> {
     Ok(())
 }
 
-/// Shows ignored faces again (REQ-032-11).
-pub fn restore_ignored(conn: &Connection) -> Result<usize> {
-    Ok(conn.execute("UPDATE detected_faces SET state = 'open' WHERE state = 'ignored'", [])?)
+/// Forgets a face; looking at its photo again may find it anew (REQ-032-30).
+pub fn delete_face(conn: &Connection, face: i64) -> Result<()> {
+    conn.prepare_cached("DELETE FROM detected_faces WHERE id = ?1")?
+        .execute([face])?;
+    Ok(())
 }
 
 /// Removes everything stored about faces, never the named regions of the files (REQ-032-04).
@@ -607,11 +609,13 @@ pub struct GroupFace {
 }
 
 /// The faces of _Unconfirmed faces_: those with a suggestion by person (REQ-032-24), the others in groups of similar
-/// faces (REQ-032-15), without those taken out of them (REQ-032-25). Largest first.
+/// faces (REQ-032-15), without those taken out of them (REQ-032-25), largest first; then those in no group
+/// (REQ-032-28).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FaceGroups {
     pub suggested: Vec<(String, Vec<GroupFace>)>,
     pub unknown: Vec<Vec<GroupFace>>,
+    pub others: Vec<GroupFace>,
 }
 
 pub fn face_groups(conn: &Connection, detector: &str, recognizer: &str, threshold: f32) -> Result<FaceGroups> {
@@ -629,6 +633,7 @@ pub fn face_groups(conn: &Connection, detector: &str, recognizer: &str, threshol
     };
     let mut suggested: HashMap<&str, Vec<GroupFace>> = HashMap::new();
     let mut rest = Vec::new();
+    let mut others = Vec::new();
     for face in &faces {
         let rejected: Vec<&str> = face.rejected.iter().map(String::as_str).collect();
         let suggestion = face
@@ -638,7 +643,7 @@ pub fn face_groups(conn: &Connection, detector: &str, recognizer: &str, threshol
         match suggestion {
             Some((name, _)) => suggested.entry(name).or_default().push(shown(face)),
             None if !face.ungrouped => rest.push(face),
-            None => {}
+            None => others.push(face),
         }
     }
     let mut suggested: Vec<(String, Vec<GroupFace>)> = suggested
@@ -647,11 +652,67 @@ pub fn face_groups(conn: &Connection, detector: &str, recognizer: &str, threshol
         .collect();
     suggested.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
     let vectors: Vec<&[f32]> = rest.iter().filter_map(|face| face.vector.as_deref()).collect();
-    let unknown = group(&vectors, threshold, MIN_GROUP)
+    let groups = group(&vectors, threshold, MIN_GROUP);
+    let mut grouped = vec![false; rest.len()];
+    for &index in groups.iter().flatten() {
+        grouped[index] = true;
+    }
+    others.extend(
+        rest.iter()
+            .zip(&grouped)
+            .filter(|(_, grouped)| !**grouped)
+            .map(|(face, _)| *face),
+    );
+    others.sort_by_key(|face| face.id);
+    let unknown = groups
         .into_iter()
         .map(|members| members.into_iter().map(|index| shown(rest[index])).collect())
         .collect();
-    Ok(FaceGroups { suggested, unknown })
+    let others = others.into_iter().map(shown).collect();
+    Ok(FaceGroups {
+        suggested,
+        unknown,
+        others,
+    })
+}
+
+/// Faces the user ignored or said aren't faces (REQ-032-30), oldest first. They need no recognition model: a face
+/// decided before it was recognized has no vector. A face on a named region is that person instead (REQ-032-08).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DecidedFaces {
+    pub ignored: Vec<GroupFace>,
+    pub not_faces: Vec<GroupFace>,
+}
+
+pub fn decided_faces(conn: &Connection, detector: &str) -> Result<DecidedFaces> {
+    let named = regions(conn, None)?;
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, media_id, x, y, w, h, state FROM detected_faces
+         WHERE detector = ?1 AND state <> 'open' ORDER BY id",
+    )?;
+    let rows = stmt.query_map([detector], |row| {
+        Ok((
+            GroupFace {
+                id: row.get(0)?,
+                media: row.get(1)?,
+                rect: [row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?],
+            },
+            FaceState::parse(&row.get::<_, String>(6)?),
+        ))
+    })?;
+    let mut decided = DecidedFaces::default();
+    for row in rows {
+        let (face, state) = row?;
+        if region_of(face.rect, named.get(&face.media)).is_some() {
+            continue;
+        }
+        match state {
+            FaceState::Ignored => decided.ignored.push(face),
+            FaceState::NotAFace => decided.not_faces.push(face),
+            FaceState::Open => {}
+        }
+    }
+    Ok(decided)
 }
 
 /// Takes a face out of the groups of unknown faces for good; it stays unknown (REQ-032-25).
@@ -979,7 +1040,7 @@ mod tests {
     }
 
     #[test]
-    fn req_032_11_ignored_faces_stay_gone_when_looked_at_again_until_restored() {
+    fn req_032_11_ignored_faces_and_non_faces_stay_gone_when_looked_at_again() {
         let (mut conn, root) = setup();
         let id = insert(&conn, root, "a.jpg", "image");
         let found = photo(&conn, "d");
@@ -992,13 +1053,79 @@ mod tests {
 
         store_scan(&mut conn, &found, "d", &[face(0.1), face(0.5)]).unwrap();
         assert!(unknown_faces_on(&conn, id, "d", "r").unwrap().is_empty());
+    }
 
-        assert_eq!(restore_ignored(&conn).unwrap(), 1);
-        assert_eq!(
-            unknown_faces_on(&conn, id, "d", "r").unwrap().len(),
-            1,
-            "a non-face stays gone"
-        );
+    /// REQ-032-28: unknown faces in no group, taken out or with too few alike, are the page's other faces; a face
+    /// with a suggestion isn't among them.
+    #[test]
+    fn req_032_28_faces_in_no_group_are_the_other_unknown_faces() {
+        let (mut conn, root) = setup();
+        people(&mut conn, root);
+        let ids = strangers(&mut conn, root, 4);
+        let groups = face_groups(&conn, "d", "r", 0.5).unwrap();
+        assert!(groups.others.is_empty(), "{groups:?}");
+
+        let out = groups.unknown[0][0].clone();
+        ungroup(&conn, out.id).unwrap();
+        let groups = face_groups(&conn, "d", "r", 0.5).unwrap();
+        assert_eq!(groups.others, [out.clone()]);
+
+        // Two more out: a group of one is no group, so all four are others.
+        for face in &groups.unknown[0][..2] {
+            ungroup(&conn, face.id).unwrap();
+        }
+        let groups = face_groups(&conn, "d", "r", 0.5).unwrap();
+        assert!(groups.unknown.is_empty());
+        let mut others: Vec<i64> = groups.others.iter().map(|face| face.media).collect();
+        others.sort();
+        assert_eq!(others, ids);
+        assert_eq!(groups.suggested.len(), 1, "a face like Anna is still to confirm");
+    }
+
+    /// REQ-032-30: decided faces are listed by decision, also before recognition; they can be undone, swapped and
+    /// deleted, and a deleted one is found again only by looking again.
+    #[test]
+    fn req_032_30_lists_decided_faces_to_undo_swap_or_delete() {
+        let (mut conn, root) = setup();
+        let id = insert(&conn, root, "a.jpg", "image");
+        let found = photo(&conn, "d");
+        store_scan(&mut conn, &found, "d", &[face(0.1), face(0.5), face(0.8)]).unwrap();
+        let faces = unknown_faces_on(&conn, id, "d", "r").unwrap();
+        set_state(&conn, faces[0].id, FaceState::Ignored).unwrap();
+        set_state(&conn, faces[1].id, FaceState::NotAFace).unwrap();
+        set_state(&conn, faces[2].id, FaceState::NotAFace).unwrap();
+
+        let decided = decided_faces(&conn, "d").unwrap();
+        let ids = |faces: &[GroupFace]| faces.iter().map(|face| face.id).collect::<Vec<_>>();
+        assert_eq!(ids(&decided.ignored), [faces[0].id]);
+        assert_eq!(ids(&decided.not_faces), [faces[1].id, faces[2].id]);
+        assert_eq!(decided.ignored[0].media, id);
+        assert_eq!(decided.ignored[0].rect, faces[0].rect);
+        assert!(decided_faces(&conn, "another detector").unwrap().ignored.is_empty());
+
+        set_state(&conn, faces[0].id, FaceState::Open).unwrap();
+        set_state(&conn, faces[1].id, FaceState::Ignored).unwrap();
+        delete_face(&conn, faces[2].id).unwrap();
+        let decided = decided_faces(&conn, "d").unwrap();
+        assert_eq!(ids(&decided.ignored), [faces[1].id]);
+        assert!(decided.not_faces.is_empty());
+        let open = unknown_faces_on(&conn, id, "d", "r").unwrap();
+        assert_eq!(ids_of(&open), [faces[0].id], "back to unknown, the deleted one gone");
+        assert_eq!(pending_faces(&conn, "d", "r", 10).unwrap().len(), 1);
+
+        // A named region on a decided face makes it that person, not a decision.
+        name_region(&conn, id, "Bob", 0.5);
+        assert!(decided_faces(&conn, "d").unwrap().ignored.is_empty());
+
+        look_again(&conn, Some(id)).unwrap();
+        let found = photo(&conn, "d");
+        store_scan(&mut conn, &found, "d", &[face(0.1), face(0.5), face(0.8)]).unwrap();
+        let open = unknown_faces_on(&conn, id, "d", "r").unwrap();
+        assert_eq!(open.len(), 2, "the deleted face is found again: {open:?}");
+    }
+
+    fn ids_of(faces: &[UnknownFace]) -> Vec<i64> {
+        faces.iter().map(|face| face.id).collect()
     }
 
     #[test]

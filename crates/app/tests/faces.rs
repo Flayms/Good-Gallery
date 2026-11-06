@@ -12,7 +12,7 @@ use domain::face_models::Detection;
 use domain::faces::FaceRegion;
 use domain::media::{MediaKind, MediaMetadata};
 use eframe::egui::{self, Key};
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -522,6 +522,190 @@ fn req_032_26_a_face_opens_its_photo_among_its_groups() {
     assert_eq!(gallery.count(), Some(4));
 }
 
+/// Opens _Unconfirmed faces_ and takes the strangers' first face out of their group, which leaves the two others too
+/// few for one: all three are other unknown faces.
+fn page_without_groups(fixture: &Fixture, exiftool: Option<&Path>) -> (App, PathBuf) {
+    let (mut harness, dir) = app(fixture, true, exiftool);
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    harness
+        .query_all_by_label_contains("out of the group")
+        .next()
+        .unwrap()
+        .click();
+    settle(&mut harness);
+    (harness, dir)
+}
+
+fn right_click(harness: &mut App, label: &str) {
+    let pos = harness.get_by_label(label).rect().center();
+    harness.hover_at(pos);
+    harness.run_steps(1);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.run_steps(1);
+    }
+    settle(harness);
+}
+
+/// The faces in a section of the page, by the label of their crops.
+fn crops(harness: &App, contains: &str) -> Vec<String> {
+    harness
+        .query_all_by_label_contains(contains)
+        .filter_map(|node| node.accesskit_node().label())
+        .collect()
+}
+
+/// REQ-032-28: faces in no group show under _Other unknown faces_ and open their photo among theirs.
+#[test]
+fn req_032_28_faces_in_no_group_show_and_open_among_theirs() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = page_without_groups(&fixture, None);
+    harness.get_by_label("Other unknown faces");
+    let others = crops(&harness, "in its photo");
+    // Ben's face to confirm, then the three strangers.
+    assert_eq!(others.len(), 4, "{others:?}");
+    harness.get_by_label(&others[2]).click();
+    settle(&mut harness);
+    assert!(harness.state().viewer.is_some(), "the viewer opened");
+    assert_eq!(
+        harness.state().gallery.as_ref().unwrap().count(),
+        Some(3),
+        "only theirs"
+    );
+}
+
+/// REQ-032-28: a long section shows a first part, and the rest on asking.
+#[test]
+fn req_032_28_shows_more_on_asking() {
+    let fixture = Fixture::new();
+    // Sixty faces, all taken out of their groups.
+    let conn = many_groups(&fixture, 20);
+    for face in faces::unknown_faces(&conn, "detector", "recognizer").unwrap() {
+        faces::ungroup(&conn, face.id).unwrap();
+    }
+    let mut harness = people_page_with_thumbnails(&fixture, conn, egui::vec2(1000.0, 4000.0));
+    let before = crops(&harness, "in its photo").len();
+    assert!(before < 60, "{before}");
+    harness.get_by_label("Show more").click();
+    settle(&mut harness);
+    assert!(crops(&harness, "in its photo").len() > before);
+}
+
+/// REQ-032-29: a face's menu ignores it or says it isn't one; the group's buttons do so for all; nothing reaches the
+/// file.
+#[test]
+fn req_032_29_ignore_or_not_a_face_from_the_page() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    let ben = crops(&harness, "in its photo").remove(0);
+    right_click(&mut harness, &ben);
+    harness.get_by_label("Not a face").click();
+    settle(&mut harness);
+    assert!(harness.query_by_label("Ben? · 1 face").is_none());
+    harness.get_by_label("Not faces · 1");
+
+    harness.get_by_label("Not faces").click();
+    settle(&mut harness);
+    harness.get_by_label("Not faces · 4");
+    assert!(harness.query_by_label("3 faces").is_none());
+    harness.get_by_label("No faces to confirm yet.");
+
+    let (mut harness, _) = page_without_groups(&fixture, None);
+    let other = crops(&harness, "in its photo").pop().unwrap();
+    right_click(&mut harness, &other);
+    harness.get_by_label("Ignore").click();
+    settle(&mut harness);
+    harness.get_by_label("Ignored · 1");
+}
+
+/// REQ-032-30: decided faces are listed, collapsed; one can go back to unknown, to the other decision, or be deleted.
+#[test]
+fn req_032_30_change_or_delete_a_decision() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    harness.get_by_label("Ignore").click();
+    settle(&mut harness);
+    assert!(crops(&harness, "Change face").is_empty(), "collapsed");
+    harness.get_by_label("Ignored · 3").click();
+    settle(&mut harness);
+    let ignored = crops(&harness, "Change face");
+    assert_eq!(ignored.len(), 3);
+
+    harness.get_by_label(&ignored[0]).click();
+    settle(&mut harness);
+    harness.get_by_label("Back to unknown").click();
+    settle(&mut harness);
+    harness.get_by_label("Ignored · 2");
+    harness.get_by_label("Other unknown faces");
+
+    harness.get_by_label(&ignored[1]).click();
+    settle(&mut harness);
+    harness.get_by_label("Not a face").click();
+    settle(&mut harness);
+    harness.get_by_label("Ignored · 1");
+    harness.get_by_label("Not faces · 1");
+
+    harness.get_by_label(&ignored[2]).click();
+    settle(&mut harness);
+    harness.get_by_label("Delete").click();
+    settle(&mut harness);
+    assert!(harness.query_by_label_contains("Ignored ·").is_none());
+    let conn = harness.state().db().unwrap();
+    let left: i64 = conn
+        .lock()
+        .unwrap()
+        .query_row("SELECT count(*) FROM detected_faces", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(left, 4, "Ben's two faces, one back to unknown, one not a face");
+}
+
+/// REQ-032-30: a decided face can be named, which writes it into the file and makes it that person.
+#[test]
+fn req_032_30_naming_a_decided_face_writes_it() {
+    let Some(exiftool) = exiftool() else { return };
+    let fixture = Fixture::new();
+    let (mut harness, dir) = app(&fixture, true, Some(&exiftool));
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    harness.get_by_label("Ignore").click();
+    settle(&mut harness);
+    harness.get_by_label("Ignored · 3").click();
+    settle(&mut harness);
+    let face = crops(&harness, "Change face").remove(0);
+    harness.get_by_label(&face).click();
+    settle(&mut harness);
+    harness.get_by_label_contains("Who is this? Face").click();
+    harness.run_steps(2);
+    harness.event(egui::Event::Text("Zoe".into()));
+    harness.run_steps(2);
+    harness.get_by_label("Save").click();
+    settle(&mut harness);
+    let written: Vec<_> = ["b.png", "c.png", "d.png"]
+        .into_iter()
+        .filter(|name| regions(&exiftool, &dir.join(name)) == ["Zoe"])
+        .collect();
+    assert_eq!(written.len(), 1, "{written:?}");
+    harness.get_by_label("Ignored · 2");
+}
+
+/// REQ-032-30: the settings no longer bring back every ignored face at once.
+#[test]
+fn req_032_30_no_button_brings_back_all_ignored_faces() {
+    let fixture = Fixture::new();
+    let harness = settings(&fixture, true);
+    assert!(harness.query_by_label("Show ignored faces again").is_none());
+}
+
 #[test]
 fn req_032_15_no_people_page_without_models() {
     let fixture = Fixture::new();
@@ -974,6 +1158,29 @@ fn req_032_15_people_page_looks_as_designed() {
     let shown: Vec<i64> = group_photos(&mut harness).concat();
     wait_for_thumbnails(&mut harness, &shown);
     harness.snapshot(common::snapshot_name("people_page"));
+}
+
+/// REQ-032-28, REQ-032-30: the other unknown faces, then the ignored faces and non-faces, opened.
+#[test]
+fn req_032_30_decided_faces_look_as_designed() {
+    let fixture = Fixture::new();
+    let (conn, _dir) = library(&fixture, true);
+    let mut unknown = faces::unknown_faces(&conn, "detector", "recognizer").unwrap();
+    unknown.sort_by_key(|face| face.media);
+    // a.png's stranger isn't a face, b.png's is ignored, c.png's taken out, which leaves d.png's alone too.
+    faces::set_state(&conn, unknown[0].id, faces::FaceState::NotAFace).unwrap();
+    faces::set_state(&conn, unknown[1].id, faces::FaceState::Ignored).unwrap();
+    faces::ungroup(&conn, unknown[2].id).unwrap();
+    let mut harness = people_page_with_thumbnails(&fixture, conn, egui::vec2(1000.0, 700.0));
+    // One at a time: the first opened moves the second.
+    for header in ["Not faces · 1", "Ignored · 1"] {
+        harness.get_by_label(header).click();
+        settle(&mut harness);
+    }
+    harness.hover_at(egui::pos2(990.0, 690.0));
+    let media: Vec<i64> = unknown.iter().map(|face| face.media).collect();
+    wait_for_thumbnails(&mut harness, &media);
+    harness.snapshot(common::snapshot_name("people_page_decided"));
 }
 
 /// REQ-032-15: the faces of a group on screen show, without the gallery having been drawn.
