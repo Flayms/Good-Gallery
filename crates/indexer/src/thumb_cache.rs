@@ -144,6 +144,24 @@ impl ThumbCache {
         Ok(())
     }
 
+    /// Moves the cached thumbnails of `from` to `to` at every width, for a file that was renamed without changing
+    /// (REQ-035-07). A thumbnail that can't be moved is only rendered again.
+    pub fn rename(&self, from: &ThumbKey, to: &ThumbKey) {
+        for width in domain::thumbs::THUMB_WIDTHS {
+            let (old, new) = (self.path(from, width), self.path(to, width));
+            if !old.is_file() {
+                continue;
+            }
+            let moved = new
+                .parent()
+                .map_or(Ok(()), std::fs::create_dir_all)
+                .and_then(|()| rename_replacing(&old, &new));
+            if let Err(error) = moved {
+                tracing::warn!("can't move the thumbnail {}: {error}", old.display());
+            }
+        }
+    }
+
     /// A cached thumbnail, or `None` if it isn't cached. Counts as a view for eviction, recorded at most once an hour
     /// (REQ-005-11).
     pub fn read(&self, path: &Path) -> io::Result<Option<Vec<u8>>> {
@@ -358,6 +376,31 @@ mod tests {
 
     fn year(year: u64) -> SystemTime {
         SystemTime::UNIX_EPOCH + Duration::from_secs((year - 1970) * 365 * 24 * 3600)
+    }
+
+    /// REQ-035-07: a renamed file keeps its thumbnails under its new name.
+    #[test]
+    fn req_035_07_moves_a_renamed_files_thumbnails() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = ThumbCache::open(dir.path().to_path_buf(), 1 << 30);
+        cache.wait_ready();
+        for width in domain::thumbs::THUMB_WIDTHS {
+            cache.write(&cache.path(&key(), width), &[width as u8]).unwrap();
+        }
+        let renamed = ThumbKey {
+            rel_path: "renamed.jpg".into(),
+            ..key()
+        };
+        cache.rename(&key(), &renamed);
+        for width in domain::thumbs::THUMB_WIDTHS {
+            assert_eq!(
+                cache.read(&cache.path(&renamed, width)).unwrap(),
+                Some(vec![width as u8])
+            );
+            assert_eq!(cache.read(&cache.path(&key(), width)).unwrap(), None);
+        }
+        // Nothing cached: nothing to move, and no error.
+        cache.rename(&key(), &renamed);
     }
 
     #[test]

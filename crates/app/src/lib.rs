@@ -18,6 +18,8 @@ pub mod open_with;
 pub mod originals;
 pub mod people_page;
 pub mod processing;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod rename;
 pub mod search_bar;
 pub mod settings_page;
 pub mod sidebar;
@@ -161,10 +163,15 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     }
     confirm_revert(&ctx, state);
     confirm_many(&ctx, state);
+    #[cfg(not(target_arch = "wasm32"))]
+    rename_dialog(&ctx, state);
     if let Some(gallery) = &mut state.gallery {
         gallery.album_dialog(&ctx);
     }
-    state.toasts.show(&ctx);
+    if state.toasts.show(&ctx) == Some(toasts::ToastAction::UndoRename) {
+        #[cfg(not(target_arch = "wasm32"))]
+        state.undo_rename();
+    }
     // Over the viewer they go with its dark look (REQ-020-05).
     if state.viewer.is_some() {
         theme::with_palette(&theme::DARK, || titlebar::caption_buttons(&ctx));
@@ -270,6 +277,24 @@ fn confirm_revert(ctx: &egui::Context, state: &mut AppState) {
 }
 
 /// Asks before rating or tagging many items, since their files change (REQ-025-07, REQ-026-06).
+/// The rename dialog, while open (spec 035).
+#[cfg(not(target_arch = "wasm32"))]
+fn rename_dialog(ctx: &egui::Context, state: &mut AppState) {
+    let Some(dialog) = &mut state.rename_dialog else { return };
+    match dialog.show(ctx) {
+        Some(rename::Asked::Rename(job)) => {
+            state.rename_dialog = None;
+            state.start_rename(job);
+        }
+        Some(rename::Asked::Undo) => {
+            state.rename_dialog = None;
+            state.undo_rename();
+        }
+        Some(rename::Asked::Close) => state.rename_dialog = None,
+        None => {}
+    }
+}
+
 fn confirm_many(ctx: &egui::Context, state: &mut AppState) {
     let Some(change) = state.confirm_many.clone() else {
         return;
@@ -401,6 +426,8 @@ fn info_sheet(ui: &mut egui::Ui, state: &mut AppState) {
 /// The gallery, or its empty state without libraries.
 fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
     let mut change_many = None;
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut rename: Option<Vec<i64>> = None;
     if state.libraries.is_empty() {
         if empty_state::no_libraries(ui).clicked() {
             // The browser's folder picker needs the click (REQ-019-01, REQ-019-02).
@@ -421,6 +448,10 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
                 ids: gallery.selected_ids(),
                 what,
             });
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if gallery.take_rename_asked() {
+            rename = Some(gallery.selected_ids());
         }
         // A click or Enter on a tile or row opens the viewer (REQ-009-01).
         if let Some(index) = gallery.take_opened()
@@ -449,6 +480,10 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
     }
     if let Some(change) = change_many {
         state.ask_change_many(change);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(ids) = rename {
+        state.open_rename(ids);
     }
     // The toolbar floats over the gallery, which scrolls underneath it (REQ-013-03).
     let area = ui.max_rect();

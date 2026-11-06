@@ -19,9 +19,10 @@ Written in Rust (egui on wgpu).
 - **Viewer:** step through the gallery, zoom and pan, play videos, see a photo's details, who is where in it (from its face regions) and a filmstrip of the gallery.
 - **Open with Good Gallery** from Explorer or your file manager: a photo in a library opens in it; any other photo or video shows at once, and you can step through its folder without adding it as a library.
 - **Editing:** exposure, brightness, contrast, highlights, shadows, whites and blacks; tone curves over a histogram; white balance, vibrance and saturation; grain, vignette and blur (behind the subject, tilt-shift or radial); crop, rotate and a smaller size with a quality of your choice. The subject and the background, found automatically, can each get their own light and color. Gradient, luminance and color masks do the same for any other part of a photo. Save as a copy, or over the original, which is kept so you can revert, or without a backup to save space. Edits stay editable, and metadata and color profiles are kept.
+- **Rename many files at once:** search and replace, regular expressions, and placeholders for the date taken, the date modified and tags. A preview shows every new name first, sidecars come along, and Undo takes it back.
 - **Light or dark,** following your system.
 
-Good Gallery doesn't write tags or ratings. It only writes files when you save or revert an edit.
+Good Gallery only changes files when you ask it to: saving or reverting an edit, rating, tagging, naming a face or renaming.
 
 | Justified                                                   | Grid                                                                     |
 | ----------------------------------------------------------- | ------------------------------------------------------------------------ |

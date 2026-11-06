@@ -13,6 +13,7 @@ pub mod helpers;
 pub mod metadata;
 pub mod original;
 pub mod rating;
+pub mod rename;
 pub mod replace;
 pub mod subject;
 pub mod tagging;

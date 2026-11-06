@@ -9,6 +9,7 @@ pub mod gallery;
 pub mod libraries;
 pub mod media;
 mod migrate;
+pub mod rename;
 pub mod settings;
 pub mod smart_albums;
 pub mod tags;
