@@ -12,7 +12,7 @@ use domain::look::{Look, LookChoice};
 use domain::media::{MediaKind, MediaMetadata};
 use eframe::egui::accesskit::Role;
 use eframe::egui::{self, Key, Modifiers};
-use egui_kittest::kittest::Queryable as _;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
 use std::path::{Path, PathBuf};
 
 type App = egui_kittest::Harness<'static, app::AppState>;
@@ -828,6 +828,16 @@ fn req_028_01_req_028_02_req_028_03_picks_a_look_and_sets_its_strength_and_grain
     harness.run_steps(2);
     let tuned = look(&harness).unwrap();
     assert_eq!((tuned.strength, tuned.grain), (99.0, 101.0));
+    // The looks reach the panel's bottom since the Size section: scroll them up first.
+    harness.hover_at(harness.get_by_role_and_label(Role::Button, "HP5").rect().center() - egui::vec2(0.0, 100.0));
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -120.0),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Wheel,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(4);
     harness.get_by_role_and_label(Role::Button, "HP5").click();
     harness.run_steps(2);
     let hp5 = look(&harness).unwrap();
@@ -1167,4 +1177,82 @@ fn req_030_13_draws_an_outline_on_the_photo() {
     harness.drop_at(at(0.7, 0.3));
     harness.run_steps(3);
     assert_eq!(session(&harness).unwrap().recipe().paintings[0].strokes.len(), 1);
+}
+
+/// REQ-029-09, REQ-021-21: the Size section sets the long edge, shows the size it gives, and has a quality for a JPEG.
+#[test]
+fn req_029_09_req_021_21_the_size_section_sets_the_long_edge_and_the_quality() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "Size").click();
+    harness.run_steps(2);
+    harness.get_by_label("Saved at 120 × 80");
+    harness.get_by_role_and_label(Role::Button, "50 %").click();
+    harness.run_steps(2);
+    let draft = |harness: &App| session(harness).unwrap().recipe().clone();
+    assert_eq!(draft(&harness).long_edge, Some(60));
+    harness.get_by_label("Saved at 60 × 40");
+    harness.get_by_role_and_label(Role::Slider, "Quality");
+    harness.snapshot(common::snapshot_name("edit_size"));
+
+    // Back to the photo's own size: no change left.
+    harness.get_by_role_and_label(Role::Button, "100 %").click();
+    harness.run_steps(2);
+    assert!(draft(&harness).is_neutral());
+}
+
+/// REQ-021-22: _Save without backup_ asks every time, then replaces the file and keeps no original.
+#[test]
+fn req_021_22_saves_without_a_backup_after_asking() {
+    let fixture = Fixture::new();
+    let Some(tools) = tools(&fixture) else { return };
+    let (mut harness, dir) = app(&fixture, None, Some(tools));
+    let before = std::fs::read(dir.join("a.jpg")).unwrap();
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    set_recipe(&mut harness, brighter());
+
+    harness.get_by_role_and_label(Role::Button, "More ways to save").click();
+    harness.run_steps(2);
+    harness
+        .get_by_role_and_label(Role::Button, "Save without backup")
+        .click();
+    harness.run_steps(2);
+    harness.get_by_label("Save without a backup?");
+    harness
+        .get_by_role_and_label(Role::Button, "Save without backup")
+        .click();
+    harness.run_steps(1);
+    settle_all(&mut harness);
+
+    assert_ne!(std::fs::read(dir.join("a.jpg")).unwrap(), before);
+    assert!(!dir.join(".good-gallery").exists(), "no backup");
+    harness.get_by_label("Saved");
+}
+
+/// REQ-021-23: each save button says on hover what happens to the photo and its original.
+#[test]
+fn req_021_23_the_save_buttons_say_what_they_do() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    set_recipe(&mut harness, brighter());
+    // The hover text is the button's description.
+    let tooltip = |harness: &mut App, button: &str, says: &str| {
+        let node = harness.get_by_role_and_label(Role::Button, button);
+        let description = node.accesskit_node().description().unwrap_or_default().to_string();
+        assert!(description.contains(says), "{button}: {description}");
+    };
+    tooltip(&mut harness, "Save", "The original is kept as a backup");
+    tooltip(
+        &mut harness,
+        "Save as copy",
+        "saves the edited one next to it, as “a (edited).jpg”",
+    );
+    harness.get_by_role_and_label(Role::Button, "More ways to save").click();
+    harness.run_steps(2);
+    tooltip(&mut harness, "Save without backup", "deletes the original");
 }

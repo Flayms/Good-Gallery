@@ -13,9 +13,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-const JPEG_QUALITY: u8 = 95;
-const WEBP_QUALITY: f32 = 95.0;
-
 /// exiftool's definition of our XMP namespace, which it needs to write `gg:` tags (reading needs none).
 const EXIFTOOL_CONFIG: &str = r"%Image::ExifTool::UserDefined = (
     'Image::ExifTool::XMP::Main' => {
@@ -77,6 +74,9 @@ pub struct SaveRequest {
     pub recipe: Recipe,
     /// Save as a copy beside the file, or replace the file.
     pub copy: bool,
+    /// Replacing keeps the unedited original as a backup (REQ-021-10); without, the file keeps no edit and an old
+    /// backup is deleted (REQ-021-22).
+    pub keep_original: bool,
     pub mtime: MtimeOnSave,
     /// The subject as the preview showed it, for a recipe with parts (REQ-022-05); found again without one.
     pub subject: Option<Arc<Mask>>,
@@ -129,7 +129,7 @@ pub fn save(tools: &Tools, request: &SaveRequest) -> Result<String, EditError> {
         write_synced(&rendered, &encoded)?;
         // Replacing an unedited original: keep it first (REQ-021-10). A file already edited keeps its first backup;
         // a copy saved over has its source elsewhere.
-        if !request.copy && source_rel == request.rel_path {
+        if !request.copy && request.keep_original && source_rel == request.rel_path {
             source_rel = backup_rel_path(&request.rel_path);
             let backup = path(&source_rel)?;
             if !backup.exists() {
@@ -138,7 +138,9 @@ pub fn save(tools: &Tools, request: &SaveRequest) -> Result<String, EditError> {
             }
             source = backup;
         }
-        copy_metadata(tools, &source, &rendered, &tagged, &request.recipe, &source_rel)?;
+        // Without a backup there is no original to edit again from, so the file keeps no edit (REQ-021-22).
+        let edit = (request.copy || request.keep_original).then_some((&request.recipe, source_rel.as_str()));
+        copy_metadata(tools, &source, &rendered, &tagged, edit)?;
         let _ = std::fs::remove_file(&rendered);
         let new = if move_regions(
             tools,
@@ -173,6 +175,12 @@ pub fn save(tools: &Tools, request: &SaveRequest) -> Result<String, EditError> {
     }
     if request.copy {
         copy_sidecar(&folder, file_name(&request.rel_path), file_name(&target_rel));
+    }
+    // The edited photo is in place: an earlier backup isn't wanted any more (REQ-021-22). The original of a copy is a
+    // file of its own and stays.
+    if !request.copy && !request.keep_original && source_rel == backup_rel_path(&request.rel_path) {
+        std::fs::remove_file(&source)?;
+        remove_empty_backup_folders(&request.library, &source);
     }
     Ok(target_rel)
 }
@@ -464,7 +472,8 @@ fn render_file(
     );
     // Last, so pixels outside the crop still feed the blur (REQ-029-04).
     decoded.image = apply_geometry(decoded.image, &recipe.geometry());
-    encode(&decoded, format)
+    decoded.image = scale_down(decoded.image, recipe.long_edge);
+    encode(&decoded, format, recipe.quality())
 }
 
 /// 8 bits per channel with a dither below half a step, so smooth gradients don't band and unchanged values stay.
@@ -494,17 +503,23 @@ fn quantize16(image: &Rgba32FImage, alpha: bool) -> DynamicImage {
     }
 }
 
-fn encode(decoded: &Decoded, format: Format) -> Result<Vec<u8>, EditError> {
+/// The photo with its long edge at most `long_edge` (REQ-029-09).
+fn scale_down(image: Rgba32FImage, long_edge: Option<u32>) -> Rgba32FImage {
+    let (width, height) = domain::edit::scaled_size(image.width(), image.height(), long_edge);
+    if (width, height) == image.dimensions() {
+        return image;
+    }
+    image::imageops::resize(&image, width, height, image::imageops::FilterType::Lanczos3)
+}
+
+fn encode(decoded: &Decoded, format: Format, quality: u8) -> Result<Vec<u8>, EditError> {
     let encode_error = |error: image::ImageError| EditError::Encode(error.to_string());
     let mut out = Vec::new();
     match format {
         Format::Jpeg => {
             let image = quantize8(&decoded.image, false);
             image
-                .write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(
-                    &mut out,
-                    JPEG_QUALITY,
-                ))
+                .write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality))
                 .map_err(encode_error)?;
         }
         Format::Png => {
@@ -526,7 +541,7 @@ fn encode(decoded: &Decoded, format: Format) -> Result<Vec<u8>, EditError> {
                 _ => return Err(EditError::Encode("unexpected pixel format".into())),
             };
             let encoded = encoder
-                .encode_simple(decoded.lossless_webp, WEBP_QUALITY)
+                .encode_simple(decoded.lossless_webp, f32::from(quality))
                 .map_err(|error| EditError::Encode(format!("{error:?}")))?;
             out.extend_from_slice(&encoded);
         }
@@ -536,8 +551,14 @@ fn encode(decoded: &Decoded, format: Format) -> Result<Vec<u8>, EditError> {
 
 /// The arguments that copy `source`'s metadata into a photo and record the edit: everything but embedded previews
 /// (they would show the unedited photo), the color profile, orientation 1 (the pixels are upright).
-fn metadata_args(source: &Path, recipe: &Recipe, source_rel: &str) -> Vec<String> {
+/// With `edit` the recipe and where its original is, else no edit at all (REQ-021-22).
+fn metadata_args(source: &Path, edit: Option<(&Recipe, &str)>) -> Vec<String> {
     let path = |path: &Path| path.to_string_lossy().into_owned();
+    let (recipe, source_rel) = match edit {
+        Some((recipe, source_rel)) => (recipe.to_json(), source_rel.to_string()),
+        // Empty values delete the tags, also ones copied from the source.
+        None => (String::new(), String::new()),
+    };
     vec![
         "-charset".into(),
         "filename=utf8".into(),
@@ -549,7 +570,7 @@ fn metadata_args(source: &Path, recipe: &Recipe, source_rel: &str) -> Vec<String
         "--PreviewImage".into(),
         "--MPF:all".into(),
         "-Orientation#=1".into(),
-        format!("-XMP-gg:EditRecipe={}", recipe.to_json()),
+        format!("-XMP-gg:EditRecipe={recipe}"),
         format!("-XMP-gg:EditSource={source_rel}"),
         "-ignoreMinorErrors".into(),
     ]
@@ -561,10 +582,9 @@ fn copy_metadata(
     source: &Path,
     from: &Path,
     to: &Path,
-    recipe: &Recipe,
-    source_rel: &str,
+    edit: Option<(&Recipe, &str)>,
 ) -> Result<(), EditError> {
-    let args = metadata_args(source, recipe, source_rel);
+    let args = metadata_args(source, edit);
     crate::replace::exiftool_into(&tools.exiftool, Some(&tools.config), &args, from, to).map_err(metadata_error)
 }
 
@@ -710,11 +730,108 @@ mod tests {
                 source: rel.into(),
                 recipe,
                 copy,
+                keep_original: true,
                 mtime: MtimeOnSave::Keep,
                 subject: None,
                 sidecar_orientation: None,
             }
         }
+
+        fn without_backup(&self, rel: &str, recipe: Recipe) -> SaveRequest {
+            SaveRequest {
+                keep_original: false,
+                ..self.request(rel, recipe, false)
+            }
+        }
+    }
+
+    fn size_of(path: &Path) -> (u32, u32) {
+        image::image_dimensions(path).unwrap()
+    }
+
+    /// REQ-029-09: the saved photo has the chosen long edge after the crop, never more than the crop.
+    #[test]
+    fn req_029_09_saves_at_the_smaller_size() {
+        let Some(lib) = library() else { return };
+        jpeg_file(&lib, "a.jpg");
+        let smaller = Recipe {
+            long_edge: Some(16),
+            ..brighter()
+        };
+        let written = save(&lib.tools, &lib.request("a.jpg", smaller, true)).unwrap();
+        assert_eq!(size_of(&lib.path(&written)), (16, 8));
+        // A half-width crop of 32 × 32 is already below 40.
+        let cropped = Recipe {
+            crop: Some([0.0, 0.0, 0.5, 1.0]),
+            long_edge: Some(40),
+            ..Recipe::default()
+        };
+        let written = save(&lib.tools, &lib.request("a.jpg", cropped, true)).unwrap();
+        assert_eq!(size_of(&lib.path(&written)), (32, 32));
+    }
+
+    /// REQ-021-21: a lower quality makes a smaller JPEG.
+    #[test]
+    fn req_021_21_a_lower_quality_makes_a_smaller_file() {
+        let Some(lib) = library() else { return };
+        let path = lib.path("big.jpg");
+        let noise = image::RgbImage::from_fn(256, 256, |x, y| {
+            let n = (x.wrapping_mul(2_654_435_761) ^ y.wrapping_mul(40_503)) as u8;
+            image::Rgb([n, n.wrapping_mul(3), n.wrapping_add(x as u8)])
+        });
+        DynamicImage::ImageRgb8(noise).save(&path).unwrap();
+        let length = |rel: &str| std::fs::metadata(lib.path(rel)).unwrap().len();
+        let default = save(&lib.tools, &lib.request("big.jpg", brighter(), true)).unwrap();
+        let low = Recipe {
+            quality: Some(30),
+            ..brighter()
+        };
+        let low = save(&lib.tools, &lib.request("big.jpg", low, true)).unwrap();
+        assert!(
+            length(&low) * 2 < length(&default),
+            "{} vs {}",
+            length(&low),
+            length(&default)
+        );
+    }
+
+    /// REQ-021-22: saving without a backup replaces the file, keeps no edit in it, and deletes an earlier backup.
+    #[test]
+    fn req_021_22_saves_without_a_backup_and_deletes_an_old_one() {
+        let Some(lib) = library() else { return };
+        jpeg_file(&lib, "a.jpg");
+        jpeg_file(&lib, "b.jpg");
+        let original = std::fs::read(lib.path("a.jpg")).unwrap();
+
+        save(&lib.tools, &lib.without_backup("a.jpg", brighter())).unwrap();
+        assert_ne!(std::fs::read(lib.path("a.jpg")).unwrap(), original);
+        assert!(!lib.root().join(".good-gallery").exists(), "no backup");
+        let tags = lib.read("a.jpg");
+        assert!(!tags.contains_key("XMP-gg:EditRecipe") && !tags.contains_key("XMP-gg:EditSource"));
+
+        // Saved with a backup before: the backup goes, and the edit is rendered from it once more.
+        save(&lib.tools, &lib.request("b.jpg", brighter(), false)).unwrap();
+        assert!(lib.path(".good-gallery/originals/b.jpg").is_file());
+        let mut again = lib.without_backup("b.jpg", brighter());
+        again.source = ".good-gallery/originals/b.jpg".into();
+        save(&lib.tools, &again).unwrap();
+        assert!(!lib.root().join(".good-gallery").exists(), "the old backup is deleted");
+        assert!(mean_red(&lib.path("b.jpg")) < 200.0, "the edit doesn't stack");
+        assert!(!lib.read("b.jpg").contains_key("XMP-gg:EditRecipe"));
+    }
+
+    /// REQ-021-22: the original of an edited copy is a file of its own, and stays.
+    #[test]
+    fn req_021_22_an_edited_copy_leaves_its_original() {
+        let Some(lib) = library() else { return };
+        jpeg_file(&lib, "a.jpg");
+        let original = std::fs::read(lib.path("a.jpg")).unwrap();
+        let copy = save(&lib.tools, &lib.request("a.jpg", brighter(), true)).unwrap();
+        let mut request = lib.without_backup(&copy, brighter());
+        request.source = "a.jpg".into();
+        save(&lib.tools, &request).unwrap();
+        assert_eq!(std::fs::read(lib.path("a.jpg")).unwrap(), original);
+        assert!(!lib.read(&copy).contains_key("XMP-gg:EditSource"));
     }
 
     fn brighter() -> Recipe {
@@ -1333,7 +1450,7 @@ mod tests {
         assert!(!is_lossless_webp(&lossy));
         assert!(!is_lossless_webp(b"RIFF"));
         let decoded = decode(&lossless, None).unwrap();
-        let encoded = encode(&decoded, Format::Webp).unwrap();
+        let encoded = encode(&decoded, Format::Webp, domain::edit::DEFAULT_QUALITY).unwrap();
         assert!(is_lossless_webp(&encoded));
         assert_eq!(image::load_from_memory(&encoded).unwrap().into_rgb8(), rgb);
     }
