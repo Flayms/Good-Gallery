@@ -26,6 +26,7 @@ The issue left the kinds of blur open; decided as follows (to review in the PR):
 - [x] 4. Shader: blur before developing; GPU / CPU parity deep into the pyramid (REQ-023-04)
 - [x] 5. Panel: kind, strength, focus size, transition, _Place focus_; snapshot (REQ-023-01 … REQ-023-03)
 - [x] 6. Glossary, architecture, README
+- [x] 7. Lens blur: weighted pyramid, disc of taps on CPU and GPU, _Soft_ / _Lens_, parity and snapshot (REQ-023-05, #202)
 
 ## Decisions
 
@@ -33,3 +34,8 @@ The issue left the kinds of blur open; decided as follows (to review in the PR):
 
 **Decided:** blurs (spec 023) sample a pyramid of the photo, halved by 2 × 2 boxes as the GPU texture's mip chain, with a cubic B-spline at the level of each spot's blur (σ ≈ 0.65 · 2^level), mixing two levels in between. The shader uses the texture's own mips (four bilinear taps per level), saving builds the same levels in 32-bit float (`domain::edit::Pyramid`). The blur comes before the other adjustments, as a lens's would.
 **Rejected:** a convolution per pixel with a varying kernel (too slow live on large photos), blurring on the GPU into extra textures per change (a readback or a second pipeline, and a different result when saving).
+
+### 2026-11-06 · Lens blur from a weighted pyramid (#202)
+
+**Decided:** _Lens_ is a choice beside _Soft_ for every kind of blur (a flag on the recipe), not a fourth kind: where the photo blurs and how it blurs are separate. Each pixel is weighted by its brightness (`domain::edit::lens_weight`, up to 41 × for highlights) before a second pyramid is built of the weighted values with the weight beside them; a disc of 48 taps on a golden-angle spiral (radius 2 σ) reads that pyramid trilinearly, one read per tap, at the level whose footprint matches the taps' spacing, and divides by the weights. The footprint and the weight were tuned by eye on a night scene: smaller footprints show the taps as grain inside the discs, larger ones soften their edges. Halving weighted values keeps a small light's share, so it spreads into an evenly lit disc instead of fading into grey. On the GPU the pyramid is a half-float texture built from the photo's texture in two small render passes (`lens.wgsl`), starting at the photo's level 1, which a disc never samples below, and cached per photo; saving and the CPU preview build it in 32-bit float (`domain::edit::blur_pixel`).
+**Rejected:** weighting on the mips already there (the box filter has averaged a light away before its weight applies, so no discs); the editor's 512 px small copy as the source (same problem, and a different result from the saved file); taps at full resolution (gaps between taps miss small lights, and slow on large discs); a depth-dependent blur (needs a depth model; later, after #200's model work).

@@ -13,6 +13,7 @@ A blur draws the eye to what stays sharp. Users who edit a photo (spec 021) blur
 - **Given** editing a photo, with the whole photo chosen (spec 022)
 - **When** the user picks a blur under _Effects_: _None_, _Behind subject_, _Tilt-shift_ or _Radial_
 - **Then** the photo is blurred that way by _Strength_ (0 to 100), and _None_ or _Strength_ at 0 leaves it unchanged
+- **And** the blur is _Soft_ until the user chooses _Lens_ (REQ-023-05)
 - **And** choosing _Behind subject_ looks for the subject first (REQ-022-02); until it is found, or if there is none, nothing is blurred
 
 ### REQ-023-02 · Blur behind the subject
@@ -34,10 +35,17 @@ A blur draws the eye to what stays sharp. Users who edit a photo (spec 021) blur
 - **When** the user changes it, at any zoom, or saves the edit
 - **Then** the preview follows from the next frame on, and the saved file shows the same blur (within a few levels per channel), relative to the photo's size
 
+### REQ-023-05 · Lens blur
+
+- **Given** any blur, with _Lens_ chosen instead of _Soft_
+- **When** a bright light is in the blurred part, such as a street lamp or a sparkle on water
+- **Then** it spreads into an evenly lit disc with a clear edge, as out of focus lights do in a camera, whose size follows _Strength_, while the rest blurs about as much as with _Soft_
+- **And** the preview and the saved file show the same discs (REQ-023-04)
+
 ## Out of scope
 
 - Turning the tilt-shift band, elliptic radial spots, several focus spots.
-- Lens-shaped bokeh (discs, cat's eyes), depth estimation, blur of the subject only.
+- Cat's eye and polygonal bokeh shapes, depth estimation (blur growing with distance), blur of the subject only.
 - Blur per part (spec 022): blur applies to the whole photo.
 
 ## Assumptions
@@ -52,3 +60,4 @@ A blur draws the eye to what stays sharp. Users who edit a photo (spec 021) blur
 | REQ-023-02 | `crates/domain/src/edit.rs` › req_023_02_background_blur_spares_the_subject; `crates/app/tests/edit.rs` › req_023_01_req_023_02_req_023_03_chooses_a_blur_and_places_its_focus; `crates/app/src/edit.rs` › req_023_04_the_gpu_blur_matches_the_cpu_blur | pass |
 | REQ-023-03 | `crates/domain/src/edit.rs` › req_023_03_tilt_shift_and_radial_keep_the_focus_sharp; `crates/app/tests/edit.rs` › req_023_01_req_023_02_req_023_03_chooses_a_blur_and_places_its_focus | pass |
 | REQ-023-04 | `crates/domain/src/edit.rs` › req_023_04_the_pyramid_blurs_smoothly_and_keeps_flat_areas; `crates/media/src/edit.rs` › req_023_04_saving_blurs_away_from_the_focus; `crates/app/src/edit.rs` › req_023_04_the_gpu_blur_matches_the_cpu_blur | pass |
+| REQ-023-05 | `crates/domain/src/edit.rs` › req_023_05_a_light_spreads_into_an_even_disc; `crates/media/src/edit.rs` › req_023_05_saving_spreads_a_light_into_a_disc; `crates/app/src/edit.rs` › req_023_04_the_gpu_blur_matches_the_cpu_blur; `crates/app/tests/edit.rs` › req_023_05_chooses_lens_blur | pass |

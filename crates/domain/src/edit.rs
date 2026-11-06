@@ -338,6 +338,8 @@ pub struct Recipe {
     pub blur_feather: f32,
     /// Where the sharp area is, 0–1 across the photo.
     pub blur_focus: [f32; 2],
+    /// _Lens_ instead of _Soft_: lights spread into discs (REQ-023-05).
+    pub blur_lens: bool,
     /// The subject's own light and color, on top of the rest (REQ-022-03); `None` while neutral.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subject: Option<Box<Recipe>>,
@@ -415,6 +417,7 @@ impl Default for Recipe {
             blur_size: 30.0,
             blur_feather: 50.0,
             blur_focus: [0.5, 0.5],
+            blur_lens: false,
             subject: None,
             background: None,
             paintings: Vec::new(),
@@ -1106,6 +1109,39 @@ impl Pyramid {
         std::array::from_fn(|k| below[k] + (above[k] - below[k]) * t)
     }
 
+    /// Between the levels around `lod` (1 or more) at `uv`, each read bilinearly, clamped at the edges: what a GPU's
+    /// trilinear sampler reads (REQ-023-05).
+    pub fn trilinear(&self, uv: [f32; 2], lod: f32) -> [f32; 4] {
+        let lod = lod.clamp(1.0, self.levels.len() as f32);
+        let low = lod.floor() as usize;
+        let t = lod - low as f32;
+        let below = self.bilinear(low, uv);
+        if t <= 0.0 {
+            return below;
+        }
+        let above = self.bilinear(low + 1, uv);
+        std::array::from_fn(|k| below[k] + (above[k] - below[k]) * t)
+    }
+
+    /// Level `level` (1 or more) at `uv`, between its four nearest pixels, clamped at the edges.
+    fn bilinear(&self, level: usize, uv: [f32; 2]) -> [f32; 4] {
+        let (w, h, pixels) = &self.levels[level - 1];
+        let (px, py) = (uv[0] * *w as f32 - 0.5, uv[1] * *h as f32 - 0.5);
+        let (ix, iy) = (px.floor(), py.floor());
+        let (fx, fy) = (px - ix, py - iy);
+        let at = |x: f32, y: f32| {
+            let x = (x as i64).clamp(0, *w as i64 - 1) as usize;
+            let y = (y as i64).clamp(0, *h as i64 - 1) as usize;
+            pixels[y * w + x]
+        };
+        let (a, b, c, d) = (at(ix, iy), at(ix + 1.0, iy), at(ix, iy + 1.0), at(ix + 1.0, iy + 1.0));
+        std::array::from_fn(|k| {
+            let top = a[k] + (b[k] - a[k]) * fx;
+            let bottom = c[k] + (d[k] - c[k]) * fx;
+            top + (bottom - top) * fy
+        })
+    }
+
     /// Level `level` (1 or more) at `uv`, a cubic B-spline over its pixels, clamped at the edges.
     fn bspline(&self, level: usize, uv: [f32; 2]) -> [f32; 4] {
         let (w, h, pixels) = &self.levels[level - 1];
@@ -1125,6 +1161,80 @@ impl Pyramid {
         }
         out
     }
+}
+
+/// Taps of the lens blur's disc (REQ-023-05), on a golden-angle spiral that covers it evenly.
+pub const LENS_TAPS: u32 = 48;
+/// A lens disc's radius per σ of the soft blur, so the rest of the photo blurs about as much.
+pub const LENS_RADIUS_PER_SIGMA: f32 = 2.0;
+/// How much more than a midtone a full highlight weighs, so it spreads into a bright disc.
+pub const LENS_BOOST: f32 = 40.0;
+/// The angle between a spiral's taps.
+const GOLDEN_ANGLE: f32 = 2.399_963;
+
+/// What a pixel (as stored, 0–1) weighs in the lens blur: highlights far more than the rest (REQ-023-05).
+pub fn lens_weight([r, g, b]: [f32; 3]) -> f32 {
+    let t = ((r.max(g).max(b) - 0.7) / 0.3).clamp(0.0, 1.0);
+    1.0 + LENS_BOOST * t * t
+}
+
+/// A pixel times its lens weight, and the weight: what a lens pyramid holds, so halving keeps a light's share.
+pub fn lens_weighted([r, g, b, _]: [f32; 4]) -> [f32; 4] {
+    let w = lens_weight([r, g, b]);
+    [r * w, g * w, b * w, w]
+}
+
+/// The level of detail a lens tap samples for a disc of `radius` pixels: wide enough that the taps cover the disc
+/// without gaps, and never the base itself, which a lens pyramid needn't hold (REQ-023-05).
+pub fn lens_lod(radius: f32, levels: usize) -> f32 {
+    let spacing = radius * (std::f32::consts::PI / LENS_TAPS as f32).sqrt();
+    blur_lod(spacing, levels).max(1.0)
+}
+
+/// Where tap `i` of a lens disc lies, in parts of its radius.
+pub fn lens_tap(i: u32) -> [f32; 2] {
+    let r = ((i as f32 + 0.5) / LENS_TAPS as f32).sqrt();
+    let angle = i as f32 * GOLDEN_ANGLE;
+    [r * angle.cos(), r * angle.sin()]
+}
+
+/// The lens blur at `uv`: the mean of the disc of `radius` pixels of the base (of `size` pixels), weighted so lights
+/// spread into evenly lit discs. `weighted` holds [`lens_weighted`] pixels. `None` for a disc too small to sample, or
+/// a photo too small for a pyramid (REQ-023-05).
+pub fn lens_blurred(weighted: &Pyramid, uv: [f32; 2], radius: f32, size: [f32; 2]) -> Option<[f32; 3]> {
+    if radius < 1.0 || weighted.levels() < 2 {
+        return None;
+    }
+    let lod = lens_lod(radius, weighted.levels());
+    let mut sum = [0.0; 4];
+    for i in 0..LENS_TAPS {
+        let [x, y] = lens_tap(i);
+        let tap = [uv[0] + x * radius / size[0], uv[1] + y * radius / size[1]];
+        let value = weighted.trilinear(tap, lod);
+        for k in 0..4 {
+            sum[k] += value[k];
+        }
+    }
+    (sum[3] > 0.0).then(|| [sum[0] / sum[3], sum[1] / sum[3], sum[2] / sum[3]])
+}
+
+/// A pixel `sharp` at `uv` blurred by σ `sigma` pixels of the pyramids' base (of `size` pixels): in discs from `lens`
+/// (of [`lens_weighted`] pixels) where given and the disc is large enough, else softly from `pyramid` (REQ-023-04,
+/// REQ-023-05). Transparency stays sharp.
+pub fn blur_pixel(
+    pyramid: &Pyramid,
+    lens: Option<&Pyramid>,
+    sharp: [f32; 4],
+    uv: [f32; 2],
+    sigma: f32,
+    size: [f32; 2],
+) -> [f32; 4] {
+    if let Some(lens) = lens
+        && let Some([r, g, b]) = lens_blurred(lens, uv, sigma * LENS_RADIUS_PER_SIGMA, size)
+    {
+        return [r, g, b, sharp[3]];
+    }
+    pyramid.blurred(sharp, uv, blur_lod(sigma, pyramid.levels()))
 }
 
 /// The cubic B-spline's weights of the four pixels around a position `f` (0–1) past the second.
@@ -1447,6 +1557,8 @@ pub struct Params {
     pub blur_size: f32,
     pub blur_feather: f32,
     pub blur_focus: [f32; 2],
+    /// Discs instead of a soft blur (REQ-023-05).
+    pub blur_lens: bool,
     /// The subject's and the background's own numbers (REQ-022-03).
     pub subject: Option<Box<Params>>,
     pub background: Option<Box<Params>>,
@@ -1527,6 +1639,7 @@ impl Params {
             blur_size: recipe.blur_size / 100.0 * 0.5,
             blur_feather: 0.02 + recipe.blur_feather / 100.0 * 0.5,
             blur_focus: recipe.blur_focus,
+            blur_lens: recipe.blur_lens,
             subject: recipe.subject.as_deref().map(|part| Box::new(Self::new(part))),
             background: recipe.background.as_deref().map(|part| Box::new(Self::new(part))),
         }
@@ -2204,6 +2317,51 @@ mod tests {
         Adjustment::BlurSize.set(&mut wide, 100.0);
         assert!(Params::new(&wide).blur_sigma([0.5, 0.2], size, 0.0) < radial.blur_sigma([0.5, 0.2], size, 0.0));
         assert_eq!(Recipe::default().blur_focus, [0.5, 0.5]);
+    }
+
+    /// REQ-023-05: a small light spreads into an evenly lit disc of the lens's radius, far brighter than a soft blur
+    /// leaves it; flat areas stay as they are.
+    #[test]
+    fn req_023_05_a_light_spreads_into_an_even_disc() {
+        const N: usize = 256;
+        let background = 0.1;
+        let pixels: Vec<[f32; 4]> = (0..N * N)
+            .map(|i| {
+                let light = (127..=129).contains(&(i % N)) && (127..=129).contains(&(i / N));
+                if light {
+                    [1.0; 4]
+                } else {
+                    [background, background, background, 1.0]
+                }
+            })
+            .collect();
+        let weighted = Pyramid::new(N as u32, N as u32, pixels.iter().copied().map(lens_weighted).collect());
+        let soft = Pyramid::new(N as u32, N as u32, pixels);
+        let radius = 40.0;
+        let at = |dx: f32| [(128.5 + dx) / N as f32, 128.5 / N as f32];
+        let lens = |dx: f32| lens_blurred(&weighted, at(dx), radius, [N as f32; 2]).unwrap()[0] - background;
+        let inside: Vec<f32> = [0.0, 12.0, 24.0, 32.0].into_iter().map(lens).collect();
+        let (low, high) = inside
+            .iter()
+            .fold((f32::MAX, 0.0f32), |(l, h), v| (l.min(*v), h.max(*v)));
+        assert!(low > 0.02, "lit across the disc: {inside:?}");
+        assert!(low / high > 0.5, "evenly: {inside:?}");
+        assert!(lens(56.0).abs() < 0.003, "dark beyond its edge: {}", lens(56.0));
+        let sigma = radius / LENS_RADIUS_PER_SIGMA;
+        let soft_center = soft.blurred([background; 4], at(0.0), blur_lod(sigma, soft.levels()))[0] - background;
+        assert!(low > 3.0 * soft_center, "{low} against a soft blur's {soft_center}");
+
+        let flat = Pyramid::new(64, 64, vec![lens_weighted([0.3, 0.5, 0.2, 1.0]); 64 * 64]);
+        let out = lens_blurred(&flat, [0.5, 0.5], 10.0, [64.0; 2]).unwrap();
+        assert!(
+            out.iter().zip([0.3, 0.5, 0.2]).all(|(a, b)| (a - b).abs() < 1e-4),
+            "{out:?}"
+        );
+        assert_eq!(
+            lens_blurred(&flat, [0.5, 0.5], 0.5, [64.0; 2]),
+            None,
+            "too small to blur"
+        );
     }
 
     #[test]
