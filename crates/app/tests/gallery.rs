@@ -736,3 +736,79 @@ fn req_006_17_shows_the_month_while_dragging_the_scrollbar() {
     harness.run_steps(20);
     assert!(harness.query_by_label("June 2020").is_none());
 }
+
+/// REQ-006-18: scrolling shows the years wherever the pointer is, until a second after it stops.
+#[test]
+fn req_006_18_scrolling_shows_the_years_until_it_stops() {
+    let fixture = Fixture::new();
+    let mut harness =
+        common::harness_with_step(fixture.state(index(&photos_of_years(&[2024, 2023, 2020]))), 1.0 / 60.0);
+    settle(&mut harness);
+    harness.hover_at(egui::pos2(500.0, 400.0));
+    harness.run_steps(20);
+    assert!(harness.query_by_label("2023").is_none());
+
+    harness.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Line,
+        delta: egui::vec2(0.0, -3.0),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Wheel,
+        modifiers: egui::Modifiers::NONE,
+    });
+    harness.run_steps(10);
+    assert!(gallery(&harness).offset() > 0.0, "it scrolled");
+    assert!(harness.query_by_label("2023").is_some(), "shown while scrolling");
+    harness.run_steps(30);
+    assert!(
+        harness.query_by_label("2023").is_some(),
+        "still there half a second later"
+    );
+    harness.run_steps(90);
+    assert!(harness.query_by_label("2023").is_none(), "gone after it stopped");
+}
+
+/// REQ-006-18: a jump or a new result doesn't show the years by itself.
+#[test]
+fn req_006_18_a_jump_shows_no_years() {
+    let fixture = Fixture::new();
+    let mut harness =
+        common::harness_with_step(fixture.state(index(&photos_of_years(&[2024, 2023, 2020]))), 1.0 / 60.0);
+    settle(&mut harness);
+    harness.hover_at(egui::pos2(500.0, 400.0));
+    harness.run_steps(20);
+    harness.state_mut().gallery.as_mut().unwrap().scroll_to(3000.0);
+    harness.run_steps(5);
+    assert!(gallery(&harness).offset() > 0.0);
+    assert!(harness.query_by_label("2023").is_none());
+
+    let mut by_name = gallery(&harness).search().clone();
+    by_name.descending = !by_name.descending;
+    harness.state_mut().gallery.as_mut().unwrap().set_search(by_name);
+    settle(&mut harness);
+    assert!(harness.query_by_label("2023").is_none());
+}
+
+/// REQ-006-19: resting the pointer on the bar shows the month the gallery would show with the thumb there.
+#[test]
+fn req_006_19_shows_the_month_at_the_pointer() {
+    let fixture = Fixture::new();
+    let mut harness =
+        common::harness_with_step(fixture.state(index(&photos_of_years(&[2024, 2023, 2020]))), 1.0 / 60.0);
+    settle(&mut harness);
+    let x = right_edge(&harness) - 5.0;
+    harness.hover_at(egui::pos2(x, 550.0));
+    harness.run_steps(20);
+    let month = harness.get_by_label("June 2020").rect();
+    assert!((month.center().y - 550.0).abs() < 30.0, "at the pointer: {month:?}");
+    assert_eq!(gallery(&harness).offset(), 0.0, "hovering doesn't scroll");
+    harness.snapshot(common::snapshot_name("gallery_years_hover"));
+
+    harness.hover_at(egui::pos2(x, 100.0));
+    harness.run_steps(5);
+    assert!(harness.query_by_label("June 2024").is_some());
+    assert!(harness.query_by_label("June 2020").is_none());
+
+    harness.hover_at(egui::pos2(500.0, 400.0));
+    harness.run_steps(20);
+    assert!(harness.query_by_label("June 2024").is_none(), "goes with the years");
+}

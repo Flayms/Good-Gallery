@@ -53,6 +53,18 @@ impl ScrollTrack {
         let at = (offset / self.max_offset()).clamp(0.0, 1.0);
         self.top + at * travel + handle / 2.0
     }
+
+    /// The scroll offset with the thumb's middle at `y`: the inverse of [`Self::thumb_center`], clamped to the
+    /// thumb's travel (REQ-006-19).
+    pub fn offset_at(&self, y: f64) -> f64 {
+        let track = self.bottom - self.top;
+        let handle = (self.view / self.content * track).max(self.min_handle);
+        let travel = track - handle;
+        if travel <= 0.0 {
+            return 0.0;
+        }
+        ((y - self.top - handle / 2.0) / travel).clamp(0.0, 1.0) * self.max_offset()
+    }
 }
 
 /// Indices of the heights to keep, in order, so that no two are closer than `min_gap`: from the first on, a height too
@@ -134,6 +146,25 @@ mod tests {
         assert_eq!(TRACK.thumb_center(7200.0), 860.0);
         // Past the end, as for a year that starts on the last screen.
         assert_eq!(TRACK.thumb_center(7900.0), 860.0);
+    }
+
+    #[test]
+    fn req_006_19_the_offset_at_a_height_undoes_the_thumbs_center() {
+        for offset in [0.0, 1234.0, 3600.0, 7200.0] {
+            assert!(
+                (TRACK.offset_at(TRACK.thumb_center(offset)) - offset).abs() < 1e-9,
+                "{offset}"
+            );
+        }
+        // Above and below the thumb's travel: the ends.
+        assert_eq!(TRACK.offset_at(100.0), 0.0);
+        assert_eq!(TRACK.offset_at(900.0), 7200.0);
+        // Content that fits doesn't scroll.
+        let fits = ScrollTrack {
+            content: 500.0,
+            ..TRACK
+        };
+        assert_eq!(fits.offset_at(500.0), 0.0);
     }
 
     #[test]
