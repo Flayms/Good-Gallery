@@ -68,7 +68,7 @@ As with faces, the user picks and downloads a model; the app ships none.
 
 ## Proposal
 
-A Tier 3 spec, **035 · Content search**, modeled on spec 032 (faces):
+A Tier 3 spec, **036 · Content search**, modeled on spec 032 (faces):
 
 - **Off until a model is chosen** in a _Search_ section of the settings (list, download, SHA-256, add your own ONNX).
 - **Background pass** over photos and video thumbnails, from the thumbnail cache, with progress in the processing icon, paused and resumed like the face search.
