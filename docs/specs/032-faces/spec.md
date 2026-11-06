@@ -204,6 +204,13 @@ Users with large libraries want to find people without tagging each photo by han
 - **And** the faces can be named or rejected there as in any photo (REQ-032-09)
 - **And** closing the viewer returns to _Unconfirmed faces_, with the gallery's search as it was
 
+### REQ-032-27 · Unconfirmed faces in the People group
+
+- **Given** faces are recognized (the People page has something to show)
+- **When** the sidebar is shown
+- **Then** _Unconfirmed faces_ is the first row of the People group, below its heading, above the people's tags
+- **And** collapsing the People group hides it with the tags, and the group shows with its heading even without People tags
+
 ## Out of scope
 
 - Videos, pets and the browser version.
@@ -248,3 +255,4 @@ Users with large libraries want to find people without tagging each photo by han
 | REQ-032-24 | `crates/db/src/faces.rs` › req_032_24_groups_suggested_faces_by_person; `crates/app/tests/faces.rs` › req_032_24_confirm_or_reject_a_suggested_group | pass |
 | REQ-032-25 | `crates/db/src/faces.rs` › req_032_25_a_face_taken_out_stays_unknown; `crates/app/tests/faces.rs` › req_032_25_taking_a_face_out_keeps_it_in_the_viewer | pass |
 | REQ-032-26 | `crates/db/src/gallery.rs` › req_032_26_a_search_of_only_some_items; `crates/app/tests/faces.rs` › req_032_26_a_face_opens_its_photo_among_its_groups | pass |
+| REQ-032-27 | `crates/app/tests/faces.rs` › req_032_27_unconfirmed_faces_is_the_first_row_of_people, req_032_27_people_shows_without_tags_and_collapses_with_it; snapshot `people_page` | pass |
