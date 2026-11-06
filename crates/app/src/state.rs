@@ -239,6 +239,9 @@ fn tag_name(path: &[String]) -> &str {
     path.last().map_or("", String::as_str)
 }
 
+/// How long a window started with a file waits for the viewer before it shows the gallery (REQ-027-07).
+const OPEN_AT_START_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Changing more items than this asks first (REQ-025-07, REQ-026-06).
 pub const CONFIRM_MANY_ABOVE: usize = 100;
 
@@ -480,6 +483,8 @@ pub struct AppState {
     pub bring_to_front: bool,
     /// A file opened with the app, shown in the viewer once the gallery lists it (REQ-027-01).
     pending_open: Option<PendingOpen>,
+    /// The window has drawn a frame.
+    window_shown: bool,
     /// A group's photos from _Unconfirmed faces_ in the viewer, and the search to go back to (REQ-032-26).
     face_photos: Option<FacePhotos>,
     /// The installed Windows app's _Open with_ entries, and whether they are on (REQ-027-06).
@@ -509,6 +514,8 @@ struct PendingOpen {
     library: i64,
     rel_path: String,
     id: Option<i64>,
+    /// Opened before the window first showed, then: nothing else shows until the viewer does (REQ-027-07).
+    at_start: Option<Instant>,
     /// A changes scan of the file was asked for, since the index didn't have it.
     scanned: bool,
 }
@@ -1114,6 +1121,7 @@ impl AppState {
             library,
             rel_path,
             id: None,
+            at_start: (!self.window_shown).then(Instant::now),
             scanned: false,
         });
         self.find_pending_open();
@@ -1241,6 +1249,19 @@ impl AppState {
         }
     }
 
+    /// Whether the window waits for the viewer to show the file it was started with, showing nothing else
+    /// (REQ-027-07). Marks the window as shown.
+    pub fn waiting_to_open(&mut self) -> bool {
+        self.window_shown = true;
+        self.viewer.is_none()
+            && self.pending_open.as_ref().is_some_and(|pending| {
+                pending.id.is_some()
+                    && pending
+                        .at_start
+                        .is_some_and(|since| since.elapsed() < OPEN_AT_START_WAIT)
+            })
+    }
+
     /// Opens the viewer on the file opened with the app once the gallery lists it (REQ-027-01). Called every frame.
     pub fn show_pending_open(&mut self) {
         let (Some(PendingOpen { id: Some(id), .. }), Some(gallery)) = (&self.pending_open, &self.gallery) else {
@@ -1250,7 +1271,20 @@ impl AppState {
             return;
         }
         let Some(index) = gallery.position_of(*id) else { return };
-        if let Some(viewer) = crate::viewer::Viewer::open(gallery, index) {
+        let at_start = self
+            .pending_open
+            .as_ref()
+            .is_some_and(|pending| pending.at_start.is_some());
+        // Started with it: once the item is there, so the viewer draws the photo in its first frame (REQ-027-07).
+        let Some(gallery) = &mut self.gallery else { return };
+        if at_start && gallery.item(index).is_none() {
+            return;
+        }
+        if let Some(mut viewer) = crate::viewer::Viewer::open(gallery, index) {
+            // In its place at once, not out of a tile the window never showed (REQ-027-07).
+            if at_start {
+                viewer.open_at_once();
+            }
             self.viewer = Some(viewer);
             self.pending_open = None;
             // The indexed item takes the place of the one from a scratch index (REQ-033-04).
@@ -1325,6 +1359,7 @@ impl AppState {
             open_requests: None,
             bring_to_front: false,
             pending_open: None,
+            window_shown: false,
             face_photos: None,
             open_with: None,
             #[cfg(not(target_arch = "wasm32"))]

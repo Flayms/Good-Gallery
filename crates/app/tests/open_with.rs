@@ -207,3 +207,78 @@ fn req_027_04_says_why_a_file_cant_be_opened() {
         assert_eq!(shown_file(&harness), None);
     }
 }
+
+/// REQ-027-07: started with a file, the window shows nothing of the gallery before the viewer, which shows the file in
+/// its place at once; closing it shows the gallery.
+#[test]
+fn req_027_07_started_with_a_file_the_viewer_comes_first() {
+    use eframe::egui::{self, accesskit::Role};
+    use std::sync::{Arc, Mutex};
+    let fixture = Fixture::new();
+    let photos = PathBuf::from(fixture.folder("Photos"));
+    touch(&photos, &["a.jpg", "trip/b.jpg", "c.jpg"]);
+    let conn = db::open_in_memory().unwrap();
+    let root = db::libraries::insert(&conn, photos.to_str().unwrap(), "Photos", LibraryStatus::Online)
+        .unwrap()
+        .id;
+    let mut writer = IndexWriter::new(conn);
+    writer
+        .write(
+            root,
+            &[file("a.jpg", 3_000), file("trip/b.jpg", 2_000), file("c.jpg", 1_000)],
+        )
+        .unwrap();
+    let mut state = fixture.state(writer.into());
+    state.open_file(photos.join("trip").join("b.jpg"));
+
+    // Every frame from the first: whether the gallery had laid out its tiles, and where the viewer drew the photo.
+    type Frame = (bool, Option<egui::Rect>);
+    let frames: Arc<Mutex<Vec<Frame>>> = Arc::default();
+    let recorded = frames.clone();
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size([900.0, 600.0])
+        .with_step_dt(1.0 / 60.0)
+        .with_context_setup(app::setup)
+        .wgpu()
+        .build_ui_state(
+            move |ui, state: &mut app::AppState| {
+                app::ui(ui, state);
+                let tiles = state
+                    .gallery
+                    .as_ref()
+                    .is_some_and(|gallery| gallery.tile_rect(0).is_some());
+                let photo = state.viewer.as_ref().and_then(app::viewer::Viewer::photo_rect);
+                recorded.lock().unwrap().push((tiles, photo));
+            },
+            state,
+        );
+    for _ in 0..200 {
+        if harness.state().viewer.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        harness.step();
+    }
+    settle(&mut harness);
+    let settled = harness.state().viewer.as_ref().unwrap().photo_rect().unwrap();
+    let frames = frames.lock().unwrap().clone();
+    let first = frames
+        .iter()
+        .position(|(_, photo)| photo.is_some())
+        .expect("the viewer opened");
+    assert!(
+        frames[..first].iter().all(|(tiles, _)| !tiles),
+        "no gallery before the viewer: {frames:?}"
+    );
+    let shown = frames[first].1.unwrap();
+    assert!(
+        (shown.min - settled.min).length() < 0.5 && (shown.size() - settled.size()).length() < 0.5,
+        "in its place at once: {shown:?}, then {settled:?}"
+    );
+
+    harness.key_press(egui::Key::Escape);
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    settle(&mut harness);
+    assert!(harness.state().viewer.is_none());
+    harness.get_by_role_and_label(Role::Image, "a.jpg");
+}
