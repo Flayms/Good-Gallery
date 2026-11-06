@@ -13,6 +13,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+/// A group's photos shown in the viewer from _Unconfirmed faces_ (REQ-032-26).
+pub(crate) struct FacePhotos {
+    /// The photo to open on, until the viewer is open.
+    at: Option<i64>,
+    /// The gallery's search before.
+    back: domain::search::GallerySearch,
+}
+
 /// A download or an added model on its way.
 #[derive(Clone)]
 pub struct Arriving {
@@ -466,6 +474,7 @@ impl AppState {
             A::Ignore { faces } => faces.iter().try_for_each(|face| decide(*face, FaceState::Ignored)),
             A::NotAFace { face } => decide(*face, FaceState::NotAFace),
             A::NotThisPerson { face, name } => faces::reject(&lock(&db), *face, name),
+            A::Ungroup { face } => faces::ungroup(&lock(&db), *face),
             A::LookAgain { media } => faces::look_again(&lock(&db), Some(*media)),
             A::Name { .. } | A::Remove { .. } | A::Rename { .. } => Ok(()),
         };
@@ -473,7 +482,11 @@ impl AppState {
             self.toasts.error(format!("Couldn't save that: {error}"));
         }
         let changes: Vec<(i64, RegionChange)> = match action {
-            A::Ignore { .. } | A::NotAFace { .. } | A::NotThisPerson { .. } | A::LookAgain { .. } => Vec::new(),
+            A::Ignore { .. }
+            | A::Ungroup { .. }
+            | A::NotAFace { .. }
+            | A::NotThisPerson { .. }
+            | A::LookAgain { .. } => Vec::new(),
             A::Name { name, places } => places
                 .into_iter()
                 .map(|(media, rect)| {
@@ -634,6 +647,57 @@ fn write_region(
         }
     }
     Ok(())
+}
+
+impl AppState {
+    /// Opens the viewer on photo `at` with its faces shown, going through `photos` only; closing it brings back the
+    /// gallery's search (REQ-032-26).
+    pub fn show_face_photos(&mut self, photos: &[i64], at: i64) {
+        let Some(gallery) = &mut self.gallery else { return };
+        let back = match self.face_photos.take() {
+            Some(open) => open.back,
+            None => gallery.search().clone(),
+        };
+        let mut media: Vec<i64> = photos.to_vec();
+        media.sort_unstable();
+        media.dedup();
+        gallery.set_search(domain::search::GallerySearch { media, ..back.clone() });
+        self.face_photos = Some(FacePhotos { at: Some(at), back });
+    }
+
+    /// Opens the viewer once the gallery lists the photo (REQ-032-26). Called every frame.
+    pub fn show_face_photo(&mut self) {
+        let (Some(FacePhotos { at: Some(at), .. }), Some(gallery)) = (&self.face_photos, &self.gallery) else {
+            return;
+        };
+        if gallery.is_loading() {
+            return;
+        }
+        let at = *at;
+        let viewer = gallery
+            .position_of(at)
+            .and_then(|index| crate::viewer::Viewer::open(gallery, index));
+        if let Some(face_photos) = &mut self.face_photos {
+            face_photos.at = None;
+        }
+        match viewer {
+            Some(mut viewer) => {
+                viewer.show_faces();
+                self.viewer = Some(viewer);
+            }
+            // Gone meanwhile: back to the search as it was.
+            None => self.face_photos_closed(),
+        }
+    }
+
+    /// The viewer closed: the gallery's search as it was before a group's photos (REQ-032-26).
+    pub(super) fn face_photos_closed(&mut self) {
+        if let Some(open) = self.face_photos.take()
+            && let Some(gallery) = &mut self.gallery
+        {
+            gallery.set_search(open.back);
+        }
+    }
 }
 
 #[cfg(test)]

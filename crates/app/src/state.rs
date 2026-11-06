@@ -267,6 +267,10 @@ pub enum FaceAction {
     Ignore {
         faces: Vec<i64>,
     },
+    /// Out of the groups of unknown faces, still unknown (REQ-032-25).
+    Ungroup {
+        face: i64,
+    },
     NotAFace {
         face: i64,
     },
@@ -466,6 +470,8 @@ pub struct AppState {
     pub bring_to_front: bool,
     /// A file opened with the app, shown in the viewer once the gallery lists it (REQ-027-01).
     pending_open: Option<PendingOpen>,
+    /// A group's photos from _Unconfirmed faces_ in the viewer, and the search to go back to (REQ-032-26).
+    pub(crate) face_photos: Option<faces::FacePhotos>,
     /// The installed Windows app's _Open with_ entries, and whether they are on (REQ-027-06).
     open_with: Option<(Arc<dyn crate::open_with::OpenWithEntries>, bool)>,
     /// A file whose folder is being added as a library from the viewer, opened once the library is there (REQ-033-04).
@@ -1161,6 +1167,7 @@ impl AppState {
 
     /// The viewer closed: a file shown from a scratch index goes with it, and isn't opened later (REQ-033-05).
     pub fn viewer_closed(&mut self) {
+        self.face_photos_closed();
         #[cfg(not(target_arch = "wasm32"))]
         if self.loose.take().is_some() {
             self.pending_open = None;
@@ -1298,6 +1305,7 @@ impl AppState {
             open_requests: None,
             bring_to_front: false,
             pending_open: None,
+            face_photos: None,
             open_with: None,
             #[cfg(not(target_arch = "wasm32"))]
             open_when_added: None,

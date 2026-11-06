@@ -743,6 +743,11 @@ impl Viewer {
         action
     }
 
+    /// Shows the face regions this time, without changing the remembered choice (REQ-032-26).
+    pub fn show_faces(&mut self) {
+        self.faces = true;
+    }
+
     fn toggle_faces(&mut self, gallery: &Gallery) {
         self.faces = !self.faces;
         gallery.store_setting(faces::FACES_KEY, if self.faces { "shown" } else { "hidden" });

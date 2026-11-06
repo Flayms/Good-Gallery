@@ -230,7 +230,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
                                 depth: 0,
                                 chevron: None,
                                 icon: Some((Icon::ScanFace, theme::text())),
-                                label: "Unknown faces",
+                                label: "Unconfirmed faces",
                                 active: *input.page == Page::People,
                                 trailing: None,
                                 tooltip: None,

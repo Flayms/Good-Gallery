@@ -134,6 +134,7 @@ mod tests {
             from: NaiveDate::from_ymd_opt(2023, 5, 1),
             to: NaiveDate::from_ymd_opt(2023, 5, 14),
             ratings: vec![0, 4, 5],
+            media: Vec::new(),
             sort_by: SortBy::Name,
             descending: false,
         }
