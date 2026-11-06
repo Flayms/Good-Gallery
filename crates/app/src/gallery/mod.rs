@@ -20,6 +20,7 @@ use db::tags::TagCount;
 use domain::autoscroll::Autoscroll;
 use domain::folders::{FolderNode, TagNode, build_folder_tree, build_tag_tree};
 use domain::layout::{LayoutOptions, ListEntry, TileLayout, list_entry_at, list_index_of_item, tile_layout};
+use domain::media::MediaKind;
 use domain::tags::TagCategory;
 use domain::thumbs::{ThumbKey, pick_thumb_width};
 use domain::view::{GalleryView, TagIndicatorChoice, group_by_day_value, groups_shown, is_grouped_by_day};
@@ -139,6 +140,36 @@ pub enum MediaAction {
     Revert,
     /// Only in the gallery: selects the item or no longer does, also where nothing can hover (REQ-025-11).
     Select,
+    /// Opens the rename dialog (REQ-009-21).
+    Rename,
+    /// Sets the rating; `None` removes it (REQ-009-21).
+    Rate(Option<i64>),
+    /// Turns photos a quarter by their orientation tag (REQ-009-22).
+    Turn(domain::orientation::Turn),
+}
+
+/// Which of the items that write files a context menu has (REQ-009-21).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MenuItems {
+    /// _Edit_, only in the viewer (REQ-021-01).
+    pub edit: bool,
+    /// _Revert to original_, only in the viewer (REQ-021-12).
+    pub revert: bool,
+    /// _Rename…_, _Rating_ and _Rotate_: the desktop app, for an indexed item.
+    pub write: bool,
+    /// _Rotate_ is on: a photo whose format has an orientation.
+    pub turn: bool,
+}
+
+impl MenuItems {
+    /// The items for a gallery item of this kind and file name.
+    pub fn for_item(kind: MediaKind, file_name: &str) -> Self {
+        Self {
+            write: !crate::WEB,
+            turn: kind == MediaKind::Image && domain::orientation::can_turn(file_name),
+            ..Self::default()
+        }
+    }
 }
 
 /// A media item's details as loaded: `Ok(None)` when it isn't indexed (any more).
@@ -1002,6 +1033,16 @@ impl Gallery {
     }
 
     /// What a context menu asked for this frame, and for which gallery position (REQ-009-11).
+    /// The items a context menu on item `index` acts on: the selection if the item is in it, else the item alone
+    /// (REQ-009-21).
+    pub fn menu_targets(&self, index: usize) -> Vec<i64> {
+        match self.id_at(index) {
+            Some(id) if self.selection.contains(id) => self.selected_ids(),
+            Some(id) => vec![id],
+            None => Vec::new(),
+        }
+    }
+
     pub fn take_menu_action(&mut self) -> Option<(usize, MediaAction)> {
         self.menu_action.take()
     }
@@ -1795,24 +1836,35 @@ fn paint_autoscroll_marker(ctx: &egui::Context, at: egui::Pos2) {
     }
 }
 
-/// _Show in Explorer_ and _Information_ in a context menu (REQ-009-11); what was chosen.
-pub fn context_menu(ui: &mut egui::Ui, selected: bool) -> Option<MediaAction> {
+/// _Show in Explorer_ and _Information_ in a context menu (REQ-009-11), and `items`; what was chosen.
+pub fn context_menu(ui: &mut egui::Ui, selected: bool, items: MenuItems) -> Option<MediaAction> {
     crate::glass::behind_menu(ui, |ui| {
         let select = ui.button(if selected { "Deselect" } else { "Select" }).clicked();
         if select {
             ui.close();
             return Some(MediaAction::Select);
         }
-        menu_items(ui, false, false)
+        menu_items(ui, items)
     })
 }
 
-/// The context menu with _Edit_ and _Revert to original_ where they apply (the viewer's, spec 021).
-pub fn context_menu_with(ui: &mut egui::Ui, edit: bool, revert: bool) -> Option<MediaAction> {
-    crate::glass::behind_menu(ui, |ui| menu_items(ui, edit, revert))
+/// The viewer's context menu, with _Edit_ and _Revert to original_ where they apply (spec 021).
+pub fn context_menu_with(ui: &mut egui::Ui, items: MenuItems) -> Option<MediaAction> {
+    crate::glass::behind_menu(ui, |ui| menu_items(ui, items))
 }
 
-fn menu_items(ui: &mut egui::Ui, edit: bool, revert: bool) -> Option<MediaAction> {
+/// The ratings _Rating_ offers, with their labels (REQ-009-21).
+const RATINGS: [(&str, Option<i64>); 6] = [
+    ("No rating", None),
+    ("1 star", Some(1)),
+    ("2 stars", Some(2)),
+    ("3 stars", Some(3)),
+    ("4 stars", Some(4)),
+    ("5 stars", Some(5)),
+];
+
+fn menu_items(ui: &mut egui::Ui, items: MenuItems) -> Option<MediaAction> {
+    let MenuItems { edit, revert, .. } = items;
     let mut action = None;
     // The browser can't open a file manager (REQ-019-13).
     if !crate::WEB && ui.button(crate::state::SHOW_IN_FOLDER).clicked() {
@@ -1826,6 +1878,30 @@ fn menu_items(ui: &mut egui::Ui, edit: bool, revert: bool) -> Option<MediaAction
     }
     if revert && ui.button("Revert to original").clicked() {
         action = Some(MediaAction::Revert);
+    }
+    if items.write {
+        ui.separator();
+        if ui.button("Rename…").clicked() {
+            action = Some(MediaAction::Rename);
+        }
+        ui.menu_button("Rating", |ui| {
+            crate::glass::behind_menu(ui, |ui| {
+                for (label, rating) in RATINGS {
+                    if ui.button(label).clicked() {
+                        action = Some(MediaAction::Rate(rating));
+                    }
+                }
+            });
+        });
+        let turns = [
+            ("Rotate left", domain::orientation::Turn::Left),
+            ("Rotate right", domain::orientation::Turn::Right),
+        ];
+        for (label, turn) in turns {
+            if ui.add_enabled(items.turn, egui::Button::new(label)).clicked() {
+                action = Some(MediaAction::Turn(turn));
+            }
+        }
     }
     if action.is_some() {
         ui.close();

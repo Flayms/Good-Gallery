@@ -1,0 +1,246 @@
+//! The context menu's rename, rating and rotate items (REQ-009-21, REQ-009-22).
+
+mod common;
+
+use common::{Fixture, settle};
+use db::libraries::LibraryStatus;
+use db::writer::{IndexWriter, IndexedFile};
+use domain::media::{MediaKind, MediaMetadata};
+use eframe::egui::{self, Modifiers, PointerButton, accesskit::Role};
+use egui_kittest::Harness;
+use egui_kittest::kittest::{NodeT as _, Queryable as _};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+type App = Harness<'static, app::AppState>;
+
+const NAMES: [&str; 4] = ["a.jpg", "b.jpg", "c.gif", "d.mp4"];
+
+fn exiftool() -> Option<PathBuf> {
+    match media::exiftool::find_exiftool() {
+        Some(exiftool) => Some(exiftool),
+        None if std::env::var_os("GG_REQUIRE_HELPERS").is_some() => panic!("exiftool not found"),
+        None => {
+            eprintln!("skipped: exiftool not found");
+            None
+        }
+    }
+}
+
+/// Two JPEGs (8 × 4, left half red), a GIF and a video, newest first; with exiftool and renaming.
+fn app(fixture: &Fixture, exiftool: &Path) -> (App, PathBuf) {
+    let dir = PathBuf::from(fixture.folder("photos"));
+    let conn = db::open_in_memory().unwrap();
+    let root = db::libraries::insert(&conn, dir.to_str().unwrap(), "Photos", LibraryStatus::Online)
+        .unwrap()
+        .id;
+    let files: Vec<IndexedFile> = NAMES
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let kind = if name.ends_with(".mp4") {
+                MediaKind::Video
+            } else {
+                image::RgbImage::from_fn(8, 4, |x, _| {
+                    image::Rgb(if x < 4 { [220, 30, 30] } else { [30, 30, 220] })
+                })
+                .save(dir.join(name))
+                .unwrap();
+                MediaKind::Image
+            };
+            IndexedFile {
+                rel_path: name.to_string(),
+                file_name: name.to_string(),
+                kind,
+                size: 1,
+                mtime: 1_000,
+                sidecar_mtime: None,
+                metadata: MediaMetadata {
+                    width: Some(8),
+                    height: Some(4),
+                    taken_at: Some(2_000_000 - i as i64),
+                    ..Default::default()
+                },
+                read_error: None,
+            }
+        })
+        .collect();
+    let mut writer = IndexWriter::new(conn);
+    writer.write(root, &files).unwrap();
+    let config = media::edit::exiftool_config(&fixture.dir.path().join("data")).unwrap();
+    let journal = fixture.dir.path().join("data").join("rename-journal.json");
+    let state = fixture
+        .state(writer.into())
+        .with_edit_tools(media::edit::Tools {
+            exiftool: exiftool.to_owned(),
+            config,
+        })
+        .with_rename_journal(journal);
+    let mut harness = common::harness_with_step(state, 1.0 / 60.0);
+    harness.set_size(egui::vec2(1000.0, 700.0));
+    settle(&mut harness);
+    (harness, dir)
+}
+
+fn right_click_at(harness: &mut App, pos: egui::Pos2) {
+    harness.hover_at(pos);
+    harness.run_steps(1);
+    for pressed in [true, false] {
+        harness.event(egui::Event::PointerButton {
+            pos,
+            button: PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+        harness.run_steps(1);
+    }
+    harness.run_steps(2);
+}
+
+fn tile(harness: &App, name: &str) -> egui::Pos2 {
+    let labels = [name.to_string(), format!("{name}, selected"), format!("{name}, video")];
+    labels
+        .iter()
+        .find_map(|label| harness.query_by_role_and_label(Role::Image, label))
+        .unwrap_or_else(|| panic!("no tile {name}"))
+        .rect()
+        .center()
+}
+
+/// The item `label` of the menu opened at `at`, which opens below it: the selection bar has a _Rename…_ too.
+fn menu_item<'a>(harness: &'a App, at: egui::Pos2, label: &'a str) -> egui_kittest::Node<'a> {
+    harness
+        .get_all_by_label(label)
+        .filter(|node| node.rect().top() >= at.y)
+        .min_by(|a, b| {
+            let distance = |node: &egui_kittest::Node<'_>| (node.rect().center() - at).length();
+            distance(a).total_cmp(&distance(b))
+        })
+        .unwrap()
+}
+
+/// Chooses `stars` (0 removes the rating) under _Rating_.
+fn rate(harness: &mut App, label: &str) {
+    harness.get_by_label("Rating").hover();
+    harness.run_steps(3);
+    harness.get_by_label(label).click();
+    settle(harness);
+}
+
+fn read(exiftool: &Path, file: &Path, tag: &str) -> Option<i64> {
+    let output = Command::new(exiftool)
+        .args(["-j", "-n", &format!("-{tag}")])
+        .arg(file)
+        .output()
+        .unwrap();
+    let read: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    read[0][tag.rsplit(':').next().unwrap()].as_i64()
+}
+
+fn rename_ids(harness: &App) -> Option<usize> {
+    harness.state().rename_dialog.as_ref().map(|dialog| dialog.count())
+}
+
+/// REQ-009-21, REQ-009-22: on a selected item the menu rates, rotates and renames the whole selection; on another
+/// item, that item alone.
+#[test]
+fn req_009_21_the_menu_renames_rates_and_rotates_the_selection() {
+    let Some(exiftool) = exiftool() else { return };
+    let fixture = Fixture::new();
+    let (mut harness, dir) = app(&fixture, &exiftool);
+    let gallery = harness.state_mut().gallery.as_mut().unwrap();
+    gallery.toggle_selected_at(0);
+    gallery.toggle_selected_at(1);
+    harness.run_steps(2);
+
+    let at = tile(&harness, "a.jpg");
+    right_click_at(&mut harness, at);
+    rate(&mut harness, "3 stars");
+    for name in ["a.jpg", "b.jpg"] {
+        assert_eq!(read(&exiftool, &dir.join(name), "XMP-xmp:Rating"), Some(3), "{name}");
+    }
+    assert_eq!(read(&exiftool, &dir.join("c.gif"), "XMP-xmp:Rating"), None);
+
+    let at = tile(&harness, "b.jpg");
+    right_click_at(&mut harness, at);
+    harness.get_by_label("Rotate right").click();
+    settle(&mut harness);
+    for name in ["a.jpg", "b.jpg"] {
+        assert_eq!(read(&exiftool, &dir.join(name), "Orientation"), Some(6), "{name}");
+    }
+    assert!(
+        fixture
+            .scans
+            .paths
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, paths)| paths.contains(&"a.jpg".to_string())),
+        "read again, with a new thumbnail"
+    );
+
+    let at = tile(&harness, "a.jpg");
+    right_click_at(&mut harness, at);
+    menu_item(&harness, at, "Rename…").click();
+    settle(&mut harness);
+    assert_eq!(rename_ids(&harness), Some(2));
+    harness.state_mut().rename_dialog = None;
+    harness.run_steps(2);
+
+    // Not in the selection: that item alone.
+    let at = tile(&harness, "c.gif");
+    right_click_at(&mut harness, at);
+    rate(&mut harness, "1 star");
+    assert_eq!(read(&exiftool, &dir.join("c.gif"), "XMP-xmp:Rating"), Some(1));
+    assert_eq!(read(&exiftool, &dir.join("a.jpg"), "XMP-xmp:Rating"), Some(3));
+    let at = tile(&harness, "c.gif");
+    right_click_at(&mut harness, at);
+    menu_item(&harness, at, "Rename…").click();
+    settle(&mut harness);
+    assert_eq!(rename_ids(&harness), Some(1));
+}
+
+/// REQ-009-21: a video or a GIF can't be rotated.
+#[test]
+fn req_009_21_rotate_is_off_for_videos_and_gifs() {
+    let Some(exiftool) = exiftool() else { return };
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, &exiftool);
+    for name in ["c.gif", "d.mp4"] {
+        let at = tile(&harness, name);
+        right_click_at(&mut harness, at);
+        for item in ["Rotate left", "Rotate right"] {
+            assert!(
+                harness.get_by_label(item).accesskit_node().is_disabled(),
+                "{name}: {item}"
+            );
+        }
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+    }
+    let at = tile(&harness, "a.jpg");
+    right_click_at(&mut harness, at);
+    assert!(!harness.get_by_label("Rotate left").accesskit_node().is_disabled());
+    harness.snapshot(common::snapshot_name("context_menu"));
+}
+
+/// REQ-009-21: the viewer's menu rates and rotates the photo it shows, which is then shown turned.
+#[test]
+fn req_009_21_the_viewers_menu_rates_and_rotates() {
+    let Some(exiftool) = exiftool() else { return };
+    let fixture = Fixture::new();
+    let (mut harness, dir) = app(&fixture, &exiftool);
+    common::open_item(&mut harness, "a.jpg");
+    settle(&mut harness);
+    let center = egui::pos2(500.0, 350.0);
+
+    right_click_at(&mut harness, center);
+    rate(&mut harness, "5 stars");
+    assert_eq!(read(&exiftool, &dir.join("a.jpg"), "XMP-xmp:Rating"), Some(5));
+
+    right_click_at(&mut harness, center);
+    harness.get_by_label("Rotate left").click();
+    settle(&mut harness);
+    assert_eq!(read(&exiftool, &dir.join("a.jpg"), "Orientation"), Some(8));
+    assert!(harness.state().viewer.is_some(), "the viewer stays");
+}

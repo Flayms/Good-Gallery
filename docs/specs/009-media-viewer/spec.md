@@ -157,10 +157,26 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 - **And** panning stops where its edges reach the window's or the info panel's, not the media area's
 - **And** fitted (1×) it stays in the media area, in the middle (REQ-009-19)
 
+### REQ-009-21 · Rename, rate and rotate from the menu
+
+- **Given** a tile's, a list row's or the viewer's context menu (REQ-009-11) in the desktop app
+- **When** the user chooses _Rename…_, a rating under _Rating_ (_No rating_, 1 to 5 stars), _Rotate left_ or _Rotate right_
+- **Then** it applies to the selection if the item is in it, else to that item alone
+- **And** _Rename…_ opens the rename dialog for them (REQ-035-01), a rating is written as from the keyboard (REQ-024-03, REQ-025-07), and rotating turns each photo by a quarter (REQ-009-22)
+- **And** _Rotate_ is off for videos and for photos whose format has no orientation (GIF, AVIF), and the browser version has none of these items
+
+### REQ-009-22 · Rotate without re-encoding
+
+- **Given** photos rotated from the context menu
+- **When** they are turned
+- **Then** only their orientation tag changes, turned a quarter from the one they have (a mirrored photo stays mirrored), and their pixels are written as they were; the date modified stays
+- **And** their tile, thumbnail and the viewer show them turned
+- **And** a file that can't be written stays as it was, and a message names it and says why
+
 ## Out of scope
 
 - Face regions in videos. Adding, editing and removing face regions and finding faces are spec 032.
-- Slideshows, rotating, cropping, editing, deleting, copying or sharing files.
+- Slideshows, deleting, copying or sharing files. Rotating with new pixels, cropping and editing are specs 021 and 029.
 - Opening a file in another app (other than revealing it in Explorer).
 - Fullscreen mode and comparing items side by side. The filmstrip is specified in [015](../015-filmstrip/spec.md).
 - Showing EXIF details beyond REQ-009-08.
@@ -194,4 +210,6 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 | REQ-009-18 | `crates/domain/src/viewer.rs` › req_009_18_steps_from_the_place_the_item_had; `crates/app/tests/viewer.rs` › req_009_18_keeps_an_item_that_left_the_search, req_009_18_steps_back_from_an_item_that_left_the_search, req_009_18_closes_with_an_empty_result, req_009_18_follows_the_item_back_into_the_search, req_009_18_says_when_a_kept_item_is_gone | pass |
 | REQ-009-19 | `crates/app/src/viewer.rs` › req_009_19_centers_the_photo_with_the_bar_above_it, req_009_19_the_bar_keeps_clear_of_the_window_controls | pass |
 | REQ-009-20 | `crates/app/tests/viewer.rs` › req_009_20_a_zoomed_photo_pans_to_the_windows_edges, req_009_20_stops_at_the_info_panel (snapshot `viewer_zoomed`); req_009_05_zooms_and_pans, req_009_16_click_toggles_between_fitted_and_actual_pixels, req_009_03_a_click_beside_a_zoomed_photo_closes | pass |
+| REQ-009-21 | `crates/domain/src/orientation.rs` › req_009_21_only_formats_with_an_orientation_turn; `crates/app/tests/context_menu.rs` › req_009_21_the_menu_renames_rates_and_rotates_the_selection, req_009_21_rotate_is_off_for_videos_and_gifs, req_009_21_the_viewers_menu_rates_and_rotates (snapshot `context_menu`) | pass |
+| REQ-009-22 | `crates/domain/src/orientation.rs` › req_009_22_turns_a_quarter_and_keeps_the_mirror; `crates/media/src/rotate.rs` › req_009_22_changes_only_the_orientation_tag, req_009_22_a_mirrored_photo_stays_mirrored, req_009_22_a_read_only_file_stays; `crates/app/tests/context_menu.rs` › req_009_21_the_menu_renames_rates_and_rotates_the_selection | pass |
 | REQ-009-17 | `crates/domain/src/faces.rs` › req_009_17_face_regions_are_hidden_until_shown; `crates/app/tests/viewer.rs` › req_009_17_shows_face_regions_and_remembers_the_choice (snapshot `viewer_faces`) | pass |
