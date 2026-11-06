@@ -42,7 +42,7 @@ The user looks at one media item at full quality without losing their place in t
 - **Given** a photo in the viewer
 - **When** the user turns the mouse wheel, with or without Ctrl, scrolls or pinches on a touchpad, double-clicks, presses `+` / `-` / `0`, or drags
 - **Then** the wheel, scrolling and pinching zoom around the pointer, a double-click switches between fitted and actual pixels (at least 2×) around the pointer, `+` / `-` zoom around the center, `0` fits it again, and dragging pans a zoomed photo
-- **And** zoom stays between fitted (1×) and 8×, and a zoomed photo always covers the area it can fill (no panning into empty space)
+- **And** zoom stays between fitted (1×) and 8×, and a zoomed photo always covers the area it can fill (no panning into empty space; the area is the window, REQ-009-20)
 
 ### REQ-009-06 · Play videos
 
@@ -149,6 +149,14 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 - **Then** the photo or video is centered in the area beside the info panel, with as much room above it as below, and it doesn't move when the controls fade
 - **And** the control bar with the file name and the buttons sits above it, in the title bar's strip, clear of the window controls
 
+### REQ-009-20 · A zoomed photo fills the window
+
+- **Given** a photo zoomed in the viewer (REQ-009-05) beyond the media area
+- **When** it is shown or panned
+- **Then** it spreads over the whole window beside the info panel, under the control bar, the arrows and the filmstrip, which stay on top of it
+- **And** panning stops where its edges reach the window's or the info panel's, not the media area's
+- **And** fitted (1×) it stays in the media area, in the middle (REQ-009-19)
+
 ## Out of scope
 
 - Face regions in videos. Adding, editing and removing face regions and finding faces are spec 032.
@@ -185,4 +193,5 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 | REQ-009-16 | `crates/domain/src/viewer.rs` › req_009_16_toggles_between_fitted_and_actual_pixels_at_least_2x; `crates/app/tests/viewer.rs` › req_009_16_click_toggles_between_fitted_and_actual_pixels, req_009_03_req_009_16_clicks_on_the_photo_and_double_clicks_dont_close | pass |
 | REQ-009-18 | `crates/domain/src/viewer.rs` › req_009_18_steps_from_the_place_the_item_had; `crates/app/tests/viewer.rs` › req_009_18_keeps_an_item_that_left_the_search, req_009_18_steps_back_from_an_item_that_left_the_search, req_009_18_closes_with_an_empty_result, req_009_18_follows_the_item_back_into_the_search, req_009_18_says_when_a_kept_item_is_gone | pass |
 | REQ-009-19 | `crates/app/src/viewer.rs` › req_009_19_centers_the_photo_with_the_bar_above_it, req_009_19_the_bar_keeps_clear_of_the_window_controls | pass |
+| REQ-009-20 | `crates/app/tests/viewer.rs` › req_009_20_a_zoomed_photo_pans_to_the_windows_edges, req_009_20_stops_at_the_info_panel (snapshot `viewer_zoomed`); req_009_05_zooms_and_pans, req_009_16_click_toggles_between_fitted_and_actual_pixels, req_009_03_a_click_beside_a_zoomed_photo_closes | pass |
 | REQ-009-17 | `crates/domain/src/faces.rs` › req_009_17_face_regions_are_hidden_until_shown; `crates/app/tests/viewer.rs` › req_009_17_shows_face_regions_and_remembers_the_choice (snapshot `viewer_faces`) | pass |

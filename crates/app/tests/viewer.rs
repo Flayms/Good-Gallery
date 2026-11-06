@@ -304,17 +304,20 @@ fn req_009_03_req_009_16_clicks_on_the_photo_and_double_clicks_dont_close() {
 fn req_009_16_click_toggles_between_fitted_and_actual_pixels() {
     let fixture = Fixture::new();
     let mut harness = app(&fixture, 3, &[]);
+    // A small window, so the photo zoomed 2× is larger than it and can move (REQ-009-20).
+    harness.set_size(egui::vec2(600.0, 400.0));
+    let center = pos2(300.0, 200.0);
     open(&mut harness, "1.png");
 
-    click_at(&mut harness, CENTER + egui::vec2(10.0, 20.0));
+    click_at(&mut harness, center + egui::vec2(10.0, 20.0));
     let view = viewer(&harness).view();
-    // 400 px shown 400 px wide: actual pixels are 1×, so 2×; the point under the pointer stays in place.
+    // 400 px shown 341 px wide: actual pixels are 1.17×, so 2×; the point under the pointer stays in place.
     assert_eq!(view.scale, 2.0);
     assert_eq!((view.x, view.y), (-10.0, -20.0));
-    click_at(&mut harness, CENTER);
+    click_at(&mut harness, center);
     assert!(!viewer(&harness).view().is_zoomed());
 
-    double_click_at(&mut harness, CENTER);
+    double_click_at(&mut harness, center);
     assert_eq!(viewer(&harness).view().scale, 2.0, "switched once");
 }
 
@@ -388,7 +391,7 @@ fn req_009_05_zooms_and_pans() {
     harness.run_steps(1);
     assert!((viewer(&harness).view().scale - 6.4).abs() < 1e-4);
 
-    // At 6.4× the photo is 2560 × 1920 in a 772 × 472 area: it pans by at most 894 / 724 px.
+    // At 6.4× the photo is 2560 × 1920 in a 900 × 600 window (REQ-009-20): it pans by at most 830 / 660 px.
     harness.drag_at(CENTER);
     harness.run_steps(1);
     harness.hover_at(CENTER + egui::vec2(-300.0, 0.0));
@@ -406,13 +409,79 @@ fn req_009_05_zooms_and_pans() {
         harness.run_steps(1);
     }
     assert!(
-        (viewer(&harness).view().x + 894.0).abs() < 1.0,
+        (viewer(&harness).view().x + 830.0).abs() < 1.0,
         "stops at the photo's edge"
     );
 
     harness.key_press(Key::Num0);
     harness.run_steps(1);
     assert!(!viewer(&harness).view().is_zoomed());
+}
+
+/// Zooms to 8× and drags the photo far by `by`, in steps.
+fn zoom_and_pan(harness: &mut App, by: egui::Vec2) {
+    for _ in 0..12 {
+        harness.key_press(Key::Plus);
+        harness.run_steps(1);
+    }
+    for _ in 0..20 {
+        harness.drag_at(CENTER);
+        harness.run_steps(1);
+        harness.hover_at(CENTER + by);
+        harness.run_steps(1);
+        harness.drop_at(CENTER + by);
+        harness.run_steps(1);
+    }
+}
+
+/// REQ-009-20: a zoomed photo spreads over the whole window, under the controls, and pans up to the window's edges.
+#[test]
+fn req_009_20_a_zoomed_photo_pans_to_the_windows_edges() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture, 3, &[]);
+    open(&mut harness, "1.png");
+    let screen = harness.ctx.content_rect();
+
+    zoom_and_pan(&mut harness, egui::vec2(-300.0, -200.0));
+    let photo = viewer(&harness).photo_rect().unwrap();
+    assert!((photo.right() - screen.right()).abs() < 1.0, "{photo:?} in {screen:?}");
+    assert!(
+        (photo.bottom() - screen.bottom()).abs() < 1.0,
+        "{photo:?} in {screen:?}"
+    );
+    harness.snapshot(common::snapshot_name("viewer_zoomed"));
+
+    zoom_and_pan(&mut harness, egui::vec2(300.0, 200.0));
+    let photo = viewer(&harness).photo_rect().unwrap();
+    assert!((photo.left() - screen.left()).abs() < 1.0, "{photo:?} in {screen:?}");
+    assert!((photo.top() - screen.top()).abs() < 1.0, "{photo:?} in {screen:?}");
+
+    harness.key_press(Key::Num0);
+    harness.run_steps(1);
+    let photo = viewer(&harness).photo_rect().unwrap();
+    assert!(
+        photo.left() > screen.left() + 40.0,
+        "fitted, it stays in the media area: {photo:?}"
+    );
+}
+
+/// REQ-009-20: with the info panel open, the zoomed photo pans up to the panel's edge.
+#[test]
+fn req_009_20_stops_at_the_info_panel() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture, 3, &[]);
+    open(&mut harness, "1.png");
+    harness.key_press(Key::I);
+    harness.run_steps(5);
+    assert!(viewer(&harness).info_open());
+    let panel = harness.ctx.content_rect().right() - 12.0 - app::info::WIDTH;
+
+    zoom_and_pan(&mut harness, egui::vec2(-200.0, 0.0));
+    let photo = viewer(&harness).photo_rect().unwrap();
+    assert!(
+        (photo.right() - panel).abs() < 1.0,
+        "{photo:?} beside the panel at {panel}"
+    );
 }
 
 /// REQ-009-13: photos up to two places around the shown one load ahead; stepping to one shows its original at once;
@@ -662,12 +731,14 @@ fn req_009_03_a_click_beside_a_zoomed_photo_closes() {
     let fixture = Fixture::new();
     let mut harness = app(&fixture, 3, &[]);
     open(&mut harness, "1.png");
-    for _ in 0..6 {
+    for _ in 0..2 {
         harness.key_press(Key::Plus);
         harness.run_steps(1);
     }
-    // The zoomed photo reaches past the media area into the strip below it.
-    click_at(&mut harness, pos2(450.0, 590.0));
+    // Zoomed 1.56×, the photo is 625 × 469 in the middle of the 900 × 600 window: below it the scrim shows.
+    let photo = viewer(&harness).photo_rect().unwrap();
+    assert!(photo.bottom() < 560.0, "{photo:?}");
+    click_at(&mut harness, pos2(450.0, 580.0));
     std::thread::sleep(std::time::Duration::from_millis(400));
     harness.run_steps(2);
     assert!(harness.state().viewer.is_none());
