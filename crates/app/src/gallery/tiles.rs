@@ -14,7 +14,7 @@ use eframe::egui::{self, Color32, Rect, Vec2, pos2, vec2};
 use web_time::Instant;
 
 /// Solid badges on tiles (`docs/design.md`: never glass on tiles).
-const BADGE: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 153);
+pub(super) const BADGE: Color32 = Color32::from_rgba_premultiplied(0, 0, 0, 153);
 /// A tile under the pointer is this much darker (REQ-025-13).
 const HOVER_DARKEN: Color32 = Color32::from_black_alpha(38);
 /// A tile a Shift-click would add is this much brighter (REQ-025-14).

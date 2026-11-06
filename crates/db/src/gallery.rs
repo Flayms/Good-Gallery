@@ -232,6 +232,17 @@ fn layout_query(conn: &Connection, search: &GallerySearch) -> Result<(String, Ve
     Ok((sql, params))
 }
 
+/// How many media items match `search` (REQ-034-02).
+pub fn count(conn: &Connection, search: &GallerySearch) -> Result<u64> {
+    let (clause, params) = filters(conn, search)?;
+    let count: i64 = conn.query_row(
+        &format!("SELECT count(*) FROM media {clause}"),
+        rusqlite::params_from_iter(params),
+        |row| row.get(0),
+    )?;
+    Ok(count.max(0) as u64)
+}
+
 /// Ids and aspects of every match in sort order, with the day groups of a date sort.
 pub fn layout(conn: &Connection, search: &GallerySearch) -> Result<GalleryLayout> {
     let (sql, params) = layout_query(conn, search)?;

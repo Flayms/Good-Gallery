@@ -5,6 +5,8 @@ use serde_json::{Value, json};
 /// A sidebar group the user can move or switch off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SidebarGroup {
+    /// Smart albums (REQ-034-02).
+    Albums,
     People,
     Places,
     Ratings,
@@ -13,11 +15,12 @@ pub enum SidebarGroup {
 
 impl SidebarGroup {
     /// The default order.
-    pub const ALL: [Self; 4] = [Self::People, Self::Places, Self::Ratings, Self::Tags];
+    pub const ALL: [Self; 5] = [Self::Albums, Self::People, Self::Places, Self::Ratings, Self::Tags];
 
     /// How it is stored; also the id of its collapsed state (`sidebar.group.<key>`).
     pub fn key(self) -> &'static str {
         match self {
+            Self::Albums => "albums",
             Self::People => "people",
             Self::Places => "places",
             Self::Ratings => "ratings",
@@ -32,6 +35,7 @@ impl SidebarGroup {
     /// Its name in the UI.
     pub fn label(self) -> &'static str {
         match self {
+            Self::Albums => "Smart albums",
             Self::People => "People",
             Self::Places => "Places",
             Self::Ratings => "Ratings",
@@ -144,18 +148,21 @@ mod tests {
     #[test]
     fn req_008_10_moves_groups_and_switches_them_off() {
         let mut layout = SidebarLayout::default();
-        layout.move_up(Ratings);
-        layout.move_up(Ratings);
-        layout.move_up(Ratings);
-        assert_eq!(order(&layout), [Ratings, People, Places, Tags]);
+        for _ in 0..4 {
+            layout.move_up(Ratings);
+        }
+        assert_eq!(order(&layout), [Ratings, Albums, People, Places, Tags]);
         layout.move_down(People);
         layout.move_down(Tags);
-        assert_eq!(order(&layout), [Ratings, Places, People, Tags]);
+        assert_eq!(order(&layout), [Ratings, Albums, Places, People, Tags]);
 
         layout.set_shown(Places, false);
-        assert_eq!(layout.shown().collect::<Vec<_>>(), [Ratings, People, Tags]);
+        assert_eq!(layout.shown().collect::<Vec<_>>(), [Ratings, Albums, People, Tags]);
         layout.set_shown(Places, true);
-        assert_eq!(layout.shown().collect::<Vec<_>>(), [Ratings, Places, People, Tags]);
+        assert_eq!(
+            layout.shown().collect::<Vec<_>>(),
+            [Ratings, Albums, Places, People, Tags]
+        );
     }
 
     #[test]
@@ -167,7 +174,7 @@ mod tests {
 
         let odd = json!([
             {"group": "tags", "shown": false},
-            {"group": "albums", "shown": true},
+            {"group": "faces", "shown": true},
             {"group": "tags", "shown": true},
             "places",
             {"group": "ratings"},
@@ -175,7 +182,13 @@ mod tests {
         let repaired = SidebarLayout::from_value(&odd);
         assert_eq!(
             repaired.groups(),
-            [(Tags, false), (Ratings, true), (People, true), (Places, true)]
+            [
+                (Tags, false),
+                (Ratings, true),
+                (Albums, true),
+                (People, true),
+                (Places, true)
+            ]
         );
         assert_eq!(SidebarLayout::from_value(&json!("people")), SidebarLayout::default());
     }
@@ -185,7 +198,13 @@ mod tests {
         let default = SidebarLayout::default();
         assert_eq!(
             default.groups(),
-            [(People, true), (Places, true), (Ratings, true), (Tags, true)]
+            [
+                (Albums, true),
+                (People, true),
+                (Places, true),
+                (Ratings, true),
+                (Tags, true)
+            ]
         );
         assert!(default.is_default());
         let mut changed = default.clone();

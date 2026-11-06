@@ -116,3 +116,64 @@ pub fn dialog(ctx: &egui::Context, id: &str, title: &str, text: &str, buttons: &
     }
     decided
 }
+
+/// A dialog with `title`, a text field holding `name`, `verb` and _Cancel_. `Some(true)` once confirmed (the button or
+/// Enter, with a name that isn't blank), `Some(false)` once cancelled (_Cancel_, Escape or a click beside it).
+pub fn name_dialog(ctx: &egui::Context, id: &str, title: &str, name: &mut String, verb: &str) -> Option<bool> {
+    let mut decided = None;
+    let filled = !name.trim().is_empty();
+    let modal = egui::Modal::new(egui::Id::unique(id))
+        .frame(
+            Frame::new()
+                .fill(theme::raised())
+                .stroke(Stroke::new(1.0, theme::rim()))
+                .corner_radius(CornerRadius::same(theme::RADIUS_PANEL))
+                .inner_margin(Margin::same(20)),
+        )
+        .show(ctx, |ui| {
+            crate::glass::behind_frame(ui, Margin::same(20), |ui| {
+                ui.set_width(360.0);
+                ui.label(RichText::new(title).font(FontId::new(theme::SIZE_TITLE, theme::semibold())));
+                ui.add_space(theme::SPACE * 3.0);
+                let field = ui.add(
+                    egui::TextEdit::singleline(name)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("Name"),
+                );
+                let field_id = egui::Id::unique(id).with("focused");
+                // Focused once when the dialog opens, ready for typing.
+                if !ui.data(|data| data.get_temp::<bool>(field_id).unwrap_or(false)) {
+                    field.request_focus();
+                    ui.data_mut(|data| data.insert_temp(field_id, true));
+                }
+                if filled && field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                    decided = Some(true);
+                }
+                ui.add_space(theme::SPACE * 4.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let confirm = egui::Button::new(
+                        RichText::new(verb)
+                            .color(theme::base())
+                            .font(FontId::new(theme::SIZE_BODY, theme::semibold())),
+                    )
+                    .fill(theme::text());
+                    if ui.add_enabled(filled, confirm).clicked() {
+                        decided = Some(true);
+                    }
+                    if ui
+                        .add(egui::Button::new("Cancel").stroke(Stroke::new(1.0, theme::rim())))
+                        .clicked()
+                    {
+                        decided = Some(false);
+                    }
+                });
+            });
+        });
+    if modal.should_close() && decided.is_none() {
+        decided = Some(false);
+    }
+    if decided.is_some() {
+        ctx.data_mut(|data| data.remove::<bool>(egui::Id::unique(id).with("focused")));
+    }
+    decided
+}

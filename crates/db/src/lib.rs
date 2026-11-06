@@ -10,6 +10,7 @@ pub mod libraries;
 pub mod media;
 mod migrate;
 pub mod settings;
+pub mod smart_albums;
 pub mod tags;
 pub mod thumbs;
 pub mod writer;

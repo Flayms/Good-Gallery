@@ -1,6 +1,6 @@
 # 035 · Rename many files
 
-**Status:** Draft
+**Status:** Approved
 
 ## Goal
 

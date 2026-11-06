@@ -68,11 +68,20 @@ Users who find a sideways photo or one with something distracting at its edge fi
 - **And** a region entirely outside the crop isn't shown, and a region partly outside is cut at the crop's edge
 - **And** People tags stay as they are, also for a person cropped away
 
+### REQ-029-09 · Smaller size
+
+- **Given** a photo in editing mode
+- **When** the user sets its long edge in pixels, or picks 75 %, 50 % or 25 %, in the _Size_ section
+- **Then** the saved photo has that long edge, after the crop and turns, with its aspect ratio kept, and the section shows the size it will have ("1920 × 1440")
+- **And** it can't be larger than the photo after its crop: there is no enlarging, and a crop made smaller afterwards saves at the crop's own size
+- **And** like any adjustment it can be undone, reset and changed later (REQ-029-05, REQ-029-07)
+
 ## Out of scope
 
 - Straightening by a free angle and flipping.
+- Enlarging, and scaling videos (#205).
 - Rotating without opening the editor, or several selected photos at once.
-- A lossless save for a rotate-only edit (writing the orientation tag instead of new pixels). A JPEG is re-encoded once at quality 95, like any edit.
+- A lossless save for a rotate-only edit (writing the orientation tag instead of new pixels). A JPEG is re-encoded once at the edit's quality (REQ-021-21), like any edit.
 - Videos and the formats spec 021 doesn't edit, and the browser version.
 - Rewriting another tool's sidecar.
 
@@ -93,3 +102,4 @@ Users who find a sideways photo or one with something distracting at its edge fi
 | REQ-029-06 | `crates/domain/src/edit.rs` › req_029_06_the_crop_in_pixels_stays_inside_the_photo; `crates/media/src/edit.rs` › req_029_06_saves_the_cropped_turned_pixels, req_029_06_keeps_16_bits (exiftool); `crates/app/tests/edit.rs` › req_029_06_saves_what_the_frame_holds; the tile's new shape checked in the running app | pass |
 | REQ-029-07 | `crates/domain/src/edit.rs` › req_029_07_crop_and_turns_round_trip_and_hostile_ones_are_tamed, req_029_07_the_originals_size_follows_from_the_outputs; `crates/media/src/edit.rs` › req_029_07_editing_again_and_reverting_bring_back_the_whole_photo (exiftool) | pass |
 | REQ-029-08 | `crates/domain/src/edit.rs` › req_029_08_places_rectangles_on_the_output; `crates/meta/src/rules.rs` › req_029_08_moves_a_sidecars_regions_by_the_saved_edit, req_029_08_places_regions_on_the_output_and_names_who_is_gone; `crates/media/src/edit.rs` › req_029_08_saved_regions_mark_the_same_faces (exiftool) | pass |
+| REQ-029-09 | `crates/domain/src/edit.rs` › req_029_09_scales_the_long_edge_down_and_never_up, req_029_09_req_021_21_size_and_quality_are_changes_and_round_trip; `crates/media/src/edit.rs` › req_029_09_saves_at_the_smaller_size; `crates/app/tests/edit.rs` › req_029_09_req_021_21_the_size_section_sets_the_long_edge_and_the_quality (snapshot `edit_size`) | pass |

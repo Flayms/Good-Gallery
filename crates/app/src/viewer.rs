@@ -6,7 +6,7 @@
 //! the video (REQ-009-06). A photo can be edited (spec 021): the adjustments panel takes the info panel's place and
 //! the photo shows through the recipe (`edit`).
 
-use crate::edit::{self, Dialog, EditSession, Leave, Outcome};
+use crate::edit::{self, Dialog, EditSession, Leave, Outcome, SaveMode};
 use crate::gallery::{self, Gallery, MediaAction};
 use crate::icons::{self, Icon};
 use crate::originals::{OriginalRequest, OriginalState, Originals};
@@ -1804,7 +1804,7 @@ impl Viewer {
                     &text,
                     &["Save", "Discard", "Cancel"],
                 ) {
-                    Some(0) => outcome = session.save(false, Some(leave)),
+                    Some(0) => outcome = session.save(SaveMode::Replace, Some(leave)),
                     Some(1) => {
                         session.dialog = None;
                         outcome = Some(Outcome::Leave(leave));
@@ -1825,7 +1825,24 @@ impl Viewer {
                     &text,
                     &["Replace", "Cancel"],
                 ) {
-                    Some(0) => outcome = session.save(false, then),
+                    Some(0) => outcome = session.save(SaveMode::Replace, then),
+                    Some(_) => session.dialog = None,
+                    None => {}
+                }
+            }
+            Dialog::WithoutBackup(then) => {
+                let text = format!(
+                    "The edited photo replaces {name}, and its original is deleted. The edit can't be changed or \
+                     undone afterwards."
+                );
+                match crate::widgets::dialog(
+                    ctx,
+                    "edit-without-backup",
+                    "Save without a backup?",
+                    &text,
+                    &["Save without backup", "Cancel"],
+                ) {
+                    Some(0) => outcome = session.save(SaveMode::WithoutBackup, then),
                     Some(_) => session.dialog = None,
                     None => {}
                 }

@@ -394,6 +394,15 @@ fn filters_menu(ui: &mut egui::Ui, gallery: &mut Gallery) {
     {
         search.clear_filters();
     }
+    // Below the filters, as it keeps them all with the tags and the file name (REQ-034-01).
+    if ui
+        .add_enabled(gallery.can_save_album(), egui::Button::new("Save as smart album…"))
+        .clicked()
+    {
+        gallery.set_search(search.clone());
+        gallery.ask_save_album();
+        ui.close();
+    }
     gallery.set_search(search);
 }
 

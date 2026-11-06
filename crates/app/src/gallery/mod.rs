@@ -2,8 +2,10 @@
 //! only what is near the viewport drawn: tiles (`tiles`) or list rows (`list`), with thumbnails streamed from the
 //! thumbnail cache.
 
+mod albums;
 mod list;
 mod tiles;
+mod years;
 
 use crate::icons::Icon;
 use crate::textures::{TextureRequest, TextureStreamer};
@@ -154,6 +156,8 @@ pub struct SidebarData {
     pub other_tags: Vec<TagCount>,
     /// The folder tree of the selected library.
     pub folders: Option<(i64, Vec<FolderNode>)>,
+    /// Smart albums by name, with their counts (REQ-034-02).
+    pub albums: Vec<db::smart_albums::AlbumRow>,
 }
 
 /// Most used tags outside both categories in the sidebar (REQ-008-05).
@@ -194,6 +198,7 @@ fn load_sidebar(conn: &Connection, library: Option<i64>) -> db::Result<SidebarDa
         popular: db::tags::popular(conn, POPULAR_TAGS)?,
         other_tags: db::tags::popular(conn, SUGGESTED_TAGS)?,
         folders,
+        albums: db::smart_albums::rows(conn)?,
     })
 }
 
@@ -434,6 +439,8 @@ pub struct Gallery {
     faces: Option<(i64, Option<Vec<db::faces::ShownFace>>)>,
     /// The groups of unknown faces, until something changes (REQ-032-15).
     face_groups: Option<Option<Vec<FaceGroup>>>,
+    /// The dialog naming a smart album, while open (REQ-034-01, REQ-034-05).
+    album_dialog: Option<albums::NameDialog>,
     /// A context menu's choice this frame.
     menu_action: Option<(usize, MediaAction)>,
     /// The item under the pointer in the last frame.
@@ -506,6 +513,7 @@ impl Gallery {
             detail: None,
             faces: None,
             face_groups: None,
+            album_dialog: None,
             menu_action: None,
             hovered: None,
             range_preview: None,
@@ -545,7 +553,7 @@ impl Gallery {
         self.reload_sidebar();
     }
 
-    fn reload_sidebar(&mut self) {
+    pub(crate) fn reload_sidebar(&mut self) {
         self.loader.send(Request::Sidebar {
             library: self.search.library,
         });
@@ -1445,7 +1453,7 @@ impl Gallery {
         } else if let Some(top) = self.viewed.and_then(|(index, _)| self.reveal(&arranged, index, count)) {
             scroll = scroll.vertical_scroll_offset(top);
         }
-        scroll.show_viewport(ui, |ui, viewport| {
+        let output = scroll.show_viewport(ui, |ui, viewport| {
             self.offset = viewport.min.y;
             self.view_height = viewport.height() - inset_top;
             ui.set_min_height(total + inset_top + PADDING);
@@ -1469,6 +1477,13 @@ impl Gallery {
                 self.selection.clear();
             }
         });
+        self.year_labels(
+            ui,
+            &arranged,
+            scroll_bar_rect(area, list),
+            output.content_size.y,
+            output.inner_rect.height(),
+        );
         self.arranged = Some(arranged);
         if list {
             list::column_header(ui, area, self.list_width);

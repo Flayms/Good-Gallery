@@ -161,6 +161,9 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     }
     confirm_revert(&ctx, state);
     confirm_many(&ctx, state);
+    if let Some(gallery) = &mut state.gallery {
+        gallery.album_dialog(&ctx);
+    }
     state.toasts.show(&ctx);
     // Over the viewer they go with its dark look (REQ-020-05).
     if state.viewer.is_some() {

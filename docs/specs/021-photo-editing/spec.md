@@ -146,6 +146,27 @@ Users who find a photo that is too dark, has a color cast or lacks punch fix it 
 - **Then** either the old or the new file is in place, never an empty or partial one, the backup is never lost, and a failure shows an error toast while editing stays open
 - **And** the new file is on disk before it takes the old one's place, and it is never renamed over an existing file (REQ-024-06)
 
+### REQ-021-21 · Quality
+
+- **Given** a JPEG or WebP photo in editing mode
+- **When** the user sets _Quality_ in the _Size_ section, from 10 to 100
+- **Then** the saved file is encoded at that quality, 95 unless changed, so a lower one makes a smaller file
+- **And** a WebP saved lossless stays lossless, and PNG photos have no quality to set
+
+### REQ-021-22 · Save without backup
+
+- **Given** editing with changes, or a photo saved with an edit before
+- **When** the user chooses _Save without backup_ beside _Save_, and confirms, every time
+- **Then** the file is replaced with the edited photo, and the unedited original's backup is deleted, if there is one, so the photo takes no more space than the file itself
+- **And** the file keeps no edit settings: editing it again starts from the saved photo, and _Revert to original_ isn't offered
+- **And** the original of an edited copy, which is a file of its own, stays
+
+### REQ-021-23 · What each save does
+
+- **Given** the save buttons in editing mode
+- **When** the pointer rests on one
+- **Then** it says what happens to the photo and its original: _Save_ replaces it and keeps the original as a backup, _Save as copy_ leaves it and adds the edited photo beside it, _Save without backup_ replaces it and deletes the original for good
+
 ## Out of scope
 
 - Crop and rotate, which are in spec 029.
@@ -184,3 +205,6 @@ Users who find a photo that is too dark, has a color cast or lacks punch fix it 
 | REQ-021-14 | `crates/media/src/edit.rs` › req_021_09_req_021_14_saves_a_copy_beside_the_original_with_its_metadata_and_sidecar, req_021_14_bakes_the_orientation_into_the_pixels, req_021_14_baking_the_orientation_moves_the_regions (exiftool) | pass |
 | REQ-021-15 | `crates/media/src/edit.rs` › req_021_15_keeps_or_updates_the_date_modified (exiftool); `crates/db/src/settings.rs` › req_021_15_stores_the_date_modified_choice_and_falls_back_to_keep; `crates/app/tests/edit.rs` › req_021_15_the_date_modified_setting_is_on_the_settings_page | pass |
 | REQ-021-16 | `crates/media/src/edit.rs` › req_021_16_a_failed_save_leaves_the_original_and_no_temporary_file, req_021_16_a_read_only_folder_fails_and_changes_nothing, req_021_16_a_lost_replacement_leaves_the_original, req_021_16_reverting_never_loses_the_backup (exiftool); `crates/app/tests/edit.rs` › req_021_16_a_failed_save_keeps_editing_open | pass |
+| REQ-021-21 | `crates/domain/src/edit.rs` › req_029_09_req_021_21_size_and_quality_are_changes_and_round_trip; `crates/media/src/edit.rs` › req_021_21_a_lower_quality_makes_a_smaller_file; `crates/app/tests/edit.rs` › req_029_09_req_021_21_the_size_section_sets_the_long_edge_and_the_quality | pass |
+| REQ-021-22 | `crates/media/src/edit.rs` › req_021_22_saves_without_a_backup_and_deletes_an_old_one, req_021_22_an_edited_copy_leaves_its_original; `crates/app/tests/edit.rs` › req_021_22_saves_without_a_backup_after_asking | pass |
+| REQ-021-23 | `crates/app/tests/edit.rs` › req_021_23_the_save_buttons_say_what_they_do | pass |
