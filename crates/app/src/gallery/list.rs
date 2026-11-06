@@ -130,8 +130,11 @@ impl Gallery {
             self.hovered = Some(index);
         }
         let selected = self.selection.contains(id);
+        let items = self.items.get(&id).map_or_else(super::MenuItems::default, |item| {
+            super::MenuItems::for_item(item.kind, &item.file_name)
+        });
         response.context_menu(|ui| {
-            if let Some(action) = super::context_menu(ui, selected) {
+            if let Some(action) = super::context_menu(ui, selected, items) {
                 self.menu_action = Some((index, action));
             }
         });

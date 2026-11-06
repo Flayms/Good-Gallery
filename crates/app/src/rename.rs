@@ -85,6 +85,11 @@ impl RenameDialog {
     }
 
     /// The preview's rows, once loaded.
+    /// How many items it renames.
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
     pub fn rows(&self) -> &[Row] {
         &self.rows
     }

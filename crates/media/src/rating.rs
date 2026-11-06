@@ -12,6 +12,8 @@ pub enum WriteError {
     ReadOnly,
     #[error("the path leaves its library")]
     UnsafePath,
+    #[error("its format has no orientation to turn")]
+    NoOrientation,
     #[error("exiftool: {0}")]
     Exiftool(String),
     #[error(transparent)]

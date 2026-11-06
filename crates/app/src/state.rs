@@ -221,6 +221,8 @@ pub enum Many {
     Rate(Option<i64>),
     /// Add the tag with this path (REQ-026-06).
     Tag(Vec<String>),
+    /// Turn photos a quarter by their orientation tag (REQ-009-22).
+    Turn(domain::orientation::Turn),
 }
 
 impl Many {
@@ -231,6 +233,8 @@ impl Many {
             Self::Rate(Some(stars)) => (format!("Rate {count} items with {stars} stars?"), "Rate"),
             Self::Rate(None) => (format!("Remove the rating of {count} items?"), "Remove rating"),
             Self::Tag(path) => (format!("Tag {count} items with {}?", tag_name(path)), "Tag"),
+            Self::Turn(domain::orientation::Turn::Left) => (format!("Rotate {count} photos left?"), "Rotate"),
+            Self::Turn(domain::orientation::Turn::Right) => (format!("Rotate {count} photos right?"), "Rotate"),
         }
     }
 }
@@ -249,6 +253,8 @@ struct ChangedMany {
     what: Many,
     /// The files changed, by library: read again on the next changes scan.
     changed: Vec<(i64, String)>,
+    /// The media items changed.
+    media: Vec<i64>,
     failed: usize,
     /// The first file that couldn't be changed, and why.
     first_failure: Option<(String, String)>,
@@ -885,13 +891,16 @@ impl AppState {
         self.toasts.success(match &change.what {
             Many::Rate(_) => format!("Rating {count} items…"),
             Many::Tag(_) => format!("Tagging {count} items…"),
+            Many::Turn(_) => format!("Rotating {count} photos…"),
         });
+        let cache = self.thumbnail_cache();
         self.spawn_write(move || {
             let files = db::media::files_of(&lock(&db), &change.ids).map_err(|error| error.to_string());
             Event::ChangedMany(files.map(|files| {
                 let mut done = ChangedMany {
                     what: change.what.clone(),
                     changed: Vec::new(),
+                    media: Vec::new(),
                     failed: 0,
                     first_failure: None,
                 };
@@ -907,6 +916,11 @@ impl AppState {
                             media::tagging::write(&exiftool, library, &file.rel_path, file.kind, &tag)
                                 .map(|()| db::media::mark_for_reading(&lock(&db), file.id))
                         }
+                        // A new thumbnail, and the faces looked for again on the turned photo.
+                        Many::Turn(turn) => media::rotate::turn(&exiftool, library, &file.rel_path, *turn).map(|_| {
+                            forget_index_entry(Some(&db), cache.as_ref(), file.root_id, &file.rel_path);
+                            db::faces::look_again(&lock(&db), Some(file.id)).map(|()| true)
+                        }),
                     };
                     match written {
                         Ok(indexed) => {
@@ -914,6 +928,7 @@ impl AppState {
                                 tracing::error!("can't update the index for {}: {error}", file.rel_path);
                             }
                             done.changed.push((file.root_id, file.rel_path));
+                            done.media.push(file.id);
                         }
                         Err(error) => {
                             tracing::error!("can't change {}: {error}", file.rel_path);
@@ -1848,11 +1863,18 @@ impl AppState {
                     for (root_id, paths) in by_library {
                         self.scans.request_paths(root_id, paths);
                     }
+                    // The viewer shows a turned photo anew.
+                    if let (Many::Turn(_), Some(originals)) = (&done.what, &mut self.originals) {
+                        for media in &done.media {
+                            originals.forget(*media);
+                        }
+                    }
                     self.refresh();
                     let changed = format::count(done.changed.len() as u64);
                     let (did, verb) = match &done.what {
                         Many::Rate(_) => (format!("Rated {changed} items"), "rate"),
                         Many::Tag(path) => (format!("Tagged {changed} items with {}", tag_name(path)), "tag"),
+                        Many::Turn(_) => (format!("Rotated {changed} photos"), "rotate"),
                     };
                     match done.first_failure {
                         None => self.toasts.success(did),

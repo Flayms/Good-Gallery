@@ -232,6 +232,14 @@ fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
         Some(viewer::Action::SaveEdit(request)) => state.save_edit(*request),
         Some(viewer::Action::Revert(target)) => state.confirm_revert = Some(target),
         Some(viewer::Action::Rate(rate)) => state.rate(rate),
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(viewer::Action::Rename(id)) => state.open_rename(vec![id]),
+        #[cfg(target_arch = "wasm32")]
+        Some(viewer::Action::Rename(_)) => {}
+        Some(viewer::Action::Turn(id, turn)) => state.ask_change_many(state::ChangeMany {
+            ids: vec![id],
+            what: state::Many::Turn(turn),
+        }),
         Some(viewer::Action::Tag(change)) => state.tag(change),
         Some(viewer::Action::Face(face)) => state.face_action(face),
         #[cfg(not(target_arch = "wasm32"))]
@@ -478,7 +486,24 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
             }
             Some((index, gallery::MediaAction::Information)) => state.info_sheet = gallery.id_at(index),
             Some((index, gallery::MediaAction::Select)) => gallery.toggle_selected_at(index),
+            // On the selection if the item is in it, else on the item (REQ-009-21).
+            #[cfg(not(target_arch = "wasm32"))]
+            Some((index, gallery::MediaAction::Rename)) => rename = Some(gallery.menu_targets(index)),
+            Some((index, gallery::MediaAction::Rate(rating))) => {
+                change_many = Some(state::ChangeMany {
+                    ids: gallery.menu_targets(index),
+                    what: state::Many::Rate(rating),
+                });
+            }
+            Some((index, gallery::MediaAction::Turn(turn))) => {
+                change_many = Some(state::ChangeMany {
+                    ids: gallery.menu_targets(index),
+                    what: state::Many::Turn(turn),
+                });
+            }
             Some((_, gallery::MediaAction::Edit | gallery::MediaAction::Revert)) | None => {}
+            #[cfg(target_arch = "wasm32")]
+            Some((_, gallery::MediaAction::Rename)) => {}
         }
     }
     if let Some(change) = change_many {

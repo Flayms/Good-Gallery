@@ -17,6 +17,7 @@ pub mod folders;
 pub mod layout;
 pub mod look;
 pub mod media;
+pub mod orientation;
 pub mod paint;
 pub mod rating;
 pub mod rename;

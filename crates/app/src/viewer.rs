@@ -71,6 +71,10 @@ pub enum Action {
     Face(crate::state::FaceAction),
     /// Add the folder of the file outside every library as a library (REQ-033-04); the viewer stays.
     AddFolder,
+    /// Open the rename dialog for this item (REQ-009-21); the viewer stays.
+    Rename(i64),
+    /// Turn this photo a quarter by its orientation tag (REQ-009-22); the viewer stays.
+    Turn(i64, domain::orientation::Turn),
 }
 
 /// What a face's popup is about.
@@ -961,11 +965,29 @@ impl Viewer {
                             edit.replaced_original(&detail.rel_path)
                                 .then(|| crate::state::RevertTarget::of(detail))
                         });
-                    backdrop.context_menu(|ui| match gallery::context_menu_with(ui, editable, revert.is_some()) {
+                    // Rename, rate and rotate an indexed item, not while it is edited (REQ-009-21).
+                    let items = gallery::MenuItems {
+                        edit: editable,
+                        revert: revert.is_some(),
+                        write: self.indexed && self.edit.is_none(),
+                        ..gallery::MenuItems::for_item(item.kind, &item.file_name)
+                    };
+                    backdrop.context_menu(|ui| match gallery::context_menu_with(ui, items) {
                         Some(MediaAction::ShowInExplorer) => action = Self::explorer_action(item, libraries),
                         Some(MediaAction::Information) => self.info_open = true,
                         Some(MediaAction::Edit) => self.toggle_edit = true,
                         Some(MediaAction::Revert) => action = revert.clone().map(Action::Revert),
+                        Some(MediaAction::Rename) => action = Some(Action::Rename(item.id)),
+                        Some(MediaAction::Rate(rating)) => {
+                            action = Some(Action::Rate(crate::state::Rate {
+                                media: item.id,
+                                root_id: item.root_id,
+                                rel_path: item.rel_path.clone(),
+                                kind: item.kind,
+                                rating,
+                            }));
+                        }
+                        Some(MediaAction::Turn(turn)) => action = Some(Action::Turn(item.id, turn)),
                         Some(MediaAction::Select) | None => {}
                     });
                 }

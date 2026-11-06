@@ -16,6 +16,7 @@ pub mod original;
 pub mod rating;
 pub mod rename;
 pub mod replace;
+pub mod rotate;
 pub mod subject;
 pub mod tagging;
 pub mod thumbnail;
