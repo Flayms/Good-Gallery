@@ -98,7 +98,7 @@ There is no async runtime: work runs on OS threads that talk over channels (`cro
 - egui draws everything with its own painter on wgpu. Thumbnails, originals and video frames are our own `wgpu::Texture`s (with mips), created off the UI thread and registered with egui's renderer.
 - The gallery lays out all tiles up front (`domain::layout`), so the scroll length is exact; only tiles near the viewport are drawn and only their data and textures are loaded. A byte budget (LRU) bounds GPU memory.
 - **Glass** (`app::glass`) blurs what lies under the toolbar, menus and the viewer's chrome in a paint callback: a recorded backdrop rendered at half resolution, a dual-Kawase blur, then tint and rounded corners. Without a wgpu render state (kittest) or with reduced transparency (the setting, or the OS), surfaces are opaque.
-- **Photo editing** previews the recipe with `edit.wgsl` in a paint callback over the original's texture; saving runs the same formulas on the CPU at full resolution (`media::edit`).
+- **Photo editing** previews the recipe with `edit.wgsl` in a paint callback over the original's texture; saving runs the same formulas on the CPU at full resolution (`media::edit`). A lens blur also samples a pyramid of brightness-weighted pixels, built once per photo from its texture by `lens.wgsl`.
 - **Theme:** `theme` holds a dark and a light palette named by role; `theme::begin_frame` picks the current one each frame.
 
 ## Platforms

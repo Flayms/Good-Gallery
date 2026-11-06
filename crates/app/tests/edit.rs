@@ -800,6 +800,59 @@ fn req_023_01_req_023_02_req_023_03_chooses_a_blur_and_places_its_focus() {
     assert!(harness.query_by_label("Place focus").is_none());
 }
 
+/// A night scene: small lights on a dark street, which a lens blur turns into discs (REQ-023-05).
+fn lights_photo(dir: &Path) {
+    let lights = image::RgbImage::from_fn(480, 320, |x, y| {
+        let near = [
+            (80, 90),
+            (200, 60),
+            (330, 110),
+            (410, 70),
+            (140, 230),
+            (290, 250),
+            (420, 260),
+        ]
+        .iter()
+        .any(|&(lx, ly): &(i32, i32)| (x as i32 - lx).abs() <= 2 && (y as i32 - ly).abs() <= 2);
+        if near {
+            image::Rgb([255, 236, 190])
+        } else {
+            image::Rgb([18, 22, 40 + (y / 16) as u8])
+        }
+    });
+    lights.save(dir.join("a.jpg")).unwrap();
+}
+
+/// REQ-023-05: a blur is _Soft_ until _Lens_ is chosen, which spreads the lights into discs.
+#[test]
+fn req_023_05_chooses_lens_blur() {
+    let fixture = Fixture::new();
+    let (mut harness, dir) = app(&fixture, None, None);
+    lights_photo(&dir);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    harness.set_size(egui::vec2(900.0, 800.0));
+    harness.run_steps(2);
+    for section in ["Crop and rotate", "Look", "Light", "Color", "Effects"] {
+        harness.get_by_role_and_label(Role::Button, section).click();
+        harness.run_steps(2);
+    }
+    assert!(harness.query_by_label("Lens").is_none(), "no blur, no lens");
+    harness.get_by_role_and_label(Role::Button, "Radial").click();
+    harness.run_steps(2);
+    assert!(!session(&harness).unwrap().recipe().blur_lens, "soft first");
+    harness.get_by_role_and_label(Role::Button, "Lens").click();
+    harness.run_steps(2);
+    let recipe = session(&harness).unwrap().recipe().clone();
+    assert!(recipe.blur_lens && recipe.blur_kind == BlurKind::Radial);
+    harness.run_steps(4);
+    harness.snapshot(common::snapshot_name("edit_lens"));
+
+    harness.get_by_role_and_label(Role::Button, "Soft").click();
+    harness.run_steps(2);
+    assert!(!session(&harness).unwrap().recipe().blur_lens);
+}
+
 /// REQ-028-01, REQ-028-02, REQ-028-03: _Look_ offers the film looks; a picked one shows _Strength_ and _Grain_, each
 /// pick is one undo step, and _None_ takes it away.
 #[test]
