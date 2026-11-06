@@ -116,9 +116,9 @@ Users with large libraries want to find people without tagging each photo by han
 
 ### REQ-032-15 · Groups of unknown faces
 
-- **Given** unknown faces of the chosen recognition model
-- **When** the user opens _People_ from the sidebar's People group
-- **Then** similar faces form groups, largest first, without groups of fewer than three
+- **Given** unknown faces of the chosen recognition model, without a suggestion (REQ-032-24)
+- **When** the user opens _Unconfirmed faces_ from the sidebar's People group
+- **Then** similar faces form groups, largest first, without groups of fewer than three, below the faces to confirm
 - **And** each face in a group on screen shows as a crop of its photo, soon after and while the page stays open; a photo without a thumbnail shows an empty square
 - **And** the user can name a group, which asks first and then writes to all its photos, _Ignore_ it, or take a wrong face out of it
 
@@ -180,9 +180,34 @@ Users with large libraries want to find people without tagging each photo by han
 - **Then** each photo's faces are recognized right after it was looked at, before the next photo, so suggestions appear during the first pass, and the photo is read and decoded once for both steps
 - **And** faces waiting for a recognition model chosen later are recognized once no photos are waiting (REQ-032-16)
 
+### REQ-032-24 · Recognized faces to confirm
+
+- **Given** unknown faces of the chosen recognition model with a suggestion (REQ-032-10)
+- **When** the user opens _Unconfirmed faces_
+- **Then** they come first, one group per suggested person, largest first, titled with the name as a question ("Anna? · 14 faces")
+- **And** _Yes, all_ asks first and then writes the name to all of the group's photos, as naming a group does (REQ-032-15)
+- **And** a face's ✕ says _Not Anna_: that person is no longer suggested for it (REQ-032-10), and it joins the unknown faces or another person's group
+
+### REQ-032-25 · Taking a face out of a group
+
+- **Given** a group of unknown faces
+- **When** the user chooses a face's ✕ (_Not one of them_)
+- **Then** the face leaves the groups for good, also when they are formed again
+- **And** it stays an unknown face: the viewer still shows it with its suggestion, and it still counts as a face to confirm (REQ-032-24)
+- **And** _Ignore_ for the whole group stays as it was (REQ-032-11)
+
+### REQ-032-26 · The whole photo
+
+- **Given** a face on _Unconfirmed faces_
+- **When** the user clicks it
+- **Then** the viewer opens on its photo, with face regions shown (REQ-009-17), and the filmstrip, ← and → go through that group's photos only
+- **And** the faces can be named or rejected there as in any photo (REQ-032-09)
+- **And** closing the viewer returns to _Unconfirmed faces_, with the gallery's search as it was
+
 ## Out of scope
 
 - Videos, pets and the browser version.
+- Merging two people, and a page of confirmed people: the sidebar's People group lists them.
 - Showing unnamed face regions of other programs: they stay in the file, and the detector usually finds the same faces.
 - A graphics card: models run on the CPU (see the plan).
 - Models in other formats than ONNX, and detection models of an output format the app doesn't know.
@@ -220,3 +245,6 @@ Users with large libraries want to find people without tagging each photo by han
 | REQ-032-22 | `crates/db/src/faces.rs` › req_032_22_looks_again_and_decisions_stay; `crates/app/tests/faces.rs` › req_032_22_look_again_from_the_details, req_032_22_look_through_all_again_asks_first | pass |
 | REQ-032-23 | `crates/indexer/src/faces.rs` › req_032_23_recognizes_a_photos_faces_right_after_looking_at_it, req_032_23_only_looks_without_a_recognition_model_and_catches_up_with_one; `crates/db/src/faces.rs` › req_032_23_only_the_open_faces_of_that_photo | pass |
 | REQ-032-17 | `crates/domain/src/face_models.rs` › req_032_17_notices_a_model_that_tells_nobody_apart; `crates/db/src/faces.rs` › req_032_17_a_model_telling_people_apart_seems_right; `crates/app/tests/faces.rs` › req_032_17_warns_when_the_model_tells_nobody_apart | pass |
+| REQ-032-24 | `crates/db/src/faces.rs` › req_032_24_groups_suggested_faces_by_person; `crates/app/tests/faces.rs` › req_032_24_confirm_or_reject_a_suggested_group | pass |
+| REQ-032-25 | `crates/db/src/faces.rs` › req_032_25_a_face_taken_out_stays_unknown; `crates/app/tests/faces.rs` › req_032_25_taking_a_face_out_keeps_it_in_the_viewer | pass |
+| REQ-032-26 | `crates/db/src/gallery.rs` › req_032_26_a_search_of_only_some_items; `crates/app/tests/faces.rs` › req_032_26_a_face_opens_its_photo_among_its_groups | pass |

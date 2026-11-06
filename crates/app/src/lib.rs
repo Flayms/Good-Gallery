@@ -76,6 +76,7 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
     }
     state.show_pending_open();
+    state.show_face_photo();
     // Light, dark or the system's, from this frame on (REQ-020-01, REQ-020-02).
     theme::set_appearance(&ctx, state.settings.appearance);
     theme::set_transparency_setting(&ctx, state.settings.reduce_transparency);

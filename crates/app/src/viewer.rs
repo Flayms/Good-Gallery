@@ -32,10 +32,11 @@ const WHEEL_SENSITIVITY: f32 = 0.002;
 /// Points per wheel line: one notch scrolls about 100 points in a browser.
 const WHEEL_LINE: f32 = 100.0;
 const KEY_ZOOM_STEP: f32 = 1.25;
-/// Room around the media: for the arrows at the sides, the title bar strip at the top, the control bar below.
+/// Room around the media: for the arrows at the sides; above it the control bar, in the title bar's strip, and as much
+/// room below (REQ-009-19).
 const SIDE_SPACE: f32 = 64.0;
-const TOP_SPACE: f32 = 48.0;
-const CONTROLS_SPACE: f32 = 80.0;
+/// Room between the control bar or the filmstrip and the media.
+const MEDIA_GAP: f32 = 12.0;
 const BAR_HEIGHT: f32 = 48.0;
 const NAV_SIZE: f32 = 40.0;
 /// Distance of floating chrome from the window's edges.
@@ -743,6 +744,11 @@ impl Viewer {
         action
     }
 
+    /// Shows the face regions this time, without changing the remembered choice (REQ-032-26).
+    pub fn show_faces(&mut self) {
+        self.faces = true;
+    }
+
     fn toggle_faces(&mut self, gallery: &Gallery) {
         self.faces = !self.faces;
         gallery.store_setting(faces::FACES_KEY, if self.faces { "shown" } else { "hidden" });
@@ -866,7 +872,12 @@ impl Viewer {
         }
 
         let screen = ctx.content_rect();
-        let layout = Layout::new(screen, self.info_open || self.edit.is_some(), self.filmstrip);
+        let info_open = self.info_open || self.edit.is_some();
+        let reserved = [
+            crate::titlebar::reserved_left_in(ctx, screen.left()),
+            crate::titlebar::reserved_in(ctx, screen.right()),
+        ];
+        let layout = Layout::new(screen, info_open, self.filmstrip, reserved);
         egui::Area::new(Self::layer().id)
             .order(Self::layer().order)
             .fixed_pos(screen.min)
@@ -1465,7 +1476,7 @@ impl Viewer {
         text.add_face = has_faces && self.faces && !crate::WEB;
         text.editable &= self.indexed;
         text.filmstrip = self.indexed;
-        let bar = control_bar_rect(layout, &text);
+        let bar = control_bar_rect(layout, bar_width(&text));
         let previous = self.step_target(-1, count).map(|_| {
             Rect::from_center_size(
                 pos2(screen.left() + INSET + NAV_SIZE / 2.0, layout.media.center().y),
@@ -1960,12 +1971,12 @@ struct Layout {
     strip: Option<Rect>,
     /// Right edge of the area for the media, the arrows, the bar and the filmstrip.
     right: f32,
-    /// How far the control bar sits above the window's bottom.
-    bar_bottom: f32,
+    /// Room the window controls take at the left and the right of the title bar's strip.
+    reserved: [f32; 2],
 }
 
 impl Layout {
-    fn new(screen: Rect, info_open: bool, filmstrip: bool) -> Self {
+    fn new(screen: Rect, info_open: bool, filmstrip: bool, reserved: [f32; 2]) -> Self {
         let info = info_open.then(|| {
             Rect::from_min_max(
                 // Below the window controls (REQ-013-02).
@@ -1985,9 +1996,11 @@ impl Layout {
                 pos2(right - INSET, screen.bottom() - INSET),
             )
         });
+        // As much room below as above, so the media stays in the middle when the controls fade (REQ-009-19).
+        let margin = (INSET + BAR_HEIGHT).max(below) + MEDIA_GAP;
         let media = Rect::from_min_max(
-            pos2(screen.left() + SIDE_SPACE, screen.top() + TOP_SPACE),
-            pos2(right - SIDE_SPACE, screen.bottom() - CONTROLS_SPACE - below),
+            pos2(screen.left() + SIDE_SPACE, screen.top() + margin),
+            pos2(right - SIDE_SPACE, screen.bottom() - margin),
         );
         Self {
             screen,
@@ -1995,7 +2008,7 @@ impl Layout {
             info,
             strip,
             right,
-            bar_bottom: 16.0 + below,
+            reserved,
         }
     }
 
@@ -2272,7 +2285,8 @@ fn bar_buttons(
         .collect()
 }
 
-fn control_bar_rect(layout: &Layout, text: &BarText) -> Rect {
+/// The control bar's width for `text` and its buttons.
+fn bar_width(text: &BarText) -> f32 {
     let mut width = 20.0 + text.name.size().x + BAR_GAP;
     if let Some(date) = &text.date {
         width += date.size().x + BAR_GAP;
@@ -2285,13 +2299,19 @@ fn control_bar_rect(layout: &Layout, text: &BarText) -> Rect {
         + BAR_GAP
         + bar_buttons_width(bar_buttons(text.editable, text.faces, text.add_face, text.filmstrip).len())
         + 6.0;
-    let room = layout.right - layout.screen.left();
-    let width = width.min(room - 32.0);
+    width
+}
+
+/// Where the control bar of `width` goes: above the media, in the title bar's strip, over the media's middle where the
+/// window controls leave room for it (REQ-009-19).
+fn control_bar_rect(layout: &Layout, width: f32) -> Rect {
+    let left = layout.screen.left() + layout.reserved[0] + INSET;
+    let right = layout.right - layout.reserved[1] - INSET;
+    let width = width.min(right - left).max(0.0);
+    let middle = (layout.screen.left() + layout.right) / 2.0;
+    let x = middle.clamp(left + width / 2.0, (right - width / 2.0).max(left + width / 2.0));
     Rect::from_center_size(
-        pos2(
-            layout.screen.left() + room / 2.0,
-            layout.screen.bottom() - layout.bar_bottom - BAR_HEIGHT / 2.0,
-        ),
+        pos2(x, layout.screen.top() + INSET + BAR_HEIGHT / 2.0),
         vec2(width, BAR_HEIGHT),
     )
 }
@@ -2536,4 +2556,58 @@ fn control_bar(
         }
     }
     clicked
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SCREEN: Rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(1280.0, 800.0));
+
+    /// REQ-009-19: as much room above the photo as below, with or without the filmstrip and the info panel, and the
+    /// bar above it.
+    #[test]
+    fn req_009_19_centers_the_photo_with_the_bar_above_it() {
+        for info in [false, true] {
+            for filmstrip in [false, true] {
+                let layout = Layout::new(SCREEN, info, filmstrip, [0.0, 0.0]);
+                let above = layout.media.top() - SCREEN.top();
+                let below = SCREEN.bottom() - layout.media.bottom();
+                assert!(
+                    (above - below).abs() < 0.5,
+                    "info {info}, filmstrip {filmstrip}: {above} above, {below} below"
+                );
+                let bar = control_bar_rect(&layout, 400.0);
+                assert!(bar.bottom() < layout.media.top(), "{bar:?} above {:?}", layout.media);
+                assert!(
+                    (bar.center().x - layout.media.center().x).abs() < 0.5,
+                    "{bar:?} over the photo"
+                );
+                if let Some(strip) = layout.strip {
+                    assert!(
+                        strip.top() > layout.media.bottom(),
+                        "{strip:?} below {:?}",
+                        layout.media
+                    );
+                }
+            }
+        }
+    }
+
+    /// REQ-009-19: in a narrow window the bar moves aside or shrinks rather than covering the window controls.
+    #[test]
+    fn req_009_19_the_bar_keeps_clear_of_the_window_controls() {
+        let narrow = Rect::from_min_max(pos2(0.0, 0.0), pos2(640.0, 600.0));
+        for reserved in [[0.0, 138.0], [90.0, 0.0]] {
+            let layout = Layout::new(narrow, false, false, reserved);
+            for width in [300.0, 600.0] {
+                let bar = control_bar_rect(&layout, width);
+                assert!(
+                    bar.left() >= reserved[0] && bar.right() <= 640.0 - reserved[1],
+                    "{reserved:?}: {bar:?}"
+                );
+                assert!(bar.width() > 0.0);
+            }
+        }
+    }
 }

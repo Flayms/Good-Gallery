@@ -15,8 +15,9 @@ use egui_kittest::kittest::{NodeT as _, Queryable as _};
 
 type App = egui_kittest::Harness<'static, app::AppState>;
 
-/// Center of the media area in the 900 × 600 window: between 64 px at the sides, 48 px above and 80 px below.
-const CENTER: egui::Pos2 = pos2(450.0, 284.0);
+/// Center of the media area in the 900 × 600 window: between 64 px at the sides and as much room above as below
+/// (REQ-009-19).
+const CENTER: egui::Pos2 = pos2(450.0, 300.0);
 
 /// A library in `dir` with `count` photos `0.png`, `1.png`, … (newest first), 400 × 300 px each; photos named in
 /// `missing` are indexed but not on disk.
@@ -158,7 +159,8 @@ fn req_009_01_req_009_04_opens_the_clicked_item_with_its_original() {
             .get_by_role_and_label(egui::accesskit::Role::Button, "Close")
             .rect()
             .bottom()
-            > 500.0
+            <= 60.0,
+        "the control bar is above the photo (REQ-009-19)"
     );
     // Past the original's fade-in.
     harness.run_steps(20);
@@ -664,8 +666,8 @@ fn req_009_03_a_click_beside_a_zoomed_photo_closes() {
         harness.key_press(Key::Plus);
         harness.run_steps(1);
     }
-    // The zoomed photo reaches past the media area into the 48 px strip at the top.
-    click_at(&mut harness, pos2(450.0, 20.0));
+    // The zoomed photo reaches past the media area into the strip below it.
+    click_at(&mut harness, pos2(450.0, 590.0));
     std::thread::sleep(std::time::Duration::from_millis(400));
     harness.run_steps(2);
     assert!(harness.state().viewer.is_none());
