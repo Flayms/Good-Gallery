@@ -41,6 +41,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [035-rename](035-rename/spec.md)                         | Rename a selection with search and replace and placeholders, with undo | Implemented |
 | [036-content-search](036-content-search/spec.md)     | Find photos by what they show, with a model on this computer     | Implemented |
 | [037-faster-analysis](037-faster-analysis/spec.md)       | Faces and content search on several cores, with the same results | Implemented |
+| [039-smart-album-rules](039-smart-album-rules/spec.md)   | Smart albums from a list of conditions, matching all or any, with relative dates | Draft |
 
 ## Conventions
 
