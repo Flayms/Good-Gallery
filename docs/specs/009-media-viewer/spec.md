@@ -173,10 +173,27 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 - **And** their tile, thumbnail and the viewer show them turned
 - **And** a file that can't be written stays as it was, and a message names it and says why
 
+### REQ-009-23 · Delete
+
+- **Given** a tile's, a list row's or the viewer's context menu (REQ-009-11) in the desktop app, a selection in the gallery, or an item in the viewer
+- **When** the user chooses _Delete…_ or presses Delete
+- **Then** it applies to the selection if the item is in it, else to that item alone (Delete in the gallery applies to the selection)
+- **And** a dialog always asks first, naming how many items go and where: to the Recycle Bin (the Trash on Linux), or deleted permanently when one of their libraries is on a network drive, which has no Recycle Bin; its button then says _Delete permanently_
+- **When** confirmed, **then** each file goes there with its sidecars (`IMG_1.jpg.xmp`, and `IMG_1.xmp` unless another file of that name shares it)
+- **And** a file that can't be deleted stays, the others still go, and a message says how many failed, names the first and says why
+- **And** the browser version and files outside every library have no _Delete…_
+
+### REQ-009-24 · Deleted items leave the gallery
+
+- **Given** items deleted (REQ-009-23)
+- **When** their files are gone
+- **Then** they leave the index, the gallery, the selection and the counts right away, and their cached thumbnails are removed
+- **And** the viewer showing one moves on to the item that takes its place, or closes when none is left
+
 ## Out of scope
 
 - Face regions in videos. Adding, editing and removing face regions and finding faces are spec 032.
-- Slideshows, deleting, copying or sharing files. Rotating with new pixels, cropping and editing are specs 021 and 029.
+- Slideshows, copying or sharing files. Undoing a delete in the app (the Recycle Bin is the undo), and deleting the backups of edited originals (spec 021), which stay. Rotating with new pixels, cropping and editing are specs 021 and 029.
 - Opening a file in another app (other than revealing it in Explorer).
 - Fullscreen mode and comparing items side by side. The filmstrip is specified in [015](../015-filmstrip/spec.md).
 - Showing EXIF details beyond REQ-009-08.
@@ -212,4 +229,6 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 | REQ-009-20 | `crates/app/tests/viewer.rs` › req_009_20_a_zoomed_photo_pans_to_the_windows_edges, req_009_20_stops_at_the_info_panel (snapshot `viewer_zoomed`); req_009_05_zooms_and_pans, req_009_16_click_toggles_between_fitted_and_actual_pixels, req_009_03_a_click_beside_a_zoomed_photo_closes | pass |
 | REQ-009-21 | `crates/domain/src/orientation.rs` › req_009_21_only_formats_with_an_orientation_turn; `crates/app/tests/context_menu.rs` › req_009_21_the_menu_renames_rates_and_rotates_the_selection, req_009_21_rotate_is_off_for_videos_and_gifs, req_009_21_the_viewers_menu_rates_and_rotates (snapshot `context_menu`) | pass |
 | REQ-009-22 | `crates/domain/src/orientation.rs` › req_009_22_turns_a_quarter_and_keeps_the_mirror; `crates/media/src/rotate.rs` › req_009_22_changes_only_the_orientation_tag, req_009_22_a_mirrored_photo_stays_mirrored, req_009_22_a_read_only_file_stays; `crates/app/tests/context_menu.rs` › req_009_21_the_menu_renames_rates_and_rotates_the_selection | pass |
+| REQ-009-23 | `crates/domain/src/deletion.rs` › req_009_23_network_paths_have_no_recycle_bin, req_009_23_the_question_says_where_the_files_go; `crates/media/src/delete.rs` › req_009_23_the_file_goes_with_its_sidecars, req_009_23_a_shared_sidecar_stays, req_009_23_a_file_that_cant_go_stays_with_its_sidecars, req_009_23_a_gone_file_counts_and_paths_stay_inside, req_009_23_permanently_removes_the_files, req_009_23_a_local_library_has_a_recycle_bin; `crates/app/tests/context_menu.rs` › req_009_23_req_009_24_the_menu_deletes_the_selection_after_asking, req_009_23_the_delete_key_and_an_item_outside_the_selection (snapshot `context_menu`) | partial: tests use a stand-in for the Recycle Bin; moving to the real one (`trash` crate) and finding mapped network drives on Windows have no test |
+| REQ-009-24 | `crates/db/src/media.rs` › req_009_24_removes_a_deleted_item; `crates/app/tests/context_menu.rs` › req_009_23_req_009_24_the_menu_deletes_the_selection_after_asking, req_009_24_the_viewer_moves_on_from_a_deleted_item | pass |
 | REQ-009-17 | `crates/domain/src/faces.rs` › req_009_17_face_regions_are_hidden_until_shown; `crates/app/tests/viewer.rs` › req_009_17_shows_face_regions_and_remembers_the_choice (snapshot `viewer_faces`) | pass |

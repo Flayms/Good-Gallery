@@ -11,6 +11,7 @@ Add every pitfall you hit. A trap in a tool, library, OS or our tests that we ca
 
 * **MSVC C++ build tools are required** on Windows (`link.exe`); without them even a hello world fails with "`link.exe` returned an unexpected error". Install the "Desktop development with C++" / VC Tools workload, e.g. `winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`. C dependencies (libwebp, dav1d, a video backend) need them too.
 * **`cargo` may be missing from the agent shell's `PATH`**: rustup lives in `~/.cargo/bin`, which is on the Windows user `PATH` but not always in Git Bash. `export PATH="$HOME/.cargo/bin:$PATH"` (Bash) or prepend `$env:USERPROFILE\.cargo\bin` (PowerShell).
+* **`cargo test --workspace` needs about 6 GB in `target`**: each file in `crates/app/tests` links its own debug binary of the whole app (≈ 140 MB, 20+ of them), and linking fails with "linking with `cc` failed" when the disk fills. On a small disk, run `cargo test -p app --test <name>` one at a time and delete each binary from `target/debug/deps` afterwards, then `cargo test --workspace --exclude app`. Deleting `target/debug/incremental` frees another 1–2 GB.
 * **egui / eframe / wgpu APIs change between minor versions.** Pin exact versions and check docs.rs for the pinned one; examples from memory are often for another version.
 
 ## egui / eframe 0.37

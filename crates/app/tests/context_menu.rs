@@ -1,4 +1,4 @@
-//! The context menu's rename, rating and rotate items (REQ-009-21, REQ-009-22).
+//! The context menu's rename, rating, rotate and delete items (REQ-009-21 … REQ-009-24).
 
 mod common;
 
@@ -75,7 +75,9 @@ fn app(fixture: &Fixture, exiftool: &Path) -> (App, PathBuf) {
             exiftool: exiftool.to_owned(),
             config,
         })
-        .with_rename_journal(journal);
+        .with_rename_journal(journal)
+        // Deleted files go for good: the user's Recycle Bin stays as it was.
+        .with_trash(|path| std::fs::remove_file(path));
     let mut harness = common::harness_with_step(state, 1.0 / 60.0);
     harness.set_size(egui::vec2(1000.0, 700.0));
     settle(&mut harness);
@@ -243,4 +245,127 @@ fn req_009_21_the_viewers_menu_rates_and_rotates() {
     settle(&mut harness);
     assert_eq!(read(&exiftool, &dir.join("a.jpg"), "Orientation"), Some(8));
     assert!(harness.state().viewer.is_some(), "the viewer stays");
+}
+
+fn ids(harness: &App) -> Vec<i64> {
+    let gallery = harness.state().gallery.as_ref().unwrap();
+    (0..gallery.count().unwrap_or(0))
+        .filter_map(|at| gallery.id_at(at))
+        .collect()
+}
+
+fn is_indexed(harness: &App, name: &str) -> bool {
+    let db = harness.state().db().unwrap();
+    let conn = db.lock().unwrap();
+    conn.query_row("SELECT count(*) FROM media WHERE rel_path = ?1", [name], |row| {
+        row.get::<_, i64>(0)
+    })
+    .unwrap()
+        > 0
+}
+
+/// Answers the delete dialog, which must ask `title`.
+fn answer(harness: &mut App, title: &str, button: &str) {
+    harness.run_steps(2);
+    assert!(harness.query_by_label(title).is_some(), "asks {title}");
+    harness.get_by_label(button).click();
+    settle(harness);
+}
+
+/// REQ-009-23, REQ-009-24: _Delete…_ on a selected item asks, then deletes the whole selection with its sidecars;
+/// the items leave the gallery, the selection and the index, and their libraries are scanned again.
+#[test]
+fn req_009_23_req_009_24_the_menu_deletes_the_selection_after_asking() {
+    let fixture = Fixture::new();
+    let (mut harness, dir) = app(&fixture, &exiftool().unwrap_or_default());
+    std::fs::write(dir.join("a.jpg.xmp"), "<x/>").unwrap();
+    let gallery = harness.state_mut().gallery.as_mut().unwrap();
+    gallery.toggle_selected_at(0);
+    gallery.toggle_selected_at(1);
+    harness.run_steps(2);
+
+    let at = tile(&harness, "a.jpg");
+    right_click_at(&mut harness, at);
+    menu_item(&harness, at, "Delete…").click();
+    answer(&mut harness, "Delete 2 items?", "Cancel");
+    assert!(dir.join("a.jpg").exists() && dir.join("b.jpg").exists(), "cancelled");
+
+    let at = tile(&harness, "b.jpg");
+    right_click_at(&mut harness, at);
+    menu_item(&harness, at, "Delete…").click();
+    answer(&mut harness, "Delete 2 items?", "Delete");
+    for name in ["a.jpg", "a.jpg.xmp", "b.jpg"] {
+        assert!(!dir.join(name).exists(), "{name} deleted");
+    }
+    assert!(dir.join("c.gif").exists());
+    assert!(!is_indexed(&harness, "a.jpg") && !is_indexed(&harness, "b.jpg"));
+    assert_eq!(harness.state().gallery.as_ref().unwrap().count(), Some(2));
+    assert_eq!(harness.state().gallery.as_ref().unwrap().selected_count(), 0);
+    assert!(
+        fixture
+            .scans
+            .paths
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, paths)| paths.contains(&"a.jpg".to_string())),
+        "scanned again"
+    );
+}
+
+/// REQ-009-23: Delete deletes the selection; the menu on an item outside it deletes that item alone.
+#[test]
+fn req_009_23_the_delete_key_and_an_item_outside_the_selection() {
+    let fixture = Fixture::new();
+    let (mut harness, dir) = app(&fixture, &exiftool().unwrap_or_default());
+    harness.state_mut().gallery.as_mut().unwrap().toggle_selected_at(2);
+    harness.run_steps(2);
+    harness.key_press(egui::Key::Delete);
+    answer(&mut harness, "Delete 1 item?", "Delete");
+    assert!(!dir.join("c.gif").exists());
+
+    harness.state_mut().gallery.as_mut().unwrap().toggle_selected_at(0);
+    harness.run_steps(2);
+    let at = tile(&harness, "d.mp4");
+    right_click_at(&mut harness, at);
+    menu_item(&harness, at, "Delete…").click();
+    answer(&mut harness, "Delete 1 item?", "Delete");
+    assert!(!dir.join("d.mp4").exists());
+    assert!(dir.join("a.jpg").exists(), "the selection stays");
+    assert_eq!(harness.state().gallery.as_ref().unwrap().count(), Some(2));
+}
+
+/// REQ-009-24: the viewer moves on from a deleted item to the one taking its place, back at the end, and closes
+/// when none is left.
+#[test]
+fn req_009_24_the_viewer_moves_on_from_a_deleted_item() {
+    let fixture = Fixture::new();
+    let (mut harness, dir) = app(&fixture, &exiftool().unwrap_or_default());
+    let [_, b, c, _] = ids(&harness)[..] else { panic!() };
+    common::open_item(&mut harness, "a.jpg");
+    settle(&mut harness);
+
+    harness.key_press(egui::Key::Delete);
+    answer(&mut harness, "Delete 1 item?", "Delete");
+    assert!(!dir.join("a.jpg").exists());
+    assert_eq!(harness.state().viewer.as_ref().map(app::viewer::Viewer::id), Some(b));
+
+    // From the menu, at the end: the one before.
+    harness.key_press(egui::Key::ArrowRight);
+    harness.key_press(egui::Key::ArrowRight);
+    settle(&mut harness);
+    let center = egui::pos2(500.0, 350.0);
+    right_click_at(&mut harness, center);
+    harness.get_by_label("Delete…").click();
+    answer(&mut harness, "Delete 1 item?", "Delete");
+    assert!(!dir.join("d.mp4").exists());
+    assert_eq!(harness.state().viewer.as_ref().map(app::viewer::Viewer::id), Some(c));
+
+    for _ in 0..2 {
+        harness.key_press(egui::Key::Delete);
+        answer(&mut harness, "Delete 1 item?", "Delete");
+    }
+    harness.run_steps(60);
+    assert!(harness.state().viewer.is_none(), "closed with nothing left");
+    assert!(ids(&harness).is_empty());
 }
