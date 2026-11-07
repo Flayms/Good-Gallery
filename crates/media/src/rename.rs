@@ -32,7 +32,7 @@ fn on_disk(library: &Path, rel_path: &str) -> PathBuf {
 
 /// The sidecars `IMG_1.jpg.xmp` and `IMG_1.xmp` of a file, in either case of the extension, as `(from, to)` pairs
 /// for a rename, and whether the second is shared with another file of that name (then it is copied, not moved).
-fn sidecars(library: &Path, from: &str, to: &str) -> Vec<(String, String, bool)> {
+pub(crate) fn sidecars(library: &Path, from: &str, to: &str) -> Vec<(String, String, bool)> {
     let stem = |rel: &str| -> String {
         match rel.rfind('.') {
             Some(dot) if dot > rel.rfind('/').map_or(0, |slash| slash + 1) => rel[..dot].to_string(),

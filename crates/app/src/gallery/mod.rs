@@ -146,6 +146,8 @@ pub enum MediaAction {
     Rate(Option<i64>),
     /// Turns photos a quarter by their orientation tag (REQ-009-22).
     Turn(domain::orientation::Turn),
+    /// Asks before deleting (REQ-009-23).
+    Delete,
 }
 
 /// Which of the items that write files a context menu has (REQ-009-21).
@@ -155,7 +157,7 @@ pub struct MenuItems {
     pub edit: bool,
     /// _Revert to original_, only in the viewer (REQ-021-12).
     pub revert: bool,
-    /// _Rename…_, _Rating_ and _Rotate_: the desktop app, for an indexed item.
+    /// _Rename…_, _Rating_, _Rotate_ and _Delete…_: the desktop app, for an indexed item.
     pub write: bool,
     /// _Rotate_ is on: a photo whose format has an orientation.
     pub turn: bool,
@@ -523,6 +525,8 @@ pub struct Gallery {
     selection_change: Option<crate::state::Many>,
     /// _Rename…_ was chosen for the selection (REQ-035-01).
     rename_asked: bool,
+    /// Delete was pressed with a selection (REQ-009-23).
+    delete_asked: bool,
     /// The item shown in the viewer: kept in view (REQ-016-06), its thumbnail wanted first (REQ-009-14).
     viewed: Option<(usize, i64)>,
     /// The item the viewer shows outside the result, and what the index says of it once known (REQ-009-18).
@@ -608,6 +612,7 @@ impl Gallery {
             selection: Default::default(),
             selection_change: None,
             rename_asked: false,
+            delete_asked: false,
             viewed: None,
             outside: None,
             strip: 0..0,
@@ -908,6 +913,11 @@ impl Gallery {
         std::mem::take(&mut self.rename_asked)
     }
 
+    /// Delete was pressed with a selection this frame (REQ-009-23).
+    pub fn take_delete_asked(&mut self) -> bool {
+        std::mem::take(&mut self.delete_asked)
+    }
+
     /// The rating or tag asked for the selection this frame, if any (REQ-025-07, REQ-026-06).
     pub fn take_selection_change(&mut self) -> Option<crate::state::Many> {
         self.selection_change.take()
@@ -941,6 +951,9 @@ impl Gallery {
                     if input.consume_key(egui::Modifiers::NONE, key) {
                         self.selection_change = Some(crate::state::Many::Rate(Some(rating)));
                     }
+                }
+                if input.consume_key(egui::Modifiers::NONE, egui::Key::Delete) {
+                    self.delete_asked = true;
                 }
             }
         });
@@ -1908,6 +1921,10 @@ fn menu_items(ui: &mut egui::Ui, items: MenuItems) -> Option<MediaAction> {
             if ui.add_enabled(items.turn, egui::Button::new(label)).clicked() {
                 action = Some(MediaAction::Turn(turn));
             }
+        }
+        ui.separator();
+        if ui.button("Delete…").clicked() {
+            action = Some(MediaAction::Delete);
         }
     }
     if action.is_some() {
