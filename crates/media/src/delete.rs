@@ -13,6 +13,7 @@ pub fn deletes_permanently(library: &Path) -> bool {
 
 /// A mapped network drive (`Z:`).
 #[cfg(windows)]
+#[allow(unsafe_code)]
 fn on_remote_drive(library: &Path) -> bool {
     use std::path::{Component, Prefix};
     use windows_sys::Win32::Storage::FileSystem::GetDriveTypeW;
