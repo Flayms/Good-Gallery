@@ -6,6 +6,7 @@ use anyhow::{Context as _, bail};
 use chrono::NaiveDate;
 use db::libraries::{self, LibraryStatus};
 use db::rusqlite::Connection;
+use domain::album_rules::{Bound, Condition, DateField, Days, Orientation, Rules, Unit};
 use domain::media::MediaKind;
 use domain::search::{GallerySearch, SortBy};
 use std::path::PathBuf;
@@ -160,6 +161,14 @@ pub fn run(args: &[String]) -> anyhow::Result<bool> {
         ..Default::default()
     };
     let year = |y| NaiveDate::from_ymd_opt(y, 1, 1);
+    let rules = |any: bool, conditions: Vec<Condition>| GallerySearch {
+        rules: Some(Box::new(Rules {
+            name: String::new(),
+            any,
+            conditions,
+        })),
+        ..Default::default()
+    };
     let searches: Vec<(&str, GallerySearch)> = vec![
         ("a common tag", tags(&[&common], &[])),
         ("a rare tag", tags(&[&rare], &[])),
@@ -197,6 +206,59 @@ pub fn run(args: &[String]) -> anyhow::Result<bool> {
                 descending: false,
                 ..tags(&[&middle], &[])
             },
+        ),
+        // Smart albums with rules (REQ-039-07): five conditions matching any, three matching all.
+        (
+            "rules: any of five",
+            rules(
+                true,
+                vec![
+                    Condition::Tag {
+                        name: rare.clone(),
+                        is: true,
+                    },
+                    Condition::Tag {
+                        name: middle.clone(),
+                        is: true,
+                    },
+                    Condition::RatingAtLeast(5),
+                    Condition::Size(Bound {
+                        at_least: true,
+                        value: 7_900_000.0,
+                    }),
+                    Condition::Date {
+                        field: DateField::Taken,
+                        days: Days::Last(30, Unit::Days),
+                    },
+                ],
+            ),
+        ),
+        (
+            "rules: all of three",
+            rules(
+                false,
+                vec![
+                    Condition::Tag {
+                        name: middle.clone(),
+                        is: true,
+                    },
+                    Condition::RatingAtLeast(3),
+                    Condition::Orientation(Orientation::Portrait),
+                ],
+            ),
+        ),
+        (
+            "rules: last 5 years, videos",
+            rules(
+                false,
+                vec![
+                    Condition::Date {
+                        field: DateField::Taken,
+                        days: Days::Last(5, Unit::Years),
+                    },
+                    Condition::Kind(MediaKind::Video),
+                ],
+            ),
         ),
         ("everything", GallerySearch::default()),
         (

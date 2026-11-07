@@ -512,6 +512,8 @@ pub struct AppState {
     pub confirm_revert: Option<RevertTarget>,
     /// Rating many items, waiting for the user to confirm (REQ-025-07).
     pub confirm_many: Option<ChangeMany>,
+    /// The day the counts and the gallery were last worked out for: a new one moves relative dates (REQ-039-04).
+    today: Option<chrono::NaiveDate>,
     /// A saved copy to show in the viewer once it is indexed: its library and path (REQ-021-09).
     pending_copy: Option<(i64, String)>,
     /// Files whose metadata couldn't be read, for the toolbar's notice (REQ-002-16).
@@ -908,6 +910,26 @@ impl AppState {
     pub fn rate(&mut self, _rate: Rate) {}
 
     /// Rates or tags several items, after the user confirmed if there are many (REQ-025-07, REQ-026-06).
+    /// A new day refreshes the sidebar's counts and the gallery, so smart albums with relative dates follow
+    /// (REQ-039-04).
+    pub fn notice_new_day(&mut self) {
+        let today = domain::time_zone::today();
+        if self.today == Some(today) {
+            return;
+        }
+        let first = self.today.is_none();
+        self.today = Some(today);
+        if first {
+            return;
+        }
+        if let Some(gallery) = &mut self.gallery {
+            gallery.reload_sidebar();
+            if gallery.search().rules.as_ref().is_some_and(|rules| rules.is_relative()) {
+                gallery.reload();
+            }
+        }
+    }
+
     pub fn ask_change_many(&mut self, change: ChangeMany) {
         // Deleting always asks (REQ-009-23).
         if change.ids.len() > CONFIRM_MANY_ABOVE || matches!(change.what, Many::Delete { .. }) {
@@ -1444,6 +1466,7 @@ impl AppState {
             edit_tools: None,
             confirm_revert: None,
             confirm_many: None,
+            today: None,
             #[cfg(not(target_arch = "wasm32"))]
             rename_dialog: None,
             #[cfg(not(target_arch = "wasm32"))]

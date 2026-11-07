@@ -2,6 +2,8 @@
 //! only what is near the viewport drawn: tiles (`tiles`) or list rows (`list`), with thumbnails streamed from the
 //! thumbnail cache.
 
+pub mod album_editor;
+pub use album_editor::AlbumEditor;
 mod albums;
 mod list;
 mod tiles;
@@ -232,15 +234,23 @@ type ContentSlot = Arc<Mutex<Option<Arc<dyn ContentMatches>>>>;
 
 /// `search` as the index can query it: its content words replaced by the items they match (REQ-036-05).
 fn resolve(conn: &Connection, search: &GallerySearch, content: &ContentSlot) -> Result<GallerySearch, String> {
-    let Some(words) = &search.content else {
-        return Ok(search.clone());
-    };
     let matcher = content.lock().unwrap_or_else(|p| p.into_inner()).clone();
-    let matches = match matcher {
-        Some(matcher) => matcher.matches(conn, words)?,
-        None => Vec::new(),
+    let matches = |words: &str| match &matcher {
+        Some(matcher) => matcher.matches(conn, words),
+        None => Ok(Vec::new()),
     };
-    Ok(search.with_content_matches(&matches))
+    let mut search = search.clone();
+    if let Some(words) = search.content.clone() {
+        search = search.with_content_matches(&matches(&words)?);
+    }
+    // A smart album's _Shows_ condition, on its own (REQ-039-02).
+    if let Some(rules) = &search.rules
+        && let Some(words) = rules.content()
+    {
+        let resolved = rules.with_content_matches(&matches(words)?);
+        search.rules = Some(Box::new(resolved));
+    }
+    Ok(search)
 }
 
 fn load_sidebar(conn: &Connection, library: Option<i64>, content: &ContentSlot) -> db::Result<SidebarData> {
@@ -544,7 +554,9 @@ pub struct Gallery {
     /// The groups of unknown faces, until something changes (REQ-032-15).
     face_groups: Option<Option<FaceGroups>>,
     /// The dialog naming a smart album, while open (REQ-034-01, REQ-034-05).
-    album_dialog: Option<albums::NameDialog>,
+    album_dialog: Option<albums::AlbumDialog>,
+    /// The libraries the smart album editor offers (REQ-039-02).
+    album_libraries: Vec<(i64, String)>,
     /// A context menu's choice this frame.
     menu_action: Option<(usize, MediaAction)>,
     /// The item under the pointer in the last frame.
@@ -625,6 +637,7 @@ impl Gallery {
             faces: None,
             face_groups: None,
             album_dialog: None,
+            album_libraries: Vec::new(),
             menu_action: None,
             hovered: None,
             range_preview: None,

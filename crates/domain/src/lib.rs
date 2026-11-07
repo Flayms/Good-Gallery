@@ -3,6 +3,7 @@
 // Rebuilt when another worktree built into the same target folder (`.cargo/config.toml`).
 const _: Option<&str> = option_env!("GOOD_GALLERY_WORKTREE");
 
+pub mod album_rules;
 pub mod ambient;
 pub mod appearance;
 pub mod autoscroll;

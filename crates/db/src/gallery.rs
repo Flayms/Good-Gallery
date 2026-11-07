@@ -2,6 +2,7 @@
 //! is loaded) and tile data for the visible range.
 
 use crate::Result;
+use domain::album_rules::{Bound, Condition, DateField, Orientation};
 use domain::date_groups::{DateGroup, date_groups};
 use domain::layout::tile_aspect;
 use domain::media::MediaKind;
@@ -144,6 +145,116 @@ fn tag_conditions(conn: &Connection, include: &[String], exclude: &[String]) -> 
     Ok(Some(conditions))
 }
 
+/// Tag ids of the subtrees of `names` (normalized), descendants included.
+fn subtree_ids(conn: &Connection, names: &[String]) -> Result<Vec<i64>> {
+    Ok(subtrees(conn, &normalized(names))?
+        .into_values()
+        .flat_map(|subtree| subtree.ids)
+        .collect())
+}
+
+/// One condition of a smart album's rules as SQL on `media` (REQ-039-02). Ids and numbers the app made go into the
+/// statement; text the user typed goes through `param`.
+fn rule_condition(
+    conn: &Connection,
+    condition: &Condition,
+    today: chrono::NaiveDate,
+    param: &mut impl FnMut(rusqlite::types::Value) -> String,
+) -> Result<String> {
+    let compare = |column: &str, bound: &Bound, scale: f64| {
+        let op = if bound.at_least { ">=" } else { "<=" };
+        format!("{column} {op} {}", bound.value * scale)
+    };
+    Ok(match condition {
+        Condition::Tag { name, is } => {
+            let ids = subtree_ids(conn, std::slice::from_ref(name))?;
+            match (ids.is_empty(), is) {
+                (true, true) => "0".into(),
+                (true, false) => "1".into(),
+                (false, true) => format!("media.id IN ({})", tagged_media(&ids)),
+                (false, false) => format!("NOT EXISTS ({})", links_to(&ids)),
+            }
+        }
+        Condition::HasPeople | Condition::HasPlaces => {
+            let category = if *condition == Condition::HasPeople {
+                TagCategory::People
+            } else {
+                TagCategory::Places
+            };
+            let roots: Vec<String> = domain::tags::CATEGORY_ROOTS
+                .iter()
+                .filter(|(of, _)| *of == category)
+                .flat_map(|(_, names)| names.iter().map(|name| name.to_string()))
+                .collect();
+            let ids = subtree_ids(conn, &roots)?;
+            if ids.is_empty() {
+                "0".into()
+            } else {
+                format!("EXISTS ({})", links_to(&ids))
+            }
+        }
+        Condition::NoTags => "NOT EXISTS (SELECT 1 FROM media_tags WHERE media_tags.media_id = media.id)".into(),
+        Condition::NameContains(name) => format!(
+            "media.id IN (SELECT id FROM media INDEXED BY media_name_idx WHERE instr(file_name_lower, lower({})) > 0)",
+            param(name.trim().to_string().into())
+        ),
+        Condition::Kind(kind) => format!("media.kind = '{}'", kind.as_str()),
+        Condition::RatingIn(ratings) => {
+            let parts: Vec<String> = ratings
+                .iter()
+                .filter(|&&rating| rating <= 5)
+                .map(|&rating| match rating {
+                    0 => "media.rating IS NULL".to_string(),
+                    rating => format!("media.rating = {rating}"),
+                })
+                .collect();
+            if parts.is_empty() {
+                "0".into()
+            } else {
+                format!("({})", parts.join(" OR "))
+            }
+        }
+        Condition::RatingAtLeast(stars) => format!("media.rating >= {stars}"),
+        Condition::Library(library) => format!("media.root_id = {library}"),
+        Condition::Folder { library, folder } => {
+            let folder = folder.trim_matches('/');
+            let from = param(format!("{folder}/").into());
+            let to = param(format!("{folder}0").into());
+            format!("(media.root_id = {library} AND media.dir >= {from} AND media.dir < {to})")
+        }
+        Condition::Date { field, days } => {
+            let column = match field {
+                DateField::Taken => "media.sort_date",
+                DateField::Modified => "media.mtime",
+            };
+            let (from, to) = days.range(today);
+            let (from, to) = domain::search::days_ms(from, to);
+            let mut parts = Vec::new();
+            if let Some(from) = from {
+                parts.push(format!("{column} >= {from}"));
+            }
+            if let Some(to) = to {
+                parts.push(format!("{column} < {to}"));
+            }
+            if parts.is_empty() {
+                "1".into()
+            } else {
+                format!("({})", parts.join(" AND "))
+            }
+        }
+        Condition::Size(bound) => compare("media.size", bound, 1.0),
+        Condition::Duration(bound) => compare("media.duration", bound, 1.0),
+        Condition::Megapixels(bound) => compare("media.width * media.height", bound, 1_000_000.0),
+        Condition::Orientation(Orientation::Portrait) => "media.height > media.width".into(),
+        Condition::Orientation(Orientation::Landscape) => "media.width > media.height".into(),
+        Condition::Orientation(Orientation::Square) => "media.width = media.height".into(),
+        // Words not yet matched by content search match nothing (REQ-036-07).
+        Condition::Shows(_) => "0".into(),
+        Condition::Matches(ids) if ids.is_empty() => "0".into(),
+        Condition::Matches(ids) => format!("media.id IN ({})", id_list(ids)),
+    })
+}
+
 /// The WHERE clause of a search with its parameters (REQ-007-01 … -11).
 fn filters(conn: &Connection, search: &GallerySearch) -> Result<(String, Vec<rusqlite::types::Value>)> {
     use rusqlite::types::Value;
@@ -213,6 +324,18 @@ fn filters(conn: &Connection, search: &GallerySearch) -> Result<(String, Vec<rus
     match tag_conditions(conn, &search.tags, &search.exclude)? {
         Some(tags) => conditions.extend(tags),
         None => conditions.push("0".into()),
+    }
+    if let Some(rules) = &search.rules {
+        let today = domain::time_zone::today();
+        let mut parts = Vec::new();
+        for condition in &rules.conditions {
+            parts.push(rule_condition(conn, condition, today, &mut param)?);
+        }
+        // Without conditions every item is in the album (REQ-039-03).
+        if !parts.is_empty() {
+            let joiner = if rules.any { " OR " } else { " AND " };
+            conditions.push(format!("({})", parts.join(joiner)));
+        }
     }
     let clause = if conditions.is_empty() {
         String::new()

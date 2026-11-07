@@ -1,4 +1,5 @@
-//! Smart albums (spec 034): saving a search from the Filters menu, the sidebar group, renaming and deleting.
+//! Smart albums (specs 034 and 039): saving a search from the Filters menu, the sidebar group, renaming and deleting,
+//! and rules matching all or any of their conditions.
 
 mod common;
 
@@ -76,11 +77,11 @@ fn active(harness: &App, label: &str) -> bool {
     row.accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
 }
 
-/// The dialog's field: the search bar's comes first.
+/// The dialog's name field: the search bar's comes first, then the name, then the conditions' fields.
 fn name_field<'a>(harness: &'a App) -> egui_kittest::Node<'a> {
     harness
         .query_all_by_role(Role::TextInput)
-        .last()
+        .nth(1)
         .expect("the dialog is open")
 }
 
@@ -214,4 +215,126 @@ fn req_034_05_renames_and_deletes_a_smart_album() {
     assert!(harness.query_by_label("Smart albums").is_none());
     // Only the album: the search shown stays.
     assert_eq!(search(&harness), beach());
+}
+
+fn editor(harness: &mut App) -> &mut app::gallery::AlbumEditor {
+    harness
+        .state_mut()
+        .gallery
+        .as_mut()
+        .unwrap()
+        .album_editor()
+        .expect("the editor is open")
+}
+
+/// The count the sidebar shows for `album`.
+fn count_of(harness: &App, album: &str) -> Option<String> {
+    harness
+        .state()
+        .gallery
+        .as_ref()
+        .unwrap()
+        .sidebar()
+        .and_then(|data| data.albums.iter().find(|row| row.album.name == album))
+        .map(|row| row.count.to_string())
+}
+
+/// REQ-039-01, REQ-039-02, REQ-039-03, REQ-039-05: _Save as smart album…_ opens the editor with the search's filters;
+/// matching any of two tags keeps both, the album opens with its name as one chip, and removing the chip leaves it.
+#[test]
+fn req_039_01_req_039_03_req_039_05_saves_rules_matching_any() {
+    use app::gallery::album_editor::{Kind, Row};
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness(index());
+    settle(&mut harness);
+    set_search(&mut harness, beach());
+    harness.get_by_label_contains("Filters").click();
+    harness.run();
+    harness.get_by_label("Save as smart album…").click();
+    harness.run();
+    assert_eq!(
+        editor(&mut harness).rows,
+        [Row {
+            text: "Beach".into(),
+            ..Row::new(Kind::Tag)
+        }]
+    );
+    let edit = editor(&mut harness);
+    edit.name = "Sea".into();
+    edit.any = true;
+    edit.rows.push(Row {
+        text: "Berlin".into(),
+        ..Row::new(Kind::Tag)
+    });
+    harness.run();
+    harness.snapshot(common::snapshot_name("album_editor"));
+    harness.get_by_label("Save").click();
+    settle(&mut harness);
+
+    assert_eq!(count_of(&harness, "Sea").as_deref(), Some("3"));
+    assert_eq!(
+        harness.state().gallery.as_ref().unwrap().count(),
+        Some(3),
+        "the saved album is open"
+    );
+    assert!(active(&harness, "Sea"));
+    assert!(
+        harness.query_by_label("Remove smart album Sea").is_some(),
+        "one chip with its name"
+    );
+    assert!(harness.query_by_label("Remove tag Beach").is_none());
+    harness.get_by_label("Remove smart album Sea").click();
+    settle(&mut harness);
+    assert!(search(&harness).rules.is_none());
+    assert!(!active(&harness, "Sea"));
+    assert_eq!(count_of(&harness, "Sea").as_deref(), Some("3"), "the album stays");
+}
+
+/// REQ-039-01, REQ-039-06: _Edit…_ opens an album's rules, and an album the filters bar can show is kept as a plain
+/// search; an incomplete condition keeps _Save_ off.
+#[test]
+fn req_039_01_req_039_06_edits_an_album() {
+    use app::gallery::album_editor::{Kind, Row};
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness(index());
+    settle(&mut harness);
+    set_search(&mut harness, beach());
+    save_as(&mut harness, "Seaside");
+    let rows = |harness: &App| {
+        harness
+            .state()
+            .gallery
+            .as_ref()
+            .unwrap()
+            .sidebar()
+            .unwrap()
+            .albums
+            .clone()
+    };
+    assert_eq!(rows(&harness)[0].album.search, beach(), "stored as a search");
+
+    harness.get_by_role_and_label(Role::Button, "Seaside").click_secondary();
+    harness.run();
+    harness.get_by_label("Edit…").click();
+    harness.run();
+    let edit = editor(&mut harness);
+    assert_eq!(edit.rows.len(), 1);
+    edit.rows.push(Row::new(Kind::RatingAtLeast));
+    edit.rows.push(Row::new(Kind::Tag));
+    harness.run();
+    assert!(
+        harness.get_by_label("Save").accesskit_node().is_disabled(),
+        "an empty tag"
+    );
+    editor(&mut harness).rows.pop();
+    harness.run();
+    harness.get_by_label("Save").click();
+    settle(&mut harness);
+    let album = rows(&harness)[0].clone();
+    assert_eq!(album.count, 1, "beach.jpg: Beach and 5 stars");
+    let rules = album.album.search.rules.expect("at least 3 stars needs rules");
+    assert_eq!(
+        (rules.name.as_str(), rules.any, rules.conditions.len()),
+        ("Seaside", false, 2)
+    );
 }

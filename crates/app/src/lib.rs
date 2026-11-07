@@ -79,6 +79,7 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     }
     state.show_pending_open();
     state.show_face_photo();
+    state.notice_new_day();
     #[cfg(not(target_arch = "wasm32"))]
     state.refresh_content_search();
     // Light, dark or the system's, from this frame on (REQ-020-01, REQ-020-02).
