@@ -90,7 +90,7 @@ Users with large libraries want to find people without tagging each photo by han
 - **Given** a detected face without a name
 - **When** the user chooses _Ignore_ or _Not a face_
 - **Then** the box and any suggestion are gone, and don't come back when the photo is looked at again
-- **And** an ignored face no longer counts in the groups (REQ-032-15), and can be brought back in the settings by _Show ignored faces again_
+- **And** neither counts in the groups (REQ-032-15) or as a face to confirm (REQ-032-24); _Unconfirmed faces_ lists them to change the decision (REQ-032-30)
 
 ### REQ-032-12 · Drawing a face
 
@@ -120,7 +120,7 @@ Users with large libraries want to find people without tagging each photo by han
 - **When** the user opens _Unconfirmed faces_ from the sidebar's People group
 - **Then** similar faces form groups, largest first, without groups of fewer than three, below the faces to confirm
 - **And** each face in a group on screen shows as a crop of its photo, soon after and while the page stays open; a photo without a thumbnail shows an empty square
-- **And** the user can name a group, which asks first and then writes to all its photos, _Ignore_ it, or take a wrong face out of it
+- **And** the user can name a group, which asks first and then writes to all its photos, _Ignore_ it, mark it as _Not faces_, or take a wrong face out of it
 
 ### REQ-032-16 · Changing models
 
@@ -193,8 +193,8 @@ Users with large libraries want to find people without tagging each photo by han
 - **Given** a group of unknown faces
 - **When** the user chooses a face's ✕ (_Not one of them_)
 - **Then** the face leaves the groups for good, also when they are formed again
-- **And** it stays an unknown face: the viewer still shows it with its suggestion, and it still counts as a face to confirm (REQ-032-24)
-- **And** _Ignore_ for the whole group stays as it was (REQ-032-11)
+- **And** it stays an unknown face: the viewer still shows it with its suggestion, it still counts as a face to confirm (REQ-032-24), and without a suggestion it shows under _Other unknown faces_ (REQ-032-28)
+- **And** _Ignore_ and _Not faces_ for the whole group stay as they were (REQ-032-11)
 
 ### REQ-032-26 · The whole photo
 
@@ -211,9 +211,32 @@ Users with large libraries want to find people without tagging each photo by han
 - **Then** _Unconfirmed faces_ is the first row of the People group, below its heading, above the people's tags
 - **And** collapsing the People group hides it with the tags, and the group shows with its heading even without People tags
 
+### REQ-032-28 · Every unknown face on the page
+
+- **Given** unknown faces of the chosen recognition model without a suggestion, in no group (taken out of one, REQ-032-25, or with fewer than three alike)
+- **When** the user opens _Unconfirmed faces_
+- **Then** they show under _Other unknown faces_, after the groups, a first part of them with _Show more_ for the rest
+- **And** a face there opens its photo among theirs, as a group's face does (REQ-032-26)
+
+### REQ-032-29 · Deciding on the page
+
+- **Given** a face on _Unconfirmed faces_ that the user hasn't decided about
+- **When** the user opens its menu (right click)
+- **Then** it offers _Ignore_ and _Not a face_, with the same effect as in the viewer (REQ-032-11)
+
+### REQ-032-30 · Ignored faces and non-faces
+
+- **Given** faces the user ignored or marked as not a face, of the chosen detection model
+- **When** the user opens _Unconfirmed faces_
+- **Then** they are listed at the end, under _Ignored_ and _Not faces_, each with its count, collapsed until opened, also when no face is left to confirm
+- **And** clicking a face offers: type a name, which writes it as a face region (REQ-032-14), _Back to unknown_, the other decision, and _Delete_
+- **And** _Delete_ forgets the face; it is found again only if its photo is looked at again (REQ-032-22)
+- **And** the settings have no button bringing back all ignored faces
+
 ## Out of scope
 
 - Videos, pets and the browser version.
+- Changing several decided faces at once.
 - Merging two people, and a page of confirmed people: the sidebar's People group lists them.
 - Showing unnamed face regions of other programs: they stay in the file, and the detector usually finds the same faces.
 - A graphics card: models run on the CPU (see the plan).
@@ -239,7 +262,7 @@ Users with large libraries want to find people without tagging each photo by han
 | REQ-032-08 | `crates/domain/src/face_models.rs` › req_032_08_a_loose_region_of_another_program_is_the_same_face; `crates/db/src/faces.rs` › req_032_08_a_face_on_a_named_region_is_that_person_until_the_file_changes | pass |
 | REQ-032-09 | `crates/app/tests/faces.rs` › req_032_09_shows_unknown_faces_with_suggestions_beside_named_ones, req_032_09_faces_button_shows_when_faces_are_looked_for, req_032_09_no_faces_button_while_none_are_looked_for, req_032_09_naming_an_unknown_face_writes_the_typed_name, req_032_09_a_faces_popup_looks_as_designed (snapshot `viewer_face_popup`) | pass |
 | REQ-032-10 | `crates/domain/src/face_models.rs` › req_032_10_suggests_the_most_similar_person_unless_rejected, req_032_10_one_wrong_face_of_a_person_counts_for_little, req_032_10_thresholds_are_the_measured_ones; `crates/media/src/face_store.rs` › req_032_10_the_catalog_beats_an_old_note; `crates/db/src/faces.rs` › req_032_10_remembers_who_a_face_is_not, req_032_10_suggests_a_known_person_for_an_unknown_face; `crates/app/tests/faces.rs` › req_032_10_not_this_person_is_remembered | pass, with thresholds measured on LFW, not on a real library |
-| REQ-032-11 | `crates/db/src/faces.rs` › req_032_11_ignored_faces_stay_gone_when_looked_at_again_until_restored; `crates/app/tests/faces.rs` › req_032_11_ignored_and_non_faces_go_away, req_032_11_a_non_face_goes_away | pass |
+| REQ-032-11 | `crates/db/src/faces.rs` › req_032_11_ignored_faces_and_non_faces_stay_gone_when_looked_at_again; `crates/app/tests/faces.rs` › req_032_11_ignored_and_non_faces_go_away, req_032_11_a_non_face_goes_away | pass |
 | REQ-032-12 | `crates/media/src/face_regions.rs` › req_032_12_a_new_region_goes_into_the_file_and_reads_back_where_it_was_drawn; `crates/app/tests/faces.rs` › req_032_12_draws_a_face_and_saves_it_where_it_was_drawn | pass |
 | REQ-032-13 | `crates/media/src/face_regions.rs` › req_032_13_removes_and_renames_one_region_of_any_program, req_032_13_a_person_with_another_region_stays_in_person_in_image; `crates/app/tests/faces.rs` › req_032_13_renames_and_removes_a_region_on_the_photo, req_032_13_removing_on_the_photo_takes_the_region_and_the_keyword; `crates/app/tests/tagging.rs` › req_032_13_the_people_tags_remove_button_takes_the_region | pass |
 | REQ-032-14 | `crates/domain/src/faces.rs` › req_032_14_stored_rect_undoes_turning_upright; `crates/media/src/face_regions.rs` › req_032_14_other_regions_and_fields_survive, req_032_14_changes_the_microsoft_region_only_where_it_exists, req_032_14_stores_rectangles_for_the_files_orientation, req_032_14_uses_the_sidecar_when_only_it_has_regions, req_032_14_a_read_only_file_shows_why_and_stays, req_032_14_is_read_back_by_the_indexing_rules; `crates/app/tests/faces.rs` › req_032_14_confirming_a_suggestion_writes_it_and_nothing_before_that, req_032_14_rejecting_and_ignoring_leave_the_file_alone | pass |
@@ -255,4 +278,7 @@ Users with large libraries want to find people without tagging each photo by han
 | REQ-032-24 | `crates/db/src/faces.rs` › req_032_24_groups_suggested_faces_by_person; `crates/app/tests/faces.rs` › req_032_24_confirm_or_reject_a_suggested_group | pass |
 | REQ-032-25 | `crates/db/src/faces.rs` › req_032_25_a_face_taken_out_stays_unknown; `crates/app/tests/faces.rs` › req_032_25_taking_a_face_out_keeps_it_in_the_viewer | pass |
 | REQ-032-26 | `crates/db/src/gallery.rs` › req_032_26_a_search_of_only_some_items; `crates/app/tests/faces.rs` › req_032_26_a_face_opens_its_photo_among_its_groups | pass |
+| REQ-032-28 | `crates/db/src/faces.rs` › req_032_28_faces_in_no_group_are_the_other_unknown_faces; `crates/app/tests/faces.rs` › req_032_28_faces_in_no_group_show_and_open_among_theirs, req_032_28_shows_more_on_asking, req_032_30_decided_faces_look_as_designed (snapshot `people_page_decided`) | pass |
+| REQ-032-29 | `crates/app/tests/faces.rs` › req_032_29_ignore_or_not_a_face_from_the_page; snapshot `people_page` | pass |
+| REQ-032-30 | `crates/db/src/faces.rs` › req_032_30_lists_decided_faces_to_undo_swap_or_delete; `crates/app/tests/faces.rs` › req_032_30_change_or_delete_a_decision, req_032_30_naming_a_decided_face_writes_it, req_032_30_no_button_brings_back_all_ignored_faces, req_032_30_decided_faces_look_as_designed (snapshot `people_page_decided`) | pass |
 | REQ-032-27 | `crates/app/tests/faces.rs` › req_032_27_unconfirmed_faces_is_the_first_row_of_people, req_032_27_people_shows_without_tags_and_collapses_with_it; snapshot `people_page` | pass |

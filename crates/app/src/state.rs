@@ -283,6 +283,14 @@ pub enum FaceAction {
         face: i64,
     },
     NotAFace {
+        faces: Vec<i64>,
+    },
+    /// An ignored face or a non-face back among the unknown faces (REQ-032-30).
+    Reopen {
+        faces: Vec<i64>,
+    },
+    /// Forget a face until its photo is looked at again (REQ-032-30).
+    Delete {
         face: i64,
     },
     Remove {

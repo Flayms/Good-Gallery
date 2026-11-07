@@ -403,19 +403,6 @@ impl AppState {
         self.kick_faces();
     }
 
-    /// Shows ignored faces again (REQ-032-11).
-    pub fn restore_ignored_faces(&mut self) {
-        let Some(db) = self.db.clone() else { return };
-        match faces::restore_ignored(&lock(&db)) {
-            Ok(count) => self.toasts.success(format!("{count} ignored faces are back")),
-            Err(error) => self.toasts.error(format!("Couldn't bring them back: {error}")),
-        }
-        if let Some(gallery) = &mut self.gallery {
-            gallery.forget_faces();
-        }
-        self.kick_faces();
-    }
-
     /// Deletes everything stored about faces and stops looking; files stay as they are (REQ-032-04).
     pub fn delete_face_data(&mut self) {
         let Some(db) = self.db.clone() else { return };
@@ -464,7 +451,9 @@ impl AppState {
         let decide = |face: i64, state: FaceState| faces::set_state(&lock(&db), face, state);
         let decided = match &action {
             A::Ignore { faces } => faces.iter().try_for_each(|face| decide(*face, FaceState::Ignored)),
-            A::NotAFace { face } => decide(*face, FaceState::NotAFace),
+            A::NotAFace { faces } => faces.iter().try_for_each(|face| decide(*face, FaceState::NotAFace)),
+            A::Reopen { faces } => faces.iter().try_for_each(|face| decide(*face, FaceState::Open)),
+            A::Delete { face } => faces::delete_face(&lock(&db), *face),
             A::NotThisPerson { face, name } => faces::reject(&lock(&db), *face, name),
             A::Ungroup { face } => faces::ungroup(&lock(&db), *face),
             A::LookAgain { media } => faces::look_again(&lock(&db), Some(*media)),
@@ -477,6 +466,8 @@ impl AppState {
             A::Ignore { .. }
             | A::Ungroup { .. }
             | A::NotAFace { .. }
+            | A::Reopen { .. }
+            | A::Delete { .. }
             | A::NotThisPerson { .. }
             | A::LookAgain { .. } => Vec::new(),
             A::Name { name, places } => places

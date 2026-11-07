@@ -819,18 +819,6 @@ fn faces(ui: &mut egui::Ui, state: &mut AppState) {
         divider(ui);
         setting_row(
             ui,
-            "Ignored faces",
-            "Faces you chose to ignore stay out of the way.",
-            170.0,
-            |ui| {
-                if ui.button("Show ignored faces again").clicked() {
-                    state.restore_ignored_faces();
-                }
-            },
-        );
-        divider(ui);
-        setting_row(
-            ui,
             "Face data",
             "Removes found faces and what you decided about them. Your files stay as they are.",
             140.0,

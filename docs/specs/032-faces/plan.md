@@ -73,7 +73,7 @@
 
 ### 2026-11-03 · Taking a face out of a group ignores it
 
-**Decided:** a face taken out of a group becomes ignored, and comes back with _Show ignored faces again_. Groups are computed, so there is nothing to remove it from, and it would rejoin the same group if merely skipped.
+**Superseded** by REQ-032-25 (#212): a face taken out of a group is marked `ungrouped` and stays an unknown face. Ignoring it hid a face the user had only said didn't belong there.
 **Rejected:** a rejection list per group: groups have no lasting identity.
 
 ### 2026-11-03 · Unnamed regions of other programs stay out
@@ -90,3 +90,8 @@
 
 **Decided:** _Add another model_ takes a chosen or dropped `.onnx` file (#176). A link box was odd to use, and the app no longer downloads anything but the catalog's pinned files. Models added by link earlier stay in the data folder and keep working.
 **Rejected:** keeping the link next to the file. It saved one download by hand for the few who add their own model.
+
+### 2026-11-06 · Decisions are changed on _Unconfirmed faces_ (#232)
+
+**Decided:** the page lists every face the search found that has no name: groups, then _Other unknown faces_ (REQ-032-28), then the ignored faces and non-faces (REQ-032-30). `db::faces::face_groups` returns the faces it left out of every group, and `decided_faces` lists the decided ones without needing a recognition model, since a face decided before recognition has no vector. Naming a decided face first sets it back to `open`, so the face counts like any named face if the name is removed later. _Delete_ removes the `detected_faces` row; embeddings and rejections go with it by foreign key, and looking at the photo again may find the face anew. Long sections show 48 faces and _Show more_, so a library with thousands of unknown faces lays out a few cards. The menu on undecided faces opens with a right click, because a click already opens the photo (REQ-032-26); on decided faces, which the viewer doesn't show, a click opens it.
+**Rejected:** a separate page for decisions, or keeping them in the settings: the page is where the user goes after a search, and a list in the settings would need its own crops and loading. Bringing all ignored faces back at once (the old button): a decision is undone where it can be seen.

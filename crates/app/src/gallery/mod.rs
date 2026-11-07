@@ -263,11 +263,14 @@ fn load_sidebar(conn: &Connection, library: Option<i64>, content: &ContentSlot) 
 pub type FaceGroup = Vec<(db::faces::GroupFace, Option<ThumbKey>)>;
 
 /// What _Unconfirmed faces_ shows: faces to confirm by suggested person (REQ-032-24), then groups of unknown faces
-/// (REQ-032-15).
+/// (REQ-032-15), the unknown faces in no group (REQ-032-28), and the ignored faces and non-faces (REQ-032-30).
 #[derive(Debug, Clone, Default)]
 pub struct FaceGroups {
     pub suggested: Vec<(String, FaceGroup)>,
     pub unknown: Vec<FaceGroup>,
+    pub others: FaceGroup,
+    pub ignored: FaceGroup,
+    pub not_faces: FaceGroup,
 }
 
 /// Groups shown of each kind; a library with more has far smaller ones further down.
@@ -275,6 +278,7 @@ const FACE_GROUPS: usize = 40;
 
 fn load_face_groups(conn: &Connection, detector: &str, recognizer: &str, threshold: f32) -> db::Result<FaceGroups> {
     let groups = db::faces::face_groups(conn, detector, recognizer, threshold)?;
+    let decided = db::faces::decided_faces(conn, detector)?;
     let with_keys = |faces: Vec<db::faces::GroupFace>| -> db::Result<FaceGroup> {
         faces
             .into_iter()
@@ -297,6 +301,9 @@ fn load_face_groups(conn: &Connection, detector: &str, recognizer: &str, thresho
             .take(FACE_GROUPS)
             .map(with_keys)
             .collect::<db::Result<_>>()?,
+        others: with_keys(groups.others)?,
+        ignored: with_keys(decided.ignored)?,
+        not_faces: with_keys(decided.not_faces)?,
     })
 }
 

@@ -730,7 +730,7 @@ impl Viewer {
                                     action = Some(FaceAction::Ignore { faces: vec![face.id] });
                                 }
                                 if ui.button("Not a face").clicked() {
-                                    action = Some(FaceAction::NotAFace { face: face.id });
+                                    action = Some(FaceAction::NotAFace { faces: vec![face.id] });
                                 }
                             }
                             FaceTarget::Drawn(rect) => {
