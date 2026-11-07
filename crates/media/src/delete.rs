@@ -61,7 +61,11 @@ pub fn delete(library: &Path, rel_path: &str, remove: impl Fn(&Path) -> io::Resu
     if file.symlink_metadata().is_ok() {
         remove(&file)?;
     }
-    for sidecar in sidecars {
+    // On a file system that ignores case, `IMG_1.xmp` and `IMG_1.XMP` are found as one sidecar: the second is gone.
+    for sidecar in sidecars
+        .into_iter()
+        .filter(|sidecar| sidecar.symlink_metadata().is_ok())
+    {
         if let Err(error) = remove(&sidecar) {
             tracing::warn!("can't delete the sidecar {}: {error}", sidecar.display());
         }
@@ -110,7 +114,13 @@ mod tests {
         ]);
         delete(&library, "2024/IMG_1.jpg", into(&bin)).unwrap();
         assert_eq!(files(&library.join("2024")), ["IMG_2.jpg"]);
-        assert_eq!(files(&bin), ["IMG_1.XMP", "IMG_1.jpg", "IMG_1.jpg.xmp"]);
+        // Windows finds `IMG_1.XMP` as `IMG_1.xmp`, and the stand-in names it so.
+        let lower = |names: Vec<String>| {
+            let mut names: Vec<String> = names.iter().map(|name| name.to_lowercase()).collect();
+            names.sort();
+            names
+        };
+        assert_eq!(lower(files(&bin)), ["img_1.jpg", "img_1.jpg.xmp", "img_1.xmp"]);
     }
 
     /// REQ-009-23: a sidecar named after the stem that another file of that name shares stays.
