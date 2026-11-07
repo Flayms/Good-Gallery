@@ -1,4 +1,4 @@
-//! The years beside the scrollbar, and the month while dragging it or at the pointer (REQ-006-16 … REQ-006-19).
+//! The years beside the scrollbar, and the month while dragging it or at the pointer (REQ-006-16 … REQ-006-20).
 
 use super::Arranged;
 use super::Gallery;
@@ -18,6 +18,17 @@ const MIN_GAP: f64 = 22.0;
 const PADDING: f32 = 6.0;
 /// How long the years stay after the user stopped scrolling (REQ-006-18), in seconds.
 const LINGER: f64 = 1.0;
+
+/// The gallery index of the first item of the month of date group `group`, in the gallery's order (REQ-006-20).
+fn first_of_month(groups: &[domain::date_groups::DateGroup], group: usize) -> usize {
+    use chrono::Datelike as _;
+    let month = |index: usize| (groups[index].day.year(), groups[index].day.month());
+    let mut first = group;
+    while first > 0 && month(first - 1) == month(group) {
+        first -= 1;
+    }
+    groups[first].start
+}
 
 /// A badge at height `y`, its right edge beside the scrollbar.
 fn badge_rect(bar: Rect, galley: &egui::Galley, y: f32, height: f32) -> Rect {
@@ -107,16 +118,25 @@ impl Gallery {
             })
         };
         let month = at.map(|(item, y)| {
-            let group = data.groups.partition_point(|group| group.start <= item);
-            let text = format::month_year(data.groups[group.saturating_sub(1)].day);
+            let group = data
+                .groups
+                .partition_point(|group| group.start <= item)
+                .saturating_sub(1);
+            let text = format::month_year(data.groups[group].day);
             let galley = ui.painter().layout_no_wrap(text.clone(), font.clone(), Color32::WHITE);
-            (text, badge_rect(bar, &galley, y as f32, LABEL_HEIGHT + 4.0), galley)
+            let first = first_of_month(&data.groups, group);
+            (
+                text,
+                badge_rect(bar, &galley, y as f32, LABEL_HEIGHT + 4.0),
+                galley,
+                first,
+            )
         });
 
         let badge = BADGE.gamma_multiply(opacity);
         let text_color = Color32::WHITE.gamma_multiply(opacity);
         for (index, year, galley, rect) in years {
-            if month.as_ref().is_some_and(|(_, month, _)| month.intersects(rect)) {
+            if month.as_ref().is_some_and(|(_, month, _, _)| month.intersects(rect)) {
                 continue;
             }
             let response = ui
@@ -140,9 +160,16 @@ impl Gallery {
             let pos = rect.center() - galley.size() / 2.0;
             ui.painter().galley(pos, galley, text_color);
         }
-        if let Some((text, rect, galley)) = month {
-            ui.interact(rect, ui.scope_id().with("month"), egui::Sense::hover())
-                .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, text.clone()));
+        if let Some((text, rect, galley, first)) = month {
+            // A click goes to the month's first item, as a year's does to its own (REQ-006-20).
+            let response = ui
+                .interact(rect, ui.scope_id().with("month"), egui::Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, text.clone()));
+            if response.clicked() && !dragging {
+                self.scroll_to = Some(self.start_of(arranged, first).min(track.max_offset()) as f32);
+                ui.ctx().request_repaint();
+            }
             ui.painter()
                 .rect_filled(rect, 4, Color32::BLACK.gamma_multiply(opacity));
             let pos = rect.center() - galley.size() / 2.0;
