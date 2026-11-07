@@ -261,6 +261,12 @@ Users with large libraries want to find people without tagging each photo by han
 - **Then** up to six known people (People tags) whose name contains what was typed show below it, those starting with it first
 - **And** clicking one, or moving to it with ↓ and ↑ and pressing Enter, names the face or group as typing the name and pressing Enter would
 
+### REQ-032-35 · A group to confirm that isn't that person
+
+- **Given** a group of faces to confirm (REQ-032-24)
+- **When** they aren't the suggested person
+- **Then** the group can be named as someone else in a field, with known people suggested (REQ-032-34), ignored, or marked as not faces, as a group of unknown faces can (REQ-032-15, REQ-032-11)
+
 ## Out of scope
 
 - Videos, pets and the browser version.
@@ -314,3 +320,4 @@ Users with large libraries want to find people without tagging each photo by han
 | REQ-032-32 | `crates/app/tests/faces.rs` › req_032_32_a_group_shows_all_its_faces | pass |
 | REQ-032-33 | `crates/app/tests/faces.rs` › req_032_33_the_viewer_says_what_each_decision_does, req_032_33_the_page_says_what_each_decision_does, req_032_13_renames_and_removes_a_region_on_the_photo (_Remove name_); snapshots `viewer_face_popup`, `people_page` | pass |
 | REQ-032-34 | `crates/app/src/names.rs` › req_032_34_suggests_known_people_starting_with_what_was_typed_first; `crates/app/tests/faces.rs` › req_032_34_picks_a_known_person_on_the_page, req_032_34_picks_a_known_person_with_the_keys, req_032_34_suggests_known_people_in_the_viewer; snapshot `people_page_names` | pass |
+| REQ-032-35 | `crates/app/tests/faces.rs` › req_032_35_a_group_to_confirm_can_be_someone_else_or_ignored; snapshot `people_page` | pass |

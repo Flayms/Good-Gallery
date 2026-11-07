@@ -32,15 +32,28 @@ pub mod tips {
 
 /// A button for one of a face's decisions, with what it does (REQ-032-33).
 pub fn decision(ui: &mut egui::Ui, label: &str, tip: &str) -> bool {
-    ui.button(label).on_hover_text(tip).clicked()
+    decision_spoken(ui, label, tip, label)
+}
+
+/// [`decision`], read out by screen readers as `spoken`, which says whose it is where a page has several.
+fn decision_spoken(ui: &mut egui::Ui, label: &str, tip: &str, spoken: &str) -> bool {
+    let response = ui.button(label).on_hover_text(tip);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, spoken));
+    response.clicked()
 }
 
 /// A button that names or renames, off until there is a name to write (REQ-032-33).
 pub fn naming(ui: &mut egui::Ui, label: &str, named: bool) -> bool {
-    ui.add_enabled(named, egui::Button::new(label))
+    naming_spoken(ui, label, named, label)
+}
+
+fn naming_spoken(ui: &mut egui::Ui, label: &str, named: bool, spoken: &str) -> bool {
+    let response = ui
+        .add_enabled(named, egui::Button::new(label))
         .on_hover_text(tips::NAME)
-        .on_disabled_hover_text(tips::NO_NAME)
-        .clicked()
+        .on_disabled_hover_text(tips::NO_NAME);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, named, spoken));
+    response.clicked()
 }
 
 /// A part of the page shown in parts: a section by its title, or a group by its first face (REQ-032-32).
@@ -284,7 +297,8 @@ fn faces_count(count: usize) -> String {
 }
 
 /// One group with its faces. A person's group (REQ-032-24) is confirmed with _Yes, all_, and a face's ✕ says it isn't
-/// them; an unknown group (REQ-032-15) is named in a field or ignored, and a face's ✕ takes it out (REQ-032-25).
+/// them; an unknown group (REQ-032-15) is named in a field or ignored, and a face's ✕ takes it out (REQ-032-25). A
+/// person's group can be named as someone else, ignored or marked as not faces too (REQ-032-35).
 /// Without saying who, nothing is written. A large group shows in parts (REQ-032-32). What the user chose, where the
 /// card is, and how many faces show.
 fn group_card(
@@ -347,8 +361,8 @@ fn group_card(
         ui.add_space(theme::SPACE * 2.0);
         let places = || group.iter().map(|(face, _)| (face.media, face.rect)).collect();
         let field_id = ui.make_persistent_id(("face group name", key));
-        let field = ui.horizontal(|ui| match person {
-            Some(name) => {
+        let field = ui.horizontal(|ui| {
+            if let Some(name) = person {
                 let yes = ui.button("Yes, all");
                 let spoken = format!("Yes, all are {name}");
                 yes.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &spoken));
@@ -358,35 +372,46 @@ fn group_card(
                         places: places(),
                     });
                 }
-                None
             }
-            None => {
-                let page = &mut state.people_page;
-                let name = page.names.entry(key).or_default();
-                let field = names::field(ui, field_id, name, "Who is this?", 240.0);
-                let spoken = format!("Who is this? Group of {}", group.len());
-                field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, &spoken));
-                if naming(ui, "Name them", clean_name(name).is_some())
-                    && let Some(name) = clean_name(name)
-                {
-                    page.confirm = Some(NamingGroup { name, places: places() });
-                }
-                let faces = || group.iter().map(|(face, _)| face.id).collect();
-                if decision(ui, "Ignore", tips::IGNORE) {
-                    chosen = Some(Chosen::Face(FaceAction::Ignore { faces: faces() }));
-                }
-                if decision(ui, "Not faces", tips::NOT_A_FACE) {
-                    chosen = Some(Chosen::Face(FaceAction::NotAFace { faces: faces() }));
-                }
-                Some(field)
+            // Whose the buttons are, where a page has several of each.
+            let (hint, spoken, whose) = match person {
+                Some(name) => (
+                    "Someone else?",
+                    format!("Someone else than {name}? Group of {}", group.len()),
+                    format!(" ({name}?)"),
+                ),
+                None => (
+                    "Who is this?",
+                    format!("Who is this? Group of {}", group.len()),
+                    String::new(),
+                ),
+            };
+            let page = &mut state.people_page;
+            let name = page.names.entry(key).or_default();
+            let field = names::field(ui, field_id, name, hint, 240.0);
+            field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, &spoken));
+            if naming_spoken(
+                ui,
+                "Name them",
+                clean_name(name).is_some(),
+                &format!("Name them{whose}"),
+            ) && let Some(name) = clean_name(name)
+            {
+                page.confirm = Some(NamingGroup { name, places: places() });
             }
+            let faces = || group.iter().map(|(face, _)| face.id).collect();
+            if decision_spoken(ui, "Ignore", tips::IGNORE, &format!("Ignore{whose}")) {
+                chosen = Some(Chosen::Face(FaceAction::Ignore { faces: faces() }));
+            }
+            if decision_spoken(ui, "Not faces", tips::NOT_A_FACE, &format!("Not faces{whose}")) {
+                chosen = Some(Chosen::Face(FaceAction::NotAFace { faces: faces() }));
+            }
+            field
         });
         // Below the row, so the buttons stay where they are (REQ-032-34).
-        if let Some(field) = field.inner {
-            let name = state.people_page.names.entry(key).or_default();
-            if let Some(name) = names::suggestions(ui, field_id, &field, name, &people.people) {
-                state.people_page.confirm = Some(NamingGroup { name, places: places() });
-            }
+        let name = state.people_page.names.entry(key).or_default();
+        if let Some(name) = names::suggestions(ui, field_id, &field.inner, name, &people.people) {
+            state.people_page.confirm = Some(NamingGroup { name, places: places() });
         }
     });
     (chosen, card.response.rect, shown)

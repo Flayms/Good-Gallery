@@ -1509,3 +1509,23 @@ fn req_032_34_suggests_known_people_in_the_viewer() {
     type_name(&mut harness, "Who is this?", "x");
     assert!(harness.query_by_label("Suggested name Ben").is_none());
 }
+
+/// REQ-032-35: a group to confirm can be named as someone else, or ignored, like a group of unknown faces.
+#[test]
+fn req_032_35_a_group_to_confirm_can_be_someone_else_or_ignored() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    type_name(&mut harness, "Someone else than Ben? Group of 1", "Cy");
+    harness.get_by_label("Name them (Ben?)").click();
+    settle(&mut harness);
+    harness.get_by_label("Write Cy into 1 file?");
+    harness.get_by_label("Cancel").click();
+    settle(&mut harness);
+
+    harness.get_by_label("Ignore (Ben?)").click();
+    settle(&mut harness);
+    assert!(harness.query_by_label("Ben? · 1 face").is_none());
+    harness.get_by_label("Ignored · 1");
+}
