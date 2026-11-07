@@ -277,8 +277,16 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
         *input.page = Page::Gallery;
         gallery.select_all();
     }
+    gallery.set_album_libraries(
+        input
+            .libraries
+            .iter()
+            .map(|library| (library.id, library.label.clone()))
+            .collect(),
+    );
     match album_action {
         Some(AlbumAction::Rename(album)) => gallery.ask_rename_album(&album),
+        Some(AlbumAction::Edit(album)) => gallery.ask_edit_album(&album),
         Some(AlbumAction::Delete(id)) => gallery.delete_album(id),
         None => {}
     }
@@ -287,6 +295,8 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
 /// What a smart album's context menu asks for (REQ-034-05).
 enum AlbumAction {
     Rename(Box<SmartAlbum>),
+    /// Its rules (REQ-039-01).
+    Edit(Box<SmartAlbum>),
     Delete(i64),
 }
 
@@ -329,6 +339,9 @@ fn albums(
             *search = album.search.clone();
         }
         response.context_menu(|ui| {
+            if ui.button("Edit…").clicked() {
+                action = Some(AlbumAction::Edit(Box::new(album.clone())));
+            }
             if ui.button("Rename…").clicked() {
                 action = Some(AlbumAction::Rename(Box::new(album.clone())));
             }

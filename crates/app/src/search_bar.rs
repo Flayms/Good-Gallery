@@ -85,11 +85,18 @@ pub fn show(ui: &mut egui::Ui, bar: &mut SearchBar, gallery: &mut Gallery) {
             {
                 next.content = None;
             }
-            let hint = if chips.is_empty() && search.name.is_none() && search.content.is_none() {
-                LABEL
-            } else {
-                ""
-            };
+            // A smart album's rules, as one chip with its name (REQ-039-05).
+            if let Some(rules) = &search.rules
+                && rules_chip(ui, &rules.name)
+            {
+                next.rules = None;
+            }
+            let hint =
+                if chips.is_empty() && search.name.is_none() && search.content.is_none() && search.rules.is_none() {
+                    LABEL
+                } else {
+                    ""
+                };
             let edit = egui::TextEdit::singleline(&mut bar.query)
                 .id_salt("search bar")
                 .frame(egui::Frame::NONE)
@@ -304,6 +311,23 @@ fn tag_chip(ui: &mut egui::Ui, name: &str, mode: TagMode) -> Option<ChipAction> 
             }
         });
     action
+}
+
+/// A smart album's rules as a chip with its name; true when its × was clicked (REQ-039-05).
+fn rules_chip(ui: &mut egui::Ui, name: &str) -> bool {
+    let mut removed = false;
+    egui::Frame::new()
+        .stroke(egui::Stroke::new(1.0, theme::rim()))
+        .corner_radius(theme::RADIUS_CONTROL)
+        .inner_margin(egui::Margin::symmetric(4, 1))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            ui.add(Icon::Search.image(12.0, theme::text()));
+            ui.label(egui::RichText::new(name).size(theme::SIZE_CAPTION))
+                .on_hover_text("Smart album");
+            removed = remove_button(ui, &format!("Remove smart album {name}"));
+        });
+    removed
 }
 
 /// The file name filter as a chip; true when its × was clicked.

@@ -78,6 +78,8 @@ pub struct GallerySearch {
     pub media: Vec<i64>,
     /// Words describing what the photos show (REQ-036-05); matched by content search's model before the query runs.
     pub content: Option<String>,
+    /// A smart album's rules, matched besides the filters above (REQ-039-03); the filters bar shows them as one chip.
+    pub rules: Option<Box<crate::album_rules::Rules>>,
     pub sort_by: SortBy,
     pub descending: bool,
 }
@@ -97,6 +99,7 @@ impl Default for GallerySearch {
             ratings: Vec::new(),
             media: Vec::new(),
             content: None,
+            rules: None,
             sort_by: SortBy::Taken,
             descending: true,
         }
@@ -201,11 +204,14 @@ impl GallerySearch {
 
     /// The date range as milliseconds: from the start of `from` to the start of the day after `to` (REQ-007-08).
     pub fn date_range(&self) -> (Option<i64>, Option<i64>) {
-        (
-            self.from.map(start_of),
-            self.to.map(|to| start_of(to.succ_opt().unwrap_or(to))),
-        )
+        days_ms(self.from, self.to)
     }
+}
+
+/// Local days `from` to `to` (both inclusive) as milliseconds: from the start of `from` to the start of the day after
+/// `to` (REQ-007-08, REQ-039-02).
+pub fn days_ms(from: Option<NaiveDate>, to: Option<NaiveDate>) -> (Option<i64>, Option<i64>) {
+    (from.map(start_of), to.map(|to| start_of(to.succ_opt().unwrap_or(to))))
 }
 
 #[cfg(test)]

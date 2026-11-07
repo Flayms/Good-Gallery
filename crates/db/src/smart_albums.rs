@@ -1,6 +1,7 @@
 //! Smart albums (spec 034): searches kept under a name, with what the sidebar shows of them.
 
 use crate::Result;
+use domain::album_rules::Condition;
 use domain::search::GallerySearch;
 use domain::smart_albums::{SmartAlbum, search_from_value, search_to_value};
 use rusqlite::{Connection, params};
@@ -35,7 +36,11 @@ pub fn list(conn: &Connection) -> Result<Vec<SmartAlbum>> {
     for row in rows {
         let (id, name, search) = row?;
         // A value that isn't JSON reads as the default search, like any part that can't be read.
-        let search = search_from_value(&serde_json::from_str(&search).unwrap_or_default());
+        let mut search = search_from_value(&serde_json::from_str(&search).unwrap_or_default());
+        // The filters bar names rules by their album (REQ-039-05).
+        if let Some(rules) = &mut search.rules {
+            rules.name = name.clone();
+        }
         albums.push(SmartAlbum { id, name, search });
     }
     Ok(albums)
@@ -48,6 +53,15 @@ pub fn insert(conn: &Connection, name: &str, search: &GallerySearch) -> Result<i
         params![name, search_to_value(search).to_string()],
     )?;
     Ok(conn.last_insert_rowid())
+}
+
+/// Gives album `id` a new name and search, from its editor (REQ-039-01).
+pub fn update(conn: &Connection, id: i64, name: &str, search: &GallerySearch) -> Result<()> {
+    conn.execute(
+        "UPDATE smart_albums SET name = ?1, search = ?2 WHERE id = ?3",
+        params![name, search_to_value(search).to_string(), id],
+    )?;
+    Ok(())
 }
 
 pub fn rename(conn: &Connection, id: i64, name: &str) -> Result<()> {
@@ -76,6 +90,26 @@ pub fn rows(conn: &Connection, resolve: &dyn Fn(&GallerySearch) -> GallerySearch
 }
 
 fn missing(conn: &Connection, search: &GallerySearch) -> Result<Option<Missing>> {
+    // A rule album's libraries and folders count like a search's (REQ-034-06, REQ-039-03).
+    if let Some(rules) = &search.rules {
+        for condition in &rules.conditions {
+            let place = match condition {
+                Condition::Library(library) => GallerySearch {
+                    library: Some(*library),
+                    ..GallerySearch::default()
+                },
+                Condition::Folder { library, folder } => GallerySearch {
+                    library: Some(*library),
+                    folder: Some(folder.clone()),
+                    ..GallerySearch::default()
+                },
+                _ => continue,
+            };
+            if let Some(missing) = missing(conn, &place)? {
+                return Ok(Some(missing));
+            }
+        }
+    }
     let Some(library) = search.library else {
         return Ok(None);
     };
@@ -180,6 +214,177 @@ mod tests {
         let rows = rows(&conn, &resolve).unwrap();
         assert_eq!(rows[0].count, 1, "a.jpg: matched and rated 5");
         assert_eq!(rows[0].album.search.content.as_deref(), Some("dogs"));
+    }
+
+    /// REQ-039-02, REQ-039-03, REQ-039-06: rule albums are kept under their name, match all or any of their
+    /// conditions, and say when their library is gone.
+    #[test]
+    fn req_039_02_req_039_03_rule_albums_match_all_or_any() {
+        use domain::album_rules::{Bound, Condition, DateField, Days, Orientation, Rules, Unit};
+        let conn = crate::open_in_memory().unwrap();
+        let root = insert_library(&conn, "D:\\Photos", "Photos", LibraryStatus::Online)
+            .unwrap()
+            .id;
+        let today = domain::time_zone::today();
+        let now = domain::search::days_ms(Some(today), None).0.unwrap() + 3_600_000;
+        let old = domain::search::days_ms(today.checked_sub_days(chrono::Days::new(400)), None)
+            .0
+            .unwrap();
+        let shaped =
+            |rel: &str, size: i64, w: i64, h: i64, taken: i64, kind: MediaKind, rating: Option<i64>| IndexedFile {
+                size,
+                kind,
+                metadata: MediaMetadata {
+                    width: Some(w),
+                    height: Some(h),
+                    taken_at: Some(taken),
+                    duration: (kind == MediaKind::Video).then_some(90.0),
+                    rating,
+                    tags: match rel {
+                        "beach.jpg" => vec![vec!["Beach".into()]],
+                        "anna.jpg" => vec![vec!["People".into(), "Anna".into()]],
+                        _ => Vec::new(),
+                    },
+                    ..Default::default()
+                },
+                ..file(rel, None)
+            };
+        let mut writer = IndexWriter::new(conn);
+        writer
+            .write(
+                root,
+                &[
+                    shaped("beach.jpg", 5_000_000, 4000, 3000, old, MediaKind::Image, Some(5)),
+                    shaped("anna.jpg", 100, 300, 400, now, MediaKind::Image, None),
+                    shaped("clip.mp4", 50_000_000, 1920, 1080, now, MediaKind::Video, Some(2)),
+                    shaped("square.png", 10, 100, 100, old, MediaKind::Image, Some(3)),
+                ],
+            )
+            .unwrap();
+        let conn: Connection = writer.into();
+        let names = |rules: Rules| -> Vec<String> {
+            let search = GallerySearch {
+                rules: Some(Box::new(rules)),
+                ..GallerySearch::default()
+            };
+            let layout = crate::gallery::layout(&conn, &search).unwrap();
+            let mut names: Vec<String> = crate::gallery::items(&conn, &layout.ids)
+                .unwrap()
+                .into_iter()
+                .map(|item| item.file_name)
+                .collect();
+            names.sort();
+            names
+        };
+        let rules = |any: bool, conditions: Vec<Condition>| Rules {
+            name: String::new(),
+            any,
+            conditions,
+        };
+        let last_30 = Condition::Date {
+            field: DateField::Taken,
+            days: Days::Last(30, Unit::Days),
+        };
+        assert_eq!(names(rules(false, vec![last_30.clone()])), ["anna.jpg", "clip.mp4"]);
+        assert_eq!(
+            names(rules(false, vec![last_30.clone(), Condition::Kind(MediaKind::Video)])),
+            ["clip.mp4"]
+        );
+        assert_eq!(
+            names(rules(
+                true,
+                vec![
+                    Condition::Tag {
+                        name: "beach".into(),
+                        is: true
+                    },
+                    Condition::HasPeople
+                ]
+            )),
+            ["anna.jpg", "beach.jpg"]
+        );
+        assert_eq!(names(rules(false, vec![Condition::NoTags])), ["clip.mp4", "square.png"]);
+        assert_eq!(
+            names(rules(
+                false,
+                vec![Condition::Tag {
+                    name: "Beach".into(),
+                    is: false
+                }]
+            ))
+            .len(),
+            3
+        );
+        assert_eq!(
+            names(rules(
+                false,
+                vec![Condition::Tag {
+                    name: "nowhere".into(),
+                    is: true
+                }]
+            )),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            names(rules(false, vec![Condition::RatingAtLeast(3)])),
+            ["beach.jpg", "square.png"]
+        );
+        assert_eq!(
+            names(rules(false, vec![Condition::RatingIn(vec![0, 2])])),
+            ["anna.jpg", "clip.mp4"]
+        );
+        let at_least = |value| Bound { at_least: true, value };
+        assert_eq!(
+            names(rules(false, vec![Condition::Size(at_least(1_000_000.0))])),
+            ["beach.jpg", "clip.mp4"]
+        );
+        assert_eq!(
+            names(rules(false, vec![Condition::Duration(at_least(60.0))])),
+            ["clip.mp4"]
+        );
+        assert_eq!(
+            names(rules(false, vec![Condition::Megapixels(at_least(10.0))])),
+            ["beach.jpg"]
+        );
+        assert_eq!(
+            names(rules(false, vec![Condition::Orientation(Orientation::Portrait)])),
+            ["anna.jpg"]
+        );
+        assert_eq!(
+            names(rules(false, vec![Condition::Orientation(Orientation::Square)])),
+            ["square.png"]
+        );
+        assert_eq!(
+            names(rules(false, vec![Condition::NameContains("BEACH".into())])),
+            ["beach.jpg"]
+        );
+        assert_eq!(
+            names(rules(false, vec![Condition::Shows("dogs".into())])),
+            Vec::<String>::new()
+        );
+        assert_eq!(names(rules(true, vec![])).len(), 4, "no conditions: everything");
+
+        // Kept under its name, and its library missing is noticed.
+        let search = GallerySearch {
+            rules: Some(Box::new(rules(true, vec![Condition::HasPeople]))),
+            ..GallerySearch::default()
+        };
+        let id = insert(&conn, "People", &search).unwrap();
+        let listed = list(&conn).unwrap();
+        assert_eq!(
+            listed[0].search.rules.as_ref().map(|rules| rules.name.as_str()),
+            Some("People")
+        );
+        let gone = GallerySearch {
+            rules: Some(Box::new(rules(false, vec![Condition::Library(root + 1)]))),
+            ..GallerySearch::default()
+        };
+        update(&conn, id, "Gone", &gone).unwrap();
+        let rows = rows(&conn, &GallerySearch::clone).unwrap();
+        assert_eq!(
+            (rows[0].album.name.as_str(), rows[0].missing),
+            ("Gone", Some(Missing::Library))
+        );
     }
 
     #[test]

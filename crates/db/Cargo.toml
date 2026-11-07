@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+chrono.workspace = true
 domain.workspace = true
 rusqlite.workspace = true
 serde.workspace = true
@@ -16,7 +17,6 @@ sha2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-chrono.workspace = true
 tempfile.workspace = true
 
 [lints]

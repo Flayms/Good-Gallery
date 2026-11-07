@@ -35,8 +35,12 @@ pub fn suggested_name(search: &GallerySearch) -> String {
     }
 }
 
-/// How a search is stored (REQ-034-07): only what is set, so a default search is `{}`.
+/// How a search is stored (REQ-034-07): only what is set, so a default search is `{}`. A search with rules is stored
+/// as its rules, version 2 (REQ-039-06).
 pub fn search_to_value(search: &GallerySearch) -> Value {
+    if let Some(rules) = &search.rules {
+        return crate::album_rules::rules_to_value(rules, search.sort_by, search.descending);
+    }
     let mut map = Map::new();
     let mut put = |key: &str, value: Value| {
         map.insert(key.into(), value);
@@ -83,6 +87,14 @@ pub fn search_to_value(search: &GallerySearch) -> Value {
 
 /// A stored search. What is missing or can't be read keeps its default, so an album outlives changes to the format.
 pub fn search_from_value(value: &Value) -> GallerySearch {
+    if let Some((rules, sort_by, descending)) = crate::album_rules::rules_from_value(value) {
+        return GallerySearch {
+            rules: Some(Box::new(rules)),
+            sort_by,
+            descending,
+            ..GallerySearch::default()
+        };
+    }
     let mut search = GallerySearch::default();
     let Some(map) = value.as_object() else {
         return search;
@@ -141,6 +153,7 @@ mod tests {
             ratings: vec![0, 4, 5],
             media: Vec::new(),
             content: Some("a dog on a beach".into()),
+            rules: None,
             sort_by: SortBy::Name,
             descending: false,
         }

@@ -1,6 +1,6 @@
 # 039 · Smart album rules
 
-**Status:** Draft
+**Status:** Implemented
 
 ## Goal
 
@@ -80,12 +80,12 @@ A smart album (spec 034) keeps a search as the filters bar builds it: all of its
 
 ## Verification
 
-| REQ        | Test | Result  |
-| ---------- | ---- | ------- |
-| REQ-039-01 | —    | no test |
-| REQ-039-02 | —    | no test |
-| REQ-039-03 | —    | no test |
-| REQ-039-04 | —    | no test |
-| REQ-039-05 | —    | no test |
-| REQ-039-06 | —    | no test |
-| REQ-039-07 | —    | no test |
+| REQ        | Test | Result |
+| ---------- | ---- | ------ |
+| REQ-039-01 | `crates/domain/src/album_rules.rs` › req_039_01_req_039_06_a_search_becomes_rules_and_back; `crates/app/tests/smart_albums.rs` › req_039_01_req_039_03_req_039_05_saves_rules_matching_any (snapshot `album_editor`), req_039_01_req_039_06_edits_an_album | pass |
+| REQ-039-02 | `crates/domain/src/album_rules.rs` › req_039_02_incomplete_conditions; `crates/db/src/smart_albums.rs` › req_039_02_req_039_03_rule_albums_match_all_or_any; `crates/app/tests/smart_albums.rs` › req_039_01_req_039_06_edits_an_album | pass |
+| REQ-039-03 | `crates/db/src/smart_albums.rs` › req_039_02_req_039_03_rule_albums_match_all_or_any; `crates/app/tests/smart_albums.rs` › req_039_01_req_039_03_req_039_05_saves_rules_matching_any | pass |
+| REQ-039-04 | `crates/domain/src/album_rules.rs` › req_039_04_relative_dates_end_today; `crates/db/src/smart_albums.rs` › req_039_02_req_039_03_rule_albums_match_all_or_any (the last 30 days) | partial: refreshing when a new day starts while the app runs (`AppState::notice_new_day`) has no test |
+| REQ-039-05 | `crates/domain/src/album_rules.rs` › req_039_05_rules_the_filters_bar_cant_show; `crates/app/tests/smart_albums.rs` › req_039_01_req_039_03_req_039_05_saves_rules_matching_any | pass |
+| REQ-039-06 | `crates/domain/src/album_rules.rs` › req_039_06_stores_and_reads_rules, req_039_01_req_039_06_a_search_becomes_rules_and_back; `crates/app/tests/smart_albums.rs` › req_039_01_req_039_06_edits_an_album; the tests of spec 034 pass unchanged | pass |
+| REQ-039-07 | `cargo xtask search-bench` (500k items, 2k tags, ≈ 1M links; dev build with optimized dependencies, 2026-11-07) | no test (measured by the benchmark, p95: any of five conditions, 38,634 matches, 765 ms of 1,000; all of three, 353 matches, 5 ms of 50; the last 5 years and videos, 5,246 matches, 11 ms of 50) |
