@@ -253,6 +253,23 @@ pub fn mark_for_reading(conn: &Connection, media: i64) -> Result<bool> {
     Ok(changed > 0)
 }
 
+/// Removes media item `media`, whose file was deleted (REQ-009-24), with its tags, faces and vectors. Returns the
+/// thumbnail cache key it had, so its cached files can be deleted; `None` if it isn't indexed. Tags left without media
+/// items go on the next scan.
+pub fn remove(conn: &Connection, media: i64) -> Result<Option<domain::thumbs::ThumbKey>> {
+    Ok(conn
+        .prepare_cached("DELETE FROM media WHERE id = ?1 RETURNING root_id, rel_path, size, mtime")?
+        .query_row([media], |row| {
+            Ok(domain::thumbs::ThumbKey {
+                root_id: row.get(0)?,
+                rel_path: row.get(1)?,
+                size: row.get(2)?,
+                mtime: row.get(3)?,
+            })
+        })
+        .optional()?)
+}
+
 /// The id of the media item at `rel_path` of a library, if it is indexed.
 pub fn id_of(conn: &Connection, root_id: i64, rel_path: &str) -> Result<Option<i64>> {
     Ok(conn
@@ -300,6 +317,46 @@ mod tests {
             |row| row.get(0),
         )
         .unwrap()
+    }
+
+    /// REQ-009-24: a deleted item leaves the index with its tags, and its thumbnail key comes back.
+    #[test]
+    fn req_009_24_removes_a_deleted_item() {
+        let conn = crate::open_in_memory().unwrap();
+        let root = libraries::insert(&conn, ROOT, "Photos", LibraryStatus::Online)
+            .unwrap()
+            .id;
+        let insert = |rel_path: &str| -> i64 {
+            conn.query_row(
+                "INSERT INTO media (root_id, rel_path, file_name, kind, size, mtime)
+                 VALUES (?1, ?2, ?2, 'image', 12, 34) RETURNING id",
+                (root, rel_path),
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let (gone, kept) = (insert("a.jpg"), insert("b.jpg"));
+        let beach = tag(&conn, "Beach", None);
+        for media in [gone, kept] {
+            conn.execute(
+                "INSERT INTO media_tags (media_id, tag_id) VALUES (?1, ?2)",
+                (media, beach),
+            )
+            .unwrap();
+        }
+
+        let key = remove(&conn, gone).unwrap().unwrap();
+        assert_eq!(
+            (key.root_id, key.rel_path.as_str(), key.size, key.mtime),
+            (root, "a.jpg", 12, 34)
+        );
+        assert_eq!(id_of(&conn, root, "a.jpg").unwrap(), None);
+        assert_eq!(id_of(&conn, root, "b.jpg").unwrap(), Some(kept));
+        let count: i64 = conn
+            .query_row("SELECT media_count FROM tags WHERE id = ?1", [beach], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(remove(&conn, gone).unwrap(), None, "already gone");
     }
 
     /// REQ-025-07: the files of the selected items, also of more than one statement's worth; unknown ids are left out.

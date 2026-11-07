@@ -75,6 +75,8 @@ pub enum Action {
     Rename(i64),
     /// Turn this photo a quarter by its orientation tag (REQ-009-22); the viewer stays.
     Turn(i64, domain::orientation::Turn),
+    /// Ask before deleting this item (REQ-009-23); the viewer stays, and moves on once it is gone (REQ-009-24).
+    Delete(i64),
 }
 
 /// What a face's popup is about.
@@ -117,6 +119,8 @@ struct Keys {
     redo: bool,
     /// `1`–`5`: rate the item with that many stars (REQ-024-01).
     rate: Option<i64>,
+    /// Delete: delete the item (REQ-009-23).
+    delete: bool,
 }
 
 /// The video the viewer plays (REQ-009-06).
@@ -217,6 +221,8 @@ pub struct Viewer {
     missing: bool,
     /// No longer in the result, and shown all the same (REQ-009-18).
     left_result: bool,
+    /// The shown item was deleted: once it leaves the result, the item taking its place shows (REQ-009-24).
+    deleted: bool,
     view: ZoomView,
     /// The original was loaded when the item came up: it shows without a fade (REQ-009-14). `None` until the first
     /// frame of the item.
@@ -280,6 +286,7 @@ impl Viewer {
             version,
             missing: false,
             left_result: false,
+            deleted: false,
             view: FIT,
             instant: None,
             fade_from: None,
@@ -347,6 +354,14 @@ impl Viewer {
 
     pub fn id(&self) -> i64 {
         self.id
+    }
+
+    /// Media items `ids` were deleted: if the shown one is among them, the viewer moves on once the gallery no longer
+    /// has it (REQ-009-24).
+    pub fn deleted(&mut self, ids: &[i64]) {
+        if ids.contains(&self.id) {
+            self.deleted = true;
+        }
     }
 
     pub fn view(&self) -> ZoomView {
@@ -581,6 +596,9 @@ impl Viewer {
                         self.keys.rate = Some(rating);
                     }
                 }
+                if input.consume_key(Modifiers::NONE, Key::Delete) {
+                    self.keys.delete = true;
+                }
             }
         });
     }
@@ -590,6 +608,7 @@ impl Viewer {
         (self.index, self.id) = (index, id);
         self.missing = false;
         self.left_result = false;
+        self.deleted = false;
         self.view = FIT;
         self.instant = None;
         self.fade_from = None;
@@ -616,6 +635,12 @@ impl Viewer {
         } else if let Some(index) = gallery.position_of(self.id) {
             self.index = index;
             (self.missing, self.left_result) = (false, false);
+        } else if self.deleted {
+            // The item that took its place, or the one before it at the end; none left closes (REQ-009-24).
+            match gallery.count().unwrap_or(0) {
+                0 => self.close(gallery, Action::Close),
+                count => self.go_to(self.index.min(count - 1), gallery),
+            }
         } else {
             // Whether it is still indexed comes with `Gallery::item_outside` (REQ-009-18).
             self.left_result = true;
@@ -781,7 +806,7 @@ impl Viewer {
         let mut keys = std::mem::take(&mut self.keys);
         // What needs the index isn't there for a file outside every library (REQ-033-03).
         if !self.indexed {
-            (keys.edit, keys.filmstrip, keys.faces, keys.rate) = (false, false, false, None);
+            (keys.edit, keys.filmstrip, keys.faces, keys.rate, keys.delete) = (false, false, false, None, false);
         }
         // Escape first leaves what the faces are doing (REQ-032-09, REQ-032-12).
         if keys.close && (self.face_popup.is_some() || self.drawing_face.is_some()) {
@@ -874,6 +899,9 @@ impl Viewer {
         let mut action = None;
         if let (Some(item), Some(stars), None) = (&item, keys.rate, &self.closing) {
             action = Some(Action::Rate(crate::state::Rate::toggle(item, stars)));
+        }
+        if let (Some(item), true, None, false) = (&item, keys.delete, &self.closing, self.left_result) {
+            action = Some(Action::Delete(item.id));
         }
         if let Some(item) = &item {
             self.sync_edit(ctx, item, libraries, originals, gallery, keys.edit);
@@ -1001,6 +1029,7 @@ impl Viewer {
                             }));
                         }
                         Some(MediaAction::Turn(turn)) => action = Some(Action::Turn(item.id, turn)),
+                        Some(MediaAction::Delete) => action = Some(Action::Delete(item.id)),
                         Some(MediaAction::Select) | None => {}
                     });
                 }

@@ -22,6 +22,7 @@ thiserror.workspace = true
 thumbhash.workspace = true
 tract-onnx.workspace = true
 tracing.workspace = true
+trash.workspace = true
 ureq.workspace = true
 webp.workspace = true
 

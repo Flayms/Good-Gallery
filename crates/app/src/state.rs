@@ -223,18 +223,30 @@ pub enum Many {
     Tag(Vec<String>),
     /// Turn photos a quarter by their orientation tag (REQ-009-22).
     Turn(domain::orientation::Turn),
+    /// Delete the files: to the Recycle Bin, or `permanently` when one is on a network drive (REQ-009-23).
+    Delete { permanently: bool },
 }
 
 impl Many {
-    /// The dialog asking before changing `count` (formatted) items, and its button.
-    pub fn question(&self, count: &str) -> (String, &'static str) {
+    /// The dialog asking before changing `count` (formatted) items: its title, its text and its button.
+    pub fn question(&self, count: &str) -> (String, String, &'static str) {
+        let changed = || "Their files are changed.".to_owned();
         match self {
-            Self::Rate(Some(1)) => (format!("Rate {count} items with 1 star?"), "Rate"),
-            Self::Rate(Some(stars)) => (format!("Rate {count} items with {stars} stars?"), "Rate"),
-            Self::Rate(None) => (format!("Remove the rating of {count} items?"), "Remove rating"),
-            Self::Tag(path) => (format!("Tag {count} items with {}?", tag_name(path)), "Tag"),
-            Self::Turn(domain::orientation::Turn::Left) => (format!("Rotate {count} photos left?"), "Rotate"),
-            Self::Turn(domain::orientation::Turn::Right) => (format!("Rotate {count} photos right?"), "Rotate"),
+            Self::Rate(Some(1)) => (format!("Rate {count} items with 1 star?"), changed(), "Rate"),
+            Self::Rate(Some(stars)) => (format!("Rate {count} items with {stars} stars?"), changed(), "Rate"),
+            Self::Rate(None) => (
+                format!("Remove the rating of {count} items?"),
+                changed(),
+                "Remove rating",
+            ),
+            Self::Tag(path) => (format!("Tag {count} items with {}?", tag_name(path)), changed(), "Tag"),
+            Self::Turn(domain::orientation::Turn::Left) => {
+                (format!("Rotate {count} photos left?"), changed(), "Rotate")
+            }
+            Self::Turn(domain::orientation::Turn::Right) => {
+                (format!("Rotate {count} photos right?"), changed(), "Rotate")
+            }
+            Self::Delete { permanently } => domain::deletion::question(count, *permanently),
         }
     }
 }
@@ -446,6 +458,9 @@ pub struct AppState {
     /// Where renames are journaled (REQ-035-08, REQ-035-09); renaming is off without it.
     #[cfg(not(target_arch = "wasm32"))]
     rename_journal: Option<PathBuf>,
+    /// Moves a deleted file to the Recycle Bin (REQ-009-23); tests put their own in its place.
+    #[cfg(not(target_arch = "wasm32"))]
+    trash: media::delete::Remove,
     indexer_events: Option<Receiver<IndexerEvent>>,
     pub indexer_status: IndexerStatus,
     /// When written files were last shown; `None` until the running scan wrote its first files.
@@ -883,32 +898,62 @@ impl AppState {
 
     /// Rates or tags several items, after the user confirmed if there are many (REQ-025-07, REQ-026-06).
     pub fn ask_change_many(&mut self, change: ChangeMany) {
-        if change.ids.len() > CONFIRM_MANY_ABOVE {
+        // Deleting always asks (REQ-009-23).
+        if change.ids.len() > CONFIRM_MANY_ABOVE || matches!(change.what, Many::Delete { .. }) {
             self.confirm_many = Some(change);
         } else {
             self.change_many(change);
         }
     }
 
+    /// Asks before deleting media items `ids` (REQ-009-23): permanently if one of their libraries is on a network drive.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn ask_delete(&mut self, ids: Vec<i64>) {
+        let Some(db) = self.db.clone() else { return };
+        if ids.is_empty() {
+            return;
+        }
+        let roots: std::collections::BTreeSet<i64> = ids_roots(&lock(&db), &ids);
+        let permanently = self
+            .libraries
+            .iter()
+            // Without its libraries known, any of them counts.
+            .filter(|library| roots.is_empty() || roots.contains(&library.id))
+            .any(|library| media::delete::deletes_permanently(std::path::Path::new(&library.path)));
+        self.ask_change_many(ChangeMany {
+            ids,
+            what: Many::Delete { permanently },
+        });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn ask_delete(&mut self, _ids: Vec<i64>) {}
+
     /// Writes a rating or a tag into the files of several items in the background, one after another, then into
     /// the index; files that can't be written are counted and the first one named (REQ-025-07, REQ-026-06).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn change_many(&mut self, change: ChangeMany) {
-        let (Some(exiftool), Some(db)) = (
-            self.edit_tools.as_ref().map(|tools| tools.exiftool.clone()),
-            self.db.clone(),
-        ) else {
-            self.toasts
-                .error("Couldn't save the changes: exiftool, which writes them, wasn't found.");
-            return;
+        let Some(db) = self.db.clone() else { return };
+        // Deleting needs no exiftool (REQ-009-23).
+        let exiftool = self.edit_tools.as_ref().map(|tools| tools.exiftool.clone());
+        let exiftool = match (exiftool, &change.what) {
+            (Some(exiftool), _) => exiftool,
+            (None, Many::Delete { .. }) => std::path::PathBuf::new(),
+            (None, _) => {
+                self.toasts
+                    .error("Couldn't save the changes: exiftool, which writes them, wasn't found.");
+                return;
+            }
         };
         let count = format::count(change.ids.len() as u64);
         self.toasts.success(match &change.what {
             Many::Rate(_) => format!("Rating {count} items…"),
             Many::Tag(_) => format!("Tagging {count} items…"),
             Many::Turn(_) => format!("Rotating {count} photos…"),
+            Many::Delete { .. } => format!("Deleting {count} items…"),
         });
         let cache = self.thumbnail_cache();
+        let trash = self.trash;
         self.spawn_write(move || {
             let files = db::media::files_of(&lock(&db), &change.ids).map_err(|error| error.to_string());
             Event::ChangedMany(files.map(|files| {
@@ -936,6 +981,21 @@ impl AppState {
                             forget_index_entry(Some(&db), cache.as_ref(), file.root_id, &file.rel_path);
                             db::faces::look_again(&lock(&db), Some(file.id)).map(|()| true)
                         }),
+                        // Out of the index and the thumbnail cache right away (REQ-009-24).
+                        Many::Delete { permanently } => {
+                            // Of a selection across libraries, those with a Recycle Bin still use it.
+                            let permanently = *permanently && media::delete::deletes_permanently(library);
+                            let remove = if permanently { media::delete::permanently } else { trash };
+                            media::delete::delete(library, &file.rel_path, remove).map(|()| {
+                                let key = db::media::remove(&lock(&db), file.id)?;
+                                if let (Some(key), Some(cache)) = (key, &cache) {
+                                    for width in domain::thumbs::THUMB_WIDTHS {
+                                        let _ = std::fs::remove_file(cache.path(&key, width));
+                                    }
+                                }
+                                Ok(true)
+                            })
+                        }
                     };
                     match written {
                         Ok(indexed) => {
@@ -1377,6 +1437,8 @@ impl AppState {
             rename_dialog: None,
             #[cfg(not(target_arch = "wasm32"))]
             rename_journal: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            trash: media::delete::to_trash,
             pending_copy: None,
             #[cfg(not(target_arch = "wasm32"))]
             open_requests: None,
@@ -1454,6 +1516,13 @@ impl AppState {
             let event = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).unwrap_or(Event::Failed);
             let _ = tx.send(event);
         });
+    }
+
+    /// Moves deleted files with `trash` instead of to the Recycle Bin (REQ-009-23): tests leave the user's alone.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_trash(mut self, trash: media::delete::Remove) -> Self {
+        self.trash = trash;
+        self
     }
 
     /// Journals renames at `path` (REQ-035-08, REQ-035-09).
@@ -1906,11 +1975,14 @@ impl AppState {
                     for (root_id, paths) in by_library {
                         self.scans.request_paths(root_id, paths);
                     }
-                    // The viewer shows a turned photo anew.
-                    if let (Many::Turn(_), Some(originals)) = (&done.what, &mut self.originals) {
+                    // The viewer shows a turned photo anew, and moves on from a deleted one (REQ-009-24).
+                    if let (Many::Turn(_) | Many::Delete { .. }, Some(originals)) = (&done.what, &mut self.originals) {
                         for media in &done.media {
                             originals.forget(*media);
                         }
+                    }
+                    if let (Many::Delete { .. }, Some(viewer)) = (&done.what, &mut self.viewer) {
+                        viewer.deleted(&done.media);
                     }
                     self.refresh();
                     let changed = format::count(done.changed.len() as u64);
@@ -1918,6 +1990,11 @@ impl AppState {
                         Many::Rate(_) => (format!("Rated {changed} items"), "rate"),
                         Many::Tag(path) => (format!("Tagged {changed} items with {}", tag_name(path)), "tag"),
                         Many::Turn(_) => (format!("Rotated {changed} photos"), "rotate"),
+                        Many::Delete { permanently: true } => (format!("Deleted {changed} items"), "delete"),
+                        Many::Delete { permanently: false } => (
+                            format!("Moved {changed} items to the {}", domain::deletion::TRASH),
+                            "delete",
+                        ),
                     };
                     match done.first_failure {
                         None => self.toasts.success(did),
@@ -1971,6 +2048,18 @@ fn forget_index_entry(
     if let (Some(key), Some(cache)) = (key, cache) {
         for width in domain::thumbs::THUMB_WIDTHS {
             let _ = std::fs::remove_file(cache.path(&key, width));
+        }
+    }
+}
+
+/// The libraries of media items `ids`.
+#[cfg(not(target_arch = "wasm32"))]
+fn ids_roots(conn: &Connection, ids: &[i64]) -> std::collections::BTreeSet<i64> {
+    match db::media::files_of(conn, ids) {
+        Ok(files) => files.into_iter().map(|file| file.root_id).collect(),
+        Err(error) => {
+            tracing::error!("can't find the libraries of the items to delete: {error}");
+            std::collections::BTreeSet::new()
         }
     }
 }
