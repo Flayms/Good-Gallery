@@ -358,6 +358,43 @@ impl ExifTool {
             .and_then(|data| base64::engine::general_purpose::STANDARD.decode(data).ok()))
     }
 
+    /// The tags `args` asks for (`-json` and the tags, without files) of several files in one run, in the order of
+    /// `files`; a file exiftool couldn't read has no tags.
+    pub fn read_many(
+        &self,
+        args: &[String],
+        files: &[PathBuf],
+    ) -> Result<Vec<serde_json::Map<String, serde_json::Value>>, ExifToolError> {
+        let mut all = args.to_vec();
+        all.extend(files.iter().map(|file| file.to_string_lossy().into_owned()));
+        let reply = self.run(&all)?;
+        let mut value: serde_json::Value = if reply.trim().is_empty() {
+            serde_json::Value::Array(Vec::new())
+        } else {
+            serde_json::from_str(&reply).map_err(|e| ExifToolError::Failed(format!("unexpected output: {e}")))?
+        };
+        unwrap_invalid_utf8(&mut value);
+        // exiftool names each file as it was given, with `/` for `\\` on Windows.
+        let key = |path: &str| path.replace('\\', "/");
+        let mut by_file: std::collections::HashMap<String, serde_json::Map<String, serde_json::Value>> = match value {
+            serde_json::Value::Array(items) => items
+                .into_iter()
+                .filter_map(|item| match item {
+                    serde_json::Value::Object(tags) => {
+                        let source = key(tags.get("SourceFile")?.as_str()?);
+                        Some((source, tags))
+                    }
+                    _ => None,
+                })
+                .collect(),
+            _ => return Err(ExifToolError::Failed("unexpected output".into())),
+        };
+        Ok(files
+            .iter()
+            .map(|file| by_file.remove(&key(&file.to_string_lossy())).unwrap_or_default())
+            .collect())
+    }
+
     fn run(&self, args: &[String]) -> Result<String, ExifToolError> {
         let mut process = self.acquire()?;
         let result = process.run(args);

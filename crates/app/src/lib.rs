@@ -5,6 +5,8 @@ const _: Option<&str> = option_env!("GOOD_GALLERY_WORKTREE");
 
 pub mod edit;
 pub mod empty_state;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod fix_dates;
 pub mod format;
 pub mod gallery;
 pub mod glass;
@@ -178,12 +180,17 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     confirm_many(&ctx, state);
     #[cfg(not(target_arch = "wasm32"))]
     rename_dialog(&ctx, state);
+    #[cfg(not(target_arch = "wasm32"))]
+    date_dialog(&ctx, state);
     if let Some(gallery) = &mut state.gallery {
         gallery.album_dialog(&ctx);
     }
-    if state.toasts.show(&ctx) == Some(toasts::ToastAction::UndoRename) {
+    match state.toasts.show(&ctx) {
         #[cfg(not(target_arch = "wasm32"))]
-        state.undo_rename();
+        Some(toasts::ToastAction::UndoRename) => state.undo_rename(),
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(toasts::ToastAction::UndoDates) => state.undo_fix_dates(),
+        _ => {}
     }
     // Over the viewer they go with its dark look (REQ-020-05).
     if state.viewer.is_some() {
@@ -251,6 +258,10 @@ fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
             what: state::Many::Turn(turn),
         }),
         Some(viewer::Action::Delete(id)) => state.ask_delete(vec![id]),
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(viewer::Action::FixDates(id)) => state.open_fix_dates(vec![id]),
+        #[cfg(target_arch = "wasm32")]
+        Some(viewer::Action::FixDates(_)) => {}
         Some(viewer::Action::Tag(change)) => state.tag(change),
         Some(viewer::Action::Face(face)) => state.face_action(face),
         #[cfg(not(target_arch = "wasm32"))]
@@ -313,6 +324,23 @@ fn rename_dialog(ctx: &egui::Context, state: &mut AppState) {
             state.undo_rename();
         }
         Some(rename::Asked::Close) => state.rename_dialog = None,
+        None => {}
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn date_dialog(ctx: &egui::Context, state: &mut AppState) {
+    let Some(dialog) = &mut state.date_dialog else { return };
+    match dialog.show(ctx) {
+        Some(fix_dates::Asked::Fix(job)) => {
+            state.date_dialog = None;
+            state.start_fix_dates(job);
+        }
+        Some(fix_dates::Asked::Undo) => {
+            state.date_dialog = None;
+            state.undo_fix_dates();
+        }
+        Some(fix_dates::Asked::Close) => state.date_dialog = None,
         None => {}
     }
 }
@@ -444,6 +472,8 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
     let mut change_many = None;
     #[cfg(not(target_arch = "wasm32"))]
     let mut rename: Option<Vec<i64>> = None;
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut fix_dates: Option<Vec<i64>> = None;
     let mut delete: Option<Vec<i64>> = None;
     if state.libraries.is_empty() {
         if empty_state::no_libraries(ui).clicked() {
@@ -469,6 +499,10 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
         #[cfg(not(target_arch = "wasm32"))]
         if gallery.take_rename_asked() {
             rename = Some(gallery.selected_ids());
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if gallery.take_fix_dates_asked() {
+            fix_dates = Some(gallery.selected_ids());
         }
         if gallery.take_delete_asked() {
             delete = Some(gallery.selected_ids());
@@ -511,6 +545,10 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
                 });
             }
             Some((index, gallery::MediaAction::Delete)) => delete = Some(gallery.menu_targets(index)),
+            #[cfg(not(target_arch = "wasm32"))]
+            Some((index, gallery::MediaAction::FixDates)) => fix_dates = Some(gallery.menu_targets(index)),
+            #[cfg(target_arch = "wasm32")]
+            Some((_, gallery::MediaAction::FixDates)) => {}
             Some((_, gallery::MediaAction::Edit | gallery::MediaAction::Revert)) | None => {}
             #[cfg(target_arch = "wasm32")]
             Some((_, gallery::MediaAction::Rename)) => {}
@@ -525,6 +563,10 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(ids) = rename {
         state.open_rename(ids);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(ids) = fix_dates {
+        state.open_fix_dates(ids);
     }
     // The toolbar floats over the gallery, which scrolls underneath it (REQ-013-03).
     let area = ui.max_rect();

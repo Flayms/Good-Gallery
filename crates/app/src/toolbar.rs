@@ -123,6 +123,15 @@ fn selection_bar(ui: &mut egui::Ui, gallery: &mut Gallery) {
         if response.clicked() {
             gallery.ask_rename();
         }
+        // REQ-038-01: beside _Rename…_, the icon alone too.
+        let fix = egui::Button::new(Icon::Calendar.small())
+            .frame(false)
+            .min_size(vec2(theme::CONTROL_HEIGHT, theme::CONTROL_HEIGHT));
+        let response = ui.add(fix).on_hover_text("Fix the dates taken of the selected photos");
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Fix dates…"));
+        if response.clicked() {
+            gallery.ask_fix_dates();
+        }
         {
             let button = egui::Button::new((
                 Icon::Plus.small(),

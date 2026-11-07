@@ -270,6 +270,43 @@ pub fn remove(conn: &Connection, media: i64) -> Result<Option<domain::thumbs::Th
         .optional()?)
 }
 
+/// A media item whose date taken may be fixed (spec 038).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dated {
+    pub id: i64,
+    pub root_id: i64,
+    pub rel_path: String,
+    pub kind: MediaKind,
+    /// Milliseconds since the epoch.
+    pub mtime: i64,
+    pub taken_at: Option<i64>,
+}
+
+/// The media items `ids` in the order of their paths, as a file manager lists them; missing ids are left out
+/// (REQ-038-05).
+pub fn dated(conn: &Connection, ids: &[i64]) -> Result<Vec<Dated>> {
+    let mut found = Vec::with_capacity(ids.len());
+    let mut stmt = conn.prepare_cached("SELECT root_id, rel_path, kind, mtime, taken_at FROM media WHERE id = ?1")?;
+    for &id in ids {
+        let row = stmt
+            .query_row([id], |row| {
+                let kind: String = row.get(2)?;
+                Ok(Dated {
+                    id,
+                    root_id: row.get(0)?,
+                    rel_path: row.get(1)?,
+                    kind: MediaKind::parse(&kind).unwrap_or(MediaKind::Image),
+                    mtime: row.get(3)?,
+                    taken_at: row.get(4)?,
+                })
+            })
+            .optional()?;
+        found.extend(row);
+    }
+    found.sort_by(|a, b| (a.root_id, &a.rel_path).cmp(&(b.root_id, &b.rel_path)));
+    Ok(found)
+}
+
 /// The id of the media item at `rel_path` of a library, if it is indexed.
 pub fn id_of(conn: &Connection, root_id: i64, rel_path: &str) -> Result<Option<i64>> {
     Ok(conn
@@ -357,6 +394,33 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1);
         assert_eq!(remove(&conn, gone).unwrap(), None, "already gone");
+    }
+
+    /// REQ-038-05: the items to fix dates of, in the order of their paths, with their kind and dates.
+    #[test]
+    fn req_038_05_lists_the_items_to_fix() {
+        let conn = crate::open_in_memory().unwrap();
+        let root = libraries::insert(&conn, ROOT, "Photos", LibraryStatus::Online)
+            .unwrap()
+            .id;
+        let insert = |rel_path: &str, kind: &str, taken: Option<i64>| -> i64 {
+            conn.query_row(
+                "INSERT INTO media (root_id, rel_path, file_name, kind, size, mtime, taken_at)
+                 VALUES (?1, ?2, ?2, ?3, 1, 5, ?4) RETURNING id",
+                (root, rel_path, kind, taken),
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        let b = insert("b.jpg", "image", Some(7));
+        let a = insert("a.mp4", "video", None);
+        let items = dated(&conn, &[b, 999, a]).unwrap();
+        assert_eq!(items.iter().map(|item| item.id).collect::<Vec<_>>(), [a, b]);
+        assert_eq!((items[0].kind, items[0].taken_at), (MediaKind::Video, None));
+        assert_eq!(
+            (items[1].kind, items[1].mtime, items[1].taken_at),
+            (MediaKind::Image, 5, Some(7))
+        );
     }
 
     /// REQ-025-07: the files of the selected items, also of more than one statement's worth; unknown ids are left out.

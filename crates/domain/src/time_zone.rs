@@ -32,6 +32,15 @@ pub fn wall_clock(ms: i64) -> Option<NaiveDateTime> {
     })
 }
 
+/// The offset from UTC of the zone dates are shown in, at `ms` (milliseconds since the Unix epoch).
+pub fn offset_at(ms: i64) -> Option<FixedOffset> {
+    let at = DateTime::from_timestamp_millis(ms)?;
+    Some(match fixed() {
+        Some(offset) => offset,
+        None => *at.with_timezone(&Local).offset(),
+    })
+}
+
 /// The earliest moment, in ms since the Unix epoch, with the wall-clock time `local`; `None` if a daylight saving gap
 /// skips it.
 pub fn earliest(local: &NaiveDateTime) -> Option<i64> {

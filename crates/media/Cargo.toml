@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 base64.workspace = true
+chrono.workspace = true
 domain.workspace = true
 ed25519-compact.workspace = true
 meta.workspace = true

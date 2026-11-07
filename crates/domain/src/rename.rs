@@ -128,14 +128,15 @@ fn split_ext(name: &str) -> (&str, &str) {
     }
 }
 
+/// The parts of a date format (`yyyy-MM-dd HH-mm-ss`), longest first; shared with `date_fix` (REQ-038-03).
+pub(crate) const DATE_TOKENS: [&str; 7] = ["yyyy", "yy", "MM", "dd", "HH", "mm", "ss"];
+
 /// `yyyy-MM-dd HH-mm-ss` and its parts as a `chrono` format; everything else is literal.
 fn date_format(format: &str) -> String {
     let mut out = String::new();
     let mut rest = format;
     while !rest.is_empty() {
-        let token = ["yyyy", "yy", "MM", "dd", "HH", "mm", "ss"]
-            .into_iter()
-            .find(|token| rest.starts_with(token));
+        let token = DATE_TOKENS.into_iter().find(|token| rest.starts_with(token));
         match token {
             Some(token) => {
                 out.push_str(match token {

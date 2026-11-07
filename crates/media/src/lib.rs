@@ -4,6 +4,7 @@
 const _: Option<&str> = option_env!("GOOD_GALLERY_WORKTREE");
 
 pub mod content;
+pub mod dates;
 pub mod delete;
 pub mod edit;
 pub mod exiftool;
