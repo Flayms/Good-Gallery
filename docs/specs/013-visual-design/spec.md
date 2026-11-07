@@ -134,6 +134,13 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 - **When** buttons next to each other are pressed or under the pointer
 - **Then** each one's highlight stays in its own place, with a gap between neighbours (#179)
 
+### REQ-013-19 · Buttons answer the pointer
+
+- **Given** a button anywhere in the app, also one drawn without a frame (icons in the toolbar, the viewer's bar, chips, _Add_)
+- **When** the pointer is over it
+- **Then** it shows the hover state (a light fill, `docs/design.md`), so the user sees it can be clicked
+- **And** _Filters_ and _View_ in the toolbar show their icon alone (a funnel for _Filters_, with the number of active filters when there are any, and the current view for _View_), and name themselves in a tip
+
 ## Out of scope
 
 - A light theme or following the OS light / dark setting (the app stays dark).
@@ -171,3 +178,4 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 | REQ-013-16 | `crates/app/src/icons.rs` › req_013_16_given_stars_are_filled_and_missing_ones_outlined | pass |
 | REQ-013-17 | `crates/app/src/theme.rs` › req_013_17_the_setting_or_the_os_reduces_transparency; `crates/app/tests/settings.rs` › req_013_17_the_setting_turns_glass_off_and_stays_after_a_restart; `crates/db/src/settings.rs` › req_010_01_starts_with_defaults_and_persists_updates | pass |
 | REQ-013-18 | `crates/app/tests/viewer.rs` › req_013_18_the_viewers_bar_buttons_stay_apart; snapshot `viewer_faces` for what is painted | pass |
+| REQ-013-19 | `crates/app/tests/search.rs` › req_013_19_buttons_answer_the_pointer_and_filters_and_view_are_icons; snapshots of the toolbar (`filters_menu` and others) | pass |

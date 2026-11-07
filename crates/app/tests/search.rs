@@ -562,3 +562,39 @@ fn req_019_15_the_info_sheet_fits_a_narrow_window() {
     assert!(title.left() >= 0.0, "the info sheet starts left of the window");
     assert!(title.right() <= 300.0, "the info sheet starts right of the window");
 }
+
+/// The color drawn at `pos`.
+fn pixel(harness: &mut egui_kittest::Harness<'static, app::AppState>, pos: egui::Pos2) -> egui::Color32 {
+    let image = harness.render().unwrap();
+    let [r, g, b, _] = image.get_pixel(pos.x as u32, pos.y as u32).0;
+    egui::Color32::from_rgb(r, g, b)
+}
+
+/// REQ-013-19: a frameless button shows the hover state under the pointer; _Filters_ and _View_ are icons named by
+/// their tips.
+#[test]
+fn req_013_19_buttons_answer_the_pointer_and_filters_and_view_are_icons() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture);
+    for (label, tip) in [("Filters", "Filters"), ("View options", "View")] {
+        let rect = harness.get_by_label(label).rect();
+        assert!(rect.width() < 72.0, "{label} is an icon: {rect:?}");
+        // In the button's padding, beside its icon.
+        let inside = egui::pos2(rect.left() + 3.0, rect.center().y);
+        harness.hover_at(egui::pos2(500.0, 500.0));
+        harness.run_steps(20);
+        let before = pixel(&mut harness, inside);
+        harness.hover_at(rect.center());
+        harness.run_steps(20);
+        assert_ne!(
+            pixel(&mut harness, inside),
+            before,
+            "{label} shows the pointer is on it"
+        );
+        harness.run_steps(60);
+        assert!(
+            harness.query_all_by_label(tip).count() >= if tip == label { 2 } else { 1 },
+            "{label} has the tip {tip}"
+        );
+    }
+}

@@ -87,7 +87,7 @@ pub fn notice(ui: &mut egui::Ui, unreadable: &Unreadable) -> Option<ReadAgain> {
         Icon::TriangleAlert.image(theme::ICON_SIZE, theme::alert()),
         format!("{} unreadable", format::count(unreadable.count as u64)),
     ))
-    .frame(false)
+    .frame_when_inactive(false)
     .min_size(vec2(0.0, theme::CONTROL_HEIGHT));
     let response = ui.add(button);
     let label = summary(unreadable.count);

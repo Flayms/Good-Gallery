@@ -45,6 +45,7 @@ icons! {
     Film => "film",
     FolderOpen => "folder-open",
     FolderPlus => "folder-plus",
+    Funnel => "funnel",
     Folder => "folder",
     GalleryHorizontal => "gallery-horizontal",
     ImageOff => "image-off",
@@ -73,6 +74,7 @@ icons! {
     Search => "search",
     Settings => "settings",
     SlidersHorizontal => "sliders-horizontal",
+    Sparkles => "sparkles",
     SquareSplitHorizontal => "square-split-horizontal",
     StarFilled => "star-filled",
     StarOff => "star-off",
@@ -125,7 +127,7 @@ pub fn icon_button(ui: &mut egui::Ui, icon: Icon, label: &str, tooltip: &str) ->
     let response = ui
         .add(
             egui::Button::image(icon.small())
-                .frame(false)
+                .frame_when_inactive(false)
                 .min_size(Vec2::splat(theme::CONTROL_HEIGHT - 4.0)),
         )
         .on_hover_text(tooltip);

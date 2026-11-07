@@ -195,7 +195,7 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths, writable:
                         let remove = ui
                             .add(
                                 egui::Button::image(Icon::X.image(12.0, theme::muted()))
-                                    .frame(false)
+                                    .frame_when_inactive(false)
                                     .min_size(egui::vec2(20.0, 24.0)),
                             )
                             .on_hover_text(format!("Remove {name}"));
@@ -215,7 +215,7 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths, writable:
                                 .size(theme::SIZE_CAPTION)
                                 .color(theme::muted()),
                         )
-                        .frame(false)
+                        .frame_when_inactive(false)
                         .min_size(egui::vec2(0.0, 24.0)),
                     );
                     let spoken = format!("Add to {label}");
@@ -320,7 +320,8 @@ pub(crate) fn add_field(
     let has: Vec<String> = has.iter().map(|name| (*name).to_owned()).collect();
     for path in domain::tagging::suggest(known, typed, &has, SUGGESTIONS) {
         let shown = path.join(" › ");
-        let button = egui::Button::new(egui::RichText::new(&shown).size(theme::SIZE_CAPTION)).frame(false);
+        let button =
+            egui::Button::new(egui::RichText::new(&shown).size(theme::SIZE_CAPTION)).frame_when_inactive(false);
         if ui.add(button).clicked() {
             return Adding::Add(path.clone());
         }
