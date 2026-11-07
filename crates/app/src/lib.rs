@@ -84,8 +84,10 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
     theme::set_transparency_setting(&ctx, state.settings.reduce_transparency);
     theme::begin_frame(&ctx);
     glass::begin_frame(&ctx);
-    // The viewer's keys go to it alone (REQ-009-02).
-    if let Some(viewer) = &mut state.viewer {
+    // The viewer's keys go to it alone (REQ-009-02), not while a dialog asks over it (REQ-009-23).
+    if let Some(viewer) = &mut state.viewer
+        && state.confirm_many.is_none()
+    {
         viewer.input(&ctx);
     }
     ctx.layer_painter(egui::LayerId::background())
@@ -248,6 +250,7 @@ fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
             ids: vec![id],
             what: state::Many::Turn(turn),
         }),
+        Some(viewer::Action::Delete(id)) => state.ask_delete(vec![id]),
         Some(viewer::Action::Tag(change)) => state.tag(change),
         Some(viewer::Action::Face(face)) => state.face_action(face),
         #[cfg(not(target_arch = "wasm32"))]
@@ -318,14 +321,8 @@ fn confirm_many(ctx: &egui::Context, state: &mut AppState) {
     let Some(change) = state.confirm_many.clone() else {
         return;
     };
-    let (title, button) = change.what.question(&format::count(change.ids.len() as u64));
-    let chosen = widgets::dialog(
-        ctx,
-        "confirm-many",
-        &title,
-        "Their files are changed.",
-        &[button, "Cancel"],
-    );
+    let (title, text, button) = change.what.question(&format::count(change.ids.len() as u64));
+    let chosen = widgets::dialog(ctx, "confirm-many", &title, &text, &[button, "Cancel"]);
     if let Some(chosen) = chosen {
         state.confirm_many = None;
         if chosen == 0 {
@@ -447,6 +444,7 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
     let mut change_many = None;
     #[cfg(not(target_arch = "wasm32"))]
     let mut rename: Option<Vec<i64>> = None;
+    let mut delete: Option<Vec<i64>> = None;
     if state.libraries.is_empty() {
         if empty_state::no_libraries(ui).clicked() {
             // The browser's folder picker needs the click (REQ-019-01, REQ-019-02).
@@ -471,6 +469,9 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
         #[cfg(not(target_arch = "wasm32"))]
         if gallery.take_rename_asked() {
             rename = Some(gallery.selected_ids());
+        }
+        if gallery.take_delete_asked() {
+            delete = Some(gallery.selected_ids());
         }
         // A click or Enter on a tile or row opens the viewer (REQ-009-01).
         if let Some(index) = gallery.take_opened()
@@ -509,6 +510,7 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
                     what: state::Many::Turn(turn),
                 });
             }
+            Some((index, gallery::MediaAction::Delete)) => delete = Some(gallery.menu_targets(index)),
             Some((_, gallery::MediaAction::Edit | gallery::MediaAction::Revert)) | None => {}
             #[cfg(target_arch = "wasm32")]
             Some((_, gallery::MediaAction::Rename)) => {}
@@ -516,6 +518,9 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
     }
     if let Some(change) = change_many {
         state.ask_change_many(change);
+    }
+    if let Some(ids) = delete {
+        state.ask_delete(ids);
     }
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(ids) = rename {

@@ -360,10 +360,14 @@ fn req_026_06_tags_the_selection() {
 #[test]
 fn req_026_06_asks_before_tagging_many() {
     let tag = app::state::Many::Tag(path(&["Places", "Italy", "Rome"]));
-    assert_eq!(tag.question("2,345"), ("Tag 2,345 items with Rome?".to_owned(), "Tag"));
+    let changed = "Their files are changed.".to_owned();
+    assert_eq!(
+        tag.question("2,345"),
+        ("Tag 2,345 items with Rome?".to_owned(), changed.clone(), "Tag")
+    );
     assert_eq!(
         app::state::Many::Rate(Some(4)).question("101"),
-        ("Rate 101 items with 4 stars?".to_owned(), "Rate")
+        ("Rate 101 items with 4 stars?".to_owned(), changed, "Rate")
     );
 }
 
