@@ -401,6 +401,9 @@ enum Event {
     /// Files were renamed (spec 035), or why not.
     #[cfg(not(target_arch = "wasm32"))]
     Renamed(Result<crate::rename::RenameDone, String>),
+    /// Dates taken were fixed or taken back (spec 038), or why not.
+    #[cfg(not(target_arch = "wasm32"))]
+    DatesFixed(Result<crate::fix_dates::DatesDone, String>),
     /// A tag was written into the file (REQ-026-03), or why not (REQ-026-04).
     Tagged(Result<(i64, String), String>),
     /// Several items were rated or tagged (REQ-025-07, REQ-026-06), or why none could be.
@@ -458,6 +461,14 @@ pub struct AppState {
     /// Where renames are journaled (REQ-035-08, REQ-035-09); renaming is off without it.
     #[cfg(not(target_arch = "wasm32"))]
     rename_journal: Option<PathBuf>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub date_dialog: Option<crate::fix_dates::FixDatesDialog>,
+    /// Where date fixes are journaled (REQ-038-09); fixing dates is off without it.
+    #[cfg(not(target_arch = "wasm32"))]
+    date_journal: Option<PathBuf>,
+    /// exiftool processes that read dates for the date fix dialog, started when it first opens.
+    #[cfg(not(target_arch = "wasm32"))]
+    date_reader: Option<Arc<media::exiftool::ExifTool>>,
     /// Moves a deleted file to the Recycle Bin (REQ-009-23); tests put their own in its place.
     #[cfg(not(target_arch = "wasm32"))]
     trash: media::delete::Remove,
@@ -1461,6 +1472,12 @@ impl AppState {
             #[cfg(not(target_arch = "wasm32"))]
             rename_journal: None,
             #[cfg(not(target_arch = "wasm32"))]
+            date_dialog: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            date_journal: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            date_reader: None,
+            #[cfg(not(target_arch = "wasm32"))]
             trash: media::delete::to_trash,
             pending_copy: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -1546,6 +1563,120 @@ impl AppState {
     pub fn with_trash(mut self, trash: media::delete::Remove) -> Self {
         self.trash = trash;
         self
+    }
+
+    /// Journals date fixes at `path` (REQ-038-09).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_date_journal(mut self, path: PathBuf) -> Self {
+        self.date_journal = Some(path);
+        self
+    }
+
+    /// Opens the date fix dialog for `ids` (REQ-038-01).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn open_fix_dates(&mut self, ids: Vec<i64>) {
+        let (Some(db), Some(journal)) = (self.db.clone(), &self.date_journal) else {
+            return;
+        };
+        if ids.is_empty() {
+            return;
+        }
+        let Some(path) = self.edit_tools.as_ref().map(|tools| tools.exiftool.clone()) else {
+            self.toasts
+                .error("Dates can't be fixed: exiftool, which reads and writes them, wasn't found.");
+            return;
+        };
+        let reader = self
+            .date_reader
+            .get_or_insert_with(|| Arc::new(media::exiftool::ExifTool::new(path, 2)))
+            .clone();
+        let undo = crate::fix_dates::can_undo(journal);
+        self.date_dialog = Some(crate::fix_dates::FixDatesDialog::open(
+            db,
+            reader,
+            &self.libraries,
+            ids,
+            undo,
+        ));
+    }
+
+    /// Writes the dates of `job` in the background (REQ-038-08).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn start_fix_dates(&mut self, job: crate::fix_dates::FixJob) {
+        let (Some(db), Some(journal), Some(exiftool)) = (
+            self.db.clone(),
+            self.date_journal.clone(),
+            self.edit_tools.as_ref().map(|tools| tools.exiftool.clone()),
+        ) else {
+            return;
+        };
+        let mtime = self.settings.mtime_on_save;
+        let count = job.changes.len();
+        self.toasts
+            .success(format!("Fixing the dates of {} photos…", format::count(count as u64)));
+        self.spawn_write(move || Event::DatesFixed(crate::fix_dates::run(&db, &exiftool, &journal, &job, mtime)));
+    }
+
+    /// Takes the last date fix back (REQ-038-09).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn undo_fix_dates(&mut self) {
+        let (Some(db), Some(journal), Some(exiftool)) = (
+            self.db.clone(),
+            self.date_journal.clone(),
+            self.edit_tools.as_ref().map(|tools| tools.exiftool.clone()),
+        ) else {
+            return;
+        };
+        self.spawn_write(move || Event::DatesFixed(crate::fix_dates::undo(&db, &exiftool, &journal)));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn dates_fixed(&mut self, result: Result<crate::fix_dates::DatesDone, String>) {
+        let done = match result {
+            Ok(done) => done,
+            Err(error) => {
+                self.toasts.error(format!("Couldn't fix the dates: {error}"));
+                return;
+            }
+        };
+        for (root_id, paths) in &done.touched {
+            self.scans.request_paths(*root_id, paths.clone());
+        }
+        if !done.touched.is_empty() {
+            self.refresh();
+            if let Some(gallery) = &mut self.gallery {
+                gallery.reload();
+            }
+        }
+        if let Some((name, error, count)) = &done.failed {
+            let others = if *count > 1 {
+                format!(" and {} more", format::count(*count as u64 - 1))
+            } else {
+                String::new()
+            };
+            self.toasts
+                .error(format!("Couldn't fix the date of {name}{others}: {error}"));
+        }
+        let photos = |count: usize| {
+            let count = format::count(count as u64);
+            if count == "1" {
+                "1 photo".to_string()
+            } else {
+                format!("{count} photos")
+            }
+        };
+        if done.undone {
+            let mut text = format!("Put back the dates of {}", photos(done.fixed));
+            if done.skipped > 0 {
+                text.push_str(&format!("; {} changed since were left alone", photos(done.skipped)));
+            }
+            self.toasts.success(text);
+        } else if done.fixed > 0 {
+            self.toasts.success_with(
+                format!("Fixed the dates of {}", photos(done.fixed)),
+                crate::toasts::ToastAction::UndoDates,
+            );
+        }
     }
 
     /// Journals renames at `path` (REQ-035-08, REQ-035-09).
@@ -1981,6 +2112,8 @@ impl AppState {
             },
             #[cfg(not(target_arch = "wasm32"))]
             Event::Renamed(result) => self.renamed(result),
+            #[cfg(not(target_arch = "wasm32"))]
+            Event::DatesFixed(result) => self.dates_fixed(result),
             Event::Rated(result) => match result {
                 Ok((root_id, rel_path)) => {
                     // A new sidecar is noted on the next read; the rating read then is the same.

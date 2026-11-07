@@ -150,6 +150,8 @@ pub enum MediaAction {
     Turn(domain::orientation::Turn),
     /// Asks before deleting (REQ-009-23).
     Delete,
+    /// Opens the date fix dialog (REQ-038-01).
+    FixDates,
 }
 
 /// Which of the items that write files a context menu has (REQ-009-21).
@@ -537,6 +539,8 @@ pub struct Gallery {
     rename_asked: bool,
     /// Delete was pressed with a selection (REQ-009-23).
     delete_asked: bool,
+    /// _Fix dates…_ was chosen for the selection (REQ-038-01).
+    fix_dates_asked: bool,
     /// The item shown in the viewer: kept in view (REQ-016-06), its thumbnail wanted first (REQ-009-14).
     viewed: Option<(usize, i64)>,
     /// The item the viewer shows outside the result, and what the index says of it once known (REQ-009-18).
@@ -625,6 +629,7 @@ impl Gallery {
             selection_change: None,
             rename_asked: false,
             delete_asked: false,
+            fix_dates_asked: false,
             viewed: None,
             outside: None,
             strip: 0..0,
@@ -924,6 +929,16 @@ impl Gallery {
     /// _Rename…_ was chosen this frame.
     pub fn take_rename_asked(&mut self) -> bool {
         std::mem::take(&mut self.rename_asked)
+    }
+
+    /// Asks to fix the dates of the selection (REQ-038-01).
+    pub fn ask_fix_dates(&mut self) {
+        self.fix_dates_asked = self.selected_count() > 0;
+    }
+
+    /// _Fix dates…_ was chosen this frame.
+    pub fn take_fix_dates_asked(&mut self) -> bool {
+        std::mem::take(&mut self.fix_dates_asked)
     }
 
     /// Delete was pressed with a selection this frame (REQ-009-23).
@@ -1916,6 +1931,9 @@ fn menu_items(ui: &mut egui::Ui, items: MenuItems) -> Option<MediaAction> {
         ui.separator();
         if ui.button("Rename…").clicked() {
             action = Some(MediaAction::Rename);
+        }
+        if ui.button("Fix dates…").clicked() {
+            action = Some(MediaAction::FixDates);
         }
         ui.menu_button("Rating", |ui| {
             crate::glass::behind_menu(ui, |ui| {

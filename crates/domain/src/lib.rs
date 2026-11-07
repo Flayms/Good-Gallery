@@ -10,6 +10,7 @@ pub mod autoscroll;
 pub mod caption;
 pub mod content;
 pub mod crop;
+pub mod date_fix;
 pub mod date_groups;
 pub mod deletion;
 pub mod edit;
