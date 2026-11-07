@@ -13,12 +13,14 @@ const WITH_ACTION_FOR: f64 = 10.0;
 pub enum ToastAction {
     /// Takes the last rename back (REQ-035-08).
     UndoRename,
+    /// Takes the last date fix back (REQ-038-09).
+    UndoDates,
 }
 
 impl ToastAction {
     fn label(self) -> &'static str {
         match self {
-            Self::UndoRename => "Undo",
+            Self::UndoRename | Self::UndoDates => "Undo",
         }
     }
 }

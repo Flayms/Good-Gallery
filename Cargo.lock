@@ -2589,6 +2589,7 @@ name = "media"
 version = "0.6.0"
 dependencies = [
  "base64 0.22.1",
+ "chrono",
  "domain",
  "ed25519-compact",
  "fast_image_resize",

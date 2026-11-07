@@ -77,6 +77,8 @@ pub enum Action {
     Turn(i64, domain::orientation::Turn),
     /// Ask before deleting this item (REQ-009-23); the viewer stays, and moves on once it is gone (REQ-009-24).
     Delete(i64),
+    /// Open the date fix dialog for this item (REQ-038-01); the viewer stays.
+    FixDates(i64),
 }
 
 /// What a face's popup is about.
@@ -1030,6 +1032,7 @@ impl Viewer {
                         }
                         Some(MediaAction::Turn(turn)) => action = Some(Action::Turn(item.id, turn)),
                         Some(MediaAction::Delete) => action = Some(Action::Delete(item.id)),
+                        Some(MediaAction::FixDates) => action = Some(Action::FixDates(item.id)),
                         Some(MediaAction::Select) | None => {}
                     });
                 }
