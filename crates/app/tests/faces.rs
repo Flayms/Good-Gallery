@@ -1463,3 +1463,49 @@ fn req_032_33_the_page_says_what_each_decision_does() {
     assert!(harness.query_by_label_contains("Ignored ·").is_none());
     assert!(harness.query_by_label_contains("Not faces ·").is_none());
 }
+
+/// REQ-032-34: typing in a group's field suggests known people; clicking one names the group, after asking.
+#[test]
+fn req_032_34_picks_a_known_person_on_the_page() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    assert!(harness.query_by_label("Suggested name Ben").is_none());
+    type_name(&mut harness, "Who is this? Group of 3", "e");
+    harness.set_size(egui::vec2(1000.0, 700.0));
+    harness.run_steps(4);
+    harness.snapshot(common::snapshot_name("people_page_names"));
+    harness.get_by_label("Suggested name Ben").click();
+    settle(&mut harness);
+    harness.get_by_label("Write Ben into 3 files?");
+}
+
+/// REQ-032-34: ↓ moves to a suggestion and Enter takes it.
+#[test]
+fn req_032_34_picks_a_known_person_with_the_keys() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    type_name(&mut harness, "Who is this? Group of 3", "b");
+    harness.key_press(Key::ArrowDown);
+    harness.run_steps(2);
+    harness.key_press(Key::Enter);
+    settle(&mut harness);
+    harness.get_by_label("Write Ben into 3 files?");
+}
+
+/// REQ-032-34: the viewer's field suggests known people too, and a name nobody has suggests none.
+#[test]
+fn req_032_34_suggests_known_people_in_the_viewer() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    open_with_faces(&mut harness, "a.png");
+    harness.get_by_label("Unknown face: Ben?").click();
+    settle(&mut harness);
+    type_name(&mut harness, "Who is this?", "Be");
+    harness.get_by_label("Suggested name Ben");
+    type_name(&mut harness, "Who is this?", "x");
+    assert!(harness.query_by_label("Suggested name Ben").is_none());
+}

@@ -5,6 +5,7 @@
 
 use crate::gallery::FaceGroup;
 use crate::icons::Icon;
+use crate::names;
 use crate::state::{AppState, FaceAction};
 use crate::theme;
 use db::faces::GroupFace;
@@ -296,6 +297,7 @@ fn group_card(
     let part = Part::Group(key);
     let shown = shown_part(state, part, group.len());
     let photos: Vec<i64> = group.iter().map(|(face, _)| face.media).collect();
+    let people = known_people(state);
     let mut chosen = None;
     let card = card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -344,7 +346,8 @@ fn group_card(
         show_more(ui, state, part, shown, group.len());
         ui.add_space(theme::SPACE * 2.0);
         let places = || group.iter().map(|(face, _)| (face.media, face.rect)).collect();
-        ui.horizontal(|ui| match person {
+        let field_id = ui.make_persistent_id(("face group name", key));
+        let field = ui.horizontal(|ui| match person {
             Some(name) => {
                 let yes = ui.button("Yes, all");
                 let spoken = format!("Yes, all are {name}");
@@ -355,20 +358,15 @@ fn group_card(
                         places: places(),
                     });
                 }
+                None
             }
             None => {
                 let page = &mut state.people_page;
                 let name = page.names.entry(key).or_default();
-                let field = ui.add(
-                    egui::TextEdit::singleline(name)
-                        .hint_text("Who is this?")
-                        .desired_width(240.0),
-                );
+                let field = names::field(ui, field_id, name, "Who is this?", 240.0);
                 let spoken = format!("Who is this? Group of {}", group.len());
                 field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, &spoken));
-                let enter = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                let save = naming(ui, "Name them", clean_name(name).is_some());
-                if (enter || save)
+                if naming(ui, "Name them", clean_name(name).is_some())
                     && let Some(name) = clean_name(name)
                 {
                     page.confirm = Some(NamingGroup { name, places: places() });
@@ -380,8 +378,16 @@ fn group_card(
                 if decision(ui, "Not faces", tips::NOT_A_FACE) {
                     chosen = Some(Chosen::Face(FaceAction::NotAFace { faces: faces() }));
                 }
+                Some(field)
             }
         });
+        // Below the row, so the buttons stay where they are (REQ-032-34).
+        if let Some(field) = field.inner {
+            let name = state.people_page.names.entry(key).or_default();
+            if let Some(name) = names::suggestions(ui, field_id, &field, name, &people.people) {
+                state.people_page.confirm = Some(NamingGroup { name, places: places() });
+            }
+        }
     });
     (chosen, card.response.rect, shown)
 }
@@ -443,6 +449,7 @@ fn decided_card(
 ) -> (Option<Chosen>, Rect, usize) {
     let part = Part::Section(title);
     let shown = shown_part(state, part, faces.len());
+    let people = known_people(state);
     let mut chosen = None;
     let card = card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -451,11 +458,12 @@ fn decided_card(
                 let spoken = format!("Change face {}", face.id);
                 let response = crop_spoken(ui, state, face.media, face.rect, &spoken);
                 let names = &mut state.people_page.names;
+                let people = &people.people;
                 egui::Popup::menu(&response)
                     .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                     .show(|ui| {
                         crate::glass::behind_menu(ui, |ui| {
-                            if let Some(action) = decided_menu(ui, names, face, decided) {
+                            if let Some(action) = decided_menu(ui, names, people, face, decided) {
                                 chosen = Some(action);
                                 ui.close();
                             }
@@ -471,32 +479,31 @@ fn decided_card(
 fn decided_menu(
     ui: &mut egui::Ui,
     names: &mut std::collections::HashMap<i64, String>,
+    people: &[Vec<String>],
     face: &GroupFace,
     decided: Decided,
 ) -> Option<Chosen> {
     let mut chosen = None;
     let name = names.entry(face.id).or_default();
-    ui.horizontal(|ui| {
-        let field = ui.add(
-            egui::TextEdit::singleline(name)
-                .hint_text("Who is this?")
-                .desired_width(180.0),
-        );
-        let spoken = format!("Who is this? Face {}", face.id);
-        field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, &spoken));
-        let enter = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-        if (naming(ui, "Save", clean_name(name).is_some()) || enter)
-            && let Some(name) = clean_name(name)
-        {
-            chosen = Some(Chosen::Faces(vec![
-                FaceAction::Reopen { faces: vec![face.id] },
-                FaceAction::Name {
-                    name,
-                    places: vec![(face.media, face.rect)],
-                },
-            ]));
-        }
-    });
+    let id = ui.make_persistent_id(("decided face name", face.id));
+    let (field, save) = ui
+        .horizontal(|ui| {
+            let field = names::field(ui, id, name, "Who is this?", 180.0);
+            let spoken = format!("Who is this? Face {}", face.id);
+            field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, &spoken));
+            (field, naming(ui, "Save", clean_name(name).is_some()))
+        })
+        .inner;
+    let picked = names::suggestions(ui, id, &field, name, people);
+    if let Some(name) = picked.or_else(|| save.then(|| clean_name(name)).flatten()) {
+        chosen = Some(Chosen::Faces(vec![
+            FaceAction::Reopen { faces: vec![face.id] },
+            FaceAction::Name {
+                name,
+                places: vec![(face.media, face.rect)],
+            },
+        ]));
+    }
     ui.separator();
     let faces = vec![face.id];
     if decision(ui, "Back to unknown", tips::BACK_TO_UNKNOWN) {
@@ -526,8 +533,16 @@ fn card_frame() -> egui::Frame {
 }
 
 fn clean_name(name: &str) -> Option<String> {
-    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
-    (!name.is_empty()).then_some(name)
+    names::clean(name)
+}
+
+/// The known people, suggested while a name is typed (REQ-032-34).
+fn known_people(state: &AppState) -> std::sync::Arc<crate::gallery::TagPaths> {
+    state
+        .gallery
+        .as_ref()
+        .map(|gallery| gallery.tag_paths())
+        .unwrap_or_default()
 }
 
 /// Naming a group writes to many files, so it asks first (REQ-032-15).
