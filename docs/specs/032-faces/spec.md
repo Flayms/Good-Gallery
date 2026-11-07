@@ -76,7 +76,7 @@ Users with large libraries want to find people without tagging each photo by han
 - **When** a face has no name
 - **Then** it is drawn as a box without a name, with its suggestion if there is one
 - **And** the _Faces_ button also shows for such photos
-- **And** clicking it offers: type a name, confirm the suggestion, _Not this person_, _Ignore_ and _Not a face_
+- **And** clicking it offers: type a name, confirm the suggestion, _Not this person_, _Ignore_, _Not a face_ and _Remove box_ (REQ-032-33)
 
 ### REQ-032-10 · Suggestions
 
@@ -101,7 +101,7 @@ Users with large libraries want to find people without tagging each photo by han
 ### REQ-032-13 · Removing or renaming a face region
 
 - **Given** a named face region, written by any program
-- **When** the user removes or renames it, on the photo or by its People tag's remove button
+- **When** the user removes it (_Remove name_) or renames it, on the photo or by its People tag's remove button
 - **Then** the file changes accordingly, and its other regions and metadata stay
 - **And** after removing, the same name isn't suggested for that face again
 
@@ -222,16 +222,37 @@ Users with large libraries want to find people without tagging each photo by han
 
 - **Given** a face on _Unconfirmed faces_ that the user hasn't decided about
 - **When** the user opens its menu (right click)
-- **Then** it offers _Ignore_ and _Not a face_, with the same effect as in the viewer (REQ-032-11)
+- **Then** it offers _Ignore_, _Not a face_ and _Remove box_, with the same effect as in the viewer (REQ-032-11, REQ-032-33)
 
 ### REQ-032-30 · Ignored faces and non-faces
 
 - **Given** faces the user ignored or marked as not a face, of the chosen detection model
 - **When** the user opens _Unconfirmed faces_
 - **Then** they are listed at the end, under _Ignored_ and _Not faces_, each with its count, collapsed until opened, also when no face is left to confirm
-- **And** clicking a face offers: type a name, which writes it as a face region (REQ-032-14), _Back to unknown_, the other decision, and _Delete_
-- **And** _Delete_ forgets the face; it is found again only if its photo is looked at again (REQ-032-22)
+- **And** clicking a face offers: type a name, which writes it as a face region (REQ-032-14), _Back to unknown_, the other decision, and _Remove box_
+- **And** _Remove box_ forgets the face; it is found again only if its photo is looked at again (REQ-032-22)
 - **And** the settings have no button bringing back all ignored faces
+
+### REQ-032-31 · Deciding without waiting
+
+- **Given** _Unconfirmed faces_ with faces on it
+- **When** the user decides about faces there (names, ignores, marks as not faces, takes out of a group, removes)
+- **Then** the faces decided about leave their group or section at once
+- **And** the rest of the page stays as it was while the groups are formed again, without a message that the faces are being looked through
+
+### REQ-032-32 · Every face of a group
+
+- **Given** a group of faces on _Unconfirmed faces_, to confirm (REQ-032-24) or unknown (REQ-032-15)
+- **When** the page shows it
+- **Then** all of its faces show, a first part of a large group with _Show more_ for the rest, as under _Other unknown faces_ (REQ-032-28)
+
+### REQ-032-33 · What each decision means
+
+- **Given** a face in the viewer or on _Unconfirmed faces_
+- **When** the user points at one of its decisions
+- **Then** a short tip says what it does and when to use it: naming writes the name into the photo; _Ignore_ is for a real person the user won't name; _Not a face_ is for a wrong detection, which isn't found again; _Remove box_ forgets the detection, which may be found again when the photo is looked at again; _Remove name_ takes the name out of the photo
+- **And** a button that names or renames is off until a name is typed, and _Rename_ until it differs
+- **And** the same decisions have the same words everywhere (`docs/glossary.md`)
 
 ## Out of scope
 
@@ -277,8 +298,11 @@ Users with large libraries want to find people without tagging each photo by han
 | REQ-032-17 | `crates/domain/src/face_models.rs` › req_032_17_notices_a_model_that_tells_nobody_apart; `crates/db/src/faces.rs` › req_032_17_a_model_telling_people_apart_seems_right; `crates/app/tests/faces.rs` › req_032_17_warns_when_the_model_tells_nobody_apart | pass |
 | REQ-032-24 | `crates/db/src/faces.rs` › req_032_24_groups_suggested_faces_by_person; `crates/app/tests/faces.rs` › req_032_24_confirm_or_reject_a_suggested_group | pass |
 | REQ-032-25 | `crates/db/src/faces.rs` › req_032_25_a_face_taken_out_stays_unknown; `crates/app/tests/faces.rs` › req_032_25_taking_a_face_out_keeps_it_in_the_viewer | pass |
-| REQ-032-26 | `crates/db/src/gallery.rs` › req_032_26_a_search_of_only_some_items; `crates/app/tests/faces.rs` › req_032_26_a_face_opens_its_photo_among_its_groups | pass |
+| REQ-032-26 | `crates/db/src/gallery.rs` › req_032_26_a_search_of_only_some_items; `crates/app/tests/faces.rs` › req_032_26_a_face_opens_its_photo_among_its_groups, req_032_26_the_viewer_from_the_page_has_its_thumbnails | pass |
 | REQ-032-28 | `crates/db/src/faces.rs` › req_032_28_faces_in_no_group_are_the_other_unknown_faces; `crates/app/tests/faces.rs` › req_032_28_faces_in_no_group_show_and_open_among_theirs, req_032_28_shows_more_on_asking, req_032_30_decided_faces_look_as_designed (snapshot `people_page_decided`) | pass |
 | REQ-032-29 | `crates/app/tests/faces.rs` › req_032_29_ignore_or_not_a_face_from_the_page; snapshot `people_page` | pass |
 | REQ-032-30 | `crates/db/src/faces.rs` › req_032_30_lists_decided_faces_to_undo_swap_or_delete; `crates/app/tests/faces.rs` › req_032_30_change_or_delete_a_decision, req_032_30_naming_a_decided_face_writes_it, req_032_30_no_button_brings_back_all_ignored_faces, req_032_30_decided_faces_look_as_designed (snapshot `people_page_decided`) | pass |
 | REQ-032-27 | `crates/app/tests/faces.rs` › req_032_27_unconfirmed_faces_is_the_first_row_of_people, req_032_27_people_shows_without_tags_and_collapses_with_it; snapshot `people_page` | pass |
+| REQ-032-31 | `crates/app/tests/faces.rs` › req_032_31_deciding_keeps_the_page_while_it_loads_again | pass |
+| REQ-032-32 | `crates/app/tests/faces.rs` › req_032_32_a_group_shows_all_its_faces | pass |
+| REQ-032-33 | `crates/app/tests/faces.rs` › req_032_33_the_viewer_says_what_each_decision_does, req_032_33_the_page_says_what_each_decision_does, req_032_13_renames_and_removes_a_region_on_the_photo (_Remove name_); snapshots `viewer_face_popup`, `people_page` | pass |
