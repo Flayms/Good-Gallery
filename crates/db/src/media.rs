@@ -39,6 +39,8 @@ pub struct MediaDetail {
     pub camera: Option<String>,
     pub lens: Option<String>,
     pub location: Option<domain::media::Location>,
+    /// The town near its position when its own Places tags name another place (REQ-042-02).
+    pub position_place: Option<domain::places::Place>,
     /// Whether the chosen detection model looked at it yet (REQ-032-21).
     pub face_scan: crate::faces::FaceScan,
 }
@@ -49,6 +51,8 @@ pub struct DetailTag {
     pub name: String,
     /// People or Places, by the tag's top-level ancestor; `None` for other tags.
     pub category: Option<TagCategory>,
+    /// A place named from the item's position, not one of its own tags (REQ-042-03).
+    pub from_position: bool,
 }
 
 /// A media item whose metadata couldn't be read at its last scan (REQ-002-12).
@@ -170,27 +174,41 @@ pub fn detail(conn: &Connection, id: i64) -> Result<Option<MediaDetail>> {
                     (Some(latitude), Some(longitude)) => domain::media::Location::new(latitude, longitude),
                     _ => None,
                 },
+                position_place: None,
             }))
         })
         .optional()?
         .flatten();
     let Some(mut detail) = row else { return Ok(None) };
     let mut stmt = conn.prepare_cached(
-        "SELECT tags.id, tags.name FROM media_tags JOIN tags ON tags.id = media_tags.tag_id
+        "SELECT tags.id, tags.name, media_tags.from_position FROM media_tags JOIN tags ON tags.id = media_tags.tag_id
          WHERE media_tags.media_id = ?1 ORDER BY tags.name_norm",
     )?;
-    let tags: Vec<(i64, String)> = stmt
-        .query_map([id], |row| Ok((row.get(0)?, row.get(1)?)))?
+    let tags: Vec<(i64, String, bool)> = stmt
+        .query_map([id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
         .collect::<rusqlite::Result<_>>()?;
     let categories = categories_of(conn, id)?;
     detail.tags = tags
         .into_iter()
-        .map(|(id, name)| DetailTag {
+        .map(|(id, name, from_position)| DetailTag {
             category: categories.get(&id).copied(),
             id,
             name,
+            from_position,
         })
         .collect();
+    // Its own places, and where its position says it is (REQ-042-02).
+    let own_places: Vec<String> = detail
+        .tags
+        .iter()
+        .filter(|tag| tag.category == Some(TagCategory::Places) && !tag.from_position)
+        .map(|tag| domain::tags::normalize_tag(&tag.name))
+        .collect();
+    detail.position_place = detail
+        .location
+        .filter(|_| !own_places.is_empty())
+        .and_then(domain::places::place_at)
+        .filter(|place| !own_places.contains(&domain::tags::normalize_tag(place.city)));
     detail.face_scan = crate::faces::scan_state(conn, id)?;
     detail.faces = conn
         .prepare_cached("SELECT name, x, y, w, h FROM media_faces WHERE media_id = ?1 ORDER BY rowid")?

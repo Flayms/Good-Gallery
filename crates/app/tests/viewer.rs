@@ -1005,6 +1005,57 @@ fn req_040_04_shows_the_camera_the_lens_and_the_coordinates() {
     }
 }
 
+/// REQ-042-02, REQ-042-03: a place named from the position is marked and can't be removed; a photo tagged with
+/// another place hears where its position is.
+#[test]
+fn req_042_02_req_042_03_shows_places_from_the_position() {
+    let fixture = Fixture::new();
+    let dir = fixture.folder("photos");
+    let conn = db::open_in_memory().unwrap();
+    let root = db::libraries::insert(&conn, &dir, "Photos", LibraryStatus::Online)
+        .unwrap()
+        .id;
+    let munich = domain::media::Location::new(48.1374, 11.5755);
+    let mut bare = indexed(0, "bare.png", MediaKind::Image, &[], None);
+    bare.metadata.location = munich;
+    let mut rome = indexed(1, "rome.png", MediaKind::Image, &[&["Places", "Italy", "Rome"]], None);
+    rome.metadata.location = munich;
+    for name in ["bare.png", "rome.png"] {
+        image::RgbImage::from_pixel(400, 300, image::Rgb([40, 120, 200]))
+            .save(std::path::Path::new(&dir).join(name))
+            .unwrap();
+    }
+    let mut writer = IndexWriter::new(conn);
+    writer.write(root, &[bare, rome]).unwrap();
+    let mut harness = common::harness_with_step(fixture.state(writer.into()), 1.0 / 60.0);
+    harness.set_size(egui::vec2(900.0, 900.0));
+    settle(&mut harness);
+    open(&mut harness, "bare.png");
+    harness.key_press(Key::I);
+    settle(&mut harness);
+
+    assert!(panel_chip(&harness, "Munich").rect().left() > 500.0);
+    harness.get_by_label("From its position");
+    assert!(harness.query_by_label("Remove Munich").is_none(), "it can't be removed");
+    assert!(
+        harness.query_by_label("Add to Places").is_some(),
+        "a place of its own can be added"
+    );
+
+    harness.key_press(Key::Escape);
+    settle(&mut harness);
+    open(&mut harness, "rome.png");
+    if !viewer(&harness).info_open() {
+        harness.key_press(Key::I);
+    }
+    settle(&mut harness);
+    harness.get_by_label("Its position is near Munich, Bavaria, Germany");
+    assert!(
+        harness.query_by_label("Remove Rome").is_some(),
+        "its own place can be removed"
+    );
+}
+
 /// REQ-009-08, REQ-026-01: a photo without a date taken, dimensions, rating or tags keeps those fields' titles (tag groups with _Add_ under
 /// them, the others with nothing), in their usual order; a photo has no duration.
 #[test]

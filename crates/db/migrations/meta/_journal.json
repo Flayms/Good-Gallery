@@ -148,6 +148,13 @@
       "when": 1794700800000,
       "tag": "0020_media_camera_location",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1794787200000,
+      "tag": "0021_tag_from_position",
+      "breakpoints": true
     }
   ]
 }

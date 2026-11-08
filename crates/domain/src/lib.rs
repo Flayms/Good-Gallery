@@ -24,6 +24,7 @@ pub mod lut;
 pub mod media;
 pub mod orientation;
 pub mod paint;
+pub mod places;
 pub mod rating;
 pub mod rename;
 pub mod scrollbar;

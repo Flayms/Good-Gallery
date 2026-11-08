@@ -1039,6 +1039,7 @@ name = "domain"
 version = "0.6.0"
 dependencies = [
  "chrono",
+ "miniz_oxide 0.8.9",
  "regex",
  "serde",
  "serde_json",
@@ -5877,6 +5878,7 @@ dependencies = [
  "image",
  "indexer",
  "media",
+ "miniz_oxide 0.8.9",
  "regex",
  "resvg",
  "serde",
