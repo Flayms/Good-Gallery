@@ -60,6 +60,10 @@ const FILES: &[(&str, &str)] = &[
         "0020_media_camera_location",
         include_str!("../migrations/0020_media_camera_location.sql"),
     ),
+    (
+        "0021_tag_from_position",
+        include_str!("../migrations/0021_tag_from_position.sql"),
+    ),
 ];
 const JOURNAL: &str = include_str!("../migrations/meta/_journal.json");
 
