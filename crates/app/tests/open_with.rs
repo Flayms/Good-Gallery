@@ -1,6 +1,6 @@
 //! Opening a file with the app from the file manager (spec 027).
 
-mod common;
+use crate::common;
 
 use common::{Fixture, settle};
 use db::libraries::LibraryStatus;

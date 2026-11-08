@@ -1,6 +1,6 @@
 //! What the app shows while the indexer runs (specs 002 and 006).
 
-mod common;
+use crate::common;
 
 use common::{Fixture, settle};
 use db::libraries::LibraryStatus;

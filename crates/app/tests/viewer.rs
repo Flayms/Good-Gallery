@@ -1,7 +1,7 @@
 //! The viewer (spec 009) on a library of real photos; without a GPU texture streamer there are no thumbnails, so
 //! previews are the ThumbHash placeholders.
 
-mod common;
+use crate::common;
 
 use app::originals::OriginalState;
 use common::{Fixture, settle};

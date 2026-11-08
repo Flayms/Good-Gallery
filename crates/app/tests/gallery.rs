@@ -1,6 +1,6 @@
 //! The gallery (spec 006) on an index with media items; without a GPU texture streamer, tiles show placeholders.
 
-mod common;
+use crate::common;
 
 use app::gallery::Gallery;
 use common::{Fixture, settle};

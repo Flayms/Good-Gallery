@@ -1,7 +1,7 @@
 //! Editing photos in the viewer (spec 021) on a library of real files. Without a wgpu renderer for the app, the
 //! preview is rendered on the CPU; saving runs exiftool and skips itself without it.
 
-mod common;
+use crate::common;
 
 use common::{Fixture, settle};
 use db::libraries::LibraryStatus;

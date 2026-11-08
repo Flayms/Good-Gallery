@@ -1,6 +1,6 @@
 //! Snapshot tests of whole screens. `UPDATE_SNAPSHOTS=1 cargo test -p app` rewrites `tests/snapshots/*.png`.
 
-mod common;
+use crate::common;
 
 use app::Page;
 use common::{Fixture, settle};

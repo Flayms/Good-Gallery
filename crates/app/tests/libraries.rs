@@ -1,6 +1,6 @@
 //! The *Libraries* section of the Settings page (spec 001).
 
-mod common;
+use crate::common;
 
 use app::Page;
 use common::{Fixture, settle};

@@ -6,6 +6,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+# One binary for the UI tests (tests/ui.rs), not one per file.
+autotests = false
 
 [features]
 # The installed or portable app (`cargo xtask dist`): the data folder `%APPDATA%\good-gallery`, no console window.
@@ -69,6 +71,10 @@ web-sys = { workspace = true, features = [
 
 [build-dependencies]
 winresource = { version = "0.1.34", default-features = false }
+
+[[test]]
+name = "ui"
+path = "tests/ui.rs"
 
 [dev-dependencies]
 tempfile.workspace = true

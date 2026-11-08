@@ -1,6 +1,6 @@
 //! Renaming a selection (spec 035) in the app: the dialog, its preview, renaming, undo and an interrupted rename.
 
-mod common;
+use crate::common;
 
 use common::{Fixture, settle};
 use db::libraries::LibraryStatus;

@@ -1,6 +1,6 @@
 //! The _Indexing_ and _Thumbnail cache_ sections of the Settings page (spec 010).
 
-mod common;
+use crate::common;
 
 use app::{AppState, Page, SettingsTargets};
 use common::{Fixture, settle};

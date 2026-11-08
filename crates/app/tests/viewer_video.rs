@@ -1,6 +1,6 @@
 //! Videos in the viewer (REQ-009-06) with a fake player: what the viewer asks the player for, and what it shows.
 
-mod common;
+use crate::common;
 
 use app::video::{Call, FakePlayback, PlaybackState, VideoFrame, Videos};
 use common::{Fixture, settle};

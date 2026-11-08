@@ -1,6 +1,6 @@
 //! Light mode (spec 020): the appearance setting, following the system, and the light surfaces.
 
-mod common;
+use crate::common;
 
 use app::theme::{DARK, LIGHT};
 use app::{AppState, Page};

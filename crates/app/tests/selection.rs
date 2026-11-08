@@ -1,6 +1,6 @@
 //! Selecting several items in the gallery and rating them at once (spec 025).
 
-mod common;
+use crate::common;
 
 use common::{Fixture, settle};
 use db::libraries::LibraryStatus;

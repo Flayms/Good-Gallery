@@ -1,6 +1,6 @@
 //! The context menu's rename, rating, rotate and delete items (REQ-009-21 … REQ-009-24).
 
-mod common;
+use crate::common;
 
 use common::{Fixture, settle};
 use db::libraries::LibraryStatus;

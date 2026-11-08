@@ -1,6 +1,6 @@
 //! Rating by hand (spec 024) on a library of real photos, written with the real exiftool.
 
-mod common;
+use crate::common;
 
 use common::{Fixture, settle};
 use db::libraries::LibraryStatus;

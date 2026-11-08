@@ -1,6 +1,6 @@
 //! Search bar, filters, sort and sidebar (specs 007, 008) on an index with tagged, rated media items.
 
-mod common;
+use crate::common;
 
 use common::{Fixture, settle};
 use db::libraries::LibraryStatus;

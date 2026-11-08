@@ -1,7 +1,7 @@
 //! Smart albums (specs 034 and 039): saving a search from the Filters menu, the sidebar group, renaming and deleting,
 //! and rules matching all or any of their conditions.
 
-mod common;
+use crate::common;
 
 use common::{Fixture, settle};
 use db::libraries::LibraryStatus;
