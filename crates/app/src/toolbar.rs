@@ -466,6 +466,8 @@ fn day_field(ui: &mut egui::Ui, id: &str, day: Option<NaiveDate>, fallback: Naiv
             egui_extras::DatePickerButton::new(&mut picked)
                 .id_salt(id)
                 .calendar_week(false)
+                // A date range has nothing to do with a work week (REQ-007-08).
+                .highlight_weekends(false)
                 .show_icon(false),
         )
     });
@@ -635,12 +637,9 @@ fn view_menu(ui: &mut egui::Ui, gallery: &mut Gallery) {
 mod tests {
     use super::*;
 
-    /// REQ-013-03: a date picker's popup is a glass surface like the other menus, not the opaque frame egui_extras
-    /// gives it.
-    #[test]
-    fn req_013_03_date_picker_popups_are_glass() {
-        let ctx = egui::Context::default();
-        crate::glass::pretend_installed(&ctx);
+    /// Draws a date field for 1 May 2024, clicks it and returns the frame with its popup open.
+    fn open_date_picker(ctx: &egui::Context) -> egui::FullOutput {
+        crate::glass::pretend_installed(ctx);
         let day = NaiveDate::from_ymd_opt(2024, 5, 1).unwrap();
         let button = std::cell::Cell::new(None);
         let frame = |events: Vec<egui::Event>| {
@@ -669,25 +668,70 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         };
         frame(vec![egui::Event::PointerMoved(at), press(true), press(false)]);
-        let output = frame(Vec::new());
+        frame(Vec::new())
+    }
 
+    /// Whether `shape`, or a shape in it, is a rectangle filled with `fill` for which `pick` holds.
+    fn has_rect(shape: &egui::Shape, fill: egui::Color32, pick: &dyn Fn(Rect) -> bool) -> bool {
+        match shape {
+            egui::Shape::Rect(rect) => rect.fill == fill && pick(rect.rect),
+            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| has_rect(shape, fill, pick)),
+            _ => false,
+        }
+    }
+
+    /// REQ-007-08: the calendar doesn't mark weekends; the date range has nothing to do with a work week.
+    #[test]
+    fn req_007_08_the_date_picker_marks_no_weekends() {
+        fn rects(shape: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
+            match shape {
+                egui::Shape::Rect(rect) => out.push(rect.clone()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| rects(shape, out)),
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        let output = open_date_picker(&ctx);
+        let mut all = Vec::new();
+        output.shapes.iter().for_each(|clipped| rects(&clipped.shape, &mut all));
+        // The day cells are the many cells of one size; 1 May 2024, the picked day, has its own fill.
+        let size =
+            |rect: &egui::epaint::RectShape| (rect.rect.width().round() as i32, rect.rect.height().round() as i32);
+        let cell = all
+            .iter()
+            .map(size)
+            .max_by_key(|cell| all.iter().filter(|rect| size(rect) == *cell).count())
+            .unwrap();
+        let fills: Vec<_> = all
+            .iter()
+            .filter(|rect| size(rect) == cell)
+            .map(|rect| rect.fill)
+            .collect();
+        assert!(fills.len() >= 28, "the calendar is open ({} days drawn)", fills.len());
+        let usual = fills
+            .iter()
+            .max_by_key(|fill| fills.iter().filter(|other| other == fill).count())
+            .unwrap();
+        let other: Vec<_> = fills.iter().filter(|fill| *fill != usual).collect();
+        assert!(other.len() <= 1, "days other than the picked one stand out: {other:?}");
+    }
+
+    /// REQ-013-03: a date picker's popup is a glass surface like the other menus, not the opaque frame egui_extras
+    /// gives it.
+    #[test]
+    fn req_013_03_date_picker_popups_are_glass() {
+        let ctx = egui::Context::default();
+        let output = open_date_picker(&ctx);
         let popup_fill = ctx.global_style().visuals.window_fill();
         let wide = |rect: Rect| rect.width() > 300.0;
         let glass = output
             .shapes
             .iter()
             .any(|clipped| matches!(&clipped.shape, egui::Shape::Callback(callback) if wide(callback.rect)));
-        fn opaque(shape: &egui::Shape, fill: egui::Color32, wide: &dyn Fn(Rect) -> bool) -> bool {
-            match shape {
-                egui::Shape::Rect(rect) => rect.fill == fill && wide(rect.rect),
-                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| opaque(shape, fill, wide)),
-                _ => false,
-            }
-        }
         let opaque_frame = output
             .shapes
             .iter()
-            .any(|clipped| opaque(&clipped.shape, popup_fill, &wide));
+            .any(|clipped| has_rect(&clipped.shape, popup_fill, &wide));
         assert!(glass, "glass behind the popup");
         assert!(!opaque_frame, "no opaque frame over it");
     }
