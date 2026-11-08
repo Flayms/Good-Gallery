@@ -5,8 +5,10 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-/// The recipe format. Recipes of a newer version than this are not read (a newer app wrote them).
-pub const RECIPE_VERSION: u32 = 1;
+/// The recipe format. Recipes of a newer version than this are not read (a newer app wrote them). A recipe is written
+/// with the oldest version that describes it: 2 only with flips or straightening (REQ-029-10, REQ-029-11), which an
+/// app that knows 1 would leave out.
+pub const RECIPE_VERSION: u32 = 2;
 
 /// Where originals replaced by an edit are kept, relative to their library (a housekeeping folder, so never indexed).
 pub const BACKUP_DIR: &str = ".good-gallery/originals";
@@ -362,6 +364,17 @@ pub struct Recipe {
     /// for the whole photo.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub crop: Option<[f32; 4]>,
+    /// Degrees clockwise, within ±[`MAX_STRAIGHTEN`] (REQ-029-10); the crop lies on the straightened canvas.
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    pub straighten: f32,
+    /// The upright original's width per height while straightened, which the canvas needs (REQ-029-10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aspect: Option<f32>,
+    /// Mirrored left to right and top to bottom, as the original, before straightening (REQ-029-11).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub flip_h: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub flip_v: bool,
     /// The saved photo's long edge in pixels, after the crop and turns (REQ-029-09); `None` for its own size.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub long_edge: Option<u32>,
@@ -389,6 +402,14 @@ pub fn scaled_size(width: u32, height: u32, long_edge: Option<u32>) -> (u32, u32
 
 fn is_zero(turns: &u8) -> bool {
     *turns == 0
+}
+
+fn is_zero_f32(value: &f32) -> bool {
+    *value == 0.0
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Default for Recipe {
@@ -425,6 +446,10 @@ impl Default for Recipe {
             look: None,
             quarter_turns: 0,
             crop: None,
+            straighten: 0.0,
+            aspect: None,
+            flip_h: false,
+            flip_v: false,
             long_edge: None,
             quality: None,
         }
@@ -476,6 +501,34 @@ impl Recipe {
     /// Its crop and quarter turns.
     pub fn geometry(&self) -> Geometry {
         Geometry::new(self.crop, self.quarter_turns)
+            .with_straighten(self.straighten, self.aspect.unwrap_or(1.0))
+            .with_flips(self.flip_h, self.flip_v)
+    }
+
+    /// Straightens by `degrees` clockwise a photo `aspect` wide per unit of height (REQ-029-10). The crop becomes the
+    /// largest of its shape, centered, that shows only the photo.
+    pub fn set_straighten(&mut self, degrees: f32, aspect: f32) {
+        let ratio = self.geometry().with_straighten(self.straighten, aspect).crop_ratio();
+        self.straighten = sanitized_straighten(degrees);
+        self.aspect = (self.straighten != 0.0).then(|| sanitized_aspect(aspect));
+        let canvas = self.geometry().with_straighten(self.straighten, aspect);
+        self.crop = sanitized_crop(canvas.largest_crop(ratio));
+    }
+
+    /// Mirrors the output left to right (`horizontal`) or top to bottom as it shows on screen, crop and straightening
+    /// included (REQ-029-11).
+    pub fn flip(&mut self, horizontal: bool) {
+        // A quarter turn swaps which side of the canvas is which on screen.
+        let across = horizontal != (self.quarter_turns % 2 == 1);
+        let [x, y, w, h] = self.geometry().crop();
+        if across {
+            self.flip_h = !self.flip_h;
+            self.crop = sanitized_crop([1.0 - x - w, y, w, h]);
+        } else {
+            self.flip_v = !self.flip_v;
+            self.crop = sanitized_crop([x, 1.0 - y - h, w, h]);
+        }
+        self.straighten = -self.straighten + 0.0;
     }
 
     /// Whether rendering needs the photo's subject: for the parts' adjustments or a background blur.
@@ -551,7 +604,9 @@ impl Recipe {
 
     /// Compact JSON, as stored in a saved file (`gg:EditRecipe`) and the index.
     pub fn to_json(&self) -> String {
-        serde_json::to_string(self).unwrap_or_default()
+        let mut recipe = self.clone();
+        recipe.version = if self.geometry().transforms() { 2 } else { 1 };
+        serde_json::to_string(&recipe).unwrap_or_default()
     }
 
     /// A recipe from a file or the index, with every value brought into its range (REQ-011-10). `None` for invalid
@@ -603,6 +658,8 @@ impl Recipe {
         }
         self.quarter_turns %= 4;
         self.crop = self.crop.and_then(sanitized_crop);
+        self.straighten = sanitized_straighten(self.straighten);
+        self.aspect = (self.straighten != 0.0).then(|| sanitized_aspect(self.aspect.unwrap_or(1.0)));
     }
 }
 
@@ -616,11 +673,23 @@ fn sanitized_crop([x, y, w, h]: [f32; 4]) -> Option<[f32; 4]> {
     (w > 0.0 && h > 0.0 && !whole).then_some([x, y, w, h])
 }
 
-/// A recipe's crop and quarter turns: how the rendered photo becomes the output (spec 029).
+/// The steepest straightening either way, in degrees (REQ-029-10).
+pub const MAX_STRAIGHTEN: f32 = 100.0;
+
+/// A recipe's flips, straightening, crop and quarter turns: how the rendered photo becomes the output (spec 029). The
+/// upright original is flipped, then straightened about its center onto a canvas the size of the turned photo's
+/// bounding box, then cropped on that canvas, then turned by quarter turns. Without flips and straightening the canvas
+/// is the original itself.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Geometry {
     crop: [f32; 4],
     quarter_turns: u8,
+    /// Degrees clockwise, within ±[`MAX_STRAIGHTEN`].
+    straighten: f32,
+    /// Mirrored left to right, top to bottom, before straightening.
+    flip: [bool; 2],
+    /// The upright original's width over its height; only straightening needs it.
+    aspect: f32,
 }
 
 impl Geometry {
@@ -628,14 +697,42 @@ impl Geometry {
         Self {
             crop: crop.and_then(sanitized_crop).unwrap_or([0.0, 0.0, 1.0, 1.0]),
             quarter_turns: quarter_turns % 4,
+            straighten: 0.0,
+            flip: [false; 2],
+            aspect: 1.0,
         }
     }
 
-    pub fn is_identity(&self) -> bool {
-        self.quarter_turns == 0 && self.crop == [0.0, 0.0, 1.0, 1.0]
+    /// Straightened by `degrees` clockwise, for an original `aspect` wide per unit of height (REQ-029-10).
+    pub fn with_straighten(mut self, degrees: f32, aspect: f32) -> Self {
+        self.straighten = sanitized_straighten(degrees);
+        self.aspect = sanitized_aspect(aspect);
+        self
     }
 
-    /// The crop as `x, y, w, h`, fractions of the upright, unturned original; the whole photo without one.
+    /// Mirrored as the original, before straightening (REQ-029-11).
+    pub fn with_flips(mut self, horizontal: bool, vertical: bool) -> Self {
+        self.flip = [horizontal, vertical];
+        self
+    }
+
+    /// The same, without its crop: the whole canvas.
+    pub fn uncropped(mut self) -> Self {
+        self.crop = [0.0, 0.0, 1.0, 1.0];
+        self
+    }
+
+    pub fn is_identity(&self) -> bool {
+        self.quarter_turns == 0 && self.crop == [0.0, 0.0, 1.0, 1.0] && !self.transforms()
+    }
+
+    /// Whether flips or straightening move the pixels about, beyond a crop and quarter turns.
+    pub fn transforms(&self) -> bool {
+        self.straighten != 0.0 || self.flip.contains(&true)
+    }
+
+    /// The crop as `x, y, w, h`, fractions of the canvas (the upright, unturned original without straightening); the
+    /// whole canvas without one.
     pub fn crop(&self) -> [f32; 4] {
         self.crop
     }
@@ -644,8 +741,127 @@ impl Geometry {
         self.quarter_turns
     }
 
-    /// The crop in pixels of an upright original: `x, y, w, h`, at least one pixel and inside the photo.
+    pub fn straighten(&self) -> f32 {
+        self.straighten
+    }
+
+    pub fn flips(&self) -> [bool; 2] {
+        self.flip
+    }
+
+    pub fn aspect(&self) -> f32 {
+        self.aspect
+    }
+
+    /// The cosine and sine of the straightening.
+    fn turn(&self) -> (f32, f32) {
+        let radians = self.straighten.to_radians();
+        (radians.cos(), radians.sin())
+    }
+
+    /// The canvas's size per the original's: its width per the original's width, its height per its height.
+    pub fn canvas_scale(&self) -> [f32; 2] {
+        if self.straighten == 0.0 {
+            return [1.0, 1.0];
+        }
+        let (c, s) = self.turn();
+        let (c, s) = (c.abs(), s.abs());
+        [c + s / self.aspect, s * self.aspect + c]
+    }
+
+    /// The canvas's size in pixels for an upright original of this size.
+    pub fn canvas_size(&self, width: u32, height: u32) -> (u32, u32) {
+        let [sx, sy] = self.canvas_scale();
+        (
+            ((width as f32 * sx).round() as u32).max(1),
+            ((height as f32 * sy).round() as u32).max(1),
+        )
+    }
+
+    /// Where a point of the original (fractions of its size) lies on the canvas.
+    pub fn to_canvas(&self, [u, v]: [f32; 2]) -> [f32; 2] {
+        let u = if self.flip[0] { 1.0 - u } else { u };
+        let v = if self.flip[1] { 1.0 - v } else { v };
+        if self.straighten == 0.0 {
+            return [u, v];
+        }
+        let (c, s) = self.turn();
+        let [sx, sy] = self.canvas_scale();
+        // In units of the original's height, about its center.
+        let (x, y) = ((u - 0.5) * self.aspect, v - 0.5);
+        let (x, y) = (x * c - y * s, x * s + y * c);
+        [x / (self.aspect * sx) + 0.5, y / sy + 0.5]
+    }
+
+    /// Where a point of the canvas lies on the original; outside 0–1 where the canvas shows none of it.
+    pub fn from_canvas(&self, [u, v]: [f32; 2]) -> [f32; 2] {
+        let [u, v] = if self.straighten == 0.0 {
+            [u, v]
+        } else {
+            let (c, s) = self.turn();
+            let [sx, sy] = self.canvas_scale();
+            let (x, y) = ((u - 0.5) * self.aspect * sx, (v - 0.5) * sy);
+            let (x, y) = (x * c + y * s, -x * s + y * c);
+            [x / self.aspect + 0.5, y + 0.5]
+        };
+        [
+            if self.flip[0] { 1.0 - u } else { u },
+            if self.flip[1] { 1.0 - v } else { v },
+        ]
+    }
+
+    /// Whether a point of the canvas shows the photo, not the empty corners around a straightened one.
+    pub fn shows_photo(&self, point: [f32; 2]) -> bool {
+        const SLACK: f32 = 1e-4;
+        self.from_canvas(point)
+            .iter()
+            .all(|side| (-SLACK..=1.0 + SLACK).contains(side))
+    }
+
+    /// Whether a point of the original (fractions of its size, as [`Self::to_original`] gives it) is on the photo.
+    pub fn shows_photo_at(&self, point: [f32; 2]) -> bool {
+        const SLACK: f32 = 1e-3;
+        point.iter().all(|side| (-SLACK..=1.0 + SLACK).contains(side))
+    }
+
+    /// Whether all of a frame on the whole canvas as it is turned on screen shows the photo (REQ-029-10).
+    pub fn frame_shows_photo(&self, [x, y, w, h]: [f32; 4]) -> bool {
+        [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]
+            .into_iter()
+            .all(|corner| self.shows_photo(unturn(corner, self.quarter_turns)))
+    }
+
+    /// The largest crop of `ratio` (width per height in pixels, on the unturned canvas), centered, that shows only the
+    /// photo (REQ-029-10).
+    pub fn largest_crop(&self, ratio: f32) -> [f32; 4] {
+        let ratio = if ratio.is_finite() && ratio > 0.0 {
+            ratio
+        } else {
+            self.aspect
+        };
+        let (c, s) = self.turn();
+        let (c, s) = (c.abs(), s.abs());
+        let [sx, sy] = self.canvas_scale();
+        // Half sizes in units of the original's height: corners turned back must stay within its half sizes.
+        let (half_w, half_h) = (self.aspect / 2.0, 0.5);
+        let a = (half_w / (c + s / ratio)).min(half_h / (s + c / ratio));
+        let b = a / ratio;
+        // Within rounding of the whole side, the whole side.
+        let side = |n: f32| if n > 1.0 - 1e-4 { 1.0 } else { n };
+        let (w, h) = (side(2.0 * a / (self.aspect * sx)), side(2.0 * b / sy));
+        [(1.0 - w) / 2.0, (1.0 - h) / 2.0, w, h]
+    }
+
+    /// The crop's width per height in pixels, on the unturned canvas.
+    pub fn crop_ratio(&self) -> f32 {
+        let [sx, sy] = self.canvas_scale();
+        (self.crop[2] * self.aspect * sx) / (self.crop[3] * sy)
+    }
+
+    /// The crop in pixels of the canvas of an upright original of this size: `x, y, w, h`, at least one pixel and
+    /// inside it.
     pub fn crop_pixels(&self, width: u32, height: u32) -> [u32; 4] {
+        let (width, height) = self.canvas_size(width, height);
         let side = |start: f32, size: f32, whole: u32| {
             let whole_f = whole as f32;
             let first = ((start * whole_f).round() as u32).min(whole.saturating_sub(1));
@@ -663,18 +879,18 @@ impl Geometry {
         if self.quarter_turns % 2 == 1 { (h, w) } else { (w, h) }
     }
 
-    /// The crop as a frame on the whole photo as it is turned on screen (`domain::crop`).
+    /// The crop as a frame on the whole canvas as it is turned on screen (`domain::crop`).
     pub fn frame(&self) -> [f32; 4] {
-        Self::new(None, self.quarter_turns)
-            .place(self.crop)
-            .unwrap_or([0.0, 0.0, 1.0, 1.0])
+        let [x, y, w, h] = self.crop;
+        let a = turn(self.quarter_turns, [x, y]);
+        let b = turn(self.quarter_turns, [x + w, y + h]);
+        [a[0].min(b[0]), a[1].min(b[1]), (a[0] - b[0]).abs(), (a[1] - b[1]).abs()]
     }
 
-    /// The crop for a frame on the whole photo turned by `quarter_turns`; `None` for the whole photo.
+    /// The crop for a frame on the whole canvas turned by `quarter_turns`; `None` for the whole canvas.
     pub fn crop_of_frame([x, y, w, h]: [f32; 4], quarter_turns: u8) -> Option<[f32; 4]> {
-        let whole = Self::new(None, quarter_turns);
-        let a = whole.to_original([x, y]);
-        let b = whole.to_original([x + w, y + h]);
+        let a = unturn([x, y], quarter_turns);
+        let b = unturn([x + w, y + h], quarter_turns);
         sanitized_crop([a[0].min(b[0]), a[1].min(b[1]), (a[0] - b[0]).abs(), (a[1] - b[1]).abs()])
     }
 
@@ -685,43 +901,80 @@ impl Geometry {
         } else {
             (width, height)
         };
+        let [sx, sy] = self.canvas_scale();
         (
-            (width as f32 / self.crop[2]).round() as u32,
-            (height as f32 / self.crop[3]).round() as u32,
+            (width as f32 / self.crop[2] / sx).round() as u32,
+            (height as f32 / self.crop[3] / sy).round() as u32,
         )
     }
 
     /// Where a point of the original (fractions of its size) lies on the output; outside 0–1 if cropped away.
-    pub fn to_output(&self, [u, v]: [f32; 2]) -> [f32; 2] {
+    pub fn to_output(&self, point: [f32; 2]) -> [f32; 2] {
+        let [u, v] = self.to_canvas(point);
         let [x, y, w, h] = self.crop;
-        let (u, v) = ((u - x) / w, (v - y) / h);
-        match self.quarter_turns {
-            1 => [1.0 - v, u],
-            2 => [1.0 - u, 1.0 - v],
-            3 => [v, 1.0 - u],
-            _ => [u, v],
-        }
+        turn(self.quarter_turns, [(u - x) / w, (v - y) / h])
     }
 
     /// Where a point of the output lies on the original.
-    pub fn to_original(&self, [u, v]: [f32; 2]) -> [f32; 2] {
-        let (u, v) = match self.quarter_turns {
-            1 => (v, 1.0 - u),
-            2 => (1.0 - u, 1.0 - v),
-            3 => (1.0 - v, u),
-            _ => (u, v),
-        };
+    pub fn to_original(&self, point: [f32; 2]) -> [f32; 2] {
+        let [u, v] = unturn(point, self.quarter_turns);
         let [x, y, w, h] = self.crop;
-        [x + u * w, y + v * h]
+        self.from_canvas([x + u * w, y + v * h])
     }
 
     /// A rectangle of the original (`x, y, w, h`) on the output, cut at the crop's edge; `None` if entirely outside.
+    /// Straightened, it is the box around the turned rectangle.
     pub fn place(&self, [x, y, w, h]: [f32; 4]) -> Option<[f32; 4]> {
-        let a = self.to_output([x, y]);
-        let b = self.to_output([x + w, y + h]);
-        let (left, right) = (a[0].min(b[0]).max(0.0), a[0].max(b[0]).min(1.0));
-        let (top, bottom) = (a[1].min(b[1]).max(0.0), a[1].max(b[1]).min(1.0));
+        let corners = [[x, y], [x + w, y], [x, y + h], [x + w, y + h]].map(|corner| self.to_output(corner));
+        let fold = |pick: fn(&[f32; 2]) -> f32, min: bool| {
+            corners
+                .iter()
+                .map(pick)
+                .fold(if min { f32::INFINITY } else { f32::NEG_INFINITY }, |a, b| {
+                    if min { a.min(b) } else { a.max(b) }
+                })
+        };
+        let (left, right) = (fold(|p| p[0], true).max(0.0), fold(|p| p[0], false).min(1.0));
+        let (top, bottom) = (fold(|p| p[1], true).max(0.0), fold(|p| p[1], false).min(1.0));
         (right > left && bottom > top).then_some([left, top, right - left, bottom - top])
+    }
+}
+
+/// A point of the unturned canvas on the canvas turned by `quarter_turns` clockwise.
+fn turn(quarter_turns: u8, [u, v]: [f32; 2]) -> [f32; 2] {
+    match quarter_turns % 4 {
+        1 => [1.0 - v, u],
+        2 => [1.0 - u, 1.0 - v],
+        3 => [v, 1.0 - u],
+        _ => [u, v],
+    }
+}
+
+/// A point of the canvas turned by `quarter_turns` clockwise on the unturned one.
+fn unturn([u, v]: [f32; 2], quarter_turns: u8) -> [f32; 2] {
+    match quarter_turns % 4 {
+        1 => [v, 1.0 - u],
+        2 => [1.0 - u, 1.0 - v],
+        3 => [1.0 - v, u],
+        _ => [u, v],
+    }
+}
+
+/// A straightening within ±[`MAX_STRAIGHTEN`], in steps of a tenth of a degree; 0 for an invalid one.
+fn sanitized_straighten(degrees: f32) -> f32 {
+    if degrees.is_finite() {
+        ((degrees.clamp(-MAX_STRAIGHTEN, MAX_STRAIGHTEN) * 10.0).round() / 10.0) + 0.0
+    } else {
+        0.0
+    }
+}
+
+/// A photo's width per height, from a hundredth to a hundred; square for an invalid one.
+fn sanitized_aspect(aspect: f32) -> f32 {
+    if aspect.is_finite() && aspect > 0.0 {
+        aspect.clamp(0.01, 100.0)
+    } else {
+        1.0
     }
 }
 
@@ -1532,8 +1785,8 @@ pub struct Params {
     pub hue: f32,
     pub vignette: f32,
     pub vignette_start: f32,
-    /// The crop, whose center and edges the vignette takes (REQ-029-04): `x, y, w, h`.
-    pub vignette_frame: [f32; 4],
+    /// The geometry, whose output's center and edges the vignette takes (REQ-029-04).
+    pub vignette_geometry: Geometry,
     pub grain: f32,
     /// Grain cell size in pixels of the full photo.
     pub grain_cell: f32,
@@ -1612,7 +1865,7 @@ impl Params {
             hue: recipe.hue.to_radians(),
             vignette: recipe.vignette / 100.0,
             vignette_start: recipe.vignette_midpoint / 100.0 * 0.8,
-            vignette_frame: recipe.geometry().crop(),
+            vignette_geometry: recipe.geometry(),
             grain: recipe.grain / 100.0,
             grain_cell: 1.0 + recipe.grain_size / 100.0 * 3.0,
             grain_midtones: look.is_some(),
@@ -1749,8 +2002,8 @@ impl Params {
     /// Vignette and grain, over the whole photo; returns encoded values in 0–1.
     fn finish(&self, mut lin: [f32; 3], uv: [f32; 2], size: [f32; 2]) -> [f32; 3] {
         if self.vignette != 0.0 {
-            let [x, y, w, h] = self.vignette_frame;
-            let (u, v) = (((uv[0] - x) / w - 0.5) * 2.0, ((uv[1] - y) / h - 0.5) * 2.0);
+            let [u, v] = self.vignette_geometry.to_output(uv);
+            let (u, v) = ((u - 0.5) * 2.0, (v - 0.5) * 2.0);
             let r = (u * u + v * v).sqrt() / std::f32::consts::SQRT_2;
             let t = self.vignette * smoothstep(self.vignette_start, self.vignette_start + 0.5, r);
             lin = if t < 0.0 {
@@ -2963,6 +3216,151 @@ mod tests {
         }
         let crop = Geometry::new(Some([0.5, 0.5, 0.5, 0.5]), 0);
         assert!(near(crop.to_output([0.75, 0.75]), [0.5, 0.5]));
+    }
+
+    /// REQ-029-10 (#248): straightening keeps a spot of the photo on the same spot and back again, the canvas holds the
+    /// turned photo, and the largest crop of a shape shows only the photo while a larger one wouldn't.
+    #[test]
+    fn req_029_10_straightening_maps_both_ways_and_the_crop_shows_only_the_photo() {
+        let close = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-4 && (a[1] - b[1]).abs() < 1e-4;
+        for degrees in [-100.0, -33.3, -0.1, 7.5, 45.0, 90.0, 100.0] {
+            for turns in 0..4 {
+                let whole = Geometry::new(None, turns).with_straighten(degrees, 1.5);
+                let crop = whole.largest_crop(4.0 / 3.0);
+                let geometry = Geometry::new(Some(crop), turns).with_straighten(degrees, 1.5);
+                for point in [[0.3, 0.4], [0.5, 0.5], [0.7, 0.2]] {
+                    assert!(
+                        close(geometry.to_original(geometry.to_output(point)), point),
+                        "{degrees}° {turns}"
+                    );
+                }
+                assert!(
+                    geometry.frame_shows_photo(geometry.frame()),
+                    "{degrees}°: only the photo"
+                );
+                let [x, y, w, h] = geometry.frame();
+                let larger = [x - 0.01, y - 0.01, w + 0.02, h + 0.02];
+                assert!(!whole.frame_shows_photo(larger), "{degrees}°: the largest");
+                assert!((geometry.crop_ratio() - 4.0 / 3.0).abs() < 1e-3, "keeps the shape");
+            }
+        }
+        // A quarter of a turn makes the canvas the photo on its side; none at all leaves it as it was.
+        let side = Geometry::new(None, 0).with_straighten(90.0, 1.5);
+        assert_eq!(side.canvas_size(300, 200), (200, 300));
+        assert_eq!(
+            Geometry::new(None, 0).with_straighten(0.0, 1.5).canvas_size(300, 200),
+            (300, 200)
+        );
+        let tilted = Geometry::new(None, 0).with_straighten(10.0, 1.5);
+        assert!(
+            tilted.shows_photo([0.5, 0.5]) && !tilted.shows_photo([0.0, 0.0]),
+            "empty corners"
+        );
+        // A straightened, cropped output tells its original's size.
+        let saved = Geometry::new(Some(tilted.largest_crop(1.5)), 1).with_straighten(10.0, 1.5);
+        let (width, height) = saved.output_size(3000, 2000);
+        let (w, h) = saved.original_size(width, height);
+        assert!(w.abs_diff(3000) <= 2 && h.abs_diff(2000) <= 2, "{w} × {h}");
+    }
+
+    /// REQ-029-10: setting the straightening fits the crop to its shape inside the photo; it is kept in tenths of a
+    /// degree within ±100°, round-trips, and is written as a version 2 recipe only when used.
+    #[test]
+    fn req_029_10_straightening_fits_the_crop_and_round_trips() {
+        let mut recipe = Recipe::default();
+        assert!(recipe.to_json().contains("\"version\":1"));
+        recipe.set_straighten(12.34, 1.5);
+        assert_eq!(recipe.straighten, 12.3);
+        assert_eq!(recipe.aspect, Some(1.5));
+        let geometry = recipe.geometry();
+        assert!(geometry.frame_shows_photo(geometry.frame()));
+        assert!((geometry.crop_ratio() - 1.5).abs() < 1e-3, "the photo's own shape");
+        let json = recipe.to_json();
+        assert!(json.contains("\"version\":2"), "{json}");
+        assert_eq!(Recipe::from_json(&json), Some(recipe.clone()));
+        recipe.set_straighten(0.0, 1.5);
+        assert_eq!((recipe.crop, recipe.aspect), (None, None), "back to the whole photo");
+        recipe.set_straighten(250.0, 1.5);
+        assert_eq!(recipe.straighten, MAX_STRAIGHTEN);
+        let hostile = r#"{"version":2,"straighten":"NaN","aspect":-3}"#;
+        assert!(Recipe::from_json(hostile).is_none_or(|recipe| recipe.straighten == 0.0));
+        let tamed = Recipe::from_json(r#"{"version":2,"straighten":-400,"aspect":1e9}"#).unwrap();
+        assert_eq!((tamed.straighten, tamed.aspect), (-MAX_STRAIGHTEN, Some(100.0)));
+        assert!(Recipe::from_json(r#"{"version":3}"#).is_none(), "a newer app's");
+    }
+
+    /// REQ-029-11 (#248): flipping mirrors what shows, crop, straightening and quarter turns included, and twice is
+    /// as before.
+    #[test]
+    fn req_029_11_flips_mirror_the_output() {
+        let close = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-4 && (a[1] - b[1]).abs() < 1e-4;
+        for turns in 0..4 {
+            for horizontal in [true, false] {
+                let mut recipe = Recipe {
+                    quarter_turns: turns,
+                    ..Recipe::default()
+                };
+                recipe.set_straighten(8.0, 1.5);
+                recipe.crop = Some([0.2, 0.25, 0.5, 0.4]);
+                let before = recipe.geometry();
+                let mut flipped = recipe.clone();
+                flipped.flip(horizontal);
+                let after = flipped.geometry();
+                for [u, v] in [[0.1, 0.2], [0.5, 0.5], [0.8, 0.6]] {
+                    let mirrored = if horizontal { [1.0 - u, v] } else { [u, 1.0 - v] };
+                    assert!(
+                        close(after.to_original(mirrored), before.to_original([u, v])),
+                        "{turns} {horizontal}"
+                    );
+                }
+                flipped.flip(horizontal);
+                assert_eq!(flipped.straighten, recipe.straighten);
+                assert_eq!((flipped.flip_h, flipped.flip_v), (false, false));
+                assert!(
+                    flipped
+                        .crop
+                        .unwrap()
+                        .iter()
+                        .zip(recipe.crop.unwrap())
+                        .all(|(a, b)| (a - b).abs() < 1e-6)
+                );
+            }
+        }
+        let mut flipped = Recipe::default();
+        flipped.flip(true);
+        assert!(!flipped.is_neutral() && flipped.to_json().contains("\"version\":2"));
+    }
+
+    /// REQ-029-08, REQ-029-10, REQ-029-11: a region follows flips and straightening: mirrored, and as the box around
+    /// it once turned, cut at the crop's edge.
+    #[test]
+    fn req_029_08_regions_follow_flips_and_straightening() {
+        let flipped = Geometry::new(None, 0).with_flips(true, false);
+        let placed = flipped.place([0.1, 0.2, 0.2, 0.3]).unwrap();
+        assert!(
+            placed
+                .iter()
+                .zip([0.7, 0.2, 0.2, 0.3])
+                .all(|(a, b)| (a - b).abs() < 1e-6),
+            "{placed:?}"
+        );
+
+        let mut recipe = Recipe::default();
+        recipe.set_straighten(20.0, 1.5);
+        let geometry = recipe.geometry();
+        let face = [0.45, 0.45, 0.1, 0.1];
+        let [x, y, w, h] = geometry.place(face).unwrap();
+        let center = geometry.to_output([0.5, 0.5]);
+        assert!((x + w / 2.0 - center[0]).abs() < 1e-3 && (y + h / 2.0 - center[1]).abs() < 1e-3);
+        assert!(
+            w > face[2] && h > face[3],
+            "the box around the turned face is larger: {w} {h}"
+        );
+        assert_eq!(
+            geometry.place([0.0, 0.0, 0.02, 0.02]),
+            None,
+            "a corner the crop leaves out"
+        );
     }
 
     /// REQ-029-08: regions follow the crop and the turn, are cut at its edge, and are gone when entirely outside.

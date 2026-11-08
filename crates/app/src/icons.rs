@@ -46,6 +46,8 @@ icons! {
     FolderOpen => "folder-open",
     FolderPlus => "folder-plus",
     Funnel => "funnel",
+    FlipHorizontal2 => "flip-horizontal-2",
+    FlipVertical2 => "flip-vertical-2",
     Folder => "folder",
     GalleryHorizontal => "gallery-horizontal",
     ImageOff => "image-off",

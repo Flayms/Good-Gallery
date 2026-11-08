@@ -171,6 +171,8 @@ pub struct EditSession {
     size_open: bool,
     /// Whether the crop's frame is shown over the whole photo (REQ-029-02).
     cropping: bool,
+    /// Whether _Straighten_ is being dragged (REQ-029-10).
+    straightening: bool,
     crop_ratio: Ratio,
     /// Whether the crop's 4:3 or 16:9 is upright.
     crop_portrait: bool,
@@ -228,6 +230,7 @@ impl EditSession {
             geometry_open: true,
             size_open: false,
             cropping: false,
+            straightening: false,
             crop_ratio: Ratio::Free,
             crop_portrait: false,
             crop_drag: None,
@@ -682,7 +685,7 @@ impl EditSession {
         if compare {
             self.saved.geometry()
         } else if self.cropping {
-            Geometry::new(None, self.draft.quarter_turns)
+            self.draft.geometry().uncropped()
         } else {
             self.draft.geometry()
         }
@@ -711,11 +714,51 @@ impl EditSession {
         self.crop_drag = None;
     }
 
-    /// The whole photo's size as it is turned on screen.
+    /// The whole canvas's size as it is turned on screen: the photo, straightened (REQ-029-10).
     fn turned_size(&self) -> [f32; 2] {
         let [width, height] = self.target.full_size;
-        let (width, height) = Geometry::new(None, self.draft.quarter_turns).output_size(width, height);
+        let (width, height) = self.draft.geometry().uncropped().output_size(width, height);
         [width as f32, height as f32]
+    }
+
+    /// The photo's width per height, upright, which straightening needs (REQ-029-10).
+    fn aspect(&self) -> f32 {
+        let [width, height] = self.target.full_size;
+        if width == 0 || height == 0 {
+            1.0
+        } else {
+            width as f32 / height as f32
+        }
+    }
+
+    /// `proposed(1.0)` if its frame shows only the photo, else as far towards it from `proposed(0.0)` as does: a drag
+    /// or a new shape stops at the edge of a straightened photo (REQ-029-10).
+    fn frame_on_photo(&self, proposed: impl Fn(f32) -> [f32; 4]) -> [f32; 4] {
+        let whole = self.draft.geometry().uncropped();
+        if whole.frame_shows_photo(proposed(1.0)) || !whole.frame_shows_photo(proposed(0.0)) {
+            return proposed(1.0);
+        }
+        let (mut low, mut high) = (0.0, 1.0);
+        for _ in 0..16 {
+            let middle = (low + high) / 2.0;
+            if whole.frame_shows_photo(proposed(middle)) {
+                low = middle;
+            } else {
+                high = middle;
+            }
+        }
+        proposed(low)
+    }
+
+    /// `frame`, made smaller about its center until it shows only the photo (REQ-029-10).
+    fn shrunk_onto_photo(&self, frame: [f32; 4]) -> [f32; 4] {
+        let [x, y, w, h] = frame;
+        let (cx, cy) = (x + w / 2.0, y + h / 2.0);
+        // From a tiny frame at its center (t = 0) to the frame itself (t = 1).
+        self.frame_on_photo(|t| {
+            let t = 0.01 + 0.99 * t;
+            [cx - w * t / 2.0, cy - h * t / 2.0, w * t, h * t]
+        })
     }
 
     fn crop_frame(&self) -> [f32; 4] {
@@ -734,14 +777,16 @@ impl EditSession {
         let (frame, size) = (self.crop_frame(), self.turned_size());
         self.crop_portrait = crop::is_portrait(frame, size);
         if let Some(value) = ratio.value(self.crop_portrait, size) {
-            self.commit(self.with_frame(crop::fit_ratio(frame, value, size)));
+            let fitted = self.shrunk_onto_photo(crop::fit_ratio(frame, value, size));
+            self.commit(self.with_frame(fitted));
         }
     }
 
     /// Turns the 4:3 or 16:9 to its other form (REQ-029-03).
     fn swap_crop_ratio(&mut self) {
         self.crop_portrait = !self.crop_portrait;
-        self.commit(self.with_frame(crop::swap_sides(self.crop_frame(), self.turned_size())));
+        let swapped = self.shrunk_onto_photo(crop::swap_sides(self.crop_frame(), self.turned_size()));
+        self.commit(self.with_frame(swapped));
     }
 
     /// Takes drags on the crop's frame, over the whole photo at `area` (REQ-029-02).
@@ -778,7 +823,8 @@ impl EditSession {
             let delta = [(pos.x - origin.x) / area.width(), (pos.y - origin.y) / area.height()];
             let size = self.turned_size();
             let ratio = self.crop_ratio.value(self.crop_portrait, size);
-            self.draft = self.with_frame(crop::drag(start, grip, delta, ratio, size));
+            let frame = self.frame_on_photo(|t| crop::drag(start, grip, [delta[0] * t, delta[1] * t], ratio, size));
+            self.draft = self.with_frame(frame);
             ui.ctx().request_repaint();
         }
         // One undo step per drag.
@@ -1069,6 +1115,60 @@ impl EditSession {
         ] {
             painter.line_segment([corner, corner + Vec2::new(sign_x * long, 0.0)], grip);
             painter.line_segment([corner, corner + Vec2::new(0.0, sign_y * long)], grip);
+        }
+    }
+
+    /// Mirrors the photo as it shows, left to right or top to bottom (REQ-029-11).
+    fn flip(&mut self, horizontal: bool) {
+        let mut recipe = self.draft.clone();
+        recipe.flip(horizontal);
+        self.commit(recipe);
+    }
+
+    /// _Straighten_ (REQ-029-10): a free angle in tenths of a degree; a double-click sets it back to 0°.
+    fn straighten_slider(&mut self, ui: &mut egui::Ui) {
+        let value = self.draft.straighten;
+        let text = if value == 0.0 {
+            "0°".to_owned()
+        } else {
+            format!("{value:+.1}°")
+        };
+        let mut current = f64::from(value);
+        let range = (-domain::edit::MAX_STRAIGHTEN, domain::edit::MAX_STRAIGHTEN);
+        let response = slider_row(ui, "Straighten", &text, &mut current, range, 0.1);
+        self.straightening = response.is_pointer_button_down_on() || response.dragged();
+        let aspect = self.aspect();
+        if response.double_clicked() {
+            let mut recipe = self.draft.clone();
+            recipe.set_straighten(0.0, aspect);
+            self.commit(recipe);
+            return;
+        }
+        if response.changed() {
+            self.draft.set_straighten(current as f32, aspect);
+        }
+        // One undo step per finished drag, click or key press.
+        if response.drag_stopped() || response.clicked() || (response.changed() && !response.dragged()) {
+            let recipe = self.draft.clone();
+            self.commit(recipe);
+        }
+    }
+
+    /// Whether _Straighten_ is being dragged, which shows a fine grid over the photo (REQ-029-10).
+    pub fn is_straightening(&self) -> bool {
+        self.straightening
+    }
+
+    /// A fine grid over the photo shown at `rect`, to line it up while straightening (REQ-029-10).
+    pub fn paint_grid(&self, painter: &egui::Painter, rect: Rect) {
+        const LINES: usize = 12;
+        let thin = egui::Stroke::new(1.0, Color32::from_white_alpha(90));
+        for i in 1..LINES {
+            let t = i as f32 / LINES as f32;
+            let across = rect.left() + rect.width() * t;
+            let down = rect.top() + rect.height() * t;
+            painter.line_segment([pos2(across, rect.top()), pos2(across, rect.bottom())], thin);
+            painter.line_segment([pos2(rect.left(), down), pos2(rect.right(), down)], thin);
         }
     }
 
@@ -1444,6 +1544,12 @@ impl EditSession {
                     if icon_button(ui, Icon::RotateCw, "Rotate right", "Rotate right", true).clicked() {
                         self.rotate(1);
                     }
+                    if icon_button(ui, Icon::FlipHorizontal2, "Flip horizontal", "Flip horizontal", true).clicked() {
+                        self.flip(true);
+                    }
+                    if icon_button(ui, Icon::FlipVertical2, "Flip vertical", "Flip vertical", true).clicked() {
+                        self.flip(false);
+                    }
                     let cropping = self.cropping;
                     let button = egui::Button::image_and_text(Icon::Crop.small(), "Crop").selected(cropping);
                     let response = ui.add(button);
@@ -1452,6 +1558,7 @@ impl EditSession {
                         self.set_cropping(!cropping);
                     }
                 });
+                self.straighten_slider(ui);
                 if self.cropping {
                     self.crop_shapes(ui);
                 }
@@ -2299,6 +2406,11 @@ fn cpu_preview(
                 (x as f32 + 0.5) / out_width as f32,
                 (y as f32 + 0.5) / out_height as f32,
             ]);
+            // The empty corners around a straightened photo (REQ-029-10).
+            if !geometry.shows_photo_at([u, v]) {
+                output.extend_from_slice(&[0, 0, 0, 0]);
+                continue;
+            }
             let from_x = ((u * width as f32) as u32).min(width - 1) as usize;
             let from_y = ((v * height as f32) as u32).min(height - 1) as usize;
             let at = (from_y * width as usize + from_x) * 4;
@@ -2372,6 +2484,15 @@ fn uniform(
         f32::from(u8::from(params.blur_lens)),
     ]);
     floats.extend_from_slice(&geometry.crop());
+    // Straightening and flips (REQ-029-10, REQ-029-11).
+    let radians = geometry.straighten().to_radians();
+    let [horizontal, vertical] = geometry.flips();
+    floats.extend_from_slice(&[
+        radians.cos(),
+        radians.sin(),
+        geometry.aspect(),
+        f32::from(u8::from(horizontal) | (u8::from(vertical) << 1)),
+    ]);
     floats.extend_from_slice(&[
         f32::from(u8::from(params.grain_midtones)),
         params.grain_color,
@@ -3205,6 +3326,48 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// REQ-029-10, REQ-029-11 (#248): flips and straightening preview as saving renders them, with the vignette on
+    /// the output. Flips move whole pixels; straightened, the GPU samples between pixels where the CPU's small copy
+    /// takes the nearest, so most pixels agree closely and the bands' edges a little less. The aspect of 1.5 on a
+    /// square pattern checks that both follow the same formula for the canvas.
+    #[test]
+    fn req_029_10_req_029_11_the_gpu_preview_of_flips_and_straightening_matches_the_cpu_render() {
+        let (_gpu, render_state) = render_state();
+        let image = pattern();
+        for (degrees, flip, turns) in [
+            (0.0, Some(true), 0),
+            (0.0, Some(false), 1),
+            (12.5, None, 0),
+            (-30.0, Some(true), 3),
+            (95.0, Some(false), 2),
+        ] {
+            let mut recipe = recipes()[1].clone();
+            Adjustment::Vignette.set(&mut recipe, -60.0);
+            recipe.quarter_turns = turns;
+            recipe.set_straighten(degrees, 1.5);
+            if let Some(horizontal) = flip {
+                recipe.flip(horizontal);
+            }
+            let gpu = render_gpu(&render_state, &image, &recipe, None, 0);
+            let cpu = cpu_preview(&image, &recipe, recipe.geometry(), [SIZE, SIZE], None, 0);
+            let (width, height) = recipe.geometry().output_size(SIZE, SIZE);
+            let case = format!("{degrees}° {flip:?} {turns}");
+            assert_eq!(cpu.size, [width as usize, height as usize], "{case}");
+            assert_eq!(gpu.len(), cpu.pixels.len() * 4, "{case}");
+            let (limit, share) = if degrees == 0.0 { (3, 1.0) } else { (8, 0.85) };
+            let close = gpu
+                .chunks_exact(4)
+                .zip(cpu.pixels.iter())
+                .filter(|(gpu, cpu)| (0..3).all(|c| (i32::from(gpu[c]) - i32::from(cpu.to_array()[c])).abs() <= limit))
+                .count();
+            assert!(
+                close as f32 >= share * cpu.pixels.len() as f32,
+                "{case}: {close} of {} pixels agree",
+                cpu.pixels.len()
+            );
         }
     }
 
