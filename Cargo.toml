@@ -17,7 +17,7 @@ indexer = { path = "crates/indexer" }
 meta = { path = "crates/meta" }
 
 # egui, eframe, egui_kittest and wgpu change APIs between minor versions: pin exact versions.
-eframe = { version = "=0.37.0", default-features = false, features = ["accesskit", "default_fonts", "wgpu", "wayland", "x11"] }
+eframe = { version = "=0.37.0", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "wgpu", "wayland", "x11"] }
 egui = "=0.37.0"
 egui_kittest = { version = "=0.37.0", features = ["wgpu", "snapshot"] }
 

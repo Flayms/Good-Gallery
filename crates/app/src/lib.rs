@@ -177,6 +177,10 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
             Page::People => people_page::ui(ui, state),
         });
         show_viewer(&ctx, state);
+        // A copied photo goes on the clipboard once decoded (REQ-009-25).
+        if let Some(image) = state.take_copied() {
+            ctx.copy_image(image);
+        }
     }
     confirm_revert(&ctx, state);
     confirm_many(&ctx, state);
@@ -248,6 +252,10 @@ fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
             filter_by_tag(state, &tag);
         }
         Some(viewer::Action::ShowInExplorer(file)) => state.show_in_explorer(file),
+        #[cfg(not(target_arch = "wasm32"))]
+        Some(viewer::Action::Copy(file, orientation)) => state.copy_image(file, orientation),
+        #[cfg(target_arch = "wasm32")]
+        Some(viewer::Action::Copy(..)) => {}
         Some(viewer::Action::SaveEdit(request)) => state.save_edit(*request),
         Some(viewer::Action::Revert(target)) => state.confirm_revert = Some(target),
         Some(viewer::Action::Rate(rate)) => state.rate(rate),
@@ -529,6 +537,15 @@ fn gallery_page(ui: &mut egui::Ui, state: &mut AppState) {
                     state.show_in_explorer(file);
                 }
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            Some((index, gallery::MediaAction::Copy)) => {
+                let orientation = gallery.item(index).and_then(|item| item.sidecar_orientation);
+                if let Some(file) = state.file_at(index) {
+                    state.copy_image(file, orientation);
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
+            Some((_, gallery::MediaAction::Copy)) => {}
             Some((index, gallery::MediaAction::Information)) => state.info_sheet = gallery.id_at(index),
             Some((index, gallery::MediaAction::Select)) => gallery.toggle_selected_at(index),
             // On the selection if the item is in it, else on the item (REQ-009-21).

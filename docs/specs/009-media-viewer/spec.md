@@ -190,6 +190,13 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 - **Then** they leave the index, the gallery, the selection and the counts right away, and their cached thumbnails are removed
 - **And** the viewer showing one moves on to the item that takes its place, or closes when none is left
 
+### REQ-009-25 · Copy a photo
+
+- **Given** a photo's context menu, on its tile, its row or in the viewer, in the desktop app
+- **When** the user chooses _Copy_
+- **Then** the photo goes on the clipboard as an image, upright as the viewer shows it, at full size up to 8192 pixels on its longer side, without unsaved edits
+- **And** _Copy_ says so with a short notice, or why it couldn't copy; videos and the browser version have no _Copy_
+
 ## Out of scope
 
 - Face regions in videos. Adding, editing and removing face regions and finding faces are spec 032.
@@ -232,3 +239,4 @@ Deprecated 2026-10-26: one neighbour each way isn't enough on network shares, wh
 | REQ-009-23 | `crates/domain/src/deletion.rs` › req_009_23_network_paths_have_no_recycle_bin, req_009_23_the_question_says_where_the_files_go; `crates/media/src/delete.rs` › req_009_23_the_file_goes_with_its_sidecars, req_009_23_a_shared_sidecar_stays, req_009_23_a_file_that_cant_go_stays_with_its_sidecars, req_009_23_a_gone_file_counts_and_paths_stay_inside, req_009_23_permanently_removes_the_files, req_009_23_a_local_library_has_a_recycle_bin; `crates/app/tests/context_menu.rs` › req_009_23_req_009_24_the_menu_deletes_the_selection_after_asking, req_009_23_the_delete_key_and_an_item_outside_the_selection (snapshot `context_menu`) | partial: tests use a stand-in for the Recycle Bin; moving to the real one (`trash` crate) and finding mapped network drives on Windows have no test |
 | REQ-009-24 | `crates/db/src/media.rs` › req_009_24_removes_a_deleted_item; `crates/app/tests/context_menu.rs` › req_009_23_req_009_24_the_menu_deletes_the_selection_after_asking, req_009_24_the_viewer_moves_on_from_a_deleted_item | pass |
 | REQ-009-17 | `crates/domain/src/faces.rs` › req_009_17_face_regions_are_hidden_until_shown; `crates/app/tests/viewer.rs` › req_009_17_shows_face_regions_and_remembers_the_choice (snapshot `viewer_faces`) | pass |
+| REQ-009-25 | `crates/app/tests/context_menu.rs` › req_009_25_copies_a_photo_from_its_tile_and_the_viewer | pass (pasting into another app by hand) |
