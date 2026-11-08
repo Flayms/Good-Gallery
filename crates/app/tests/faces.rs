@@ -347,7 +347,7 @@ fn req_032_13_removing_on_the_photo_takes_the_region_and_the_keyword() {
     open_with_faces(&mut harness, "a.png");
     harness.get_by_label("Face of Ben").click();
     settle(&mut harness);
-    harness.get_by_label("Remove").click();
+    harness.get_by_label("Remove name").click();
     settle(&mut harness);
     assert!(regions(&exiftool, &file).is_empty());
     let output = Command::new(&exiftool)
@@ -657,7 +657,7 @@ fn req_032_30_change_or_delete_a_decision() {
 
     harness.get_by_label(&ignored[2]).click();
     settle(&mut harness);
-    harness.get_by_label("Delete").click();
+    harness.get_by_label("Remove box").click();
     settle(&mut harness);
     assert!(harness.query_by_label_contains("Ignored ·").is_none());
     let conn = harness.state().db().unwrap();
@@ -1215,12 +1215,17 @@ fn req_032_15_loads_only_the_faces_of_groups_near_the_screen() {
 
 /// A library with `groups` groups of three unknown faces each, all unlike each other.
 fn many_groups(fixture: &Fixture, groups: usize) -> db::rusqlite::Connection {
+    groups_of(fixture, groups, 3)
+}
+
+/// A library with `groups` groups of `size` unknown faces each, all unlike each other.
+fn groups_of(fixture: &Fixture, groups: usize, size: usize) -> db::rusqlite::Connection {
     let dir = fixture.folder("photos");
     let conn = db::open_in_memory().unwrap();
     let root = db::libraries::insert(&conn, &dir, "Photos", LibraryStatus::Online)
         .unwrap()
         .id;
-    let files: Vec<IndexedFile> = (0..groups * 3)
+    let files: Vec<IndexedFile> = (0..groups * size)
         .map(|i| IndexedFile {
             rel_path: format!("{i}.png"),
             file_name: format!("{i}.png"),
@@ -1249,7 +1254,7 @@ fn many_groups(fixture: &Fixture, groups: usize) -> db::rusqlite::Connection {
     for waiting in faces::pending_faces(&conn, "detector", "recognizer", files.len()).unwrap() {
         let number: usize = waiting.photo.rel_path.trim_end_matches(".png").parse().unwrap();
         let mut vector = vec![0.0; groups];
-        vector[number / 3] = 1.0;
+        vector[number / size] = 1.0;
         faces::store_embedding(&conn, waiting.face, "recognizer", &vector).unwrap();
     }
     conn
@@ -1328,4 +1333,199 @@ fn wait_for_thumbnails(harness: &mut App, media: &[i64]) {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     panic!("the thumbnails of {media:?} never showed");
+}
+
+/// REQ-032-31: a decision takes the faces off the page at once, and the page stays while the groups load again.
+#[test]
+fn req_032_31_deciding_keeps_the_page_while_it_loads_again() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    let before = crops(&harness, "in its photo").len();
+    harness.get_by_label("Not faces").click();
+    for _ in 0..4 {
+        harness.run_steps(1);
+        assert!(harness.query_by_label("Looking through the faces…").is_none());
+    }
+    assert_eq!(crops(&harness, "in its photo").len(), before - 3);
+    settle(&mut harness);
+    harness.get_by_label("Not faces · 3");
+}
+
+/// REQ-032-32: a group shows all its faces, a first part of a large one, and the rest with _Show more_.
+#[test]
+fn req_032_32_a_group_shows_all_its_faces() {
+    {
+        // One fixture at a time: each holds the GPU.
+        let fixture = Fixture::new();
+        let conn = groups_of(&fixture, 1, 12);
+        let harness = people_page_with_thumbnails(&fixture, conn, egui::vec2(1000.0, 4000.0));
+        assert_eq!(crops(&harness, "in its photo").len(), 12);
+        assert!(harness.query_by_label("Show more").is_none());
+    }
+
+    let fixture = Fixture::new();
+    let conn = groups_of(&fixture, 1, 50);
+    let mut harness = people_page_with_thumbnails(&fixture, conn, egui::vec2(1000.0, 4000.0));
+    assert_eq!(crops(&harness, "in its photo").len(), 48);
+    harness.get_by_label("Show more").click();
+    settle(&mut harness);
+    assert_eq!(crops(&harness, "in its photo").len(), 50);
+    harness.get_by_label("50 faces");
+}
+
+/// REQ-032-26: the viewer opened from the page shows its photo's and its filmstrip's thumbnails, also of photos the
+/// page doesn't show.
+#[test]
+fn req_032_26_the_viewer_from_the_page_has_its_thumbnails() {
+    let fixture = Fixture::new();
+    let conn = groups_of(&fixture, 1, 50);
+    let mut harness = people_page_with_thumbnails(&fixture, conn, egui::vec2(1000.0, 700.0));
+    harness
+        .query_all_by_label_contains("in its photo")
+        .next()
+        .unwrap()
+        .click();
+    settle(&mut harness);
+    assert!(harness.state().viewer.is_some(), "the viewer opened");
+    harness.key_press(Key::F);
+    settle(&mut harness);
+    for _ in 0..49 {
+        harness.key_press(Key::ArrowRight);
+        harness.run_steps(1);
+    }
+    settle(&mut harness);
+    let index = harness.state().viewer.as_ref().unwrap().index();
+    assert_eq!(index, 49);
+    let gallery = harness.state().gallery.as_ref().unwrap();
+    let near: Vec<i64> = (45..50).filter_map(|index| gallery.id_at(index)).collect();
+    assert_eq!(near.len(), 5);
+    wait_for_thumbnails(&mut harness, &near);
+}
+
+/// Points at `button` until its tip shows.
+fn hover_tip(harness: &mut App, button: &str, tip: &str) {
+    let pos = harness.get_by_label(button).rect().center();
+    harness.hover_at(pos);
+    for _ in 0..120 {
+        harness.run_steps(1);
+        if harness.query_by_label(tip).is_some() {
+            return;
+        }
+    }
+    panic!("{button} has no tip {tip:?}");
+}
+
+/// REQ-032-33: in the viewer, an unknown face's decisions say what they do, _Save_ waits for a name, and _Remove box_
+/// forgets the face.
+#[test]
+fn req_032_33_the_viewer_says_what_each_decision_does() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    open_with_faces(&mut harness, "a.png");
+    harness.get_by_label("Unknown face: Ben?").click();
+    settle(&mut harness);
+    assert!(harness.get_by_label("Save").accesskit_node().is_disabled());
+    hover_tip(
+        &mut harness,
+        "Ignore",
+        "For a real person you won't name: not asked about again",
+    );
+    hover_tip(&mut harness, "Not a face", "For a wrong detection: not found again");
+    type_name(&mut harness, "Who is this?", "Cy");
+    assert!(!harness.get_by_label("Save").accesskit_node().is_disabled());
+    harness.get_by_label("Remove box").click();
+    settle(&mut harness);
+    assert!(harness.query_by_label("Unknown face: Ben?").is_none());
+    let conn = harness.state().db().unwrap();
+    let unknown = faces::unknown_faces(&conn.lock().unwrap(), "detector", "recognizer").unwrap();
+    assert_eq!(unknown.len(), 3, "a.png's stranger is forgotten");
+}
+
+/// REQ-032-33: on the page, naming waits for a name, the decisions say what they do, and a face's menu offers
+/// _Remove box_.
+#[test]
+fn req_032_33_the_page_says_what_each_decision_does() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    assert!(harness.get_by_label("Name them").accesskit_node().is_disabled());
+    type_name(&mut harness, "Who is this? Group of 3", "Cy");
+    assert!(!harness.get_by_label("Name them").accesskit_node().is_disabled());
+    hover_tip(&mut harness, "Not faces", "For a wrong detection: not found again");
+    let ben = crops(&harness, "in its photo").remove(0);
+    right_click(&mut harness, &ben);
+    harness.get_by_label("Remove box").click();
+    settle(&mut harness);
+    assert!(harness.query_by_label("Ben? · 1 face").is_none());
+    assert!(harness.query_by_label_contains("Ignored ·").is_none());
+    assert!(harness.query_by_label_contains("Not faces ·").is_none());
+}
+
+/// REQ-032-34: typing in a group's field suggests known people; clicking one names the group, after asking.
+#[test]
+fn req_032_34_picks_a_known_person_on_the_page() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    assert!(harness.query_by_label("Suggested name Ben").is_none());
+    type_name(&mut harness, "Who is this? Group of 3", "e");
+    harness.set_size(egui::vec2(1000.0, 700.0));
+    harness.run_steps(4);
+    harness.snapshot(common::snapshot_name("people_page_names"));
+    harness.get_by_label("Suggested name Ben").click();
+    settle(&mut harness);
+    harness.get_by_label("Write Ben into 3 files?");
+}
+
+/// REQ-032-34: ↓ moves to a suggestion and Enter takes it.
+#[test]
+fn req_032_34_picks_a_known_person_with_the_keys() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    type_name(&mut harness, "Who is this? Group of 3", "b");
+    harness.key_press(Key::ArrowDown);
+    harness.run_steps(2);
+    harness.key_press(Key::Enter);
+    settle(&mut harness);
+    harness.get_by_label("Write Ben into 3 files?");
+}
+
+/// REQ-032-34: the viewer's field suggests known people too, and a name nobody has suggests none.
+#[test]
+fn req_032_34_suggests_known_people_in_the_viewer() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    open_with_faces(&mut harness, "a.png");
+    harness.get_by_label("Unknown face: Ben?").click();
+    settle(&mut harness);
+    type_name(&mut harness, "Who is this?", "Be");
+    harness.get_by_label("Suggested name Ben");
+    type_name(&mut harness, "Who is this?", "x");
+    assert!(harness.query_by_label("Suggested name Ben").is_none());
+}
+
+/// REQ-032-35: a group to confirm can be named as someone else, or ignored, like a group of unknown faces.
+#[test]
+fn req_032_35_a_group_to_confirm_can_be_someone_else_or_ignored() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    type_name(&mut harness, "Someone else than Ben? Group of 1", "Cy");
+    harness.get_by_label("Name them (Ben?)").click();
+    settle(&mut harness);
+    harness.get_by_label("Write Cy into 1 file?");
+    harness.get_by_label("Cancel").click();
+    settle(&mut harness);
+
+    harness.get_by_label("Ignore (Ben?)").click();
+    settle(&mut harness);
+    assert!(harness.query_by_label("Ben? · 1 face").is_none());
+    harness.get_by_label("Ignored · 1");
 }

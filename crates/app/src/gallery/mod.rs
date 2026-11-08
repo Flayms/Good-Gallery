@@ -556,8 +556,10 @@ pub struct Gallery {
     detail: Option<(i64, Option<DetailResult>)>,
     /// The unknown faces on the item the viewer shows (REQ-032-09).
     faces: Option<(i64, Option<Vec<db::faces::ShownFace>>)>,
-    /// The groups of unknown faces, until something changes (REQ-032-15).
-    face_groups: Option<Option<FaceGroups>>,
+    /// The groups of unknown faces last loaded (REQ-032-15), still shown while they load again (REQ-032-31).
+    face_groups: Option<FaceGroups>,
+    /// Whether the groups were asked for since faces last changed.
+    face_groups_asked: bool,
     /// The dialog naming a smart album, while open (REQ-034-01, REQ-034-05).
     album_dialog: Option<albums::AlbumDialog>,
     /// The libraries the smart album editor offers (REQ-039-02).
@@ -641,6 +643,7 @@ impl Gallery {
             detail: None,
             faces: None,
             face_groups: None,
+            face_groups_asked: false,
             album_dialog: None,
             album_libraries: Vec::new(),
             menu_action: None,
@@ -1174,18 +1177,38 @@ impl Gallery {
     /// Faces changed: they are asked for anew.
     pub fn forget_faces(&mut self) {
         self.faces = None;
-        self.face_groups = None;
+        self.face_groups_asked = false;
     }
 
-    /// The faces to confirm and the groups of unknown faces, `None` while loading or without chosen models
-    /// (REQ-032-15, REQ-032-24).
+    /// Takes the faces `gone` says were decided about off the groups shown, until they are formed again (REQ-032-31).
+    pub fn drop_from_face_groups(&mut self, gone: impl Fn(&db::faces::GroupFace) -> bool) {
+        let Some(groups) = &mut self.face_groups else { return };
+        let keep = |group: &mut FaceGroup| group.retain(|(face, _)| !gone(face));
+        for (_, group) in &mut groups.suggested {
+            keep(group);
+        }
+        groups.suggested.retain(|(_, group)| !group.is_empty());
+        for group in &mut groups.unknown {
+            keep(group);
+        }
+        groups.unknown.retain(|group| !group.is_empty());
+        for group in [&mut groups.others, &mut groups.ignored, &mut groups.not_faces] {
+            keep(group);
+        }
+    }
+
+    /// The faces to confirm and the groups of unknown faces, `None` while first loading or without chosen models
+    /// (REQ-032-15, REQ-032-24). Once loaded, they stay until they have loaded again (REQ-032-31).
     pub fn face_groups(&mut self) -> Option<&FaceGroups> {
-        if self.face_groups.is_none() {
-            let (detector, recognizer) = (
-                self.setting(db::faces::DETECTOR_KEY)?,
-                self.setting(db::faces::RECOGNIZER_KEY)?,
-            );
-            self.face_groups = Some(None);
+        if !self.face_groups_asked {
+            let models = self
+                .setting(db::faces::DETECTOR_KEY)
+                .zip(self.setting(db::faces::RECOGNIZER_KEY));
+            let Some((detector, recognizer)) = models else {
+                self.face_groups = None;
+                return None;
+            };
+            self.face_groups_asked = true;
             let threshold = self.face_threshold();
             self.loader.send(Request::FaceGroups {
                 detector,
@@ -1193,7 +1216,19 @@ impl Gallery {
                 threshold,
             });
         }
-        self.face_groups.as_ref()?.as_ref()
+        self.face_groups.as_ref()
+    }
+
+    /// Asks for the thumbnails the viewer shows, its photo's and its filmstrip's, on a page that draws no gallery under
+    /// it (REQ-032-26).
+    pub fn want_viewer_thumbnails(&mut self, pixels_per_point: f32) {
+        // Without tiles drawn, nothing else loads their items.
+        let strip = self.strip.clone();
+        self.load_range(strip.start, strip.end);
+        if let Some((index, _)) = self.viewed {
+            self.load_range(index, index + 1);
+        }
+        self.request_textures(std::iter::empty(), pixels_per_point);
     }
 
     /// Takes in finished thumbnails. Once per frame, on every page that draws them, before it does.
@@ -1346,10 +1381,10 @@ impl Gallery {
                 }
             }
             Loaded::FaceGroups(result) => {
-                self.face_groups = Some(Some(result.unwrap_or_else(|error| {
+                self.face_groups = Some(result.unwrap_or_else(|error| {
                     tracing::error!("can't load the groups of faces: {error}");
                     Default::default()
-                })));
+                }));
             }
             Loaded::Detail { id, result } => {
                 if let Some((asked, loaded)) = &mut self.detail

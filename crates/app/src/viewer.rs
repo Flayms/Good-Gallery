@@ -676,7 +676,13 @@ impl Viewer {
     }
 
     /// The popup of the face clicked or drawn: what it offers depends on whether it has a name.
-    fn face_popup_ui(&mut self, ui: &egui::Ui, photo: Rect) -> Option<crate::state::FaceAction> {
+    fn face_popup_ui(
+        &mut self,
+        ui: &egui::Ui,
+        photo: Rect,
+        people: &[Vec<String>],
+    ) -> Option<crate::state::FaceAction> {
+        use crate::people_page::{decision, naming, tips};
         use crate::state::FaceAction;
         let mut popup = self.face_popup.take()?;
         let rect = match &popup.target {
@@ -687,23 +693,17 @@ impl Viewer {
         let media = popup.media;
         let mut action = None;
         let mut close = false;
-        let clean = |name: &str| {
-            let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
-            (!name.is_empty()).then_some(name)
-        };
         egui::Area::new(ui.make_persistent_id("face popup"))
             .order(egui::Order::Foreground)
             .fixed_pos(anchor.left_bottom() + vec2(0.0, FACE_LABEL_HEIGHT + 8.0))
             .show(ui.ctx(), |ui| {
                 crate::glass::panel(ui, egui::Margin::same(10), |ui| {
                     ui.spacing_mut().item_spacing.y = 6.0;
-                    let field = ui.add(
-                        egui::TextEdit::singleline(&mut popup.name)
-                            .hint_text("Who is this?")
-                            .desired_width(200.0),
-                    );
+                    let id = ui.make_persistent_id("face popup name");
+                    let field = crate::names::field(ui, id, &mut popup.name, "Who is this?", 200.0);
                     field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, "Who is this?"));
-                    let enter = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                    // A known person picked, or Enter on the field (REQ-032-34).
+                    let picked = crate::names::suggestions(ui, id, &field, &popup.name, people);
                     let suggestion = match &popup.target {
                         FaceTarget::Unknown(face) => face.suggestion.clone(),
                         _ => None,
@@ -725,12 +725,16 @@ impl Viewer {
                         });
                     }
                     ui.horizontal(|ui| {
-                        let typed = clean(&popup.name);
+                        let typed = crate::names::clean(&popup.name);
                         match &popup.target {
                             FaceTarget::Named { name, rect } => {
-                                if (ui.button("Rename").clicked() || enter)
-                                    && let Some(to) = typed.filter(|to| to != name)
-                                {
+                                let renamed = typed.as_ref().is_some_and(|to| to != name);
+                                let to = if naming(ui, "Rename", renamed) {
+                                    typed.clone()
+                                } else {
+                                    picked.clone()
+                                };
+                                if let Some(to) = to.filter(|to| to != name) {
                                     action = Some(FaceAction::Rename {
                                         media,
                                         from: name.clone(),
@@ -738,7 +742,7 @@ impl Viewer {
                                         rect: *rect,
                                     });
                                 }
-                                if ui.button("Remove").clicked() {
+                                if decision(ui, "Remove name", tips::REMOVE_NAME) {
                                     action = Some(FaceAction::Remove {
                                         media,
                                         name: name.clone(),
@@ -747,25 +751,26 @@ impl Viewer {
                                 }
                             }
                             FaceTarget::Unknown(face) => {
-                                if (ui.button("Save").clicked() || enter)
-                                    && let Some(name) = typed
-                                {
+                                let save = naming(ui, "Save", typed.is_some());
+                                if let Some(name) = if save { typed.clone() } else { picked.clone() } {
                                     action = Some(FaceAction::Name {
                                         name,
                                         places: vec![(media, face.rect)],
                                     });
                                 }
-                                if ui.button("Ignore").clicked() {
+                                if decision(ui, "Ignore", tips::IGNORE) {
                                     action = Some(FaceAction::Ignore { faces: vec![face.id] });
                                 }
-                                if ui.button("Not a face").clicked() {
+                                if decision(ui, "Not a face", tips::NOT_A_FACE) {
                                     action = Some(FaceAction::NotAFace { faces: vec![face.id] });
+                                }
+                                if decision(ui, "Remove box", tips::REMOVE_BOX) {
+                                    action = Some(FaceAction::Delete { face: face.id });
                                 }
                             }
                             FaceTarget::Drawn(rect) => {
-                                if (ui.button("Save").clicked() || enter)
-                                    && let Some(name) = typed
-                                {
+                                let save = naming(ui, "Save", typed.is_some());
+                                if let Some(name) = if save { typed.clone() } else { picked.clone() } {
                                     action = Some(FaceAction::Name {
                                         name,
                                         places: vec![(media, *rect)],
@@ -985,7 +990,8 @@ impl Viewer {
                                         target: FaceTarget::Drawn(rect),
                                     });
                                 }
-                                if let Some(chosen) = self.face_popup_ui(ui, drawn) {
+                                let people = gallery.tag_paths();
+                                if let Some(chosen) = self.face_popup_ui(ui, drawn, &people.people) {
                                     action = Some(Action::Face(chosen));
                                 }
                             }
