@@ -10,11 +10,6 @@ on:
   workflow_run:
     workflows: [Release]
     types: [completed]
-  # A change to the workflow or the demo library renders them too, attached to the run, without pushing.
-  pull_request:
-    paths:
-      - xtask/src/screenshots.rs
-      - .github/workflows/screenshots.yml
 
 permissions:
   contents: write
@@ -60,7 +55,6 @@ jobs:
           name: screenshots
           path: docs/screenshots/*.png
       - name: Push changed screenshots to screenshots-refresh
-        if: github.event_name != 'pull_request'
         shell: bash
         run: |
           if git diff --quiet -- docs/screenshots; then

@@ -334,9 +334,8 @@ fn req_031_08_the_installer_is_tested_before_a_release() {
     }
 }
 
-/// REQ-014-16: the README screenshots are rendered on Windows after every successful release or by hand and pushed to a
-/// branch of their own for a person to open a pull request from; a pull request that changes the workflow only renders
-/// them.
+/// REQ-014-16: the README screenshots are rendered on Windows after every successful release or by hand, never for pull
+/// requests, and pushed to a branch of their own for a person to open a pull request from.
 #[test]
 fn req_014_16_renders_the_readme_screenshots_on_windows_and_offers_them() {
     let screenshots = workflow("screenshots.yml");
@@ -345,12 +344,14 @@ fn req_014_16_renders_the_readme_screenshots_on_windows_and_offers_them() {
         "workflow_run:",
         "workflows: [Release]",
         "types: [completed]",
-        "pull_request:",
     ] {
         assert!(screenshots.contains(trigger), "screenshots.yml lacks {trigger}");
     }
-    // Not on a timer: a week without a release has nothing new to show.
-    assert!(!screenshots.contains("schedule:"), "screenshots.yml runs on a schedule");
+    // Not on a timer: a week without a release has nothing new to show. Not for pull requests: 15 minutes on Windows
+    // would slow them down.
+    for trigger in ["schedule:", "pull_request:", "push:"] {
+        assert!(!screenshots.contains(trigger), "screenshots.yml runs on {trigger}");
+    }
     assert!(
         screenshots
             .contains("if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'"),
@@ -364,12 +365,6 @@ fn req_014_16_renders_the_readme_screenshots_on_windows_and_offers_them() {
         workflow("release.yml").contains("name: Release"),
         "the release workflow is named otherwise"
     );
-    for path in ["xtask/src/screenshots.rs", ".github/workflows/screenshots.yml"] {
-        assert!(
-            screenshots.contains(&format!("- {path}")),
-            "a change to {path} doesn't render them"
-        );
-    }
     assert!(
         screenshots.contains("runs-on: windows-latest"),
         "not rendered on Windows"
@@ -388,10 +383,6 @@ fn req_014_16_renders_the_readme_screenshots_on_windows_and_offers_them() {
     );
     let step = &screenshots[..screenshots.find("git push").unwrap()];
     let step = &step[step.rfind("- name:").expect("the push is a named step")..];
-    assert!(
-        step.contains("if: github.event_name != 'pull_request'"),
-        "a pull request's run pushes"
-    );
     assert!(
         step.contains("git diff --quiet -- docs/screenshots"),
         "unchanged screenshots are pushed"
