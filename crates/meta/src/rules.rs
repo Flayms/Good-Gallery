@@ -303,7 +303,7 @@ pub fn extract_metadata(tags: &Tags, sidecar: Option<&Tags>) -> MediaMetadata {
         tags.get("EditRecipe").and_then(Value::as_str),
         tags.get("EditSource").and_then(Value::as_str),
     )
-    .map(Box::new);
+    .map(|edit| Box::new(edit.with_history(tags.get("EditHistory").and_then(Value::as_str))));
     // A saved edit moved the file's regions onto its pixels, but a sidecar's still describe the unedited photo, whose
     // orientation the file no longer tells (REQ-029-08).
     let sidecar_faces = |sidecar: &Tags| {
@@ -586,12 +586,15 @@ mod tests {
         );
     }
 
+    /// REQ-021-11, REQ-021-24: with its versions.
     #[test]
     fn req_021_11_reads_the_saved_edit_from_the_file_but_not_from_its_sidecar() {
         let recipe = domain::edit::Recipe::default().to_json();
-        let file = tags(json!({ "EditRecipe": recipe, "EditSource": ".good-gallery/originals/a.jpg" }));
+        let file =
+            tags(json!({ "EditRecipe": recipe, "EditSource": ".good-gallery/originals/a.jpg", "EditHistory": "[]" }));
         let edit = extract_metadata(&file, None).edit.unwrap();
         assert_eq!(edit.source, ".good-gallery/originals/a.jpg");
+        assert_eq!(edit.history, "[]");
         assert_eq!(extract_metadata(&tags(json!({})), Some(&file)).edit, None);
         let outside = tags(json!({ "EditRecipe": recipe, "EditSource": "../a.jpg" }));
         assert_eq!(extract_metadata(&outside, None).edit, None);

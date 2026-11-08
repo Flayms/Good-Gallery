@@ -68,6 +68,7 @@ icons! {
     Redo2 => "redo-2",
     RefreshCw => "refresh-cw",
     RotateCcw => "rotate-ccw",
+    RotateCcwClock => "rotate-ccw-clock",
     RotateCw => "rotate-cw",
     Rows3 => "rows-3",
     ScanFace => "scan-face",

@@ -14,6 +14,7 @@ use domain::edit::{
 };
 use domain::look::{Look, LookChoice};
 use domain::paint::{MAX_PAINTINGS, MAX_POINTS, Painting, Stroke};
+use domain::versions::Version;
 use eframe::egui::{self, Color32, Pos2, Rect, Vec2, pos2, vec2};
 use eframe::egui_wgpu::{self, CallbackResources, CallbackTrait, ScreenDescriptor, wgpu};
 use std::path::PathBuf;
@@ -83,6 +84,8 @@ pub struct SaveEdit {
     pub subject: Option<Arc<Mask>>,
     /// Turns an original without an orientation of its own (REQ-004-12).
     pub sidecar_orientation: Option<u8>,
+    /// The photo's versions so far (REQ-021-24).
+    pub history: Vec<domain::versions::Version>,
 }
 
 /// Where the user wanted to go when editing had unsaved changes (REQ-021-08).
@@ -152,7 +155,7 @@ pub struct EditSession {
     /// Whether [`Self::start`] had the item's saved edit.
     started: bool,
     /// Finding out whether an earlier edit's source is still there (REQ-021-11).
-    resolving: Option<Receiver<(String, Recipe)>>,
+    resolving: Option<Receiver<(String, Recipe, Vec<Version>)>>,
     /// The unedited original, once known; the panel shows from then on (REQ-021-19).
     source: Option<String>,
     history: History,
@@ -160,6 +163,11 @@ pub struct EditSession {
     draft: Recipe,
     /// The recipe the file was saved with: no unsaved changes while the draft equals it.
     saved: Recipe,
+    /// The photo's versions, oldest first, ending with `saved`; none without an earlier edit or its original
+    /// (REQ-021-24).
+    versions: Vec<Version>,
+    /// The version the pointer is over in _Versions_, shown instead of the draft (REQ-021-25).
+    previewed: Option<Recipe>,
     base: Base,
     /// Reading the small copy back from the viewer's texture.
     reading: Option<Receiver<Result<image::RgbaImage, String>>>,
@@ -221,6 +229,8 @@ impl EditSession {
             history: History::new(Recipe::default()),
             draft: Recipe::default(),
             saved: Recipe::default(),
+            versions: Vec::new(),
+            previewed: None,
             base: Base::Waiting,
             reading: None,
             open: [true, false, true, false],
@@ -380,10 +390,11 @@ impl EditSession {
             };
         }
         if let Some(rx) = &self.resolving
-            && let Ok((source, recipe)) = rx.try_recv()
+            && let Ok((source, recipe, versions)) = rx.try_recv()
         {
             self.resolving = None;
             self.set_source(source, recipe);
+            self.versions = versions;
         }
         if let Base::Loading(rx) = &self.base
             && let Ok(result) = rx.try_recv()
@@ -606,6 +617,7 @@ impl EditSession {
                 _ => None,
             },
             sidecar_orientation: self.target.sidecar_orientation,
+            history: self.versions.clone(),
         })
     }
 
@@ -665,9 +677,77 @@ impl EditSession {
     }
 
     /// The recipe drawn: while comparing the one this editing session started with, which is the saved edit or none
-    /// (REQ-021-07, REQ-029-05, #247), else the draft.
+    /// (REQ-021-07, REQ-029-05, #247), else a version the pointer is over in _Versions_ (REQ-021-25), else the draft.
     fn shown_recipe(&self, compare: bool) -> &Recipe {
-        if compare { &self.saved } else { &self.draft }
+        if compare {
+            &self.saved
+        } else {
+            self.previewed.as_ref().unwrap_or(&self.draft)
+        }
+    }
+
+    /// The photo's versions, oldest first, ending with the one the file holds (REQ-021-24).
+    pub fn versions(&self) -> &[Version] {
+        &self.versions
+    }
+
+    /// The version the pointer is over in _Versions_ (REQ-021-25).
+    pub fn previewed(&self) -> Option<&Recipe> {
+        self.previewed.as_ref()
+    }
+
+    /// _Versions_ (REQ-021-24, REQ-021-25): the saved edits, newest first, then the original. The pointer over one
+    /// shows it; a click loads it as a change.
+    fn versions_menu(&mut self, ui: &mut egui::Ui) {
+        let button = icon_button(
+            ui,
+            Icon::RotateCcwClock,
+            "Versions",
+            if self.versions.is_empty() {
+                "Versions: each save of this photo shows here"
+            } else {
+                "Versions: go back to an earlier save or the original"
+            },
+            !self.versions.is_empty(),
+        );
+        self.previewed = None;
+        let mut chosen = None;
+        egui::Popup::menu(&button)
+            .align(egui::RectAlign::BOTTOM_END)
+            .show(|ui| {
+                crate::glass::behind_menu(ui, |ui| {
+                    let last = self.versions.len().saturating_sub(1);
+                    let entries = self
+                        .versions
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .map(|(i, version)| {
+                            let when = version.saved_at.map_or_else(
+                                || "Saved earlier".to_owned(),
+                                |t| crate::format::medium_date_time(t.saturating_mul(1000)),
+                            );
+                            let label = if i == last { format!("{when} · saved") } else { when };
+                            (label, version.recipe.clone())
+                        })
+                        .chain(std::iter::once(("Original".to_owned(), Recipe::default())));
+                    for (label, recipe) in entries {
+                        let response = ui.selectable_label(self.draft == recipe, label);
+                        if response.hovered() {
+                            self.previewed = Some(recipe.clone());
+                        }
+                        if response.clicked() {
+                            chosen = Some(recipe);
+                        }
+                    }
+                });
+            });
+        if let Some(recipe) = chosen {
+            self.previewed = None;
+            if recipe != self.draft {
+                self.commit(recipe);
+            }
+        }
     }
 
     /// Whether the recipe shown has parts by the subject that isn't found yet: the preview would show the edit without
@@ -1267,6 +1347,7 @@ impl EditSession {
                 true,
             );
             compare = held.is_pointer_button_down_on();
+            self.versions_menu(ui);
             if icon_button(ui, Icon::Redo2, "Redo", "Redo (Ctrl+Shift+Z)", self.history.can_redo()).clicked() {
                 self.redo();
             }
@@ -2104,13 +2185,15 @@ fn spawn(name: &str, job: impl FnOnce() + Send + 'static) {
 
 /// The unedited original of `target` and the recipe to start from: the source of `edit` and its recipe while the
 /// source exists (REQ-021-11), else the file itself, unedited.
-fn resolve(target: &Target, edit: &SavedEdit) -> (String, Recipe) {
+/// The original to edit from, the recipe to start with and the photo's versions (REQ-021-11, REQ-021-24): without
+/// its original, the file itself with nothing applied and no versions, since none of them can be shown.
+fn resolve(target: &Target, edit: &SavedEdit) -> (String, Recipe, Vec<Version>) {
     let exists =
         db::media::absolute_path(&target.library.to_string_lossy(), &edit.source).is_some_and(|path| path.is_file());
     if exists {
-        (edit.source.clone(), edit.recipe())
+        (edit.source.clone(), edit.recipe(), edit.versions())
     } else {
-        (target.rel_path.clone(), Recipe::default())
+        (target.rel_path.clone(), Recipe::default(), Vec::new())
     }
 }
 

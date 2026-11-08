@@ -282,8 +282,8 @@ fn write_file(
     tx.prepare_cached("DELETE FROM media_edits WHERE media_id = ?1")?
         .execute([id])?;
     if let Some(edit) = &m.edit {
-        tx.prepare_cached("INSERT INTO media_edits (media_id, recipe, source) VALUES (?1, ?2, ?3)")?
-            .execute(params![id, edit.recipe, edit.source])?;
+        tx.prepare_cached("INSERT INTO media_edits (media_id, recipe, source, history) VALUES (?1, ?2, ?3, ?4)")?
+            .execute(params![id, edit.recipe, edit.source, edit.history])?;
     }
     tx.prepare_cached("DELETE FROM media_faces WHERE media_id = ?1")?
         .execute([id])?;
@@ -577,12 +577,15 @@ mod tests {
         assert_eq!(rows(&writer)[0], ("ready".into(), Some(6)), "unchanged");
     }
 
+    /// REQ-021-11, REQ-021-24: the saved edit with its versions.
     #[test]
     fn req_021_11_stores_the_saved_edit_and_drops_it_when_the_file_has_none() {
         let (mut writer, root) = writer();
+        let recipe = domain::edit::Recipe::default();
         let edit = domain::edit::SavedEdit {
-            recipe: domain::edit::Recipe::default().to_json(),
+            recipe: recipe.to_json(),
             source: ".good-gallery/originals/a.jpg".into(),
+            history: domain::versions::to_json(&domain::versions::after_save(&[], &recipe, 7)),
         };
         let mut edited = file("a.jpg", &[]);
         edited.metadata.edit = Some(Box::new(edit.clone()));

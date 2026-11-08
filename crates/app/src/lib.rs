@@ -183,6 +183,7 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
         }
     }
     confirm_revert(&ctx, state);
+    confirm_clear_history(&ctx, state);
     confirm_many(&ctx, state);
     #[cfg(not(target_arch = "wasm32"))]
     rename_dialog(&ctx, state);
@@ -258,6 +259,7 @@ fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
         Some(viewer::Action::Copy(..)) => {}
         Some(viewer::Action::SaveEdit(request)) => state.save_edit(*request),
         Some(viewer::Action::Revert(target)) => state.confirm_revert = Some(target),
+        Some(viewer::Action::ClearHistory(clear)) => state.confirm_clear_history = Some(clear),
         Some(viewer::Action::Rate(rate)) => state.rate(rate),
         #[cfg(not(target_arch = "wasm32"))]
         Some(viewer::Action::Rename(id)) => state.open_rename(vec![id]),
@@ -315,6 +317,39 @@ fn confirm_revert(ctx: &egui::Context, state: &mut AppState) {
         state.confirm_revert = None;
         if chosen == 0 {
             state.revert_edit(target);
+        }
+    }
+}
+
+/// "Clear the version history?" with Clear history / Cancel (REQ-021-26); in the viewer's dark look while it is open.
+fn confirm_clear_history(ctx: &egui::Context, state: &mut AppState) {
+    let Some(clear) = state.confirm_clear_history.clone() else {
+        return;
+    };
+    let earlier = clear.versions.len().saturating_sub(1);
+    let text = format!(
+        "The {earlier} earlier saved {} of {} are removed. Its current edit and its original stay.",
+        if earlier == 1 { "version" } else { "versions" },
+        clear.target.file_name
+    );
+    let ask = || {
+        widgets::dialog(
+            ctx,
+            "confirm-clear-history",
+            "Clear the version history?",
+            &text,
+            &["Clear history", "Cancel"],
+        )
+    };
+    let chosen = if state.viewer.is_some() {
+        theme::with_palette(&theme::DARK, ask)
+    } else {
+        ask()
+    };
+    if let Some(chosen) = chosen {
+        state.confirm_clear_history = None;
+        if chosen == 0 {
+            state.clear_history(clear);
         }
     }
 }
@@ -464,6 +499,10 @@ fn info_sheet(ui: &mut egui::Ui, state: &mut AppState) {
         Some(info::InfoAction::Revert) => {
             let detail = state.gallery.as_ref().and_then(|gallery| gallery.cached_detail(id));
             state.confirm_revert = detail.map(state::RevertTarget::of);
+        }
+        Some(info::InfoAction::ClearHistory) => {
+            let detail = state.gallery.as_ref().and_then(|gallery| gallery.cached_detail(id));
+            state.confirm_clear_history = detail.and_then(state::ClearHistory::of);
         }
         Some(info::InfoAction::Rate(stars)) => {
             let detail = state.gallery.as_ref().and_then(|gallery| gallery.cached_detail(id));

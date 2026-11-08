@@ -172,6 +172,24 @@ impl RevertTarget {
     }
 }
 
+/// A photo whose earlier versions the user wants gone (REQ-021-26), with its versions as the index knows them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ClearHistory {
+    pub target: RevertTarget,
+    pub versions: Vec<domain::versions::Version>,
+}
+
+impl ClearHistory {
+    /// For a photo with more than one version.
+    pub fn of(detail: &db::media::MediaDetail) -> Option<Self> {
+        let versions = detail.edit.as_ref()?.versions();
+        (versions.len() > 1).then(|| Self {
+            target: RevertTarget::of(detail),
+            versions,
+        })
+    }
+}
+
 /// A rating the user set on a media item (spec 024).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rate {
@@ -404,6 +422,8 @@ enum Event {
     EditSaved(i64, Result<Written, String>),
     /// An original was put back (REQ-021-12), or why not.
     Reverted(Result<Written, String>),
+    /// A photo's earlier versions were removed (REQ-021-26), or why not.
+    HistoryCleared(Result<Written, String>),
     /// A rating was written into the file and the index (REQ-024-03), or why not (REQ-024-04).
     Rated(Result<(i64, String), String>),
     /// Files were renamed (spec 035), or why not.
@@ -520,6 +540,8 @@ pub struct AppState {
     edit_tools: Option<media::edit::Tools>,
     /// _Revert to original_ waits for confirmation (REQ-021-12).
     pub confirm_revert: Option<RevertTarget>,
+    /// _Clear version history_ waits for confirmation (REQ-021-26).
+    pub confirm_clear_history: Option<ClearHistory>,
     /// Rating many items, waiting for the user to confirm (REQ-025-07).
     pub confirm_many: Option<ChangeMany>,
     /// The day the counts and the gallery were last worked out for: a new one moves relative dates (REQ-039-04).
@@ -850,6 +872,7 @@ impl AppState {
             mtime: self.settings.mtime_on_save,
             subject: request.subject,
             sidecar_orientation: request.sidecar_orientation,
+            history: request.history,
         };
         let (db, cache) = (self.db.clone(), self.thumbnail_cache());
         let (root_id, copy) = (request.root_id, request.copy);
@@ -907,6 +930,41 @@ impl AppState {
 
     #[cfg(target_arch = "wasm32")]
     pub fn revert_edit(&mut self, _target: RevertTarget) {}
+
+    /// Removes a photo's earlier versions from its file in the background, then reads it again (REQ-021-26).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn clear_history(&mut self, clear: ClearHistory) {
+        let (Some(tools), Some(library)) = (
+            self.edit_tools.clone(),
+            self.libraries.iter().find(|library| library.id == clear.target.root_id),
+        ) else {
+            self.toasts
+                .error("Couldn't clear the version history: exiftool, which writes it, wasn't found.");
+            return;
+        };
+        let folder = PathBuf::from(&library.path);
+        let (db, cache) = (self.db.clone(), self.thumbnail_cache());
+        self.spawn_write(move || {
+            let target = clear.target;
+            let result =
+                media::edit::clear_history(&tools, &folder, &target.rel_path, &clear.versions).map_err(|error| {
+                    tracing::error!("can't clear the versions of {}: {error}", target.rel_path);
+                    error.to_string()
+                });
+            Event::HistoryCleared(result.map(|()| {
+                forget_index_entry(db.as_deref(), cache.as_ref(), target.root_id, &target.rel_path);
+                Written {
+                    media: target.media,
+                    root_id: target.root_id,
+                    rel_path: target.rel_path,
+                    copy: false,
+                }
+            }))
+        });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn clear_history(&mut self, _clear: ClearHistory) {}
 
     /// Writes a rating into the file in the background, then into the index (REQ-024-03); a file that can't be
     /// written keeps its rating, and the user is told why (REQ-024-04).
@@ -1500,6 +1558,7 @@ impl AppState {
             #[cfg(not(target_arch = "wasm32"))]
             edit_tools: None,
             confirm_revert: None,
+            confirm_clear_history: None,
             confirm_many: None,
             today: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -2152,6 +2211,15 @@ impl AppState {
                     self.written(&written);
                 }
                 Err(error) => self.toasts.error(format!("Couldn't revert: {error}")),
+            },
+            Event::HistoryCleared(result) => match result {
+                Ok(written) => {
+                    self.toasts.success("Version history cleared");
+                    self.written(&written);
+                }
+                Err(error) => self
+                    .toasts
+                    .error(format!("Couldn't clear the version history: {error}")),
             },
             #[cfg(not(target_arch = "wasm32"))]
             Event::Renamed(result) => self.renamed(result),
