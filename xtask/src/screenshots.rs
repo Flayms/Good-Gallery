@@ -268,6 +268,8 @@ fn create_library(dir: &Path, exiftool: &Path, ffmpeg: &Path, scratch: &Path) ->
         }
         args.push(format!("-XMP-xmp:Rating={}", demo.rating));
         args.push(format!("-EXIF:DateTimeOriginal={}", demo.date));
+        // The info panel shows the file's modification time: the same in every run (REQ-014-16).
+        args.push(format!("-FileModifyDate={}", demo.date));
         args.push("-overwrite_original".to_owned());
         args.push(file.to_str().context("library path isn't UTF-8")?.to_owned());
         args.push("-execute".to_owned());
@@ -350,6 +352,38 @@ impl Drop for ShortPath {
     }
 }
 
+/// A channel that moved more than this counts its pixel as changed.
+const NOISE_LEVEL: u8 = 16;
+/// Renders whose changed pixels stay at or under this share look the same: anti-aliasing and thumbnail dithering
+/// move a few hundred pixels between runs on the same commit, a visible change thousands.
+const NOISE_SHARE: f64 = 0.0005;
+
+/// Whether `new` looks like `old`: the same size, and at most [`NOISE_SHARE`] of its pixels changed (REQ-014-16).
+fn looks_the_same(old: &image::RgbaImage, new: &image::RgbaImage) -> bool {
+    if old.dimensions() != new.dimensions() {
+        return false;
+    }
+    let changed = old
+        .pixels()
+        .zip(new.pixels())
+        .filter(|(a, b)| a.0.iter().zip(b.0).any(|(a, b)| a.abs_diff(b) > NOISE_LEVEL))
+        .count();
+    changed as f64 <= NOISE_SHARE * f64::from(old.width() * old.height())
+}
+
+/// Puts the README's screenshot back where `out` only differs from it by noise, so nothing looks changed
+/// (REQ-014-16).
+fn keep_unless_changed(out: &Path, before: Option<&[u8]>) -> anyhow::Result<()> {
+    let Some(before) = before else { return Ok(()) };
+    let old = image::load_from_memory(before)?.to_rgba8();
+    let new = image::open(out)?.to_rgba8();
+    if looks_the_same(&old, &new) {
+        std::fs::write(out, before)?;
+        println!("{}: unchanged", out.display());
+    }
+    Ok(())
+}
+
 /// Runs the app on `data` until it has saved `out`.
 fn screenshot(app: &Path, data: &Path, out: &Path, extra: &[&str]) -> anyhow::Result<()> {
     crate::process::run_command(
@@ -405,6 +439,13 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         .join(if cfg!(windows) { "app.exe" } else { "app" });
     let out = root.join("docs/screenshots");
     std::fs::create_dir_all(&out)?;
+    // A README screenshot, kept as it was where the render only differs by noise.
+    let shoot = |name: &str, extra: &[&str]| -> anyhow::Result<()> {
+        let file = out.join(name);
+        let before = std::fs::read(&file).ok();
+        screenshot(&app, &data, &file, extra)?;
+        keep_unless_changed(&file, before.as_deref())
+    };
     let conn = db::open(&index)?;
     // The README shows the dark appearance, whatever the system's (a CI runner's is light).
     db::settings::set_value(&conn, "appearance", &serde_json::Value::from("dark"))?;
@@ -412,19 +453,42 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
     screenshot(&app, &data, &scratch.join("warm-up.png"), &[])?;
     for view in ["masonry", "justified", "grid", "list"] {
         db::settings::set_value(&conn, "gallery.view", &serde_json::Value::from(view))?;
-        screenshot(&app, &data, &out.join(format!("{view}.png")), &[])?;
+        shoot(&format!("{view}.png"), &[])?;
     }
     db::settings::set_value(&conn, "gallery.view", &serde_json::Value::from("masonry"))?;
     db::settings::set_value(&conn, "viewer.filmstrip", &serde_json::Value::from("shown"))?;
-    screenshot(&app, &data, &out.join("viewer.png"), &["--view", "3", "--info"])?;
+    shoot("viewer.png", &["--view", "3", "--info"])?;
     db::settings::set_value(&conn, "viewer.filmstrip", &serde_json::Value::from("hidden"))?;
-    screenshot(&app, &data, &out.join("edit.png"), &["--view", "5", "--edit"])?;
+    shoot("edit.png", &["--view", "5", "--edit"])?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// REQ-014-16: a render that differs from the README's screenshot only by noise (anti-aliasing, a few pixels) keeps
+    /// the old one; a visible change, or another size, doesn't.
+    #[test]
+    fn req_014_16_noise_is_no_change() {
+        let base = image::RgbaImage::from_pixel(1000, 800, image::Rgba([30, 30, 30, 255]));
+        let mut noisy = base.clone();
+        // Faint everywhere, and strong in 300 pixels (under 0.05%).
+        for (x, y, pixel) in noisy.enumerate_pixels_mut() {
+            pixel.0[0] += if (x + y) % 7 == 0 { 10 } else { 0 };
+            if y == 400 && x < 300 {
+                pixel.0[1] = 200;
+            }
+        }
+        assert!(looks_the_same(&base, &noisy));
+        let mut changed = base.clone();
+        for x in 0..600 {
+            changed.put_pixel(x, 10, image::Rgba([255, 255, 255, 255]));
+        }
+        assert!(!looks_the_same(&base, &changed), "a line across");
+        let smaller = image::RgbaImage::from_pixel(1000, 799, image::Rgba([30, 30, 30, 255]));
+        assert!(!looks_the_same(&base, &smaller), "another size");
+    }
 
     #[test]
     fn the_demo_library_has_four_trips_of_photos() {
