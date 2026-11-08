@@ -63,6 +63,11 @@ struct Edit {
     mask_count: vec4<f32>,
     masks: array<LocalMask, 8>,
     curves: array<vec4<f32>, 256>,
+    // The LUT (spec 043): its strength, 0 for none (x), and its points per side (y).
+    lut: vec4<f32>,
+    // Its domain's corners: the colors at its first (xyz) and last points.
+    lut_min: vec4<f32>,
+    lut_max: vec4<f32>,
 }
 
 @group(0) @binding(0) var photo: texture_2d<f32>;
@@ -74,6 +79,21 @@ struct Edit {
 @group(0) @binding(4) var paintings: texture_2d_array<f32>;
 // The lens blur's pyramid (`lens.wgsl`), 1 × 1 while there is none.
 @group(0) @binding(5) var lens: texture_2d<f32>;
+// The LUT's table, red along x, green along y, blue through the layers; 1 × 1 × 1 while there is none.
+@group(0) @binding(6) var lut: texture_3d<f32>;
+
+// `domain::edit::Params::through_lut`: the photo's own colors through the LUT, at its strength (REQ-043-02).
+fn through_lut(rgb: vec3<f32>) -> vec3<f32> {
+    if edit.lut.x <= 0.0 {
+        return rgb;
+    }
+    let n = edit.lut.y;
+    let span = max(edit.lut_max.xyz - edit.lut_min.xyz, vec3<f32>(1e-6));
+    let x = clamp((rgb - edit.lut_min.xyz) / span, vec3<f32>(0.0), vec3<f32>(1.0));
+    // The texel centers: the hardware's linear filter interpolates between the table's points.
+    let mapped = textureSampleLevel(lut, photo_sampler, (x * (n - 1.0) + 0.5) / n, 0.0).rgb;
+    return mix(rgb, mapped, edit.lut.x);
+}
 
 @vertex
 fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
@@ -287,7 +307,9 @@ fn halation_light(rgb: vec3<f32>) -> f32 {
     return smoothstep(0.3, 0.9, max(rgb.r, max(rgb.g, rgb.b)));
 }
 
-fn develop(rgb: vec3<f32>, uv: vec2<f32>, subject: f32, glow: vec3<f32>) -> vec3<f32> {
+fn develop(stored: vec3<f32>, uv: vec2<f32>, subject: f32, glow: vec3<f32>) -> vec3<f32> {
+    // The LUT first; the rest adjusts what it made.
+    let rgb = through_lut(stored);
     let photo = Part(edit.gains, edit.tone, edit.color, edit.turn);
     var lin = core(vec3<f32>(to_linear(rgb.r), to_linear(rgb.g), to_linear(rgb.b)), photo, edit.gains.w > 0.5);
     if edit.film.z > 0.5 {

@@ -483,7 +483,9 @@ fn open_state(data_dir: &Path, ctx: &egui::Context, render_state: Option<egui_wg
         .with_originals(originals)
         .with_videos(videos)
         .with_rename_journal(data_dir.join("rename-journal.json"))
-        .with_date_journal(data_dir.join("date-journal.json"));
+        .with_date_journal(data_dir.join("date-journal.json"))
+        // The LUTs the user imported (spec 043).
+        .with_luts(app::luts::Luts::open(data_dir.join("luts")));
     // A rename the app was ended in is finished first (REQ-035-09).
     state.recover_rename();
     // Saving edits copies metadata with exiftool, which needs our XMP namespace defined (spec 021).

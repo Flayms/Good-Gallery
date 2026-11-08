@@ -1585,3 +1585,48 @@ fn req_021_23_the_save_buttons_say_what_they_do() {
     harness.run_steps(2);
     tooltip(&mut harness, "Save without backup", "deletes the original");
 }
+
+/// REQ-043-01, REQ-043-02, REQ-043-03: _Import LUT…_ takes a `.cube` file the user picks, which the editor then offers;
+/// picking it applies it with a strength, and saving takes its table along.
+#[test]
+fn req_043_01_req_043_02_req_043_03_imports_and_picks_a_lut() {
+    let fixture = Fixture::new();
+    let (conn, _dir) = library(&fixture, None);
+    let luts = fixture.dir.path().join("luts");
+    let state = fixture.state(conn).with_luts(app::luts::Luts::open(luts.clone()));
+    let mut harness = common::harness_with_step(state, 1.0 / 60.0);
+    harness.set_size(egui::vec2(1200.0, 1600.0));
+    settle(&mut harness);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "Crop and rotate").click();
+    harness.run_steps(2);
+
+    let cube = fixture.dir.path().join("Warm.cube");
+    let warm = "LUT_3D_SIZE 2\n0.1 0 0\n1 0 0\n0.1 1 0\n1 1 0\n0.1 0 0.8\n1 0 0.8\n0.1 1 0.8\n1 1 0.8\n";
+    std::fs::write(&cube, warm).unwrap();
+    *fixture.picker.0.lock().unwrap() = Some(cube);
+    harness.get_by_role_and_label(Role::Button, "Import LUT…").click();
+    settle_all(&mut harness);
+    assert!(
+        luts.join(format!("{}.cube", domain::lut::lut_id(warm.as_bytes())))
+            .is_file(),
+        "kept"
+    );
+
+    harness.get_by_role_and_label(Role::Button, "Warm").click();
+    harness.run_steps(2);
+    let lut = session(&harness).unwrap().recipe().lut.clone().expect("a LUT");
+    assert_eq!((lut.name.as_str(), lut.strength), ("Warm", 100.0));
+    assert!(harness.query_by_label("LUT strength").is_some());
+    let request = session(&harness)
+        .unwrap()
+        .save_request(app::edit::SaveMode::Copy)
+        .expect("a request");
+    assert!(request.lut.is_some(), "saving takes the table along");
+
+    // Without the file on this computer, the editor says so.
+    std::fs::remove_dir_all(&luts).unwrap();
+    let fresh = app::luts::Luts::open(luts);
+    assert!(fresh.table(&lut.id).is_none());
+}

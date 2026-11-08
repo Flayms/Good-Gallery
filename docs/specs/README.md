@@ -45,6 +45,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [039-smart-album-rules](039-smart-album-rules/spec.md)   | Smart albums from a list of conditions, matching all or any, with relative dates | Implemented |
 | [040-camera-lens-and-location](040-camera-lens-and-location/spec.md) | Camera, lens and GPS position in the index, the info panel and smart albums | Implemented |
 | [041-date-calendar](041-date-calendar/spec.md)           | Pick the date range on a calendar with a photo on each day             | Implemented |
+| [043-luts](043-luts/spec.md)                             | Import `.cube` LUTs and apply them at a strength in the editor         | Implemented |
 
 ## Conventions
 

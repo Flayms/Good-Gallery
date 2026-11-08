@@ -371,6 +371,9 @@ pub struct Recipe {
     /// A film look under the adjustments (REQ-028-01); one only a newer version knows reads as none.
     #[serde(skip_serializing_if = "Option::is_none", deserialize_with = "look_or_none")]
     pub look: Option<crate::look::LookChoice>,
+    /// A LUT, first of all (REQ-043-02).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lut: Option<crate::lut::LutChoice>,
     /// Quarter turns clockwise, 0 to 3 (REQ-029-01).
     #[serde(skip_serializing_if = "is_zero")]
     pub quarter_turns: u8,
@@ -458,6 +461,7 @@ impl Default for Recipe {
             paintings: Vec::new(),
             masks: Vec::new(),
             look: None,
+            lut: None,
             quarter_turns: 0,
             crop: None,
             straighten: 0.0,
@@ -481,6 +485,7 @@ impl Recipe {
             .all(|adjustment| adjustment.get(self) == adjustment.neutral())
             && self.curves.is_identity()
             && self.look.is_none()
+            && self.lut.is_none()
             && self.geometry().is_identity()
             && self.long_edge.is_none()
             && self.quality.is_none()
@@ -669,6 +674,9 @@ impl Recipe {
             .map(|c| if c.is_finite() { c.clamp(0.0, 1.0) } else { 0.5 });
         if let Some(look) = &mut self.look {
             look.sanitize();
+        }
+        if let Some(lut) = &mut self.lut {
+            lut.sanitize();
         }
         self.quarter_turns %= 4;
         self.crop = self.crop.and_then(sanitized_crop);
@@ -1781,6 +1789,10 @@ impl History {
 /// A recipe turned into the numbers the formulas use. The GPU shader gets the same numbers (`app::edit`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Params {
+    /// The edit's LUT and its strength, 0–1, once [`Self::with_lut`] gave its table (REQ-043-02).
+    pub lut: Option<(Arc<crate::lut::Lut>, f32)>,
+    /// The strength the recipe asks its LUT for, 0–1; nothing without the table.
+    lut_strength: f32,
     /// White balance gains on linear RGB.
     pub gains: [f32; 3],
     /// `2^EV`.
@@ -1909,6 +1921,28 @@ impl Params {
             blur_lens: recipe.blur_lens,
             subject: recipe.subject.as_deref().map(|part| Box::new(Self::new(part))),
             background: recipe.background.as_deref().map(|part| Box::new(Self::new(part))),
+            lut: None,
+            lut_strength: recipe.lut.as_ref().map_or(0.0, |choice| choice.strength / 100.0),
+        }
+    }
+
+    /// These numbers with the table of the recipe's LUT, if this computer has it (REQ-043-03); without it the photo
+    /// renders as if it had none.
+    pub fn with_lut(mut self, table: Option<Arc<crate::lut::Lut>>) -> Self {
+        self.lut = table
+            .filter(|_| self.lut_strength > 0.0)
+            .map(|table| (table, self.lut_strength));
+        self
+    }
+
+    /// `rgb` (encoded) through the LUT at its strength (REQ-043-02).
+    pub fn through_lut(&self, rgb: [f32; 3]) -> [f32; 3] {
+        match &self.lut {
+            Some((table, strength)) => {
+                let mapped = table.apply(rgb);
+                std::array::from_fn(|c| rgb[c] + (mapped[c] - rgb[c]) * strength)
+            }
+            None => rgb,
         }
     }
 
@@ -1942,6 +1976,8 @@ impl Params {
         size: [f32; 2],
         subject: Option<f32>,
     ) -> [f32; 3] {
+        // The LUT first, on the photo's own colors; the rest adjusts what it made (REQ-043-02).
+        let rgb = self.through_lut(rgb);
         let mut lin = self.develop(rgb.map(to_linear));
         if let Some(subject) = subject {
             let part = |params: &Option<Box<Params>>| params.as_ref().map_or(lin, |params| params.develop(lin));
@@ -2069,7 +2105,8 @@ impl Params {
     pub fn histogram(&self, pixels: impl Iterator<Item = [f32; 3]>) -> Histogram {
         let mut histogram = Histogram::default();
         for rgb in pixels {
-            for (c, value) in self.light(rgb.map(to_linear)).into_iter().enumerate() {
+            // What the LUT made, as the curves get it (REQ-043-02).
+            for (c, value) in self.light(self.through_lut(rgb).map(to_linear)).into_iter().enumerate() {
                 let value = to_encoded(value.max(0.0)).min(1.0);
                 let bin = ((value * HISTOGRAM_BINS as f32) as usize).min(HISTOGRAM_BINS - 1);
                 histogram.channels[c][bin] += 1;

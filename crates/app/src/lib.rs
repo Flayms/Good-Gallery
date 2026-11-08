@@ -17,6 +17,7 @@ pub mod info;
 pub mod instance;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod loose;
+pub mod luts;
 pub mod names;
 pub mod open_with;
 pub mod originals;
@@ -233,7 +234,7 @@ fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
         .get_or_insert_with(|| originals::Originals::new(ctx.clone(), None, None));
     // The viewer stays dark in the light appearance (REQ-020-05).
     let action = theme::with_palette(&theme::DARK, || {
-        viewer.show(ctx, gallery, originals, libraries, &mut state.videos)
+        viewer.show(ctx, gallery, originals, libraries, &mut state.videos, &state.luts)
     });
     let closed = |state: &mut AppState| {
         state.viewer = None;
@@ -259,6 +260,7 @@ fn show_viewer(ctx: &egui::Context, state: &mut AppState) {
         #[cfg(target_arch = "wasm32")]
         Some(viewer::Action::Copy(..)) => {}
         Some(viewer::Action::SaveEdit(request)) => state.save_edit(*request),
+        Some(viewer::Action::ImportLut) => state.import_lut(),
         Some(viewer::Action::Revert(target)) => state.confirm_revert = Some(target),
         Some(viewer::Action::ClearHistory(clear)) => state.confirm_clear_history = Some(clear),
         Some(viewer::Action::Rate(rate)) => state.rate(rate),

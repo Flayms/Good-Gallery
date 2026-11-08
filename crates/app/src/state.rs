@@ -37,6 +37,11 @@ pub trait FolderPicker: Send + Sync {
     fn pick_model_file(&self) -> Option<PathBuf> {
         None
     }
+
+    /// A `.cube` LUT (REQ-043-01).
+    fn pick_lut_file(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -52,6 +57,13 @@ impl FolderPicker for NativeFolderPicker {
         rfd::FileDialog::new()
             .set_title("Add a face model")
             .add_filter("ONNX model", &["onnx"])
+            .pick_file()
+    }
+
+    fn pick_lut_file(&self) -> Option<PathBuf> {
+        rfd::FileDialog::new()
+            .set_title("Import a LUT")
+            .add_filter("Cube LUT", &["cube"])
             .pick_file()
     }
 }
@@ -382,6 +394,8 @@ const COPY_MAX_SIDE: u32 = 8192;
 /// some never happen there.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 enum Event {
+    /// A LUT the user picked was imported, or why not (REQ-043-01); `None` when they cancelled.
+    LutImported(Option<Result<crate::luts::LutEntry, String>>),
     #[cfg(not(target_arch = "wasm32"))]
     FaceModelArrived {
         key: String,
@@ -474,6 +488,8 @@ pub struct AppState {
     scans: Arc<dyn ScanRequests>,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     picker: Arc<dyn FolderPicker>,
+    /// The LUTs the user imported, for editing (spec 043).
+    pub luts: Arc<crate::luts::Luts>,
     events: (Sender<Event>, Receiver<Event>),
     pending_jobs: usize,
     /// A photo decoded for the clipboard, put there in the next frame (REQ-009-25).
@@ -842,6 +858,23 @@ impl AppState {
 
     /// Saves edits with exiftool (spec 021).
     #[cfg(not(target_arch = "wasm32"))]
+    /// Keeps imported LUTs in `luts` (spec 043).
+    pub fn with_luts(mut self, luts: crate::luts::Luts) -> Self {
+        self.luts = Arc::new(luts);
+        self
+    }
+
+    /// Lets the user pick a `.cube` file and imports it as a LUT, in the background (REQ-043-01).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn import_lut(&mut self) {
+        let (picker, luts) = (self.picker.clone(), self.luts.clone());
+        self.spawn(move || Event::LutImported(picker.pick_lut_file().map(|file| luts.import(&file))));
+    }
+
+    /// The browser version doesn't edit (REQ-021-01).
+    #[cfg(target_arch = "wasm32")]
+    pub fn import_lut(&mut self) {}
+
     pub fn with_edit_tools(mut self, tools: media::edit::Tools) -> Self {
         self.edit_tools = Some(tools);
         self
@@ -873,6 +906,7 @@ impl AppState {
             subject: request.subject,
             sidecar_orientation: request.sidecar_orientation,
             history: request.history,
+            lut: request.lut,
         };
         let (db, cache) = (self.db.clone(), self.thumbnail_cache());
         let (root_id, copy) = (request.root_id, request.copy);
@@ -1525,6 +1559,7 @@ impl AppState {
             media_count: 0,
             scans,
             picker,
+            luts: Arc::default(),
             events: channel(),
             pending_jobs: 0,
             copied: None,
@@ -2110,6 +2145,9 @@ impl AppState {
         match event {
             #[cfg(not(target_arch = "wasm32"))]
             Event::FaceModelArrived { key, name, result } => self.face_model_arrived(&key, &name, result),
+            Event::LutImported(Some(Ok(entry))) => self.toasts.success(format!("Imported the LUT {}", entry.name)),
+            Event::LutImported(Some(Err(error))) => self.toasts.error(error),
+            Event::LutImported(None) => {}
             #[cfg(not(target_arch = "wasm32"))]
             Event::FaceModelChecked(wrong) => self.face_model_checked(wrong),
             #[cfg(not(target_arch = "wasm32"))]

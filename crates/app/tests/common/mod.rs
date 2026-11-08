@@ -21,6 +21,10 @@ impl FolderPicker for FakePicker {
     fn pick_folder(&self) -> Option<PathBuf> {
         self.0.lock().unwrap().clone()
     }
+
+    fn pick_lut_file(&self) -> Option<PathBuf> {
+        self.0.lock().unwrap().clone()
+    }
 }
 
 #[derive(Default)]

@@ -16,6 +16,7 @@ anyhow.workspace = true
 chrono.workspace = true
 db.workspace = true
 egui_extras.workspace = true
+half = "2.7.1"
 indexer.workspace = true
 eframe.workspace = true
 image.workspace = true
