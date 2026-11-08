@@ -58,6 +58,8 @@ pub struct SavedEdit {
     pub recipe: String,
     /// The unedited original, relative to the library: the backup after _Save_, the source after _Save as copy_.
     pub source: String,
+    /// Its versions as stored (`gg:EditHistory`, [`crate::versions`]); empty for none (#247).
+    pub history: String,
 }
 
 impl SavedEdit {
@@ -67,7 +69,19 @@ impl SavedEdit {
         (Recipe::from_json(recipe).is_some() && crate::media::is_safe_rel_path(source)).then(|| Self {
             recipe: recipe.to_owned(),
             source: source.to_owned(),
+            history: String::new(),
         })
+    }
+
+    /// With the file's `gg:EditHistory`, if it has one.
+    pub fn with_history(mut self, history: Option<&str>) -> Self {
+        self.history = history.unwrap_or_default().to_owned();
+        self
+    }
+
+    /// The versions the file was saved with, ending with its edit (REQ-021-24).
+    pub fn versions(&self) -> Vec<crate::versions::Version> {
+        crate::versions::of_file(&self.recipe(), &self.history)
     }
 
     pub fn recipe(&self) -> Recipe {

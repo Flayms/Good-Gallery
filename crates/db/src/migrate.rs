@@ -55,6 +55,7 @@ const FILES: &[(&str, &str)] = &[
         "0018_content_vectors",
         include_str!("../migrations/0018_content_vectors.sql"),
     ),
+    ("0019_edit_history", include_str!("../migrations/0019_edit_history.sql")),
 ];
 const JOURNAL: &str = include_str!("../migrations/meta/_journal.json");
 

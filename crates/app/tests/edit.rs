@@ -662,6 +662,7 @@ fn req_021_10_req_021_12_saves_over_the_original_and_reverts() {
     let edit = SavedEdit {
         recipe: brighter().to_json(),
         source: ".good-gallery/originals/a.jpg".into(),
+        history: String::new(),
     };
     db.lock()
         .unwrap()
@@ -688,13 +689,14 @@ fn req_021_10_req_021_12_saves_over_the_original_and_reverts() {
     harness.get_by_label("Reverted to the original");
 }
 
-/// REQ-021-11: an item saved over its original edits again from the backup, with the saved recipe.
+/// REQ-021-11, REQ-021-24: an item saved over its original edits again from the backup, with the saved recipe.
 #[test]
 fn req_021_11_edits_again_from_the_original_with_the_saved_recipe() {
     let fixture = Fixture::new();
     let edit = SavedEdit {
         recipe: brighter().to_json(),
         source: ".good-gallery/originals/a.jpg".into(),
+        history: String::new(),
     };
     let (mut harness, dir) = app(&fixture, Some(edit), None);
     let backup = dir.join(".good-gallery").join("originals");
@@ -708,6 +710,162 @@ fn req_021_11_edits_again_from_the_original_with_the_saved_recipe() {
     harness.key_press(Key::Escape);
     harness.run_steps(2);
     edit_and_check(&mut harness, Some("a.jpg"), 0.0);
+    // REQ-021-24: and no versions, which couldn't be shown without it.
+    assert!(session(&harness).unwrap().versions().is_empty());
+}
+
+/// REQ-021-24, REQ-021-25 (#247): _Versions_ lists the photo's saved edits, newest first, and its original; the pointer
+/// over one previews it, a click loads it as a change that can be undone, and saving it adds a version.
+#[test]
+fn req_021_24_req_021_25_lists_previews_and_restores_versions() {
+    use domain::versions::{Version, after_save, to_json};
+    let fixture = Fixture::new();
+    let older = Recipe {
+        exposure: 0.5,
+        ..Recipe::default()
+    };
+    let versions = after_save(&after_save(&[], &older, 1_700_000_000), &brighter(), 1_710_000_000);
+    let saved = SavedEdit {
+        recipe: brighter().to_json(),
+        source: ".good-gallery/originals/a.jpg".into(),
+        history: to_json(&versions),
+    };
+    let (mut harness, dir) = app(&fixture, Some(saved), None);
+    let backup = dir.join(".good-gallery").join("originals");
+    std::fs::create_dir_all(&backup).unwrap();
+    std::fs::copy(dir.join("a.jpg"), backup.join("a.jpg")).unwrap();
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    assert_eq!(session(&harness).unwrap().versions(), versions.as_slice());
+
+    harness.get_by_role_and_label(Role::Button, "Versions").click();
+    harness.run_steps(2);
+    let label = |version: &Version| app::format::medium_date_time(version.saved_at.unwrap() * 1000);
+    let newest = harness.get_by_label_contains(&label(&versions[1])).rect();
+    let oldest = harness.get_by_label(&label(&versions[0])).rect();
+    let original = harness.get_by_label("Original").rect();
+    assert!(
+        newest.top() < oldest.top() && oldest.top() < original.top(),
+        "newest first, the original last"
+    );
+    harness.snapshot(common::snapshot_name("edit_versions"));
+
+    harness.hover_at(oldest.center());
+    harness.run_steps(2);
+    let session_now = session(&harness).unwrap();
+    assert_eq!(
+        session_now.previewed(),
+        Some(&older),
+        "previewed while the pointer is over it"
+    );
+    assert_eq!(session_now.recipe(), &brighter(), "not chosen yet");
+
+    harness.get_by_label(&label(&versions[0])).click();
+    harness.run_steps(2);
+    assert_eq!(session(&harness).unwrap().recipe(), &older);
+    assert!(session(&harness).unwrap().has_changes());
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run_steps(2);
+    assert_eq!(
+        session(&harness).unwrap().recipe(),
+        &brighter(),
+        "undone like any change"
+    );
+    assert_eq!(
+        session(&harness).unwrap().previewed(),
+        None,
+        "nothing previewed once the menu closed"
+    );
+}
+
+/// REQ-021-26 (#247): _Clear version history_ in the info panel asks first, then keeps only the version the file holds;
+/// the photo and its original stay.
+#[test]
+fn req_021_26_clears_the_version_history_after_asking() {
+    use domain::versions::{after_save, to_json};
+    let fixture = Fixture::new();
+    let Some(tools) = tools(&fixture) else { return };
+    let older = Recipe {
+        exposure: 0.5,
+        ..Recipe::default()
+    };
+    let versions = after_save(&after_save(&[], &older, 1_700_000_000), &brighter(), 1_710_000_000);
+    let saved = SavedEdit {
+        recipe: brighter().to_json(),
+        source: ".good-gallery/originals/a.jpg".into(),
+        history: to_json(&versions),
+    };
+    let (mut harness, dir) = app(&fixture, Some(saved), Some(tools.clone()));
+    let backup = dir.join(".good-gallery").join("originals");
+    std::fs::create_dir_all(&backup).unwrap();
+    std::fs::copy(dir.join("a.jpg"), backup.join("a.jpg")).unwrap();
+    let pixels = image::open(dir.join("a.jpg")).unwrap().to_rgb8();
+    open(&mut harness, "a.jpg");
+    // Tall enough for the whole info panel, whose button is clicked where it shows.
+    harness.set_size(egui::vec2(900.0, 1600.0));
+    harness.key_press(Key::I);
+    settle_all(&mut harness);
+
+    harness
+        .get_by_role_and_label(Role::Button, "Clear version history")
+        .click();
+    harness.run_steps(2);
+    harness.get_by_label("Clear the version history?");
+    harness.get_by_role_and_label(Role::Button, "Clear history").click();
+    harness.run_steps(1);
+    settle_all(&mut harness);
+    harness.get_by_label("Version history cleared");
+
+    let read = std::process::Command::new(&tools.exiftool)
+        .args(["-s3", "-XMP-gg:EditHistory"])
+        .arg(dir.join("a.jpg"))
+        .output()
+        .unwrap();
+    let history = String::from_utf8(read.stdout).unwrap();
+    assert_eq!(domain::versions::parse(history.trim()), vec![versions[1].clone()]);
+    assert_eq!(
+        image::open(dir.join("a.jpg")).unwrap().to_rgb8(),
+        pixels,
+        "the photo stays"
+    );
+    assert!(backup.join("a.jpg").is_file(), "the original stays");
+}
+
+/// REQ-021-26: one version leaves nothing to clear.
+#[test]
+fn req_021_26_no_clearing_with_one_version() {
+    let fixture = Fixture::new();
+    let saved = SavedEdit {
+        recipe: brighter().to_json(),
+        source: ".good-gallery/originals/a.jpg".into(),
+        history: String::new(),
+    };
+    let (mut harness, _) = app(&fixture, Some(saved), None);
+    open(&mut harness, "a.jpg");
+    harness.key_press(Key::I);
+    settle_all(&mut harness);
+    harness.get_by_label("Saved over the original, which is kept");
+    assert!(
+        harness
+            .query_by_role_and_label(Role::Button, "Clear version history")
+            .is_none()
+    );
+}
+
+/// REQ-021-24: a photo without an earlier edit has no versions to choose.
+#[test]
+fn req_021_24_no_versions_without_an_earlier_edit() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    assert!(session(&harness).unwrap().versions().is_empty());
+    assert!(
+        harness
+            .get_by_role_and_label(Role::Button, "Versions")
+            .accesskit_node()
+            .is_disabled()
+    );
 }
 
 fn edit_and_check(harness: &mut App, source: Option<&str>, exposure: f32) {
@@ -850,6 +1008,7 @@ fn req_022_05_edits_again_with_the_saved_parts() {
     let edit = SavedEdit {
         recipe: recipe.to_json(),
         source: "a.jpg".into(),
+        history: String::new(),
     };
     let (mut harness, dir) = app(&fixture, Some(edit), None);
     disc_photo(&dir);
