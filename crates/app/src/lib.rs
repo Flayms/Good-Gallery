@@ -16,6 +16,7 @@ pub mod info;
 pub mod instance;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod loose;
+pub mod names;
 pub mod open_with;
 pub mod originals;
 pub mod people_page;
