@@ -83,6 +83,8 @@ pub enum Action {
     Delete(i64),
     /// Open the date fix dialog for this item (REQ-038-01); the viewer stays.
     FixDates(i64),
+    /// Let the user pick a LUT to import (REQ-043-01); the viewer stays.
+    ImportLut,
 }
 
 /// What a face's popup is about.
@@ -212,6 +214,8 @@ impl Transition {
 }
 
 pub struct Viewer {
+    /// The imported LUTs, for editing (spec 043).
+    luts: std::sync::Arc<crate::luts::Luts>,
     /// A text field had the keyboard at the end of the last frame (a new tag, REQ-026-01).
     typing: bool,
     /// The item is in a library. One outside every library, shown from a scratch index, has no rating, tags,
@@ -299,6 +303,7 @@ impl Viewer {
             last_activity: Instant::now(),
             close_at: None,
             keys: Keys::default(),
+            luts: Default::default(),
             typing: false,
             indexed: true,
             info_open: false,
@@ -820,7 +825,9 @@ impl Viewer {
         originals: &mut Originals,
         libraries: &[Library],
         videos: &mut Videos,
+        luts: &std::sync::Arc<crate::luts::Luts>,
     ) -> Option<Action> {
+        self.luts = luts.clone();
         self.follow(gallery);
         let count = gallery.count().unwrap_or(0);
         let mut keys = std::mem::take(&mut self.keys);
@@ -1800,7 +1807,7 @@ impl Viewer {
                     full_size: [side(item.width), side(item.height)],
                     sidecar_orientation: item.sidecar_orientation,
                 };
-                self.edit = Some(EditSession::new(target, originals.render_state()));
+                self.edit = Some(EditSession::new(target, originals.render_state()).with_luts(self.luts.clone()));
             }
         }
         if let Some(session) = &mut self.edit
@@ -1898,6 +1905,9 @@ impl Viewer {
         ui.interact(rect, ui.make_persistent_id("edit panel"), egui::Sense::click());
         let (outcome, compare) = session.panel(ui, rect);
         self.comparing = compare;
+        if session.take_import_lut() {
+            return Some(Action::ImportLut);
+        }
         self.apply_outcome(outcome, gallery)
     }
 

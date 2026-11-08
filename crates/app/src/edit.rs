@@ -86,6 +86,8 @@ pub struct SaveEdit {
     pub sidecar_orientation: Option<u8>,
     /// The photo's versions so far (REQ-021-24).
     pub history: Vec<domain::versions::Version>,
+    /// The table of the recipe's LUT, if this computer has it (REQ-043-03).
+    pub lut: Option<Arc<domain::lut::Lut>>,
 }
 
 /// Where the user wanted to go when editing had unsaved changes (REQ-021-08).
@@ -218,6 +220,12 @@ pub struct EditSession {
     pub saving: bool,
     render_state: Option<egui_wgpu::RenderState>,
     ctx: Option<egui::Context>,
+    /// The imported LUTs, to pick from and render with (spec 043).
+    luts: Arc<crate::luts::Luts>,
+    /// The shown LUT's table on the GPU, made when it was first shown.
+    lut_texture: Option<(Arc<domain::lut::Lut>, wgpu::TextureView)>,
+    /// _Import LUT…_ was clicked; the viewer passes it on (REQ-043-01).
+    import_lut: bool,
 }
 
 impl EditSession {
@@ -264,6 +272,9 @@ impl EditSession {
             saving: false,
             render_state,
             ctx: None,
+            luts: Arc::default(),
+            lut_texture: None,
+            import_lut: false,
         }
     }
 
@@ -577,7 +588,7 @@ impl EditSession {
             .enumerate_pixels()
             .filter(|(x, y, _)| x % step == 0 && y % step == 0)
             .map(|(_, _, pixel)| [pixel[0], pixel[1], pixel[2]].map(|c| f32::from(c) / 255.0));
-        let histogram = Params::new(&key).histogram(samples);
+        let histogram = self.params(&key).histogram(samples);
         self.histogram = Some((key, histogram));
     }
 
@@ -605,6 +616,27 @@ impl EditSession {
         }
     }
 
+    /// The imported LUTs to offer and render with (spec 043).
+    pub fn with_luts(mut self, luts: Arc<crate::luts::Luts>) -> Self {
+        self.luts = luts;
+        self
+    }
+
+    /// Whether _Import LUT…_ was clicked since last asked (REQ-043-01).
+    pub fn take_import_lut(&mut self) -> bool {
+        std::mem::take(&mut self.import_lut)
+    }
+
+    /// The table of `recipe`'s LUT, if it has one and this computer has it (REQ-043-03).
+    fn lut_table(&self, recipe: &Recipe) -> Option<Arc<domain::lut::Lut>> {
+        recipe.lut.as_ref().and_then(|choice| self.luts.table(&choice.id))
+    }
+
+    /// The numbers the preview renders `recipe` with, with its LUT's table.
+    fn params(&self, recipe: &Recipe) -> Params {
+        Params::new(recipe).with_lut(self.lut_table(recipe))
+    }
+
     /// The request to save the shown recipe.
     pub fn save_request(&self, mode: SaveMode) -> Option<SaveEdit> {
         Some(SaveEdit {
@@ -621,6 +653,7 @@ impl EditSession {
             },
             sidecar_orientation: self.target.sidecar_orientation,
             history: self.versions.clone(),
+            lut: self.lut_table(&self.draft),
         })
     }
 
@@ -1315,6 +1348,9 @@ impl EditSession {
         }
         let geometry = self.shown_geometry(compare);
         let recipe = self.shown_recipe(compare).clone();
+        // With the LUT's table, taken before the loaded photo is borrowed (REQ-043-02).
+        let lut = self.lut_table(&recipe);
+        let params = Params::new(&recipe).with_lut(lut.clone());
         // Without an earlier edit the original as it is, not through a neutral recipe (REQ-021-13).
         let original = compare && recipe == Recipe::default();
         let tints = self.tints_selection() && !compare;
@@ -1358,12 +1394,27 @@ impl EditSession {
                     render_state.queue.submit([encoder.finish()]);
                 }
             }
+            // The LUT's table on the GPU, the first time it shows (REQ-043-02).
+            let lut_view = match &params.lut {
+                Some((table, _)) => {
+                    if self
+                        .lut_texture
+                        .as_ref()
+                        .is_none_or(|(shown, _)| !Arc::ptr_eq(shown, table))
+                    {
+                        let view = upload_lut(&render_state.device, &render_state.queue, table);
+                        self.lut_texture = Some((table.clone(), view));
+                    }
+                    self.lut_texture.as_ref().map(|(_, view)| view.clone())
+                }
+                None => None,
+            };
             let ppp = ctx.pixels_per_point();
             let shown = rect.intersect(clip);
             if shown.is_positive() {
                 let flags = flags | if render_state.target_format.is_srgb() { 2 } else { 0 };
                 let uniform = uniform(
-                    &Params::new(&recipe),
+                    &params,
                     geometry,
                     [rect.min.x * ppp, rect.min.y * ppp, rect.max.x * ppp, rect.max.y * ppp],
                     [uv.min.x, uv.min.y, uv.max.x, uv.max.y],
@@ -1380,6 +1431,7 @@ impl EditSession {
                             mask: mask_view,
                             paintings: paintings_view,
                             lens: loaded.lens.clone().filter(|_| lens_shown),
+                            lut: lut_view,
                             uniform,
                             group: std::sync::OnceLock::new(),
                         },
@@ -1396,7 +1448,7 @@ impl EditSession {
                 *shown != recipe || *shown_geometry != geometry || *shown_flags != flags
             })
         {
-            let image = cpu_preview(small, &recipe, geometry, self.target.full_size, mask, flags);
+            let image = cpu_preview_lut(small, &recipe, geometry, self.target.full_size, mask, flags, lut);
             match &mut loaded.cpu {
                 Some((shown, shown_geometry, shown_flags, handle)) => {
                     handle.set(image, egui::TextureOptions::LINEAR);
@@ -2016,6 +2068,86 @@ impl EditSession {
             self.look_slider(ui, "Strength", LookChoice::STRENGTH, |choice| &mut choice.strength);
             self.look_slider(ui, "Grain", LookChoice::GRAIN, |choice| &mut choice.grain);
         }
+        self.luts_ui(ui);
+    }
+
+    /// The imported LUTs to pick from, _Import LUT…_, and the chosen one's strength (REQ-043-01 … REQ-043-03).
+    fn luts_ui(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(8.0);
+        ui.label(
+            egui::RichText::new("LUT")
+                .size(theme::SIZE_CAPTION)
+                .color(theme::muted()),
+        );
+        let chosen = self.draft.lut.clone();
+        let entries = self.luts.entries();
+        ui.horizontal_wrapped(|ui| {
+            let none = ui.add(egui::Button::selectable(chosen.is_none(), "No LUT"));
+            if none.clicked() && chosen.is_some() {
+                let mut recipe = self.draft.clone();
+                recipe.lut = None;
+                self.commit(recipe);
+            }
+            for entry in &entries {
+                let selected = chosen.as_ref().is_some_and(|choice| choice.id == entry.id);
+                if ui.add(egui::Button::selectable(selected, &entry.name)).clicked() && !selected {
+                    let mut recipe = self.draft.clone();
+                    // Another LUT keeps the strength set for the last one.
+                    recipe.lut = Some(domain::lut::LutChoice {
+                        id: entry.id.clone(),
+                        name: entry.name.clone(),
+                        strength: chosen.as_ref().map_or(100.0, |choice| choice.strength),
+                    });
+                    self.commit(recipe);
+                }
+            }
+            if ui.add(egui::Button::new("Import LUT…")).clicked() {
+                self.import_lut = true;
+            }
+        });
+        let Some(choice) = chosen else { return };
+        if self.luts.table(&choice.id).is_none() {
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!(
+                        "{} isn't on this computer, so the photo shows without it. Import it to see it.",
+                        choice.name
+                    ))
+                    .size(theme::SIZE_CAPTION)
+                    .color(theme::muted()),
+                )
+                .wrap(),
+            );
+        }
+        ui.add_space(4.0);
+        let mut current = f64::from(choice.strength);
+        let text = format!("{current:.0} %");
+        let response = slider_row(
+            ui,
+            "LUT strength",
+            &text,
+            &mut current,
+            domain::lut::LutChoice::STRENGTH,
+            1.0,
+        );
+        let set = |session: &mut Self, strength: f32| {
+            if let Some(lut) = &mut session.draft.lut {
+                lut.strength = strength;
+            }
+        };
+        if response.double_clicked() {
+            set(self, 100.0);
+            let recipe = self.draft.clone();
+            self.commit(recipe);
+            return;
+        }
+        if response.changed() {
+            set(self, current as f32);
+        }
+        if response.drag_stopped() || response.clicked() || (response.changed() && !response.dragged()) {
+            let recipe = self.draft.clone();
+            self.commit(recipe);
+        }
     }
 
     /// _Strength_ or _Grain_ of the chosen look, in percent; a double-click goes back to 100 %.
@@ -2419,6 +2551,7 @@ fn read_small(render_state: &egui_wgpu::RenderState, texture: &wgpu::Texture) ->
 }
 
 /// `small` through `recipe`, on the CPU, with the shader's `flags` (but 2: the output is encoded).
+#[cfg(test)]
 fn cpu_preview(
     small: &image::RgbaImage,
     recipe: &Recipe,
@@ -2427,9 +2560,22 @@ fn cpu_preview(
     mask: Option<&Mask>,
     flags: u32,
 ) -> egui::ColorImage {
+    cpu_preview_lut(small, recipe, geometry, full_size, mask, flags, None)
+}
+
+/// [`cpu_preview`] with the table of the recipe's LUT (REQ-043-02).
+fn cpu_preview_lut(
+    small: &image::RgbaImage,
+    recipe: &Recipe,
+    geometry: Geometry,
+    full_size: [u32; 2],
+    mask: Option<&Mask>,
+    flags: u32,
+    lut: Option<Arc<domain::lut::Lut>>,
+) -> egui::ColorImage {
     let size = full_size.map(|side| side.max(1) as f32);
     let paintings = domain::paint::draw_all(&recipe.paintings, size);
-    let params = Params::new(recipe).with_paintings(&paintings);
+    let params = Params::new(recipe).with_paintings(&paintings).with_lut(lut);
     let (width, height) = small.dimensions();
     // A background blur waits for the subject (REQ-023-02).
     let blurs = params.blur > 0.0 && flags & 1 == 0 && (params.blur_kind != BlurKind::Background || flags & 4 != 0);
@@ -2603,7 +2749,57 @@ fn uniform(
         let [r, g, b] = params.curves.as_ref().map_or([0.0; 3], |table| table[i]);
         floats.extend_from_slice(&[r, g, b, 0.0]);
     }
+    // The LUT (REQ-043-02): its strength and size, and its domain's corners.
+    match &params.lut {
+        Some((table, strength)) => {
+            let (min, max) = table.domain();
+            floats.extend_from_slice(&[*strength, table.size as f32, 0.0, 0.0]);
+            floats.extend_from_slice(&[min[0], min[1], min[2], 0.0, max[0], max[1], max[2], 0.0]);
+        }
+        None => floats.extend_from_slice(&[0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0]),
+    }
     floats
+}
+
+/// A LUT's table as a 3D texture, which the GPU interpolates between its points (REQ-043-02).
+fn upload_lut(device: &wgpu::Device, queue: &wgpu::Queue, lut: &domain::lut::Lut) -> wgpu::TextureView {
+    let side = lut.size as u32;
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("lut"),
+        size: wgpu::Extent3d {
+            width: side,
+            height: side,
+            depth_or_array_layers: side,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D3,
+        format: wgpu::TextureFormat::Rgba16Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    // Red runs along x, green along y, blue through the layers, as the table lists them.
+    let texels: Vec<u8> = lut
+        .table
+        .iter()
+        .flat_map(|[r, g, b]| [*r, *g, *b, 1.0])
+        .flat_map(|value| half::f16::from_f32(value).to_le_bytes())
+        .collect();
+    queue.write_texture(
+        texture.as_image_copy(),
+        &texels,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(side * 8),
+            rows_per_image: Some(side),
+        },
+        wgpu::Extent3d {
+            width: side,
+            height: side,
+            depth_or_array_layers: side,
+        },
+    );
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
 struct EditResources {
@@ -2616,6 +2812,8 @@ struct EditResources {
     no_paintings: wgpu::TextureView,
     /// The lens blur's pyramid while there is none.
     no_lens: wgpu::TextureView,
+    /// The LUT while there is none.
+    no_lut: wgpu::TextureView,
     /// What builds a lens pyramid from a photo (`lens.wgsl`): weighing, then halving (REQ-023-05).
     lens_layout: wgpu::BindGroupLayout,
     weigh: wgpu::RenderPipeline,
@@ -2690,6 +2888,16 @@ impl EditResources {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D3,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -2732,8 +2940,25 @@ impl EditResources {
         let no_subject = mask_texture(device, 1, 1).create_view(&wgpu::TextureViewDescriptor::default());
         let (lens_layout, weigh, halve) = lens_pipelines(device);
         let no_lens = lens_texture(device, [1, 1], 1).create_view(&wgpu::TextureViewDescriptor::default());
+        let no_lut = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("no lut"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D3,
+                format: wgpu::TextureFormat::Rgba16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default());
         Self {
             no_lens,
+            no_lut,
             lens_layout,
             weigh,
             halve,
@@ -2745,6 +2970,7 @@ impl EditResources {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn bind(
         &self,
         device: &wgpu::Device,
@@ -2752,6 +2978,7 @@ impl EditResources {
         mask: Option<&wgpu::TextureView>,
         paintings: Option<&wgpu::TextureView>,
         lens: Option<&wgpu::TextureView>,
+        lut: Option<&wgpu::TextureView>,
         uniform: &[f32],
     ) -> wgpu::BindGroup {
         let buffer = wgpu::util::DeviceExt::create_buffer_init(
@@ -2789,6 +3016,10 @@ impl EditResources {
                 wgpu::BindGroupEntry {
                     binding: 5,
                     resource: wgpu::BindingResource::TextureView(lens.unwrap_or(&self.no_lens)),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(lut.unwrap_or(&self.no_lut)),
                 },
             ],
         })
@@ -3118,6 +3349,8 @@ struct PreviewCallback {
     paintings: Option<wgpu::TextureView>,
     /// The photo's lens pyramid, while a lens blur shows (REQ-023-05).
     lens: Option<wgpu::TextureView>,
+    /// The LUT's table, while the recipe has one this computer has (REQ-043-02).
+    lut: Option<wgpu::TextureView>,
     uniform: Vec<f32>,
     /// Made in `prepare`; dropped with the frame, so the photo's texture isn't kept alive after editing ends.
     group: std::sync::OnceLock<wgpu::BindGroup>,
@@ -3139,6 +3372,7 @@ impl CallbackTrait for PreviewCallback {
                 self.mask.as_ref(),
                 self.paintings.as_ref(),
                 self.lens.as_ref(),
+                self.lut.as_ref(),
                 &self.uniform,
             ));
         }
@@ -3233,6 +3467,18 @@ mod tests {
         mask: Option<&Mask>,
         flags: u32,
     ) -> Vec<u8> {
+        render_gpu_lut(render_state, image, recipe, mask, flags, None)
+    }
+
+    /// [`render_gpu`] with the table of the recipe's LUT.
+    fn render_gpu_lut(
+        render_state: &egui_wgpu::RenderState,
+        image: &image::RgbaImage,
+        recipe: &Recipe,
+        mask: Option<&Mask>,
+        flags: u32,
+        lut: Option<Arc<domain::lut::Lut>>,
+    ) -> Vec<u8> {
         let (device, queue) = (&render_state.device, &render_state.queue);
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let resources = EditResources::new(device, format);
@@ -3243,8 +3489,10 @@ mod tests {
         let view = source.create_view(&wgpu::TextureViewDescriptor::default());
 
         let (output_width, output_height) = recipe.geometry().output_size(width, height);
+        let params = Params::new(recipe).with_lut(lut);
+        let lut_view = params.lut.as_ref().map(|(table, _)| upload_lut(device, queue, table));
         let uniform = uniform(
-            &Params::new(recipe),
+            &params,
             recipe.geometry(),
             [0.0, 0.0, output_width as f32, output_height as f32],
             [0.0, 0.0, 1.0, 1.0],
@@ -3261,7 +3509,15 @@ mod tests {
             .then(|| resources.build_lens(device, &mut lens_encoder, &view))
             .flatten();
         queue.submit([lens_encoder.finish()]);
-        let group = resources.bind(device, &view, mask.as_ref(), Some(&paint.view), lens.as_ref(), &uniform);
+        let group = resources.bind(
+            device,
+            &view,
+            mask.as_ref(),
+            Some(&paint.view),
+            lens.as_ref(),
+            lut_view.as_ref(),
+            &uniform,
+        );
         let target = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("edit test"),
             size: wgpu::Extent3d {
@@ -3476,6 +3732,54 @@ mod tests {
                     assert!(
                         diff <= 2,
                         "pixel {i} channel {c}: GPU {gpu:?}, CPU {cpu:?} with {recipe:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// REQ-043-02: a LUT previews as saving renders it (within two levels), at any strength, under other adjustments.
+    #[test]
+    fn req_043_02_the_gpu_preview_of_a_lut_matches_the_cpu_render() {
+        let (_gpu, render_state) = render_state();
+        let image = pattern();
+        // 17 points a side, bending each channel its own way.
+        let n = 17;
+        let mut text = format!("TITLE \"Bend\"\nLUT_3D_SIZE {n}\n");
+        for b in 0..n {
+            for g in 0..n {
+                for r in 0..n {
+                    let (r, g, b) = [r, g, b].map(|v| v as f32 / (n - 1) as f32).into();
+                    text.push_str(&format!("{} {} {}\n", r.sqrt(), g * g, 0.2 + 0.6 * b));
+                }
+            }
+        }
+        let lut = Arc::new(domain::lut::Lut::parse(&text).unwrap());
+        for (i, strength) in [100.0, 60.0, 25.0].into_iter().enumerate() {
+            let mut recipe = recipes()[i % recipes().len()].clone();
+            recipe.lut = Some(domain::lut::LutChoice {
+                id: domain::lut::lut_id(text.as_bytes()),
+                name: "Bend".into(),
+                strength,
+            });
+            let gpu = render_gpu_lut(&render_state, &image, &recipe, None, 0, Some(lut.clone()));
+            let cpu = cpu_preview_lut(
+                &image,
+                &recipe,
+                recipe.geometry(),
+                [SIZE, SIZE],
+                None,
+                0,
+                Some(lut.clone()),
+            );
+            let plain = cpu_preview(&image, &recipe, recipe.geometry(), [SIZE, SIZE], None, 0);
+            assert_ne!(cpu.pixels, plain.pixels, "the LUT changes the photo");
+            for (i, (gpu, cpu)) in gpu.chunks_exact(4).zip(cpu.pixels.iter()).enumerate() {
+                for c in 0..3 {
+                    let diff = (i32::from(gpu[c]) - i32::from(cpu.to_array()[c])).abs();
+                    assert!(
+                        diff <= 2,
+                        "pixel {i} channel {c}: GPU {gpu:?}, CPU {cpu:?} at {strength} %"
                     );
                 }
             }
@@ -3874,6 +4178,7 @@ mod tests {
             mask: None,
             paintings: None,
             lens: None,
+            lut: None,
             uniform: uniform(
                 &Params::new(&Recipe::default()),
                 Geometry::new(None, 0),
