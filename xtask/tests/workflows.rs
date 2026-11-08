@@ -353,6 +353,10 @@ fn req_014_16_renders_the_readme_screenshots_on_windows_and_offers_them() {
         "not rendered on Windows"
     );
     assert!(commands(&screenshots).contains(&"cargo xtask screenshots"));
+    assert!(
+        screenshots.contains("Set-DisplayResolution -Width 1920 -Height 1080"),
+        "the runner's small screen shrinks the window"
+    );
     assert!(screenshots.contains("contents: write"), "it can't push the branch");
 
     let push = &screenshots[screenshots.find("git push").expect("nothing is pushed")..];

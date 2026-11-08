@@ -405,9 +405,11 @@ pub fn run(args: &[String]) -> anyhow::Result<()> {
         .join(if cfg!(windows) { "app.exe" } else { "app" });
     let out = root.join("docs/screenshots");
     std::fs::create_dir_all(&out)?;
+    let conn = db::open(&index)?;
+    // The README shows the dark appearance, whatever the system's (a CI runner's is light).
+    db::settings::set_value(&conn, "appearance", &serde_json::Value::from("dark"))?;
     // A first run renders the thumbnails, so the screenshots don't catch placeholders.
     screenshot(&app, &data, &scratch.join("warm-up.png"), &[])?;
-    let conn = db::open(&index)?;
     for view in ["masonry", "justified", "grid", "list"] {
         db::settings::set_value(&conn, "gallery.view", &serde_json::Value::from(view))?;
         screenshot(&app, &data, &out.join(format!("{view}.png")), &[])?;

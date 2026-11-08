@@ -2,9 +2,9 @@
 //!
 //! Options: `--data-dir <folder>` (index, settings, thumbnails and logs; default `%APPDATA%\good-gallery` in the
 //! packaged app, `%APPDATA%\good-gallery-rust` otherwise; on Linux the same names in `~/.local/share`),
-//! `--screenshot <file.png>` (saves a screenshot of the window
-//! after a few frames and exits), `--screenshot-after <seconds>` (waits that long before the screenshot, e.g. for scans
-//! or thumbnails), `--bench-scroll <seconds>` (vsync off; scrolls the gallery once to warm the files, then again while
+//! `--screenshot <file.png>` (saves a screenshot of the window after a few frames and exits; the mouse is ignored, so
+//! nothing shows hover), `--screenshot-after <seconds>` (waits that long before the screenshot, e.g. for scans or
+//! thumbnails), `--bench-scroll <seconds>` (vsync off; scrolls the gallery once to warm the files, then again while
 //! measuring frame times, prints them and exits; REQ-006-12; with `--bench-cold` it measures at once, while thumbnails
 //! render, REQ-006-15; with `--bench-no-glass` without the glass pass), `--view <position>` (opens the viewer at that gallery
 //! position once the gallery has loaded, e.g. for a screenshot; with `--info` its info panel too), `--scroll <points>`

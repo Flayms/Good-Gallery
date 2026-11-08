@@ -41,6 +41,10 @@ jobs:
       - name: Fetch exiftool, ffmpeg and libmpv
         shell: pwsh
         run: ./packaging/fetch-helpers.ps1
+      # The runner's screen is 1024 × 768, smaller than the app's 1280 × 800 window.
+      - name: Make the screen larger than the window
+        shell: pwsh
+        run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
       - run: cargo xtask screenshots
         env:
           GOOD_GALLERY_EXIFTOOL: ${{ github.workspace }}\target\helpers\exiftool\exiftool.exe
