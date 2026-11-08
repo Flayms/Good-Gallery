@@ -27,6 +27,8 @@ pub enum Page {
     Settings,
     /// Groups of unknown faces (REQ-032-15).
     People,
+    /// The world map of the photos with a position (spec 044).
+    Map,
 }
 
 /// The native folder dialog, or a fake in tests. Blocks until the user picks or cancels; runs on a job thread.
@@ -2338,6 +2340,20 @@ fn lock<T>(db: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 impl AppState {
+    /// Shows `photos` in the gallery, chosen on the map, with the rest of the search (REQ-044-03).
+    pub fn show_map_photos(&mut self, photos: Vec<i64>) {
+        let Some(gallery) = &mut self.gallery else { return };
+        let mut media = photos;
+        media.sort_unstable();
+        media.dedup();
+        let search = domain::search::GallerySearch {
+            media,
+            ..gallery.search().clone()
+        };
+        gallery.set_search(search);
+        self.page = Page::Gallery;
+    }
+
     /// Opens the viewer on photo `at` with its faces shown, going through `photos` only; closing it brings back the
     /// gallery's search (REQ-032-26).
     pub fn show_face_photos(&mut self, photos: &[i64], at: i64) {

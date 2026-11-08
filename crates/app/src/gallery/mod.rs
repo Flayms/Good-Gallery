@@ -99,6 +99,10 @@ enum Request {
         id: i64,
     },
     Calendar(CalendarKey),
+    /// The located items of a search, for the map (REQ-044-01).
+    Located(GallerySearch),
+    /// Thumbnail keys of map clusters' newest photos.
+    ThumbKeys(Vec<i64>),
 }
 
 enum Loaded {
@@ -134,6 +138,11 @@ enum Loaded {
         key: CalendarKey,
         result: Result<CalendarData, String>,
     },
+    Located {
+        search: GallerySearch,
+        result: Result<Vec<(i64, f64, f64)>, String>,
+    },
+    ThumbKeys(Vec<(i64, Option<ThumbKey>)>),
 }
 
 /// What the date calendar asks for: the search apart from its date range, and the days it shows (REQ-041-02).
@@ -275,6 +284,8 @@ pub struct SidebarData {
     /// The cameras and lenses in the index, most used first, for the smart album editor (REQ-040-05).
     pub cameras: Vec<(String, u64)>,
     pub lenses: Vec<(String, u64)>,
+    /// Media items with a GPS position: the sidebar offers the map when there are any (REQ-044-01).
+    pub located: u64,
 }
 
 /// Most used tags outside both categories in the sidebar (REQ-008-05).
@@ -351,6 +362,7 @@ fn load_sidebar(conn: &Connection, library: Option<i64>, content: &ContentSlot) 
         })?,
         cameras: db::media::cameras(conn)?,
         lenses: db::media::lenses(conn)?,
+        located: db::media::located_count(conn)?,
     })
 }
 
@@ -441,6 +453,22 @@ fn run(conn: &Connection, request: Request, content: &ContentSlot) -> Loaded {
             result: load_calendar(conn, &key, content),
             key,
         },
+        Request::Located(search) => Loaded::Located {
+            result: resolve(conn, &search, content)
+                .and_then(|resolved| db::gallery::located_items(conn, &resolved).map_err(|e| e.to_string())),
+            search,
+        },
+        Request::ThumbKeys(ids) => Loaded::ThumbKeys(
+            ids.into_iter()
+                .map(|id| {
+                    let key = db::thumbs::thumb_source(conn, id)
+                        .ok()
+                        .flatten()
+                        .map(|source| source.key);
+                    (id, key)
+                })
+                .collect(),
+        ),
         Request::Detail { id } => Loaded::Detail {
             id,
             result: Box::new(db::media::detail(conn, id).map_err(|e| e.to_string())),
@@ -671,6 +699,14 @@ pub struct Gallery {
     calendar_wanted: Vec<(i64, ThumbKey)>,
     /// Whether this frame asked for thumbnails yet: without tiles drawn, the calendar asks itself.
     textures_asked: bool,
+    /// What the map shows, kept while it is closed (REQ-044-02).
+    pub map_view: domain::map::MapView,
+    /// The search the map asked for last, and its located items once loaded (REQ-044-01).
+    map_asked: Option<GallerySearch>,
+    map_points: Option<Arc<Vec<(i64, f64, f64)>>>,
+    /// Thumbnail keys of photos the map showed, `None` for one without; each asked for once.
+    map_keys: HashMap<i64, Option<ThumbKey>>,
+    map_keys_asked: HashSet<i64>,
 }
 
 impl Gallery {
@@ -749,6 +785,11 @@ impl Gallery {
             calendar_data: None,
             calendar_wanted: Vec::new(),
             textures_asked: false,
+            map_view: Default::default(),
+            map_asked: None,
+            map_points: None,
+            map_keys: HashMap::new(),
+            map_keys_asked: HashSet::new(),
             tiles_frame: None,
         }
     }
@@ -778,8 +819,9 @@ impl Gallery {
             generation: self.generation,
             search: self.search.clone(),
         });
-        // New items may fall on the calendar's days.
+        // New items may fall on the calendar's days, and on the map.
         self.calendar_asked = None;
+        self.map_asked = None;
         // Counts and new tags while indexing (REQ-006-11).
         self.reload_sidebar();
     }
@@ -1385,6 +1427,31 @@ impl Gallery {
         }
     }
 
+    /// The located items of the gallery's search, apart from photos chosen on the map, newest first; the last answer
+    /// while a new one loads (REQ-044-01).
+    pub fn map_points(&mut self) -> Option<Arc<Vec<(i64, f64, f64)>>> {
+        let search = GallerySearch {
+            media: Vec::new(),
+            ..self.search.clone()
+        };
+        if self.map_asked.as_ref() != Some(&search) {
+            self.map_asked = Some(search.clone());
+            self.loader.send(Request::Located(search));
+        }
+        self.map_points.clone()
+    }
+
+    /// The thumbnail key of photo `id`, asked for when first wanted; `None` while unknown or for one without.
+    pub fn map_key(&mut self, id: i64) -> Option<ThumbKey> {
+        if let Some(key) = self.map_keys.get(&id) {
+            return key.clone();
+        }
+        if self.map_keys_asked.insert(id) {
+            self.loader.send(Request::ThumbKeys(vec![id]));
+        }
+        None
+    }
+
     /// Asks for these media items' thumbnails, for the People page, which draws no tiles.
     pub fn want_thumbnails(&mut self, wanted: &[(i64, ThumbKey)]) {
         let Some(thumbnails) = &mut self.thumbnails else { return };
@@ -1527,6 +1594,12 @@ impl Gallery {
                     }));
                 }
             }
+            Loaded::Located { search, result } => match result {
+                Ok(points) if self.map_asked.as_ref() == Some(&search) => self.map_points = Some(Arc::new(points)),
+                Ok(_) => {}
+                Err(error) => tracing::error!("can't load the map's photos: {error}"),
+            },
+            Loaded::ThumbKeys(keys) => self.map_keys.extend(keys),
             Loaded::Calendar { key, result } => match result {
                 Ok(data) => self.calendar_data = Some((key, data)),
                 Err(error) => tracing::error!("can't load the calendar's days: {error}"),

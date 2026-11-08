@@ -17,6 +17,7 @@ chrono.workspace = true
 db.workspace = true
 egui_extras.workspace = true
 indexer.workspace = true
+miniz_oxide.workspace = true
 eframe.workspace = true
 image.workspace = true
 tracing.workspace = true
