@@ -112,6 +112,16 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 - **Then** a page after the folder offers: _Start menu shortcut_ (on), _Desktop shortcut_ (off) and _Show under "Open with"_ for photos and videos (on, REQ-027-05), each with a line saying what it does
 - **And** installing again or updating, also silently from the app (REQ-031-08), starts from the choices made last time, including a later change in the settings (REQ-027-06): an update brings back nothing the user turned off, and a choice turned off now is removed
 
+### REQ-014-16 · README screenshots from Windows
+
+- **Given** the README's screenshots, which show the Windows app
+- **When** a week has passed, or someone starts the _Screenshots_ workflow by hand
+- **Then** GitHub renders them on Windows with `cargo xtask screenshots`
+- **And** if any changed, it pushes them to the `screenshots-refresh` branch, replacing what was there, and its summary links to a pull request from that branch, which a person opens so CI checks it; if none changed, it says so and pushes nothing
+- **Given** a pull request that changes the workflow or `xtask/src/screenshots.rs`
+- **When** CI runs
+- **Then** the workflow renders the screenshots and attaches them to the run, and pushes nothing
+
 ## Out of scope
 
 - Code signing (Windows SmartScreen warns about unsigned downloads). Free option for later: SignPath Foundation.
@@ -145,3 +155,4 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 | REQ-014-13 | `xtask/src/dist.rs` › req_014_13_replaces_a_locked_download_once_it_is_free, req_014_13_names_a_download_that_stays_locked | pass |
 | REQ-014-15 | `xtask/tests/packaging.rs` › req_014_15_the_installer_offers_and_remembers_its_options; `packaging/smoke-test.ps1` (Windows packages workflow: the defaults of a silent install, an update keeping changed choices) | pass |
 | REQ-014-14 | `xtask/tests/workflows.rs` › req_014_14_the_builds_run_side_by_side_and_publish_waits_for_them, req_014_14_main_warms_the_cache_the_release_builds_restore; the 15 minutes are measured by the next release | partial |
+| REQ-014-16 | `xtask/tests/workflows.rs` › req_014_16_renders_the_readme_screenshots_on_windows_and_offers_them | partial (the run itself on GitHub: this pull request's run renders them) |

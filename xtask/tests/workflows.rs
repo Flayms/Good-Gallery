@@ -333,3 +333,52 @@ fn req_031_08_the_installer_is_tested_before_a_release() {
         assert!(packages.contains(part), "windows-packages.yml lacks {part}");
     }
 }
+
+/// REQ-014-16: the README screenshots are rendered on Windows every week or by hand and pushed to a branch of their
+/// own for a person to open a pull request from; a pull request that changes the workflow only renders them.
+#[test]
+fn req_014_16_renders_the_readme_screenshots_on_windows_and_offers_them() {
+    let screenshots = workflow("screenshots.yml");
+    for trigger in ["workflow_dispatch:", "schedule:", "- cron:", "pull_request:"] {
+        assert!(screenshots.contains(trigger), "screenshots.yml lacks {trigger}");
+    }
+    for path in ["xtask/src/screenshots.rs", ".github/workflows/screenshots.yml"] {
+        assert!(
+            screenshots.contains(&format!("- {path}")),
+            "a change to {path} doesn't render them"
+        );
+    }
+    assert!(
+        screenshots.contains("runs-on: windows-latest"),
+        "not rendered on Windows"
+    );
+    assert!(commands(&screenshots).contains(&"cargo xtask screenshots"));
+    assert!(screenshots.contains("contents: write"), "it can't push the branch");
+
+    let push = &screenshots[screenshots.find("git push").expect("nothing is pushed")..];
+    assert!(
+        push.starts_with("git push --force origin screenshots-refresh"),
+        "pushed elsewhere"
+    );
+    let step = &screenshots[..screenshots.find("git push").unwrap()];
+    let step = &step[step.rfind("- name:").expect("the push is a named step")..];
+    assert!(
+        step.contains("if: github.event_name != 'pull_request'"),
+        "a pull request's run pushes"
+    );
+    assert!(
+        step.contains("git diff --quiet -- docs/screenshots"),
+        "unchanged screenshots are pushed"
+    );
+    assert!(
+        screenshots.contains("compare/main...screenshots-refresh"),
+        "no link to a pull request"
+    );
+    // A pull request opened with the workflow's token wouldn't run CI, and this repository doesn't let workflows
+    // open them.
+    assert!(!screenshots.contains("gh pr create"), "a person opens the pull request");
+    assert!(
+        screenshots.contains("upload-artifact"),
+        "the renders aren't attached to the run"
+    );
+}
