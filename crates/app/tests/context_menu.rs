@@ -369,3 +369,62 @@ fn req_009_24_the_viewer_moves_on_from_a_deleted_item() {
     assert!(harness.state().viewer.is_none(), "closed with nothing left");
     assert!(ids(&harness).is_empty());
 }
+
+/// Steps frames until one puts an image on the clipboard; its size and first pixel.
+fn copied_image(harness: &mut App) -> Option<([usize; 2], egui::Color32)> {
+    harness.state_mut().wait_for_jobs();
+    for _ in 0..10 {
+        harness.run_steps(1);
+        let copied = harness
+            .output()
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|command| match command {
+                egui::OutputCommand::CopyImage(image) => Some((image.size, image.pixels[0])),
+                _ => None,
+            });
+        if copied.is_some() {
+            return copied;
+        }
+    }
+    None
+}
+
+/// REQ-009-25: _Copy_ puts a photo on the clipboard from its tile and from the viewer; a video has no _Copy_.
+#[test]
+fn req_009_25_copies_a_photo_from_its_tile_and_the_viewer() {
+    let Some(exiftool) = exiftool() else { return };
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, &exiftool);
+    let at = tile(&harness, "d.mp4");
+    right_click_at(&mut harness, at);
+    assert!(harness.query_by_label("Copy").is_none(), "no Copy for a video");
+    harness.key_press(egui::Key::Escape);
+    harness.run_steps(2);
+
+    let at = tile(&harness, "a.jpg");
+    right_click_at(&mut harness, at);
+    menu_item(&harness, at, "Copy").click();
+    harness.run_steps(2);
+    let (size, first) = copied_image(&mut harness).expect("a.jpg was copied");
+    assert_eq!(size, [8, 4]);
+    assert!(first.r() > 150 && first.b() < 100, "the left half is red: {first:?}");
+    assert!(
+        harness
+            .state()
+            .toasts
+            .current()
+            .iter()
+            .any(|toast| toast.text == "Copied"),
+        "a notice says so"
+    );
+
+    common::open_item(&mut harness, "b.jpg");
+    settle(&mut harness);
+    let center = harness.ctx.content_rect().center();
+    right_click_at(&mut harness, center);
+    harness.get_by_label("Copy").click();
+    harness.run_steps(2);
+    assert_eq!(copied_image(&mut harness).map(|(size, _)| size), Some([8, 4]));
+}

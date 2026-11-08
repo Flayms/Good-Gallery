@@ -59,6 +59,8 @@ pub enum Action {
     FilterByTag(String),
     /// Explorer should show this file (REQ-009-10); the viewer stays.
     ShowInExplorer(PathBuf),
+    /// Puts a photo on the clipboard, with its sidecar's orientation (REQ-009-25).
+    Copy(PathBuf, Option<u8>),
     /// Save an edit (REQ-021-09, REQ-021-10); the viewer stays and hears back through [`Viewer::edit_saved`].
     SaveEdit(Box<edit::SaveEdit>),
     /// Ask to put the unedited original of this item back (REQ-021-12).
@@ -1016,6 +1018,10 @@ impl Viewer {
                         ..gallery::MenuItems::for_item(item.kind, &item.file_name)
                     };
                     backdrop.context_menu(|ui| match gallery::context_menu_with(ui, items) {
+                        Some(MediaAction::Copy) => {
+                            action = file_in(libraries, item.root_id, &item.rel_path)
+                                .map(|file| Action::Copy(file, item.sidecar_orientation));
+                        }
                         Some(MediaAction::ShowInExplorer) => action = Self::explorer_action(item, libraries),
                         Some(MediaAction::Information) => self.info_open = true,
                         Some(MediaAction::Edit) => self.toggle_edit = true,
@@ -1067,6 +1073,7 @@ impl Viewer {
         self.typing = ctx.egui_wants_keyboard_input();
         match action {
             Some(Action::ShowInExplorer(path)) => Some(Action::ShowInExplorer(path)),
+            Some(Action::Copy(path, orientation)) => Some(Action::Copy(path, orientation)),
             Some(Action::SaveEdit(request)) => Some(Action::SaveEdit(request)),
             Some(Action::Revert(target)) => Some(Action::Revert(target)),
             Some(Action::Rate(rate)) => Some(Action::Rate(rate)),

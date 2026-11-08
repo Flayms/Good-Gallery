@@ -355,6 +355,11 @@ struct Written {
     copy: bool,
 }
 
+/// The longest side of a photo copied to the clipboard, in pixels: a 45 MP photo fits; larger ones are scaled down
+/// (REQ-009-25).
+#[cfg(not(target_arch = "wasm32"))]
+const COPY_MAX_SIDE: u32 = 8192;
+
 /// Results of background jobs, applied on the UI thread. The browser has no background threads or folder dialog, so
 /// some never happen there.
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -390,6 +395,9 @@ enum Event {
     FolderPicked(Option<PathBuf>),
     /// Explorer couldn't show a file: why.
     ExplorerFailed(Option<String>),
+    /// A photo decoded for the clipboard, or why it couldn't be (REQ-009-25).
+    #[cfg(not(target_arch = "wasm32"))]
+    ImageCopied(Result<eframe::egui::ColorImage, String>),
     /// The thumbnail cache was cleared; its new size.
     CacheCleared(u64),
     /// An edit was saved (REQ-021-09, REQ-021-10), or why not.
@@ -448,6 +456,8 @@ pub struct AppState {
     picker: Arc<dyn FolderPicker>,
     events: (Sender<Event>, Receiver<Event>),
     pending_jobs: usize,
+    /// A photo decoded for the clipboard, put there in the next frame (REQ-009-25).
+    copied: Option<eframe::egui::ColorImage>,
     /// The writer thread's queue: every write into a library file, one after another (REQ-024-07). Started with
     /// the first write.
     #[cfg(not(target_arch = "wasm32"))]
@@ -671,6 +681,30 @@ impl AppState {
     pub fn with_file_manager(mut self, file_manager: Arc<dyn FileManager>) -> Self {
         self.file_manager = file_manager;
         self
+    }
+
+    /// Copies a photo to the clipboard, decoded on a thread of its own as the viewer shows it (REQ-009-25).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn copy_image(&mut self, file: PathBuf, sidecar_orientation: Option<u8>) {
+        self.spawn(move || {
+            let ffmpeg = media::ffmpeg::find_ffmpeg();
+            let image = media::original::load_original(&file, ffmpeg.as_deref(), COPY_MAX_SIDE, sidecar_orientation);
+            Event::ImageCopied(match image {
+                Ok(image) => Ok(eframe::egui::ColorImage::from_rgba_unmultiplied(
+                    [image.width() as usize, image.height() as usize],
+                    image.as_raw(),
+                )),
+                Err(error) => {
+                    tracing::error!("can't copy {}: {error}", file.display());
+                    Err(format!("Couldn't copy the photo: {error}"))
+                }
+            })
+        });
+    }
+
+    /// The photo to put on the clipboard this frame, if one was decoded (REQ-009-25).
+    pub fn take_copied(&mut self) -> Option<eframe::egui::ColorImage> {
+        self.copied.take()
     }
 
     /// Opens Explorer on a media file, or says why it can't (REQ-009-10). In the background: on an offline share the
@@ -1435,6 +1469,7 @@ impl AppState {
             picker,
             events: channel(),
             pending_jobs: 0,
+            copied: None,
             #[cfg(not(target_arch = "wasm32"))]
             writer: None,
             settings_page: SettingsPage::default(),
@@ -2084,6 +2119,14 @@ impl AppState {
                     self.toasts.error(error);
                 }
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            Event::ImageCopied(result) => match result {
+                Ok(image) => {
+                    self.copied = Some(image);
+                    self.toasts.success("Copied");
+                }
+                Err(error) => self.toasts.error(error),
+            },
             Event::CacheCleared(bytes) => {
                 self.settings_page.clearing = false;
                 self.cache_usage = CacheUsage::Bytes(bytes);

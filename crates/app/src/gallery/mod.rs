@@ -134,6 +134,8 @@ enum Loaded {
 /// What a tile's, row's or the viewer's context menu asks for (REQ-009-11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaAction {
+    /// Puts the photo on the clipboard (REQ-009-25).
+    Copy,
     ShowInExplorer,
     Information,
     /// Only in the viewer (REQ-021-01).
@@ -157,6 +159,8 @@ pub enum MediaAction {
 /// Which of the items that write files a context menu has (REQ-009-21).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MenuItems {
+    /// _Copy_: a photo, in the desktop app (REQ-009-25).
+    pub copy: bool,
     /// _Edit_, only in the viewer (REQ-021-01).
     pub edit: bool,
     /// _Revert to original_, only in the viewer (REQ-021-12).
@@ -171,6 +175,7 @@ impl MenuItems {
     /// The items for a gallery item of this kind and file name.
     pub fn for_item(kind: MediaKind, file_name: &str) -> Self {
         Self {
+            copy: !crate::WEB && kind == MediaKind::Image,
             write: !crate::WEB,
             turn: kind == MediaKind::Image && domain::orientation::can_turn(file_name),
             ..Self::default()
@@ -1914,6 +1919,9 @@ const RATINGS: [(&str, Option<i64>); 6] = [
 fn menu_items(ui: &mut egui::Ui, items: MenuItems) -> Option<MediaAction> {
     let MenuItems { edit, revert, .. } = items;
     let mut action = None;
+    if items.copy && ui.button("Copy").clicked() {
+        action = Some(MediaAction::Copy);
+    }
     // The browser can't open a file manager (REQ-019-13).
     if !crate::WEB && ui.button(crate::state::SHOW_IN_FOLDER).clicked() {
         action = Some(MediaAction::ShowInExplorer);
