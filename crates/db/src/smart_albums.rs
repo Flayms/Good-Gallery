@@ -216,6 +216,65 @@ mod tests {
         assert_eq!(rows[0].album.search.content.as_deref(), Some("dogs"));
     }
 
+    /// REQ-040-05: camera, lens and location conditions; _is not_ also matches items without one.
+    #[test]
+    fn req_040_05_rule_albums_match_camera_lens_and_location() {
+        use domain::album_rules::{Condition, Rules};
+        let conn = crate::open_in_memory().unwrap();
+        let root = insert_library(&conn, "D:\\Photos", "Photos", LibraryStatus::Online)
+            .unwrap()
+            .id;
+        let shot = |rel: &str, camera: Option<&str>, lens: Option<&str>, located: bool| {
+            let mut file = file(rel, None);
+            file.metadata.camera = camera.map(String::from);
+            file.metadata.lens = lens.map(String::from);
+            file.metadata.location = located.then(|| domain::media::Location::new(48.1, 11.5).unwrap());
+            file
+        };
+        let mut writer = IndexWriter::new(conn);
+        writer
+            .write(
+                root,
+                &[
+                    shot("r5.jpg", Some("Canon EOS R5"), Some("RF50mm F1.8 STM"), true),
+                    shot("phone.jpg", Some("Apple iPhone 15"), None, true),
+                    shot("scan.jpg", None, None, false),
+                ],
+            )
+            .unwrap();
+        let conn: Connection = writer.into();
+        let names = |condition: Condition| -> Vec<String> {
+            let search = GallerySearch {
+                rules: Some(Box::new(Rules {
+                    name: String::new(),
+                    any: false,
+                    conditions: vec![condition],
+                })),
+                ..GallerySearch::default()
+            };
+            let layout = crate::gallery::layout(&conn, &search).unwrap();
+            let mut names: Vec<String> = crate::gallery::items(&conn, &layout.ids)
+                .unwrap()
+                .into_iter()
+                .map(|item| item.file_name)
+                .collect();
+            names.sort();
+            names
+        };
+        let camera = |name: &str, is| Condition::Camera { name: name.into(), is };
+        let lens = |name: &str, is| Condition::Lens { name: name.into(), is };
+        assert_eq!(names(camera("Canon EOS R5", true)), ["r5.jpg"]);
+        assert_eq!(names(camera("Canon EOS R5", false)), ["phone.jpg", "scan.jpg"]);
+        assert_eq!(
+            names(camera("Canon'; DROP TABLE media; --", true)),
+            Vec::<String>::new()
+        );
+        assert_eq!(names(lens("RF50mm F1.8 STM", true)), ["r5.jpg"]);
+        assert_eq!(names(lens("RF50mm F1.8 STM", false)), ["phone.jpg", "scan.jpg"]);
+        assert_eq!(names(Condition::HasLocation(true)), ["phone.jpg", "r5.jpg"]);
+        assert_eq!(names(Condition::HasLocation(false)), ["scan.jpg"]);
+    }
+
     /// REQ-039-02, REQ-039-03, REQ-039-06: rule albums are kept under their name, match all or any of their
     /// conditions, and say when their library is gone.
     #[test]

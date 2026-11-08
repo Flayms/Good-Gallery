@@ -168,6 +168,19 @@ pub fn ratings(ratings: &[u8]) -> String {
 }
 
 /// Binary units with one decimal from KB on: "1.5 MB".
+/// A GPS position as degrees with four decimals and the hemisphere, "33.4500° S, 70.6600° W" (REQ-040-04).
+pub fn coordinates(location: domain::media::Location) -> String {
+    let part = |degrees: f64, positive: char, negative: char| {
+        let hemisphere = if degrees < 0.0 { negative } else { positive };
+        format!("{:.4}° {hemisphere}", degrees.abs())
+    };
+    format!(
+        "{}, {}",
+        part(location.latitude, 'N', 'S'),
+        part(location.longitude, 'E', 'W')
+    )
+}
+
 pub fn bytes(bytes: i64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     let mut value = bytes.max(0) as f64;
@@ -187,6 +200,14 @@ pub fn bytes(bytes: i64) -> String {
 mod tests {
     use super::*;
     use chrono::{Local, NaiveDate, TimeZone};
+
+    #[test]
+    fn req_040_04_writes_coordinates_with_their_hemispheres() {
+        let at = |latitude, longitude| coordinates(domain::media::Location::new(latitude, longitude).unwrap());
+        assert_eq!(at(-33.45, -70.66), "33.4500° S, 70.6600° W");
+        assert_eq!(at(48.137_46, 11.575_49), "48.1375° N, 11.5755° E");
+        assert_eq!(at(0.0, 12.0), "0.0000° N, 12.0000° E");
+    }
 
     #[test]
     fn req_016_02_names_the_day_with_its_weekday() {

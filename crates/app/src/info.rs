@@ -106,6 +106,22 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths, writable:
     field(ui, "Size", |ui| {
         ui.label(format::bytes(detail.size));
     });
+    // What it was taken with and where, only when known (REQ-040-04). _Location_ is the file's path.
+    if let Some(camera) = &detail.camera {
+        field(ui, "Camera", |ui| {
+            ui.add(egui::Label::new(camera).wrap());
+        });
+    }
+    if let Some(lens) = &detail.lens {
+        field(ui, "Lens", |ui| {
+            ui.add(egui::Label::new(lens).wrap());
+        });
+    }
+    if let Some(location) = detail.location {
+        field(ui, "Coordinates", |ui| {
+            ui.add(egui::Label::new(format::coordinates(location)).selectable(true));
+        });
+    }
     field(ui, "Rating", |ui| {
         // The browser version doesn't write files (REQ-024-05), nor does the app outside libraries (REQ-033-03).
         if !writable {

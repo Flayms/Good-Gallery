@@ -156,6 +156,7 @@ pub fn read(data: &[u8], tags: &mut Tags) {
     for (tag, entry) in tiff.entries(ifd0 as usize) {
         match tag {
             0x010f => insert(&mut found, "Make", tiff.text(&entry).map(Value::from)),
+            0x0110 => insert(&mut found, "Model", tiff.text(&entry).map(Value::from)),
             0x0112 => insert(&mut found, "Orientation", tiff.number(&entry, 0).map(number)),
             0x4746 => insert(&mut found, "Rating", tiff.number(&entry, 0).map(number)),
             0x9c9e => insert(&mut found, "XPKeywords", tiff.ucs2(&entry).map(Value::from)),
@@ -175,11 +176,33 @@ pub fn read(data: &[u8], tags: &mut Tags) {
                 0x9291 => sub_sec.0 = tiff.text(&entry),
                 0x9292 => sub_sec.1 = tiff.text(&entry),
                 0x882a => insert(&mut found, "TimeZoneOffset", tiff.number(&entry, 0).map(number)),
+                0xa434 => insert(&mut found, "LensModel", tiff.text(&entry).map(Value::from)),
                 _ => {}
             }
         }
     }
     if let Some(offset) = gps_ifd {
+        // Degrees, minutes and seconds, and whether the reference makes them negative (S, W).
+        let (mut latitude, mut longitude) = ((None, false), (None, false));
+        let degrees = |entry: &Entry| -> Option<f64> {
+            let parts: Option<Vec<f64>> = (0..3).map(|i| tiff.number(entry, i)).collect();
+            let [d, m, s] = parts?[..] else { return None };
+            Some(d + m / 60.0 + s / 3600.0)
+        };
+        for (tag, entry) in tiff.entries(offset as usize) {
+            match tag {
+                0x0001 => latitude.1 = tiff.text(&entry).is_some_and(|r| r.starts_with('S')),
+                0x0002 if entry.count == 3 => latitude.0 = degrees(&entry),
+                0x0003 => longitude.1 = tiff.text(&entry).is_some_and(|r| r.starts_with('W')),
+                0x0004 if entry.count == 3 => longitude.0 = degrees(&entry),
+                _ => {}
+            }
+        }
+        // exiftool's signed composites, rounded past what a GPS can tell so the arithmetic doesn't show.
+        for (name, (value, negative)) in [("GPSLatitude", latitude), ("GPSLongitude", longitude)] {
+            let signed = value.map(|v: f64| ((if negative { -v } else { v }) * 1e9).round() / 1e9);
+            insert(&mut found, name, signed.map(Value::from));
+        }
         for (tag, entry) in tiff.entries(offset as usize) {
             match tag {
                 0x0007 if entry.count == 3 => {
@@ -314,6 +337,61 @@ pub(crate) mod tests {
         assert_eq!(tags["XPKeywords"], json!("Beach;Sea"));
         assert_eq!(tags["DateTimeOriginal"], json!("2024:07:02 07:12:59"));
         assert_eq!(tags["SubSecDateTimeOriginal"], json!("2024:07:02 07:12:59.12+02:00"));
+    }
+
+    /// Three RATIONALs: degrees, minutes and seconds.
+    fn dms(parts: [(u32, u32); 3]) -> Vec<u8> {
+        parts
+            .iter()
+            .flat_map(|(n, d)| n.to_le_bytes().into_iter().chain(d.to_le_bytes()))
+            .collect()
+    }
+
+    /// REQ-040-06: the camera's model, the lens and the GPS position, signed as exiftool `-n` gives it.
+    #[test]
+    fn req_040_06_reads_the_model_the_lens_and_the_position() {
+        let data = tiff(
+            &[(0x010f, 2, 6, ascii("Canon")), (0x0110, 2, 13, ascii("Canon EOS R5"))],
+            &[
+                (0x8769, vec![(0xa434, 2, 23, ascii("RF24-105mm F4 L IS USM"))]),
+                (
+                    0x8825,
+                    vec![
+                        (0x0001, 2, 2, ascii("S")),
+                        (0x0002, 5, 3, dms([(33, 1), (27, 1), (0, 1)])),
+                        (0x0003, 2, 2, ascii("W")),
+                        (0x0004, 5, 3, dms([(70, 1), (39, 1), (3600, 100)])),
+                    ],
+                ),
+            ],
+        );
+        let mut tags = Tags::new();
+        read(&data, &mut tags);
+        assert_eq!(tags["Model"], json!("Canon EOS R5"));
+        assert_eq!(tags["LensModel"], json!("RF24-105mm F4 L IS USM"));
+        assert_eq!(tags["GPSLatitude"], json!(-33.45));
+        assert_eq!(tags["GPSLongitude"], json!(-70.66));
+        let metadata = crate::rules::extract_metadata(&tags, None);
+        assert_eq!(metadata.camera.as_deref(), Some("Canon EOS R5"));
+        let at = metadata.location.unwrap();
+        assert_eq!((at.latitude, at.longitude), (-33.45, -70.66));
+
+        // North and east are positive; a position without its reference is too.
+        let data = tiff(
+            &[],
+            &[(
+                0x8825,
+                vec![
+                    (0x0001, 2, 2, ascii("N")),
+                    (0x0002, 5, 3, dms([(48, 1), (8, 1), (15, 1)])),
+                    (0x0004, 5, 3, dms([(11, 1), (34, 1), (30, 1)])),
+                ],
+            )],
+        );
+        let mut tags = Tags::new();
+        read(&data, &mut tags);
+        assert_eq!(tags["GPSLatitude"], json!(48.1375));
+        assert_eq!(tags["GPSLongitude"], json!(11.575));
     }
 
     /// REQ-011-10: offsets outside the data, huge counts and loops are ignored.

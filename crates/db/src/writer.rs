@@ -242,13 +242,16 @@ fn write_file(
     // changes of the sidecar.
     let id: i64 = tx.prepare_cached(
         "INSERT INTO media (root_id, rel_path, file_name, kind, size, mtime, sidecar_mtime, width, height, duration,
-                            taken_at, rating, meta_version, sidecar_orientation, meta_error)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, NULL)
+                            taken_at, rating, meta_version, sidecar_orientation, meta_error, camera, lens, latitude,
+                            longitude)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, NULL, ?15, ?16, ?17, ?18)
          ON CONFLICT (root_id, rel_path) DO UPDATE SET
            file_name = excluded.file_name, kind = excluded.kind, size = excluded.size, mtime = excluded.mtime,
            sidecar_mtime = excluded.sidecar_mtime, width = excluded.width, height = excluded.height,
            duration = excluded.duration, taken_at = excluded.taken_at, rating = excluded.rating,
            meta_version = excluded.meta_version, sidecar_orientation = excluded.sidecar_orientation, meta_error = NULL,
+           camera = excluded.camera, lens = excluded.lens, latitude = excluded.latitude,
+           longitude = excluded.longitude,
            thumbhash = CASE WHEN media.size <> excluded.size OR media.mtime <> excluded.mtime
                                  OR media.sidecar_orientation IS NOT excluded.sidecar_orientation THEN NULL
                             ELSE media.thumbhash END,
@@ -272,7 +275,11 @@ fn write_file(
             m.taken_at,
             m.rating,
             METADATA_VERSION,
-            m.sidecar_orientation
+            m.sidecar_orientation,
+            m.camera,
+            m.lens,
+            m.location.map(|at| at.latitude),
+            m.location.map(|at| at.longitude)
         ],
         |row| row.get(0),
     )?;
@@ -497,6 +504,56 @@ mod tests {
         writer.write(root, &[file("b.jpg", &[&["Cities", "Berlin"]])]).unwrap();
 
         assert!(parents(&writer).contains(&("Berlin".into(), Some("Places".into()))));
+    }
+
+    /// REQ-040-01, REQ-040-02: the camera, the lens and the location reach the index and its details, and the editor's
+    /// lists count them, most used first.
+    #[test]
+    fn req_040_01_req_040_02_stores_the_camera_the_lens_and_the_location() {
+        let (mut writer, root) = writer();
+        let shot = |rel_path: &str, camera: Option<&str>, lens: Option<&str>, location| {
+            let mut file = file(rel_path, &[]);
+            file.metadata.camera = camera.map(String::from);
+            file.metadata.lens = lens.map(String::from);
+            file.metadata.location = location;
+            file
+        };
+        let santiago = domain::media::Location::new(-33.45, -70.66);
+        writer
+            .write(
+                root,
+                &[
+                    shot("a.jpg", Some("Canon EOS R5"), Some("RF24-105mm"), santiago),
+                    shot("b.jpg", Some("Canon EOS R5"), None, None),
+                    shot("c.jpg", Some("Apple iPhone 15"), None, None),
+                    shot("d.jpg", None, None, None),
+                ],
+            )
+            .unwrap();
+        let conn = writer.conn();
+        let id = |rel_path: &str| -> i64 {
+            conn.query_row("SELECT id FROM media WHERE rel_path = ?1", [rel_path], |row| row.get(0))
+                .unwrap()
+        };
+
+        let a = crate::media::detail(conn, id("a.jpg")).unwrap().unwrap();
+        assert_eq!(
+            (a.camera.as_deref(), a.lens.as_deref(), a.location),
+            (Some("Canon EOS R5"), Some("RF24-105mm"), santiago)
+        );
+        let d = crate::media::detail(conn, id("d.jpg")).unwrap().unwrap();
+        assert_eq!((d.camera, d.lens, d.location), (None, None, None));
+        assert_eq!(
+            crate::media::cameras(conn).unwrap(),
+            [("Canon EOS R5".to_string(), 2), ("Apple iPhone 15".to_string(), 1)]
+        );
+        assert_eq!(crate::media::lenses(conn).unwrap(), [("RF24-105mm".to_string(), 1)]);
+
+        // Read again without them, they are gone.
+        let a_id = id("a.jpg");
+        writer.write(root, &[shot("a.jpg", None, None, None)]).unwrap();
+        let a = crate::media::detail(writer.conn(), a_id).unwrap().unwrap();
+        assert_eq!((a.camera, a.lens, a.location), (None, None, None));
     }
 
     #[test]
