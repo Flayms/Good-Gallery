@@ -116,7 +116,7 @@ fn selection_bar(ui: &mut egui::Ui, gallery: &mut Gallery) {
     if !crate::WEB {
         // REQ-035-01: the icon alone, so the search bar keeps its room.
         let rename = egui::Button::new(Icon::Pencil.small())
-            .frame(false)
+            .frame_when_inactive(false)
             .min_size(vec2(theme::CONTROL_HEIGHT, theme::CONTROL_HEIGHT));
         let response = ui.add(rename).on_hover_text("Rename the selected files");
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Rename…"));
@@ -125,7 +125,7 @@ fn selection_bar(ui: &mut egui::Ui, gallery: &mut Gallery) {
         }
         // REQ-038-01: beside _Rename…_, the icon alone too.
         let fix = egui::Button::new(Icon::Calendar.small())
-            .frame(false)
+            .frame_when_inactive(false)
             .min_size(vec2(theme::CONTROL_HEIGHT, theme::CONTROL_HEIGHT));
         let response = ui.add(fix).on_hover_text("Fix the dates taken of the selected photos");
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Fix dates…"));
@@ -138,7 +138,7 @@ fn selection_bar(ui: &mut egui::Ui, gallery: &mut Gallery) {
                 "Tag",
                 Icon::ChevronDown.image(theme::ICON_SIZE, theme::muted()),
             ))
-            .frame(false)
+            .frame_when_inactive(false)
             .min_size(vec2(0.0, theme::CONTROL_HEIGHT));
             let response = ui.add(button);
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Tag the selection"));
@@ -156,7 +156,7 @@ fn selection_bar(ui: &mut egui::Ui, gallery: &mut Gallery) {
                 "Rate",
                 Icon::ChevronDown.image(theme::ICON_SIZE, theme::muted()),
             ))
-            .frame(false)
+            .frame_when_inactive(false)
             .min_size(vec2(0.0, theme::CONTROL_HEIGHT));
             let response = ui.add(button);
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Rate the selection"));
@@ -168,7 +168,7 @@ fn selection_bar(ui: &mut egui::Ui, gallery: &mut Gallery) {
                     } else {
                         format!("{stars} stars")
                     };
-                    let row = egui::Button::new(egui::RichText::new(&label)).frame(false);
+                    let row = egui::Button::new(egui::RichText::new(&label)).frame_when_inactive(false);
                     let clicked = ui
                         .horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 2.0;
@@ -245,11 +245,6 @@ pub fn date_range_label(from: Option<NaiveDate>, to: Option<NaiveDate>) -> Strin
     }
 }
 
-/// Whether the toolbar's buttons drop their labels to leave the search bar room: on a narrow window (REQ-019-15).
-fn compact(ui: &egui::Ui) -> bool {
-    ui.ctx().content_rect().width() < crate::sidebar::NARROW
-}
-
 /// _Filters_: media kind, date range and rating; the button shows how many are set (REQ-007-07 … -09,
 /// REQ-013-08).
 fn filters_button(ui: &mut egui::Ui, gallery: &mut Gallery) {
@@ -259,19 +254,19 @@ fn filters_button(ui: &mut egui::Ui, gallery: &mut Gallery) {
     } else {
         "Filters".into()
     };
-    // On a narrow window the icon and the count alone (REQ-019-15).
-    let text = match (count > 0, compact(ui)) {
-        (true, true) => count.to_string(),
-        (true, false) => format!("Filters · {count}"),
-        (false, true) => String::new(),
-        (false, false) => "Filters".into(),
-    };
-    let button = if text.is_empty() {
-        egui::Button::new(Icon::SlidersHorizontal.small())
+    // The icon, and how many filters are set; its name is the tip (REQ-013-19).
+    let button = if count > 0 {
+        egui::Button::new((Icon::Funnel.small(), count.to_string()))
     } else {
-        egui::Button::new((Icon::SlidersHorizontal.small(), text))
+        egui::Button::new(Icon::Funnel.small())
     };
-    let response = ui.add(button.frame(count > 0).min_size(vec2(0.0, theme::CONTROL_HEIGHT)));
+    let response = ui
+        .add(
+            button
+                .frame_when_inactive(count > 0)
+                .min_size(vec2(theme::CONTROL_HEIGHT, theme::CONTROL_HEIGHT)),
+        )
+        .on_hover_text("Filters");
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
     menu(&response, "filters menu", 320.0, |ui| filters_menu(ui, gallery));
 }
@@ -432,7 +427,7 @@ fn section_with_clear(ui: &mut egui::Ui, label: &str, value: &str, clearable: bo
         ui.label(egui::RichText::new(value).color(theme::muted()));
         if clearable {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let response = ui.add(egui::Button::new("Clear").frame(false));
+                let response = ui.add(egui::Button::new("Clear").frame_when_inactive(false));
                 let clear_label = clear_label.to_string();
                 response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &clear_label));
                 cleared = response.clicked();
@@ -471,15 +466,12 @@ fn day_field(ui: &mut egui::Ui, id: &str, day: Option<NaiveDate>, fallback: Naiv
 
 /// The _View_ button, showing the current view's icon, and its menu (REQ-006-01, -06, REQ-016-03, REQ-017-03).
 fn view_button(ui: &mut egui::Ui, gallery: &mut Gallery) {
+    // The icon of the current view; its name is the tip (REQ-013-19).
     let chevron = Icon::ChevronDown.image(theme::ICON_SIZE, theme::muted());
-    let button = if compact(ui) {
-        egui::Button::new((view_icon(gallery.view()).small(), chevron))
-    } else {
-        egui::Button::new((view_icon(gallery.view()).small(), "View", chevron))
-    }
-    .frame(false)
-    .min_size(vec2(0.0, theme::CONTROL_HEIGHT));
-    let response = ui.add(button);
+    let button = egui::Button::new((view_icon(gallery.view()).small(), chevron))
+        .frame_when_inactive(false)
+        .min_size(vec2(0.0, theme::CONTROL_HEIGHT));
+    let response = ui.add(button).on_hover_text("View");
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "View options"));
     menu(&response, "view menu", 288.0, |ui| view_menu(ui, gallery));
 }

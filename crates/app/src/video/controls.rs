@@ -140,7 +140,7 @@ fn icon_button(ui: &mut egui::Ui, rect: Rect, icon: Icon, label: &str, tooltip: 
         ui,
         rect,
         egui::Button::image(icon.small())
-            .frame(false)
+            .frame_when_inactive(false)
             .corner_radius(theme::CONTROL_HEIGHT / 2.0),
     )
     .on_hover_text(tooltip);

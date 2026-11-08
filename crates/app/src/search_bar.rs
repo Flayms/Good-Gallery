@@ -296,7 +296,10 @@ fn tag_chip(ui: &mut egui::Ui, name: &str, mode: TagMode) -> Option<ChipAction> 
                 format!("{name}, included")
             };
             let toggle = ui
-                .add(egui::Button::new((icon.image(12.0, theme::text()), text.size(theme::SIZE_CAPTION))).frame(false))
+                .add(
+                    egui::Button::new((icon.image(12.0, theme::text()), text.size(theme::SIZE_CAPTION)))
+                        .frame_when_inactive(false),
+                )
                 .on_hover_text(if excluded {
                     "Excluded – click to include"
                 } else {
@@ -359,7 +362,7 @@ fn content_chip(ui: &mut egui::Ui, words: &str, searching: bool) -> bool {
             if searching {
                 ui.add(egui::Spinner::new().size(12.0));
             } else {
-                ui.add(Icon::Image.image(12.0, theme::text()));
+                ui.add(Icon::Sparkles.image(12.0, theme::text()));
             }
             let label = ui
                 .label(egui::RichText::new(words).size(theme::SIZE_CAPTION))
@@ -372,7 +375,7 @@ fn content_chip(ui: &mut egui::Ui, words: &str, searching: bool) -> bool {
 }
 
 fn remove_button(ui: &mut egui::Ui, label: &str) -> bool {
-    let response = ui.add(egui::Button::image(Icon::X.image(12.0, theme::muted())).frame(false));
+    let response = ui.add(egui::Button::image(Icon::X.image(12.0, theme::muted())).frame_when_inactive(false));
     let label = label.to_string();
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
     response.clicked()
@@ -398,7 +401,7 @@ fn suggestion_row(
         Choice::Tag(name) if mode == TagMode::Exclude => (Icon::Minus, theme::alert(), name.clone()),
         Choice::Tag(name) => (Icon::Plus, theme::text(), name.clone()),
         Choice::FileName(name) => (Icon::FileSearch, theme::text(), format!("File name contains “{name}”")),
-        Choice::Content(words) => (Icon::Image, theme::text(), format!("Photos showing “{words}”")),
+        Choice::Content(words) => (Icon::Sparkles, theme::text(), format!("Photos showing “{words}”")),
     };
     let icon_rect = Rect::from_min_size(pos2(rect.left() + 8.0, rect.center().y - 8.0), Vec2::splat(16.0));
     icon.image(16.0, color).paint_at(ui, icon_rect);

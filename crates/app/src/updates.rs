@@ -139,7 +139,7 @@ pub fn notice(ui: &mut egui::Ui, updates: &Updates) -> Option<Asked> {
         Phase::Installing(_) => "Downloading update",
     };
     let button = egui::Button::new((Icon::Download.image(theme::ICON_SIZE, theme::muted()), label))
-        .frame(false)
+        .frame_when_inactive(false)
         .min_size(vec2(0.0, theme::CONTROL_HEIGHT));
     let response = ui.add(button);
     let mut asked = None;
