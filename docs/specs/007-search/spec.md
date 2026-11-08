@@ -59,6 +59,7 @@ The user finds media items by the tags already embedded in their files, combined
 - **When** the user sets a start day, an end day or both
 - **Then** only media items whose date taken (else date modified) falls on or between those local calendar days are shown
 - **And** the section shows the range (e.g. "From 1 Jan 2024", "Until …", one day or a span), the date pickers don't offer an end before the start, and _Clear_ removes the range
+- **And** the date pickers' calendars mark no weekends, as a date range has nothing to do with a work week
 
 ### REQ-007-09 · Rating
 
@@ -124,7 +125,7 @@ The user finds media items by the tags already embedded in their files, combined
 | REQ-007-05 | `crates/domain/src/search.rs` › req_007_05_req_008_06_adds_moves_and_removes_tags_case_insensitively; `crates/app/tests/search.rs` › req_007_04_req_007_05_suggests_tags_and_adds_them_as_included_or_excluded | pass (Escape clears the input or leaves it; checked in the app) |
 | REQ-007-06 | `crates/db/src/gallery.rs` › req_007_06_req_007_11_matches_a_case_insensitive_file_name_substring_combined_with_other_filters; `crates/app/tests/search.rs` › req_007_06_filters_by_file_name_from_the_search_bar | pass |
 | REQ-007-07 | `crates/db/src/gallery.rs` › req_007_07_req_007_10_falls_back_to_mtime_and_filters_by_kind_and_library; `crates/app/tests/search.rs` › req_007_07_req_007_09_req_013_08_filters_by_kind_and_rating_and_counts_active_filters | pass |
-| REQ-007-08 | `crates/domain/src/search.rs` › req_007_08_turns_inclusive_local_days_into_a_half_open_range; `crates/db/src/gallery.rs` › req_007_08_filters_by_local_days_both_inclusive; `crates/app/tests/search.rs` › req_007_08_sets_a_date_range_from_the_filters | pass (the end is kept from the start by moving the other day) |
+| REQ-007-08 | `crates/domain/src/search.rs` › req_007_08_turns_inclusive_local_days_into_a_half_open_range; `crates/db/src/gallery.rs` › req_007_08_filters_by_local_days_both_inclusive; `crates/app/tests/search.rs` › req_007_08_sets_a_date_range_from_the_filters; `crates/app/src/toolbar.rs` › req_007_08_the_date_picker_marks_no_weekends | pass (the end is kept from the start by moving the other day) |
 | REQ-007-09 | `crates/db/src/gallery.rs` › req_007_09_filters_by_exact_rating_0_meaning_unrated; `crates/app/tests/search.rs` › req_007_07_req_007_09_req_013_08_filters_by_kind_and_rating_and_counts_active_filters | pass |
 | REQ-007-10 | `crates/domain/src/search.rs` › req_007_10_drops_the_folder_without_a_library; `crates/db/src/gallery.rs` › req_007_10_filters_by_folder_including_subfolders, req_007_07_req_007_10_falls_back_to_mtime_and_filters_by_kind_and_library; `crates/app/tests/search.rs` › req_008_01_req_008_02_req_007_10_limits_the_gallery_to_a_library_and_its_folders | pass |
 | REQ-007-11 | `crates/db/src/gallery.rs` › req_007_06_req_007_11_matches_a_case_insensitive_file_name_substring_combined_with_other_filters | pass |
