@@ -718,6 +718,15 @@ impl Viewer {
                                     places: vec![(media, face.rect)],
                                 });
                             }
+                            // The second person as likely (REQ-032-36).
+                            if let Some(other) = &face.alternative
+                                && ui.button(format!("It's {other}")).clicked()
+                            {
+                                action = Some(FaceAction::Name {
+                                    name: other.clone(),
+                                    places: vec![(media, face.rect)],
+                                });
+                            }
                             if ui.button("Not this person").clicked() {
                                 action = Some(FaceAction::NotThisPerson {
                                     face: face.id,
@@ -2507,9 +2516,11 @@ fn face_clicks(
             6.0,
             4.0,
         ));
-        let text = match &face.suggestion {
-            Some(name) => format!("{name}?"),
-            None => "Who is this?".to_owned(),
+        // A second person as likely shows beside the first (REQ-032-36).
+        let text = match (&face.suggestion, &face.alternative) {
+            (Some(name), Some(other)) => format!("{name}? or {other}?"),
+            (Some(name), None) => format!("{name}?"),
+            _ => "Who is this?".to_owned(),
         };
         let galley = painter.layout_no_wrap(text.clone(), font.clone(), Color32::WHITE);
         let size = vec2(galley.size().x + 12.0, FACE_LABEL_HEIGHT);

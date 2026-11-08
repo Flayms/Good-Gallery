@@ -339,8 +339,39 @@ fn group_card(
                     .image(12.0, egui::Color32::WHITE)
                     .paint_at(ui, Rect::from_center_size(corner.center(), Vec2::splat(12.0)));
                 take_out.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &spoken));
+                // A second person as likely: a click names the face so (REQ-032-36).
+                let other = face
+                    .alternative
+                    .as_ref()
+                    .filter(|_| person.is_some())
+                    .and_then(|other| {
+                        let font = FontId::proportional(theme::SIZE_CAPTION);
+                        let text = format!("or {other}");
+                        let galley = ui.painter().layout_no_wrap(text, font, egui::Color32::WHITE);
+                        let size = vec2((galley.size().x + 10.0).min(shown.rect.width() - 4.0), 18.0);
+                        let chip = Rect::from_min_size(shown.rect.left_bottom() + vec2(2.0, -20.0), size);
+                        let response = ui.interact(chip, ui.make_persistent_id(("or", face.id)), Sense::click());
+                        ui.painter()
+                            .rect_filled(chip, 4.0, egui::Color32::from_black_alpha(153));
+                        ui.painter().with_clip_rect(chip).galley(
+                            chip.left_center() + vec2(5.0, -galley.size().y / 2.0),
+                            galley,
+                            egui::Color32::WHITE,
+                        );
+                        let spoken = format!("Face {} is {other}", face.id);
+                        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &spoken));
+                        response
+                            .on_hover_text(format!("It's {other}"))
+                            .clicked()
+                            .then(|| other.clone())
+                    });
                 if let Some(action) = open_face_menu(&shown, face.id) {
                     chosen = Some(action);
+                } else if let Some(other) = other {
+                    chosen = Some(Chosen::Face(FaceAction::Name {
+                        name: other,
+                        places: vec![(face.media, face.rect)],
+                    }));
                 } else if take_out.on_hover_text(hover).clicked() {
                     chosen = Some(Chosen::Face(match person {
                         Some(name) => FaceAction::NotThisPerson {

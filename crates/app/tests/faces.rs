@@ -447,6 +447,74 @@ fn req_032_24_confirm_or_reject_a_suggested_group() {
     assert_eq!(regions(&exiftool, &dir.join("a.png")), ["Ben"]);
 }
 
+/// The library of [`app`] with Cleo named on `c.png`, and the stranger on `a.png` looking as much like her as like
+/// Ben (REQ-032-36).
+fn app_alike(fixture: &Fixture, exiftool: Option<&Path>) -> (App, PathBuf) {
+    let (conn, dir) = library(fixture, true);
+    let id = |name: &str| -> i64 {
+        conn.query_row("SELECT id FROM media WHERE rel_path = ?1", [name], |row| row.get(0))
+            .unwrap()
+    };
+    let [x, y, w, h] = STRANGER;
+    conn.execute(
+        "INSERT INTO media_faces (media_id, name, x, y, w, h) VALUES (?1, 'Cleo', ?2, ?3, ?4, ?5)",
+        db::rusqlite::params![id("c.png"), x, y, w, h],
+    )
+    .unwrap();
+    let stranger: i64 = conn
+        .query_row(
+            "SELECT id FROM detected_faces WHERE media_id = ?1 AND x > 0.5",
+            [id("a.png")],
+            |row| row.get(0),
+        )
+        .unwrap();
+    faces::store_embedding(&conn, stranger, "recognizer", &[std::f32::consts::FRAC_1_SQRT_2; 2]).unwrap();
+    let mut state = fixture.state(conn).with_faces(&fixture.dir.path().join("data"), None);
+    if let Some(exiftool) = exiftool {
+        let config = media::edit::exiftool_config(&fixture.dir.path().join("data")).unwrap();
+        state = state.with_edit_tools(media::edit::Tools {
+            exiftool: exiftool.to_owned(),
+            config,
+        });
+    }
+    let mut harness = common::harness_with_step(state, 1.0 / 60.0);
+    harness.set_size(egui::vec2(1000.0, 4000.0));
+    settle(&mut harness);
+    (harness, dir)
+}
+
+/// REQ-032-36 (#253): a face as like Cleo as Ben shows both in the viewer, and either can be confirmed.
+#[test]
+fn req_032_36_the_viewer_offers_both_people() {
+    let Some(exiftool) = exiftool() else { return };
+    let fixture = Fixture::new();
+    let (mut harness, dir) = app_alike(&fixture, Some(&exiftool));
+    open_with_faces(&mut harness, "a.png");
+    harness.get_by_label("Unknown face: Ben? or Cleo?").click();
+    settle(&mut harness);
+    harness.get_by_label("It's Ben");
+    harness.get_by_label("It's Cleo").click();
+    settle(&mut harness);
+    assert_eq!(regions(&exiftool, &dir.join("a.png")), ["Cleo"]);
+}
+
+/// REQ-032-36: in Ben's group to confirm, the face that could be Cleo says so, and a click names it Cleo.
+#[test]
+fn req_032_36_a_group_offers_the_second_person() {
+    let Some(exiftool) = exiftool() else { return };
+    let fixture = Fixture::new();
+    let (mut harness, dir) = app_alike(&fixture, Some(&exiftool));
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    harness.get_by_label("Ben? · 1 face");
+    harness.set_size(egui::vec2(1000.0, 700.0));
+    settle(&mut harness);
+    harness.snapshot(common::snapshot_name("people_alternative"));
+    harness.get_by_label_contains("is Cleo").click();
+    settle(&mut harness);
+    assert_eq!(regions(&exiftool, &dir.join("a.png")), ["Cleo"]);
+}
+
 /// REQ-032-24: _Not Ben_ takes the face out of his group, and he isn't suggested for it again.
 #[test]
 fn req_032_24_a_face_that_isnt_the_person_leaves_the_group() {

@@ -2,7 +2,7 @@
 //! that person, worked out here when read, so a change by another program needs no syncing (REQ-032-08).
 
 use crate::Result;
-use domain::face_models::{Detection, group, same_face, suggest, tells_nobody_apart};
+use domain::face_models::{Detection, group, same_face, suggestions, tells_nobody_apart};
 use domain::faces::FaceRegion;
 use rusqlite::{Connection, OptionalExtension, params};
 use std::collections::HashMap;
@@ -562,6 +562,8 @@ pub struct ShownFace {
     pub id: i64,
     pub rect: [f32; 4],
     pub suggestion: Option<String>,
+    /// A second person about as likely (REQ-032-36).
+    pub alternative: Option<String>,
 }
 
 /// The faces without a name on a photo, each with the person it looks most like (REQ-032-09, REQ-032-10).
@@ -586,15 +588,18 @@ pub fn shown_faces(
         .into_iter()
         .map(|face| {
             let rejected: Vec<&str> = face.rejected.iter().map(String::as_str).collect();
-            let suggestion = face
+            let mut likely = face
                 .vector
                 .as_deref()
-                .and_then(|vector| suggest(vector, &known, threshold, &rejected))
+                .map(|vector| suggestions(vector, &known, threshold, &rejected))
+                .unwrap_or_default()
+                .into_iter()
                 .map(|(name, _)| name.to_owned());
             ShownFace {
                 id: face.id,
                 rect: face.rect,
-                suggestion,
+                suggestion: likely.next(),
+                alternative: likely.next(),
             }
         })
         .collect())
@@ -606,6 +611,8 @@ pub struct GroupFace {
     pub id: i64,
     pub media: i64,
     pub rect: [f32; 4],
+    /// A second person about as likely as the group's (REQ-032-36).
+    pub alternative: Option<String>,
 }
 
 /// The faces of _Unconfirmed faces_: those with a suggestion by person (REQ-032-24), the others in groups of similar
@@ -630,18 +637,23 @@ pub fn face_groups(conn: &Connection, detector: &str, recognizer: &str, threshol
         id: face.id,
         media: face.media,
         rect: face.rect,
+        alternative: None,
     };
     let mut suggested: HashMap<&str, Vec<GroupFace>> = HashMap::new();
     let mut rest = Vec::new();
     let mut others = Vec::new();
     for face in &faces {
         let rejected: Vec<&str> = face.rejected.iter().map(String::as_str).collect();
-        let suggestion = face
+        let likely = face
             .vector
             .as_deref()
-            .and_then(|vector| suggest(vector, &known, threshold, &rejected));
-        match suggestion {
-            Some((name, _)) => suggested.entry(name).or_default().push(shown(face)),
+            .map(|vector| suggestions(vector, &known, threshold, &rejected))
+            .unwrap_or_default();
+        match likely.first() {
+            Some((name, _)) => suggested.entry(name).or_default().push(GroupFace {
+                alternative: likely.get(1).map(|(other, _)| (*other).to_owned()),
+                ..shown(face)
+            }),
             None if !face.ungrouped => rest.push(face),
             None => others.push(face),
         }
@@ -696,6 +708,7 @@ pub fn decided_faces(conn: &Connection, detector: &str) -> Result<DecidedFaces> 
                 id: row.get(0)?,
                 media: row.get(1)?,
                 rect: [row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?],
+                alternative: None,
             },
             FaceState::parse(&row.get::<_, String>(6)?),
         ))
@@ -934,6 +947,36 @@ mod tests {
             None,
             "no recognition chosen"
         );
+    }
+
+    /// REQ-032-36 (#253): a face about as like Bob as Anna shows Bob with Anna as the alternative, in the viewer and
+    /// in Bob's group; a face clearly like one has none.
+    #[test]
+    fn req_032_36_a_face_like_two_people_names_both() {
+        let (mut conn, root) = setup();
+        let ids = people(&mut conn, root);
+        let both = insert(&conn, root, "both.jpg", "image");
+        let found = photo(&conn, "d");
+        store_scan(&mut conn, &found, "d", &[face(0.1)]).unwrap();
+        let waiting = pending_faces(&conn, "d", "r", 1).unwrap().remove(0);
+        store_embedding(&conn, waiting.face, "r", &[0.7, 0.71]).unwrap();
+
+        let shown = shown_faces(&conn, both, "d", Some("r"), 0.5).unwrap();
+        assert_eq!(shown[0].suggestion.as_deref(), Some("Bob"));
+        assert_eq!(shown[0].alternative.as_deref(), Some("Anna"));
+        let clearly = shown_faces(&conn, ids[3], "d", Some("r"), 0.5).unwrap();
+        assert_eq!(
+            (clearly[0].suggestion.as_deref(), clearly[0].alternative.as_deref()),
+            (Some("Anna"), None)
+        );
+
+        let groups = face_groups(&conn, "d", "r", 0.5).unwrap();
+        let (_, bob) = groups
+            .suggested
+            .iter()
+            .find(|(name, _)| name == "Bob")
+            .expect("Bob's group");
+        assert_eq!(bob[0].alternative.as_deref(), Some("Anna"));
     }
 
     #[test]

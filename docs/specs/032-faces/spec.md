@@ -267,6 +267,14 @@ Users with large libraries want to find people without tagging each photo by han
 - **When** they aren't the suggested person
 - **Then** the group can be named as someone else in a field, with known people suggested (REQ-032-34), ignored, or marked as not faces, as a group of unknown faces can (REQ-032-15, REQ-032-11)
 
+### REQ-032-36 · A second person as likely
+
+- **Given** an unknown face of the chosen recognition model that is like the suggested person (REQ-032-10)
+- **When** it is about as like a second person: similar enough to be suggested too, and less similar than the first by a small margin at most
+- **Then** the viewer shows both ("Anna? or Bea?"), the closer first, and its popup offers to confirm either
+- **And** in the first person's group to confirm (REQ-032-24) that face says "or Bea", and a click names it Bea
+- **And** at most two people are suggested; a person the user said it isn't is never one of them, and _Not this person_ goes for the first
+
 ## Out of scope
 
 - Videos, pets and the browser version.
@@ -321,3 +329,4 @@ Users with large libraries want to find people without tagging each photo by han
 | REQ-032-33 | `crates/app/tests/faces.rs` › req_032_33_the_viewer_says_what_each_decision_does, req_032_33_the_page_says_what_each_decision_does, req_032_13_renames_and_removes_a_region_on_the_photo (_Remove name_); snapshots `viewer_face_popup`, `people_page` | pass |
 | REQ-032-34 | `crates/app/src/names.rs` › req_032_34_suggests_known_people_starting_with_what_was_typed_first; `crates/app/tests/faces.rs` › req_032_34_picks_a_known_person_on_the_page, req_032_34_picks_a_known_person_with_the_keys, req_032_34_suggests_known_people_in_the_viewer; snapshot `people_page_names` | pass |
 | REQ-032-35 | `crates/app/tests/faces.rs` › req_032_35_a_group_to_confirm_can_be_someone_else_or_ignored; snapshot `people_page` | pass |
+| REQ-032-36 | `crates/domain/src/face_models.rs` › req_032_36_suggests_a_second_person_when_both_are_as_likely; `crates/db/src/faces.rs` › req_032_36_a_face_like_two_people_names_both; `crates/app/tests/faces.rs` › req_032_36_the_viewer_offers_both_people, req_032_36_a_group_offers_the_second_person (snapshot `people_alternative`) (exiftool) | pass, with a margin of 0.05 chosen by hand, not measured on a library |
