@@ -96,7 +96,7 @@ Open **Settings**, add a folder as a library and wait for the first indexing to 
 | Viewer  | E                             | Edit the photo                      |
 | Viewer  | Esc                           | Close (while editing: stop editing; while cropping: leave the crop) |
 | Editing | Ctrl + Z / Ctrl + Shift + Z   | Undo / redo                         |
-| Editing | Hold \\                       | Compare with the original           |
+| Editing | Hold \\                       | Compare with the photo before these changes |
 | Editing | Double-click a slider         | Reset it                            |
 
 Edited photos saved over their original show _Revert to original_ in the info panel.

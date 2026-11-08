@@ -649,10 +649,10 @@ impl EditSession {
         self.placing_focus = true;
     }
 
-    /// The size to fit into the media area while editing draws the photo: the output, or the whole unedited photo while
-    /// comparing (REQ-029-01, REQ-029-05). `None` until the original is there, while the viewer shows the file.
+    /// The size to fit into the media area while editing draws the photo: the output, or the photo as editing started
+    /// while comparing (REQ-029-01, REQ-029-05). `None` until the original is there, while the viewer shows the file.
     pub fn shown_size(&self, compare: bool) -> Option<[f32; 2]> {
-        if !matches!(self.base, Base::Loaded(_)) || (!compare && self.waits_for_subject()) {
+        if !matches!(self.base, Base::Loaded(_)) || self.waits_for_subject(compare) {
             return None;
         }
         let [width, height] = self.target.full_size;
@@ -664,16 +664,23 @@ impl EditSession {
         Some([width as f32, height as f32])
     }
 
-    /// Whether the recipe has parts by the subject that isn't found yet: the preview would show the edit without them,
-    /// so the viewer keeps showing the file meanwhile (REQ-022-05, #151).
-    fn waits_for_subject(&self) -> bool {
-        self.draft.needs_subject() && matches!(self.subject, Subject::Unknown | Subject::Finding(_))
+    /// The recipe drawn: while comparing the one this editing session started with, which is the saved edit or none
+    /// (REQ-021-07, REQ-029-05, #247), else the draft.
+    fn shown_recipe(&self, compare: bool) -> &Recipe {
+        if compare { &self.saved } else { &self.draft }
     }
 
-    /// What is drawn of the photo: while comparing all of it unturned, while cropping all of it turned, else the output.
+    /// Whether the recipe shown has parts by the subject that isn't found yet: the preview would show the edit without
+    /// them, so the viewer keeps showing the file meanwhile (REQ-022-05, #151).
+    fn waits_for_subject(&self, compare: bool) -> bool {
+        self.shown_recipe(compare).needs_subject() && matches!(self.subject, Subject::Unknown | Subject::Finding(_))
+    }
+
+    /// What is drawn of the photo: while comparing the output as editing started, while cropping all of it turned, else
+    /// the output.
     fn shown_geometry(&self, compare: bool) -> Geometry {
         if compare {
-            Geometry::new(None, 0)
+            self.saved.geometry()
         } else if self.cropping {
             Geometry::new(None, self.draft.quarter_turns)
         } else {
@@ -919,16 +926,16 @@ impl EditSession {
     }
 
     /// Keeps the preview's texture of the paintings up to date, once the recipe has any.
-    fn sync_paintings(&mut self) {
+    fn sync_paintings(&mut self, paintings: &[Painting]) {
         let Some(render_state) = &self.render_state else { return };
-        if self.draft.paintings.is_empty() && self.paint_texture.is_none() {
+        if paintings.is_empty() && self.paint_texture.is_none() {
             return;
         }
         let size = self.target.full_size.map(|side| side.max(1) as f32);
         let texture = self
             .paint_texture
             .get_or_insert_with(|| PaintTexture::new(&render_state.device, size));
-        texture.sync(&render_state.queue, &self.draft.paintings);
+        texture.sync(&render_state.queue, paintings);
     }
 
     /// The chosen mask's gradient, if it is one: its handles.
@@ -1118,16 +1125,19 @@ impl EditSession {
         self.commit(recipe);
     }
 
-    /// Draws the photo through the recipe into `rect` (texture coordinates `uv`), clipped to `clip`; the original
+    /// Draws the photo through the recipe into `rect` (texture coordinates `uv`), clipped to `clip`; as editing started
     /// while `compare` (REQ-021-02, REQ-021-07). False while there is nothing to draw yet, or while the parts wait for the
     /// subject (REQ-022-05).
     pub fn paint(&mut self, ui: &egui::Ui, rect: Rect, uv: Rect, clip: Rect, compare: bool, opacity: f32) -> bool {
-        if !compare && self.waits_for_subject() {
+        if self.waits_for_subject(compare) {
             return false;
         }
         let geometry = self.shown_geometry(compare);
-        let tints = self.tints_selection();
-        self.sync_paintings();
+        let recipe = self.shown_recipe(compare).clone();
+        // Without an earlier edit the original as it is, not through a neutral recipe (REQ-021-13).
+        let original = compare && recipe == Recipe::default();
+        let tints = self.tints_selection() && !compare;
+        self.sync_paintings(&recipe.paintings);
         let paintings_view = self.paint_texture.as_ref().map(|texture| texture.view.clone());
         let Base::Loaded(loaded) = &mut self.base else {
             return false;
@@ -1138,7 +1148,7 @@ impl EditSession {
             _ => (None, None),
         };
         // Parts by the mask (4); the selection tinted (8), the background's (16) (REQ-022-03, REQ-022-04).
-        let mut flags = u32::from(compare);
+        let mut flags = u32::from(original);
         // The chosen mask tinted, as index + 1 above the other flags (REQ-030-07).
         if let (Part::Mask(i), true) = (self.part, tints) {
             flags |= (i as u32 + 1) << 8;
@@ -1149,7 +1159,7 @@ impl EditSession {
                 flags |= 8 | if self.part == Part::Background { 16 } else { 0 };
             }
         }
-        let lens_shown = self.draft.blur_lens && self.draft.blur_kind != BlurKind::None && !compare;
+        let lens_shown = recipe.blur_lens && recipe.blur_kind != BlurKind::None && !original;
         if let (Some(view), Some(render_state)) = (&loaded.view, &self.render_state)
             && render_state
                 .renderer
@@ -1172,7 +1182,7 @@ impl EditSession {
             if shown.is_positive() {
                 let flags = flags | if render_state.target_format.is_srgb() { 2 } else { 0 };
                 let uniform = uniform(
-                    &Params::new(&self.draft),
+                    &Params::new(&recipe),
                     geometry,
                     [rect.min.x * ppp, rect.min.y * ppp, rect.max.x * ppp, rect.max.y * ppp],
                     [uv.min.x, uv.min.y, uv.max.x, uv.max.y],
@@ -1198,7 +1208,6 @@ impl EditSession {
         }
         // Without a wgpu renderer: the small copy, rendered on the CPU when the recipe changed.
         let Some(small) = &loaded.small else { return false };
-        let recipe = if compare { Recipe::default() } else { self.draft.clone() };
         if loaded
             .cpu
             .as_ref()
@@ -1254,7 +1263,7 @@ impl EditSession {
                 ui,
                 Icon::SquareSplitHorizontal,
                 "Compare",
-                "Hold to compare with the original (\\)",
+                "Hold to compare with the photo before these changes (\\)",
                 true,
             );
             compare = held.is_pointer_button_down_on();
@@ -3764,14 +3773,81 @@ mod tests {
         };
         assert!(!paint(&mut session, false), "the saved file shows while finding");
         assert_eq!(session.shown_size(false), None);
-        assert!(paint(&mut session, true), "compare shows the original");
-        assert_eq!(session.shown_size(true), Some([10.0, 10.0]));
+        assert!(
+            !paint(&mut session, true),
+            "compare shows the saved file too: it is how editing started"
+        );
+        assert_eq!(session.shown_size(true), None);
 
         tx.send(Mask::new(10, 10, vec![1.0; 100]).ok_or(String::from("mask")))
             .unwrap();
         session.poll();
         assert!(paint(&mut session, false), "the preview with its parts once found");
         assert_eq!(session.shown_size(false), Some([10.0, 10.0]));
+    }
+
+    /// REQ-021-07, REQ-029-05 (#247): _Compare_ shows the photo as this editing session started: a saved photo with its
+    /// saved edit, crop included, and one without an edit as the original.
+    #[test]
+    fn req_021_07_req_029_05_compare_shows_the_photo_as_editing_started() {
+        let ctx = egui::Context::default();
+        let paint = |session: &mut EditSession, compare: bool| -> Option<(Recipe, Geometry, u32)> {
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(10.0, 10.0));
+                let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+                assert!(session.paint(ui, rect, uv, rect, compare, 1.0));
+            })
+            .textures_delta
+            .clear();
+            let Base::Loaded(loaded) = &session.base else {
+                return None;
+            };
+            loaded
+                .cpu
+                .as_ref()
+                .map(|(recipe, geometry, flags, _)| (recipe.clone(), *geometry, *flags))
+        };
+        let loaded = || {
+            Base::Loaded(Box::new(Loaded {
+                view: None,
+                lens: None,
+                small: Some(image::RgbaImage::from_pixel(10, 10, image::Rgba([90, 90, 90, 255]))),
+                cpu: None,
+            }))
+        };
+
+        // Saved with the left half kept: the 10 × 10 file comes from a 20 × 10 original.
+        let saved = Recipe {
+            exposure: 1.0,
+            crop: Some([0.0, 0.0, 0.5, 1.0]),
+            ..Recipe::default()
+        };
+        let mut session = EditSession::new(missing_target([10, 10]), None);
+        session.set_source(".good-gallery/originals/a.jpg".into(), saved.clone());
+        session.base = loaded();
+        let changed = Recipe {
+            exposure: 2.0,
+            crop: None,
+            ..saved.clone()
+        };
+        session.commit(changed.clone());
+
+        let (recipe, geometry, flags) = paint(&mut session, true).unwrap();
+        assert_eq!(recipe, saved, "the saved edit, not the original");
+        assert_eq!(geometry, saved.geometry());
+        assert_eq!(flags & 1, 0, "rendered through the saved edit");
+        assert_eq!(session.shown_size(true), Some([10.0, 10.0]), "the saved crop's size");
+        assert_eq!(paint(&mut session, false).unwrap().0, changed);
+        assert_eq!(session.shown_size(false), Some([20.0, 10.0]));
+
+        let mut session = EditSession::new(missing_target([10, 10]), None);
+        session.set_source("a.jpg".into(), Recipe::default());
+        session.base = loaded();
+        session.commit(changed);
+        let (recipe, geometry, flags) = paint(&mut session, true).unwrap();
+        assert!(recipe.is_neutral());
+        assert_eq!(geometry, Geometry::new(None, 0));
+        assert_eq!(flags & 1, 1, "the original as it is");
     }
 
     /// REQ-021-19: without an earlier edit, the panel shows its sliders as soon as editing starts, before any pixels
