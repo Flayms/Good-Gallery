@@ -41,6 +41,7 @@ impl Gallery {
             suggested_name(&self.search),
             &self.search,
             self.album_libraries.clone(),
+            self.equipment(),
         );
         self.album_dialog = Some(AlbumDialog::Editor(Box::new(editor)));
     }
@@ -52,8 +53,18 @@ impl Gallery {
             album.name.clone(),
             &album.search,
             self.album_libraries.clone(),
+            self.equipment(),
         );
         self.album_dialog = Some(AlbumDialog::Editor(Box::new(editor)));
+    }
+
+    /// The cameras and lenses the editor offers, as the sidebar's data last counted them (REQ-040-05).
+    fn equipment(&self) -> super::album_editor::Equipment {
+        self.sidebar()
+            .map_or_else(Default::default, |data| super::album_editor::Equipment {
+                cameras: data.cameras.clone(),
+                lenses: data.lenses.clone(),
+            })
     }
 
     /// The libraries the editor offers, by id and name.

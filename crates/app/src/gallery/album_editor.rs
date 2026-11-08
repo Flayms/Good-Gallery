@@ -28,11 +28,17 @@ pub enum Kind {
     DurationS,
     Megapixels,
     Orientation,
+    Camera,
+    NotCamera,
+    Lens,
+    NotLens,
+    HasLocation,
+    NoLocation,
     Shows,
 }
 
 impl Kind {
-    const ALL: [Self; 20] = [
+    const ALL: [Self; 26] = [
         Self::Tag,
         Self::NotTag,
         Self::HasPeople,
@@ -52,6 +58,12 @@ impl Kind {
         Self::DurationS,
         Self::Megapixels,
         Self::Orientation,
+        Self::Camera,
+        Self::NotCamera,
+        Self::Lens,
+        Self::NotLens,
+        Self::HasLocation,
+        Self::NoLocation,
         Self::Shows,
     ];
 
@@ -76,6 +88,12 @@ impl Kind {
             Self::DurationS => "Duration (seconds)",
             Self::Megapixels => "Megapixels",
             Self::Orientation => "Orientation is",
+            Self::Camera => "Camera is",
+            Self::NotCamera => "Camera is not",
+            Self::Lens => "Lens is",
+            Self::NotLens => "Lens is not",
+            Self::HasLocation => "Has a location",
+            Self::NoLocation => "Has no location",
             Self::Shows => "Shows",
         }
     }
@@ -85,7 +103,7 @@ impl Kind {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Row {
     pub kind: Kind,
-    /// A tag, file name, folder or content words; the first day of a range.
+    /// A tag, file name, folder, camera, lens or content words; the first day of a range.
     pub text: String,
     /// The last day of a range.
     pub text2: String,
@@ -130,6 +148,15 @@ impl Row {
                 text: name.clone(),
                 ..Self::new(if *is { Kind::Tag } else { Kind::NotTag })
             },
+            Condition::Camera { name, is } => Self {
+                text: name.clone(),
+                ..Self::new(if *is { Kind::Camera } else { Kind::NotCamera })
+            },
+            Condition::Lens { name, is } => Self {
+                text: name.clone(),
+                ..Self::new(if *is { Kind::Lens } else { Kind::NotLens })
+            },
+            Condition::HasLocation(has) => Self::new(if *has { Kind::HasLocation } else { Kind::NoLocation }),
             Condition::HasPeople => Self::new(Kind::HasPeople),
             Condition::HasPlaces => Self::new(Kind::HasPlaces),
             Condition::NoTags => Self::new(Kind::NoTags),
@@ -257,6 +284,16 @@ impl Row {
             Kind::DurationS => Condition::Duration(bound(1.0)),
             Kind::Megapixels => Condition::Megapixels(bound(1.0)),
             Kind::Orientation => Condition::Orientation(self.orientation),
+            Kind::Camera | Kind::NotCamera => Condition::Camera {
+                name: text()?,
+                is: self.kind == Kind::Camera,
+            },
+            Kind::Lens | Kind::NotLens => Condition::Lens {
+                name: text()?,
+                is: self.kind == Kind::Lens,
+            },
+            Kind::HasLocation => Condition::HasLocation(true),
+            Kind::NoLocation => Condition::HasLocation(false),
             Kind::Shows => Condition::Shows(text()?),
         };
         condition.is_complete().then_some(condition)
@@ -279,11 +316,26 @@ pub struct AlbumEditor {
     pub sort_by: SortBy,
     pub descending: bool,
     libraries: Vec<(i64, String)>,
+    /// The cameras and lenses in the index with their counts, most used first (REQ-040-05).
+    equipment: Equipment,
+}
+
+/// The cameras and lenses the camera and lens conditions offer (REQ-040-05).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Equipment {
+    pub cameras: Vec<(String, u64)>,
+    pub lenses: Vec<(String, u64)>,
 }
 
 impl AlbumEditor {
     /// Opens for `search`'s rules, or its filters as conditions matching all (REQ-039-01, REQ-039-06).
-    pub fn new(id: Option<i64>, name: String, search: &GallerySearch, libraries: Vec<(i64, String)>) -> Self {
+    pub fn new(
+        id: Option<i64>,
+        name: String,
+        search: &GallerySearch,
+        libraries: Vec<(i64, String)>,
+        equipment: Equipment,
+    ) -> Self {
         let rules = search
             .rules
             .as_deref()
@@ -297,6 +349,7 @@ impl AlbumEditor {
             sort_by: search.sort_by,
             descending: search.descending,
             libraries,
+            equipment,
         }
     }
 
@@ -462,7 +515,7 @@ impl AlbumEditor {
                                         format!("Condition {}", at + 1),
                                     )
                                 });
-                            value_ui(ui, row, &self.libraries);
+                            value_ui(ui, row, &self.libraries, &self.equipment);
                             if !complete {
                                 ui.add(crate::icons::Icon::TriangleAlert.image(theme::ICON_SIZE, theme::alert()))
                                     .on_hover_text("This condition needs a value");
@@ -487,7 +540,33 @@ impl AlbumEditor {
 }
 
 /// The value fields of `row`'s kind.
-fn value_ui(ui: &mut egui::Ui, row: &mut Row, libraries: &[(i64, String)]) {
+fn value_ui(ui: &mut egui::Ui, row: &mut Row, libraries: &[(i64, String)], equipment: &Equipment) {
+    // A camera or lens of the index, with how many items each (REQ-040-05).
+    let named = |ui: &mut egui::Ui, row: &mut Row, choices: &[(String, u64)], what: &str| {
+        let selected = if row.text.is_empty() {
+            format!("Choose a {}", what.to_lowercase())
+        } else {
+            row.text.clone()
+        };
+        egui::ComboBox::from_id_salt(what)
+            .selected_text(selected)
+            .width(220.0)
+            .show_ui(ui, |ui| {
+                if choices.is_empty() {
+                    ui.label(
+                        RichText::new(format!("No {} in the index yet", what.to_lowercase())).color(theme::muted()),
+                    );
+                }
+                for (name, count) in choices {
+                    let label = format!("{name} ({})", crate::format::count(*count));
+                    if ui.selectable_label(row.text == *name, label).clicked() {
+                        row.text = name.clone();
+                    }
+                }
+            })
+            .response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, what));
+    };
     let text = |ui: &mut egui::Ui, value: &mut String, hint: &str| {
         ui.add(egui::TextEdit::singleline(value).desired_width(150.0).hint_text(hint))
             .widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, hint));
@@ -523,7 +602,9 @@ fn value_ui(ui: &mut egui::Ui, row: &mut Row, libraries: &[(i64, String)]) {
         Kind::Tag | Kind::NotTag => text(ui, &mut row.text, "Tag"),
         Kind::Name => text(ui, &mut row.text, "Part of the name"),
         Kind::Shows => text(ui, &mut row.text, "a dog on a beach"),
-        Kind::HasPeople | Kind::HasPlaces | Kind::NoTags => {}
+        Kind::HasPeople | Kind::HasPlaces | Kind::NoTags | Kind::HasLocation | Kind::NoLocation => {}
+        Kind::Camera | Kind::NotCamera => named(ui, row, &equipment.cameras, "Camera"),
+        Kind::Lens | Kind::NotLens => named(ui, row, &equipment.lenses, "Lens"),
         Kind::MediaKind => {
             egui::ComboBox::from_id_salt("media kind")
                 .selected_text(if row.media == MediaKind::Video {

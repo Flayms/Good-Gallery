@@ -56,6 +56,10 @@ const FILES: &[(&str, &str)] = &[
         include_str!("../migrations/0018_content_vectors.sql"),
     ),
     ("0019_edit_history", include_str!("../migrations/0019_edit_history.sql")),
+    (
+        "0020_media_camera_location",
+        include_str!("../migrations/0020_media_camera_location.sql"),
+    ),
 ];
 const JOURNAL: &str = include_str!("../migrations/meta/_journal.json");
 

@@ -947,6 +947,24 @@ mod tests {
         assert_eq!(f.value::<i64>("SELECT count(*) FROM tags"), 0);
     }
 
+    /// REQ-040-03: rows read before cameras, lenses and locations (metadata version 3) are read again.
+    #[test]
+    fn req_040_03_rereads_libraries_indexed_before_cameras_lenses_and_locations() {
+        let mut f = Fixture::new();
+        f.touch("a.jpg", "x");
+        f.scan(ScanScope::Full);
+        f.writer
+            .conn()
+            .execute("UPDATE media SET meta_version = 3", [])
+            .unwrap();
+        f.metadata.take_reads();
+
+        assert_eq!(f.scan(ScanScope::Full), ScanOutcome::Completed);
+
+        assert_eq!(f.metadata.take_reads(), ["a.jpg"]);
+        assert_eq!(f.value::<i64>("SELECT meta_version FROM media"), 4);
+    }
+
     #[test]
     fn req_002_05_rereads_files_from_an_older_metadata_extractor() {
         let mut f = Fixture::new();

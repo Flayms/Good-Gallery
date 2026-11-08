@@ -946,6 +946,65 @@ fn req_009_08_req_013_13_toggles_the_info_panel_with_the_details() {
     assert!(!viewer(&harness).info_open());
 }
 
+/// REQ-040-04: the info panel shows what a photo was taken with and where, after its size; a photo without them has
+/// none of the three.
+#[test]
+fn req_040_04_shows_the_camera_the_lens_and_the_coordinates() {
+    let fixture = Fixture::new();
+    let dir = fixture.folder("photos");
+    let conn = db::open_in_memory().unwrap();
+    let root = db::libraries::insert(&conn, &dir, "Photos", LibraryStatus::Online)
+        .unwrap()
+        .id;
+    let mut shot = indexed(0, "shot.png", MediaKind::Image, &[], None);
+    shot.metadata.camera = Some("Canon EOS R5".into());
+    shot.metadata.lens = Some("RF24-105mm F4 L IS USM".into());
+    shot.metadata.location = domain::media::Location::new(-33.45, -70.66);
+    let mut bare = indexed(1, "bare.png", MediaKind::Image, &[], None);
+    bare.metadata = MediaMetadata::default();
+    for name in ["shot.png", "bare.png"] {
+        image::RgbImage::from_pixel(400, 300, image::Rgb([40, 120, 200]))
+            .save(std::path::Path::new(&dir).join(name))
+            .unwrap();
+    }
+    let mut writer = IndexWriter::new(conn);
+    writer.write(root, &[shot, bare]).unwrap();
+    let mut harness = common::harness_with_step(fixture.state(writer.into()), 1.0 / 60.0);
+    harness.set_size(egui::vec2(900.0, 900.0));
+    settle(&mut harness);
+    open(&mut harness, "shot.png");
+    harness.key_press(Key::I);
+    settle(&mut harness);
+
+    let top = |harness: &App, label: &str| {
+        harness
+            .query_all_by_label(label)
+            .find(|node| node.rect().left() > 500.0)
+            .map(|node| node.rect().top())
+    };
+    let fields = ["Size", "Camera", "Lens", "Coordinates", "Rating"];
+    let tops: Vec<f32> = fields
+        .iter()
+        .map(|label| top(&harness, label).unwrap_or_else(|| panic!("{label} in the info panel")))
+        .collect();
+    assert!(tops.is_sorted_by(|a, b| a < b), "{fields:?} in order: {tops:?}");
+    for value in ["Canon EOS R5", "RF24-105mm F4 L IS USM", "33.4500° S, 70.6600° W"] {
+        assert!(harness.query_by_label(value).is_some(), "{value}");
+    }
+
+    harness.key_press(Key::Escape);
+    settle(&mut harness);
+    open(&mut harness, "bare.png");
+    if !viewer(&harness).info_open() {
+        harness.key_press(Key::I);
+    }
+    settle(&mut harness);
+    assert!(top(&harness, "Size").is_some(), "the panel shows the bare photo");
+    for label in ["Camera", "Lens", "Coordinates"] {
+        assert_eq!(top(&harness, label), None, "{label} for a photo without one");
+    }
+}
+
 /// REQ-009-08, REQ-026-01: a photo without a date taken, dimensions, rating or tags keeps those fields' titles (tag groups with _Add_ under
 /// them, the others with nothing), in their usual order; a photo has no duration.
 #[test]

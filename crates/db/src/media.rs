@@ -35,6 +35,10 @@ pub struct MediaDetail {
     pub edit: Option<domain::edit::SavedEdit>,
     /// Named face regions on the upright photo (REQ-004-13).
     pub faces: Vec<FaceRegion>,
+    /// What it was taken with, and where (REQ-040-04).
+    pub camera: Option<String>,
+    pub lens: Option<String>,
+    pub location: Option<domain::media::Location>,
     /// Whether the chosen detection model looked at it yet (REQ-032-21).
     pub face_scan: crate::faces::FaceScan,
 }
@@ -99,6 +103,26 @@ pub fn file_in(libraries: &[crate::libraries::Library], root_id: i64, rel_path: 
     absolute_path(&library.path, rel_path)
 }
 
+/// The cameras in the index with how many items each, most used first (REQ-040-05).
+pub fn cameras(conn: &Connection) -> Result<Vec<(String, u64)>> {
+    named_counts(conn, "camera")
+}
+
+/// The lenses in the index with how many items each, most used first (REQ-040-05).
+pub fn lenses(conn: &Connection) -> Result<Vec<(String, u64)>> {
+    named_counts(conn, "lens")
+}
+
+/// The values of a `media` text column with their counts, most used first, then by name.
+fn named_counts(conn: &Connection, column: &str) -> Result<Vec<(String, u64)>> {
+    let mut stmt = conn.prepare_cached(&format!(
+        "SELECT {column}, count(*) AS n FROM media WHERE {column} IS NOT NULL GROUP BY {column}
+         ORDER BY n DESC, {column} COLLATE NOCASE"
+    ))?;
+    let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get::<_, i64>(1)? as u64)))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 /// The details of media item `id`, or `None` if it isn't indexed (REQ-009-12) or its path leaves its library
 /// (REQ-011-08).
 pub fn detail(conn: &Connection, id: i64) -> Result<Option<MediaDetail>> {
@@ -106,7 +130,8 @@ pub fn detail(conn: &Connection, id: i64) -> Result<Option<MediaDetail>> {
         .prepare_cached(
             "SELECT media.id, media.root_id, library_roots.label, library_roots.path, media.rel_path, media.file_name,
                     media.kind, media.size, media.width, media.height, media.duration, media.taken_at, media.mtime,
-                    media.thumbhash, media.rating, media_edits.recipe, media_edits.source, media_edits.history
+                    media.thumbhash, media.rating, media_edits.recipe, media_edits.source, media_edits.history,
+                    media.camera, media.lens, media.latitude, media.longitude
              FROM media JOIN library_roots ON library_roots.id = media.root_id
              LEFT JOIN media_edits ON media_edits.media_id = media.id
              WHERE media.id = ?1",
@@ -139,6 +164,12 @@ pub fn detail(conn: &Connection, id: i64) -> Result<Option<MediaDetail>> {
                 .map(|edit| edit.with_history(row.get::<_, Option<String>>(17).ok().flatten().as_deref())),
                 faces: Vec::new(),
                 face_scan: Default::default(),
+                camera: row.get(18)?,
+                lens: row.get(19)?,
+                location: match (row.get::<_, Option<f64>>(20)?, row.get::<_, Option<f64>>(21)?) {
+                    (Some(latitude), Some(longitude)) => domain::media::Location::new(latitude, longitude),
+                    _ => None,
+                },
             }))
         })
         .optional()?

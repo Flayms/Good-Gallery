@@ -200,6 +200,9 @@ pub struct SidebarData {
     pub folders: Option<(i64, Vec<FolderNode>)>,
     /// Smart albums by name, with their counts (REQ-034-02).
     pub albums: Vec<db::smart_albums::AlbumRow>,
+    /// The cameras and lenses in the index, most used first, for the smart album editor (REQ-040-05).
+    pub cameras: Vec<(String, u64)>,
+    pub lenses: Vec<(String, u64)>,
 }
 
 /// Most used tags outside both categories in the sidebar (REQ-008-05).
@@ -274,6 +277,8 @@ fn load_sidebar(conn: &Connection, library: Option<i64>, content: &ContentSlot) 
         albums: db::smart_albums::rows(conn, &|search| {
             resolve(conn, search, content).unwrap_or_else(|_| search.with_content_matches(&[]))
         })?,
+        cameras: db::media::cameras(conn)?,
+        lenses: db::media::lenses(conn)?,
     })
 }
 

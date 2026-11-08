@@ -45,11 +45,57 @@ pub struct MediaMetadata {
     pub edit: Option<Box<crate::edit::SavedEdit>>,
     /// Named face regions on the upright photo (REQ-004-13).
     pub faces: Vec<crate::faces::FaceRegion>,
+    /// The camera, as [`camera_name`] names it (REQ-040-01).
+    pub camera: Option<String>,
+    /// The lens (REQ-040-01).
+    pub lens: Option<String>,
+    /// Where it was taken (REQ-040-02).
+    pub location: Option<Location>,
+}
+
+/// A GPS position in degrees, south and west negative (REQ-040-02).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Location {
+    pub latitude: f64,
+    pub longitude: f64,
+}
+
+impl Location {
+    /// A position on Earth, or `None` for one out of range or at exactly 0° / 0°, which cameras write without a fix.
+    pub fn new(latitude: f64, longitude: f64) -> Option<Self> {
+        let on_earth =
+            latitude.is_finite() && longitude.is_finite() && latitude.abs() <= 90.0 && longitude.abs() <= 180.0;
+        (on_earth && (latitude, longitude) != (0.0, 0.0)).then_some(Self { latitude, longitude })
+    }
+}
+
+/// The camera as a person names it: the make, then the model, but the make only once when the model starts with its
+/// first word ("Canon EOS R5", "NIKON D750" from "NIKON CORPORATION"), or whichever of the two is there (REQ-040-01).
+pub fn camera_name(make: Option<&str>, model: Option<&str>) -> Option<String> {
+    let clean = |text: Option<&str>| {
+        let text = text?.split_whitespace().collect::<Vec<_>>().join(" ");
+        (!text.is_empty()).then_some(text)
+    };
+    match (clean(make), clean(model)) {
+        (Some(make), Some(model)) => {
+            let brand = make.split(' ').next().unwrap_or_default().to_lowercase();
+            let first = model.split(' ').next().unwrap_or_default().to_lowercase();
+            Some(
+                if first == brand || model.to_lowercase().starts_with(&make.to_lowercase()) {
+                    model
+                } else {
+                    format!("{make} {model}")
+                },
+            )
+        }
+        (make, model) => model.or(make),
+    }
 }
 
 /// Bump when metadata extraction changes, so the indexer re-reads files already marked unchanged. Existing indexes were
-/// written at version 1; version 2 reads orientations from sidecars (REQ-004-12), version 3 face regions (REQ-004-13).
-pub const METADATA_VERSION: i64 = 3;
+/// written at version 1; version 2 reads orientations from sidecars (REQ-004-12), version 3 face regions (REQ-004-13),
+/// version 4 the camera, lens and location (REQ-040-03).
+pub const METADATA_VERSION: i64 = 4;
 
 fn extension(file_name: &str) -> Option<String> {
     let dot = file_name.rfind('.')?;
@@ -161,6 +207,47 @@ pub fn rel_path_in(root: &str, file: &str, windows: bool) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn req_040_01_names_the_camera_with_its_make_once() {
+        let name = |make, model| camera_name(make, model);
+        assert_eq!(
+            name(Some("Canon"), Some("Canon EOS R5")).as_deref(),
+            Some("Canon EOS R5")
+        );
+        assert_eq!(
+            name(Some("NIKON CORPORATION"), Some("NIKON D750")).as_deref(),
+            Some("NIKON D750")
+        );
+        assert_eq!(
+            name(Some("Apple"), Some("iPhone 15 Pro")).as_deref(),
+            Some("Apple iPhone 15 Pro")
+        );
+        assert_eq!(name(Some("FUJIFILM"), Some("X-T5")).as_deref(), Some("FUJIFILM X-T5"));
+        assert_eq!(
+            name(Some("  SONY "), Some("ILCE-7M4  ")).as_deref(),
+            Some("SONY ILCE-7M4")
+        );
+        assert_eq!(name(None, Some("GoPro HERO12")).as_deref(), Some("GoPro HERO12"));
+        assert_eq!(name(Some("DJI"), None).as_deref(), Some("DJI"));
+        assert_eq!(name(Some(" "), Some("")), None);
+    }
+
+    #[test]
+    fn req_040_02_keeps_only_positions_on_earth_with_a_fix() {
+        assert_eq!(
+            Location::new(-33.45, -70.66),
+            Some(Location {
+                latitude: -33.45,
+                longitude: -70.66
+            })
+        );
+        assert!(Location::new(90.0, 180.0).is_some());
+        assert!(Location::new(0.0, 12.5).is_some(), "on the equator");
+        for (latitude, longitude) in [(0.0, 0.0), (91.0, 10.0), (10.0, -180.5), (f64::NAN, 1.0)] {
+            assert_eq!(Location::new(latitude, longitude), None, "{latitude}, {longitude}");
+        }
+    }
 
     #[test]
     fn req_011_08_refuses_relative_paths_that_leave_the_library() {

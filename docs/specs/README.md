@@ -43,6 +43,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [037-faster-analysis](037-faster-analysis/spec.md)       | Faces and content search on several cores, with the same results | Implemented |
 | [038-fix-dates](038-fix-dates/spec.md)                   | Fix the date taken of a selection from another date, the filename or a shift, with undo | Implemented |
 | [039-smart-album-rules](039-smart-album-rules/spec.md)   | Smart albums from a list of conditions, matching all or any, with relative dates | Implemented |
+| [040-camera-lens-and-location](040-camera-lens-and-location/spec.md) | Camera, lens and GPS position in the index, the info panel and smart albums | Implemented |
 
 ## Conventions
 

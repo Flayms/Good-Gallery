@@ -248,6 +248,18 @@ fn rule_condition(
         Condition::Orientation(Orientation::Portrait) => "media.height > media.width".into(),
         Condition::Orientation(Orientation::Landscape) => "media.width > media.height".into(),
         Condition::Orientation(Orientation::Square) => "media.width = media.height".into(),
+        // `IS NOT` also matches items without one (REQ-040-05).
+        Condition::Camera { name, is } | Condition::Lens { name, is } => {
+            let column = if matches!(condition, Condition::Camera { .. }) {
+                "media.camera"
+            } else {
+                "media.lens"
+            };
+            let op = if *is { "=" } else { "IS NOT" };
+            format!("{column} {op} {}", param(name.trim().to_string().into()))
+        }
+        Condition::HasLocation(true) => "media.latitude IS NOT NULL".into(),
+        Condition::HasLocation(false) => "media.latitude IS NULL".into(),
         // Words not yet matched by content search match nothing (REQ-036-07).
         Condition::Shows(_) => "0".into(),
         Condition::Matches(ids) if ids.is_empty() => "0".into(),
