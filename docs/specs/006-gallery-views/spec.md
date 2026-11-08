@@ -137,6 +137,12 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 - **Then** the month and year the gallery would show at its top with the thumb at that height show beside the bar at the pointer ("June 2023"), above any year they would touch
 - **And** they follow the pointer, and go away with the years
 
+### REQ-006-20 · Jump to a month
+
+- **Given** the month and year showing at the pointer beside the scrollbar (REQ-006-19)
+- **When** the user clicks them
+- **Then** the gallery scrolls to the first item of that month, as clicking a year does to the year's first item (REQ-006-16)
+
 ## Out of scope
 
 - Selecting multiple media items, and drag and drop to other apps.
@@ -173,3 +179,4 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 | REQ-006-17 | `crates/app/src/format.rs` › req_006_17_names_the_month_and_year; `crates/app/tests/gallery.rs` › req_006_17_shows_the_month_while_dragging_the_scrollbar (snapshot `gallery_years_dragging`) | pass |
 | REQ-006-18 | `crates/app/tests/gallery.rs` › req_006_18_scrolling_shows_the_years_until_it_stops, req_006_18_a_jump_shows_no_years | pass |
 | REQ-006-19 | `crates/domain/src/scrollbar.rs` › req_006_19_the_offset_at_a_height_undoes_the_thumbs_center; `crates/app/tests/gallery.rs` › req_006_19_shows_the_month_at_the_pointer (snapshot `gallery_years_hover`) | pass |
+| REQ-006-20 | `crates/app/tests/gallery.rs` › req_006_20_clicking_the_month_jumps_to_its_first_item | pass |
