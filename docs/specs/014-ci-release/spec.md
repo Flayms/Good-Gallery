@@ -115,8 +115,8 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 ### REQ-014-16 · README screenshots from Windows
 
 - **Given** the README's screenshots, which show the Windows app
-- **When** a week has passed, or someone starts the _Screenshots_ workflow by hand
-- **Then** GitHub renders them on Windows with `cargo xtask screenshots`, in the dark appearance and the app's full window size, with no hover from wherever the mouse pointer lies
+- **When** a release has been published (REQ-014-08), or someone starts the _Screenshots_ workflow by hand
+- **Then** GitHub renders them on Windows with `cargo xtask screenshots`, after a release from the released commit, in the dark appearance and the app's full window size, with no hover from wherever the mouse pointer lies
 - **And** if any changed, it pushes them to the `screenshots-refresh` branch, replacing what was there, and its summary links to a pull request from that branch, which a person opens so CI checks it; if none changed, it says so and pushes nothing
 - **Given** a pull request that changes the workflow or `xtask/src/screenshots.rs`
 - **When** CI runs

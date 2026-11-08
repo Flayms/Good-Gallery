@@ -334,14 +334,36 @@ fn req_031_08_the_installer_is_tested_before_a_release() {
     }
 }
 
-/// REQ-014-16: the README screenshots are rendered on Windows every week or by hand and pushed to a branch of their
-/// own for a person to open a pull request from; a pull request that changes the workflow only renders them.
+/// REQ-014-16: the README screenshots are rendered on Windows after every successful release or by hand and pushed to a
+/// branch of their own for a person to open a pull request from; a pull request that changes the workflow only renders
+/// them.
 #[test]
 fn req_014_16_renders_the_readme_screenshots_on_windows_and_offers_them() {
     let screenshots = workflow("screenshots.yml");
-    for trigger in ["workflow_dispatch:", "schedule:", "- cron:", "pull_request:"] {
+    for trigger in [
+        "workflow_dispatch:",
+        "workflow_run:",
+        "workflows: [Release]",
+        "types: [completed]",
+        "pull_request:",
+    ] {
         assert!(screenshots.contains(trigger), "screenshots.yml lacks {trigger}");
     }
+    // Not on a timer: a week without a release has nothing new to show.
+    assert!(!screenshots.contains("schedule:"), "screenshots.yml runs on a schedule");
+    assert!(
+        screenshots
+            .contains("if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'"),
+        "a failed release renders them"
+    );
+    assert!(
+        screenshots.contains("ref: ${{ github.event.workflow_run.head_sha || github.sha }}"),
+        "not the released commit"
+    );
+    assert!(
+        workflow("release.yml").contains("name: Release"),
+        "the release workflow is named otherwise"
+    );
     for path in ["xtask/src/screenshots.rs", ".github/workflows/screenshots.yml"] {
         assert!(
             screenshots.contains(&format!("- {path}")),
