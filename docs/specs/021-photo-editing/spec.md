@@ -167,6 +167,31 @@ Users who find a photo that is too dark, has a color cast or lacks punch fix it 
 - **When** the pointer rests on one
 - **Then** it says what happens to the photo and its original: _Save_ replaces it and keeps the original as a backup, _Save as copy_ leaves it and adds the edited photo beside it, _Save without backup_ replaces it and deletes the original for good
 
+### REQ-021-24 · Versions
+
+- **Given** a photo saved with an edit whose unedited original still exists (REQ-021-11)
+- **When** it is saved over the original again
+- **Then** the file keeps the edit it held before as an earlier version, with the time of each save, up to 20 versions, dropping the oldest beyond
+- **And** a copy saved with _Save as copy_ starts its own versions with the edit it was saved with, and a photo saved without a backup keeps none (REQ-021-22)
+- **And** a photo saved before versions were kept has its saved edit as its only version, without a time
+- **When** the user opens _Versions_ next to _Undo_ while editing
+- **Then** it lists the versions, newest first, the one the file holds marked as saved, and then _Original_; without an earlier edit, or without its original, _Versions_ is disabled
+
+### REQ-021-25 · Go back to a version
+
+- **Given** _Versions_ is open
+- **When** the pointer rests on a version or _Original_
+- **Then** the photo shows as that version while the pointer stays, without changing the edit
+- **When** the user clicks one
+- **Then** the edit becomes that version's as one change, which can be undone, and saving it adds a new version: no version is lost by going back to an older one
+
+### REQ-021-26 · Clear version history
+
+- **Given** a photo with earlier versions, in an online library
+- **When** the user chooses _Clear version history_ in the info panel and confirms
+- **Then** the file keeps only the version it holds: the photo, its other metadata, its date modified and its original stay
+- **And** a photo with one version doesn't offer it
+
 ## Out of scope
 
 - Crop and rotate, which are in spec 029.
@@ -208,3 +233,6 @@ Users who find a photo that is too dark, has a color cast or lacks punch fix it 
 | REQ-021-21 | `crates/domain/src/edit.rs` › req_029_09_req_021_21_size_and_quality_are_changes_and_round_trip; `crates/media/src/edit.rs` › req_021_21_a_lower_quality_makes_a_smaller_file; `crates/app/tests/edit.rs` › req_029_09_req_021_21_the_size_section_sets_the_long_edge_and_the_quality | pass |
 | REQ-021-22 | `crates/media/src/edit.rs` › req_021_22_saves_without_a_backup_and_deletes_an_old_one, req_021_22_an_edited_copy_leaves_its_original; `crates/app/tests/edit.rs` › req_021_22_saves_without_a_backup_after_asking | pass |
 | REQ-021-23 | `crates/app/tests/edit.rs` › req_021_23_the_save_buttons_say_what_they_do | pass |
+| REQ-021-24 | `crates/domain/src/versions.rs` › req_021_24_a_save_adds_a_version_and_the_oldest_go, req_021_24_reads_what_a_file_holds; `crates/media/src/edit.rs` › req_021_24_req_021_26_saves_carry_the_versions_and_clearing_keeps_the_last (exiftool); `crates/db/src/writer.rs` › req_021_11_stores_the_saved_edit_and_drops_it_when_the_file_has_none; `crates/meta/src/rules.rs` › req_021_11_reads_the_saved_edit_from_the_file_but_not_from_its_sidecar; `crates/app/tests/edit.rs` › req_021_24_req_021_25_lists_previews_and_restores_versions (snapshot `edit_versions`), req_021_24_no_versions_without_an_earlier_edit | pass |
+| REQ-021-25 | `crates/app/tests/edit.rs` › req_021_24_req_021_25_lists_previews_and_restores_versions | pass |
+| REQ-021-26 | `crates/domain/src/versions.rs` › req_021_26_clearing_keeps_the_current_version; `crates/media/src/edit.rs` › req_021_24_req_021_26_saves_carry_the_versions_and_clearing_keeps_the_last (exiftool); `crates/app/tests/edit.rs` › req_021_26_clears_the_version_history_after_asking (exiftool), req_021_26_no_clearing_with_one_version | pass |

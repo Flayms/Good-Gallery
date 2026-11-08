@@ -23,6 +23,8 @@ pub enum InfoAction {
     FilterByTag(String),
     /// Put the unedited original back (REQ-021-12).
     Revert,
+    /// Remove the photo's earlier versions (REQ-021-26).
+    ClearHistory,
     /// The user clicked the star for this many stars (REQ-024-02).
     Rate(i64),
     /// Add the tag with this path (REQ-026-01).
@@ -127,6 +129,20 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths, writable:
             } else {
                 let name = edit.source.rsplit('/').next().unwrap_or(&edit.source);
                 ui.add(egui::Label::new(format!("An edited copy of {name}")).wrap());
+            }
+            let earlier = edit.versions().len().saturating_sub(1);
+            if writable
+                && earlier > 0
+                && ui
+                    .button("Clear version history")
+                    .on_hover_text(format!(
+                        "Removes the {} earlier saved {} of this photo. Its current edit and its original stay.",
+                        earlier,
+                        if earlier == 1 { "version" } else { "versions" }
+                    ))
+                    .clicked()
+            {
+                clicked = Some(InfoAction::ClearHistory);
             }
         });
     }

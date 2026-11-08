@@ -106,7 +106,7 @@ pub fn detail(conn: &Connection, id: i64) -> Result<Option<MediaDetail>> {
         .prepare_cached(
             "SELECT media.id, media.root_id, library_roots.label, library_roots.path, media.rel_path, media.file_name,
                     media.kind, media.size, media.width, media.height, media.duration, media.taken_at, media.mtime,
-                    media.thumbhash, media.rating, media_edits.recipe, media_edits.source
+                    media.thumbhash, media.rating, media_edits.recipe, media_edits.source, media_edits.history
              FROM media JOIN library_roots ON library_roots.id = media.root_id
              LEFT JOIN media_edits ON media_edits.media_id = media.id
              WHERE media.id = ?1",
@@ -135,7 +135,8 @@ pub fn detail(conn: &Connection, id: i64) -> Result<Option<MediaDetail>> {
                 edit: domain::edit::SavedEdit::parse(
                     row.get::<_, Option<String>>(15)?.as_deref(),
                     row.get::<_, Option<String>>(16)?.as_deref(),
-                ),
+                )
+                .map(|edit| edit.with_history(row.get::<_, Option<String>>(17).ok().flatten().as_deref())),
                 faces: Vec::new(),
                 face_scan: Default::default(),
             }))

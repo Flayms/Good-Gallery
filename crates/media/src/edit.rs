@@ -26,6 +26,7 @@ const EXIFTOOL_CONFIG: &str = r"%Image::ExifTool::UserDefined = (
     WRITABLE => 'string',
     EditRecipe => { },
     EditSource => { },
+    EditHistory => { },
 );
 1;
 ";
@@ -83,6 +84,8 @@ pub struct SaveRequest {
     pub subject: Option<Arc<Mask>>,
     /// Turns an original without an orientation of its own (REQ-004-12).
     pub sidecar_orientation: Option<u8>,
+    /// The file's versions so far, ending with the edit it holds; none for an unedited photo (REQ-021-24).
+    pub history: Vec<domain::versions::Version>,
 }
 
 /// exiftool and its configuration for the `gg` namespace.
@@ -139,8 +142,18 @@ pub fn save(tools: &Tools, request: &SaveRequest) -> Result<String, EditError> {
             }
             source = backup;
         }
-        // Without a backup there is no original to edit again from, so the file keeps no edit (REQ-021-22).
-        let edit = (request.copy || request.keep_original).then_some((&request.recipe, source_rel.as_str()));
+        // Without a backup there is no original to edit again from, so the file keeps no edit (REQ-021-22). A copy
+        // starts its own versions, a replacement adds one to the file's (REQ-021-24).
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_or(0, |since| since.as_secs() as i64);
+        let earlier: &[domain::versions::Version] = if request.copy { &[] } else { &request.history };
+        let history = domain::versions::to_json(&domain::versions::after_save(earlier, &request.recipe, now));
+        let edit = (request.copy || request.keep_original).then_some(SavedFields {
+            recipe: &request.recipe,
+            source: source_rel.as_str(),
+            history: &history,
+        });
         copy_metadata(tools, &source, &rendered, &tagged, edit)?;
         let _ = std::fs::remove_file(&rendered);
         let new = if move_regions(
@@ -184,6 +197,33 @@ pub fn save(tools: &Tools, request: &SaveRequest) -> Result<String, EditError> {
         remove_empty_backup_folders(&request.library, &source);
     }
     Ok(target_rel)
+}
+
+/// Keeps only the last of `versions` in the file's history (REQ-021-26). Only the tag changes: the photo, its other
+/// metadata and its date modified stay, and the file is replaced safely (REQ-021-16).
+pub fn clear_history(
+    tools: &Tools,
+    library: &Path,
+    rel_path: &str,
+    versions: &[domain::versions::Version],
+) -> Result<(), EditError> {
+    let file = db_path(library, rel_path).ok_or(EditError::UnsafePath)?;
+    let modified = std::fs::metadata(&file)?.modified()?;
+    let history = domain::versions::to_json(&domain::versions::cleared(versions));
+    let temp = crate::replace::beside(&file, "history");
+    let args = [
+        "-charset".into(),
+        "filename=utf8".into(),
+        format!("-XMP-gg:EditHistory={history}"),
+    ];
+    let written = crate::replace::exiftool_into(&tools.exiftool, Some(&tools.config), &args, &file, &temp)
+        .map_err(metadata_error)
+        .and_then(|()| set_mtime(&temp, modified).map_err(EditError::from))
+        .and_then(|()| crate::replace::replace(&temp, &file).map_err(EditError::from));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    written
 }
 
 /// Puts the unedited original back in place of `rel_path` and removes its backup (REQ-021-12).
@@ -558,13 +598,13 @@ fn encode(decoded: &Decoded, format: Format, quality: u8) -> Result<Vec<u8>, Edi
 
 /// The arguments that copy `source`'s metadata into a photo and record the edit: everything but embedded previews
 /// (they would show the unedited photo), the color profile, orientation 1 (the pixels are upright).
-/// With `edit` the recipe and where its original is, else no edit at all (REQ-021-22).
-fn metadata_args(source: &Path, edit: Option<(&Recipe, &str)>) -> Vec<String> {
+/// With `edit` the recipe, where its original is and the versions, else no edit at all (REQ-021-22).
+fn metadata_args(source: &Path, edit: Option<SavedFields>) -> Vec<String> {
     let path = |path: &Path| path.to_string_lossy().into_owned();
-    let (recipe, source_rel) = match edit {
-        Some((recipe, source_rel)) => (recipe.to_json(), source_rel.to_string()),
+    let (recipe, source_rel, history) = match edit {
+        Some(edit) => (edit.recipe.to_json(), edit.source.to_string(), edit.history.to_string()),
         // Empty values delete the tags, also ones copied from the source.
-        None => (String::new(), String::new()),
+        None => (String::new(), String::new(), String::new()),
     };
     vec![
         "-charset".into(),
@@ -579,8 +619,18 @@ fn metadata_args(source: &Path, edit: Option<(&Recipe, &str)>) -> Vec<String> {
         "-Orientation#=1".into(),
         format!("-XMP-gg:EditRecipe={recipe}"),
         format!("-XMP-gg:EditSource={source_rel}"),
+        format!("-XMP-gg:EditHistory={history}"),
         "-ignoreMinorErrors".into(),
     ]
+}
+
+/// What a saved file records of its edit in our namespace.
+#[derive(Clone, Copy)]
+struct SavedFields<'a> {
+    recipe: &'a Recipe,
+    source: &'a str,
+    /// `gg:EditHistory` (REQ-021-24).
+    history: &'a str,
 }
 
 /// Writes `from` with `source`'s metadata and the recipe into the new file `to` with exiftool (REQ-011-09).
@@ -589,7 +639,7 @@ fn copy_metadata(
     source: &Path,
     from: &Path,
     to: &Path,
-    edit: Option<(&Recipe, &str)>,
+    edit: Option<SavedFields>,
 ) -> Result<(), EditError> {
     let args = metadata_args(source, edit);
     crate::replace::exiftool_into(&tools.exiftool, Some(&tools.config), &args, from, to).map_err(metadata_error)
@@ -741,6 +791,7 @@ mod tests {
                 mtime: MtimeOnSave::Keep,
                 subject: None,
                 sidecar_orientation: None,
+                history: Vec::new(),
             }
         }
 
@@ -952,6 +1003,67 @@ mod tests {
             revert(&lib.root(), "a.jpg", MtimeOnSave::Keep),
             Err(EditError::NoOriginal)
         ));
+    }
+
+    /// The versions a file holds (`gg:EditHistory`).
+    fn versions_of(lib: &Library, rel: &str) -> Vec<domain::versions::Version> {
+        domain::versions::parse(
+            lib.read(rel)
+                .get("XMP-gg:EditHistory")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        )
+    }
+
+    /// REQ-021-24, REQ-021-26 (#247): saving over the original adds a dated version to the file's history, a copy starts
+    /// its own, saving without a backup keeps none, and clearing keeps only the current one without touching the photo.
+    #[test]
+    fn req_021_24_req_021_26_saves_carry_the_versions_and_clearing_keeps_the_last() {
+        let Some(lib) = library() else { return };
+        jpeg_file(&lib, "a.jpg");
+        save(&lib.tools, &lib.request("a.jpg", brighter(), false)).unwrap();
+        let first = versions_of(&lib, "a.jpg");
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].recipe, brighter());
+        assert!(first[0].saved_at.is_some_and(|t| t > 1_700_000_000), "dated");
+
+        let mut darker = Recipe::default();
+        Adjustment::Exposure.set(&mut darker, -1.0);
+        let mut again = lib.request("a.jpg", darker.clone(), false);
+        again.source = ".good-gallery/originals/a.jpg".into();
+        again.history = first.clone();
+        save(&lib.tools, &again).unwrap();
+        let both = versions_of(&lib, "a.jpg");
+        assert_eq!(both.len(), 2);
+        assert_eq!((&both[0], &both[1].recipe), (&first[0], &darker));
+
+        // A copy of it starts its own history.
+        let mut copy = again.clone();
+        copy.copy = true;
+        let copy = save(&lib.tools, &copy).unwrap();
+        assert_eq!(versions_of(&lib, &copy).len(), 1);
+
+        let pixels = std::fs::read(lib.path("a.jpg")).unwrap();
+        let before = mtime(&lib.path("a.jpg"));
+        clear_history(&lib.tools, &lib.root(), "a.jpg", &both).unwrap();
+        assert_eq!(versions_of(&lib, "a.jpg"), vec![both[1].clone()]);
+        let tags = lib.read("a.jpg");
+        assert_eq!(
+            tags["XMP-gg:EditSource"], ".good-gallery/originals/a.jpg",
+            "the edit stays"
+        );
+        assert_eq!(mtime(&lib.path("a.jpg")), before, "not a change of the photo");
+        assert_eq!(
+            image::open(lib.path("a.jpg")).unwrap().to_rgb8(),
+            image::load_from_memory(&pixels).unwrap().to_rgb8()
+        );
+
+        // Without a backup the file keeps no edit, so no versions either (REQ-021-22).
+        let mut without = lib.without_backup("a.jpg", darker);
+        without.source = ".good-gallery/originals/a.jpg".into();
+        without.history = both;
+        save(&lib.tools, &without).unwrap();
+        assert!(!lib.read("a.jpg").contains_key("XMP-gg:EditHistory"));
     }
 
     #[test]

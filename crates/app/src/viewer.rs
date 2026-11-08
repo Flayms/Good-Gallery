@@ -65,6 +65,8 @@ pub enum Action {
     SaveEdit(Box<edit::SaveEdit>),
     /// Ask to put the unedited original of this item back (REQ-021-12).
     Revert(crate::state::RevertTarget),
+    /// Ask to remove this photo's earlier versions (REQ-021-26).
+    ClearHistory(crate::state::ClearHistory),
     /// Rate an item (spec 024); the viewer stays.
     Rate(crate::state::Rate),
     /// Add or remove a tag of an item (spec 026); the viewer stays.
@@ -1082,6 +1084,7 @@ impl Viewer {
             Some(Action::Copy(path, orientation)) => Some(Action::Copy(path, orientation)),
             Some(Action::SaveEdit(request)) => Some(Action::SaveEdit(request)),
             Some(Action::Revert(target)) => Some(Action::Revert(target)),
+            Some(Action::ClearHistory(clear)) => Some(Action::ClearHistory(clear)),
             Some(Action::Rate(rate)) => Some(Action::Rate(rate)),
             Some(Action::Tag(change)) => Some(Action::Tag(change)),
             Some(Action::Face(face)) => Some(Action::Face(face)),
@@ -1735,6 +1738,10 @@ impl Viewer {
             info::InfoAction::Revert => gallery
                 .cached_detail(self.id)
                 .map(|detail| Action::Revert(crate::state::RevertTarget::of(detail))),
+            info::InfoAction::ClearHistory => gallery
+                .cached_detail(self.id)
+                .and_then(crate::state::ClearHistory::of)
+                .map(Action::ClearHistory),
             info::InfoAction::Rate(stars) => gallery
                 .cached_detail(self.id)
                 .map(|detail| Action::Rate(crate::state::Rate::toggle_detail(detail, stars))),

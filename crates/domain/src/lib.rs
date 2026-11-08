@@ -34,6 +34,7 @@ pub mod tags;
 pub mod thumbs;
 pub mod time_zone;
 pub mod update;
+pub mod versions;
 pub mod video;
 pub mod view;
 pub mod viewer;
