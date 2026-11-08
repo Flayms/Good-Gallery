@@ -406,6 +406,32 @@ fn req_013_02_req_013_08_the_toolbar_fits_the_minimum_window_beside_the_window_c
     }
 }
 
+/// REQ-013-08: _Filters_ sit right beside the search bar, also with a count; _View_ stays at the right end.
+#[test]
+fn req_013_08_filters_sit_beside_the_search_bar() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture);
+    harness.set_size(egui::vec2(1400.0, 800.0));
+    for kind in [None, Some(MediaKind::Image)] {
+        let mut filtered = search(&harness);
+        filtered.kind = kind;
+        harness.state_mut().gallery.as_mut().unwrap().set_search(filtered);
+        settle(&mut harness);
+        let label = if kind.is_some() { "Filters, 1 active" } else { "Filters" };
+        let field = harness
+            .get_by_role_and_label(Role::TextInput, app::search_bar::LABEL)
+            .rect();
+        let filters = harness.get_by_role_and_label(Role::Button, label).rect();
+        let view = harness.get_by_role_and_label(Role::Button, "View options").rect();
+        let gap = filters.left() - field.right();
+        assert!((0.0..=24.0).contains(&gap), "{label} is {gap} from the search bar");
+        assert!(
+            view.left() - filters.right() > 200.0,
+            "{label} isn't by the search bar but by View"
+        );
+    }
+}
+
 /// The y of a sidebar row, to compare the groups' order.
 fn row_top(harness: &App, label: &str) -> f32 {
     harness.get_by_role_and_label(Role::Button, label).rect().top()

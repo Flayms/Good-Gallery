@@ -78,7 +78,6 @@ pub fn show(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if let Some(gallery) = gallery.as_deref_mut() {
                 view_button(ui, gallery);
-                filters_button(ui, gallery);
                 // Next to the search bar, which stays (REQ-025-06).
                 if gallery.selected_count() > 0 {
                     ui.add_space(8.0);
@@ -101,7 +100,16 @@ pub fn show(
                     asked.show_sidebar = crate::sidebar::show_button(ui);
                 }
                 if let Some(gallery) = gallery {
-                    search_bar::show(ui, bar_state, gallery);
+                    // _Filters_ narrow the gallery like the search, so they sit right beside it (REQ-013-08). Its
+                    // width changes with the filter count; the search bar leaves room for it as last drawn.
+                    let width_id = egui::Id::NULL.with("filters button width");
+                    let reserved = ui.ctx().data(|d| d.get_temp(width_id)).unwrap_or(theme::CONTROL_HEIGHT);
+                    search_bar::show(ui, bar_state, gallery, reserved + ui.spacing().item_spacing.x);
+                    let width = filters_button(ui, gallery).rect.width();
+                    if width != reserved {
+                        ui.ctx().data_mut(|d| d.insert_temp(width_id, width));
+                        ui.ctx().request_discard("the Filters button changed its width");
+                    }
                 }
             });
         });
@@ -247,7 +255,7 @@ pub fn date_range_label(from: Option<NaiveDate>, to: Option<NaiveDate>) -> Strin
 
 /// _Filters_: media kind, date range and rating; the button shows how many are set (REQ-007-07 … -09,
 /// REQ-013-08).
-fn filters_button(ui: &mut egui::Ui, gallery: &mut Gallery) {
+fn filters_button(ui: &mut egui::Ui, gallery: &mut Gallery) -> egui::Response {
     let count = gallery.search().active_filter_count();
     let label = if count > 0 {
         format!("Filters, {count} active")
@@ -269,6 +277,7 @@ fn filters_button(ui: &mut egui::Ui, gallery: &mut Gallery) {
         .on_hover_text("Filters");
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
     menu(&response, "filters menu", 320.0, |ui| filters_menu(ui, gallery));
+    response
 }
 
 /// A menu under its button. It closes on Escape or a click outside both, but not on clicks in overlays on top of it

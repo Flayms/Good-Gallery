@@ -37,10 +37,10 @@ enum Choice {
     Content(String),
 }
 
-/// Draws the search bar into `ui`'s remaining width.
-pub fn show(ui: &mut egui::Ui, bar: &mut SearchBar, gallery: &mut Gallery) {
+/// Draws the search bar into `ui`'s remaining width, less `reserve` for what follows it.
+pub fn show(ui: &mut egui::Ui, bar: &mut SearchBar, gallery: &mut Gallery, reserve: f32) {
     let search = gallery.search().clone();
-    let width = ui.available_width().min(MAX_WIDTH);
+    let width = (ui.available_width() - reserve).clamp(0.0, MAX_WIDTH);
     let (field, _) = ui.allocate_exact_size(vec2(width, theme::CONTROL_HEIGHT), egui::Sense::hover());
     ui.painter().rect_filled(field, theme::RADIUS_CONTROL, theme::field());
     let mut next = search.clone();

@@ -146,6 +146,7 @@ Add every pitfall you hit. A trap in a tool, library, OS or our tests that we ca
 ## CI
 
 * **The ruleset on `main` requires checks named exactly `Lint` and `Test`**: renaming or splitting CI jobs leaves those checks "Expected — Waiting for status" forever and blocks merging. The `Lint` and `Test` jobs in `ci.yml` sum up the per-platform jobs; add a new job to their `needs`.
+* **`req_009_25_copies_a_photo_from_its_tile_and_the_viewer` can fail under a loaded `cargo test --workspace`.** Its `copied_image` waits ten frames for the copy after `wait_for_jobs`; alone it passes. Rerun the `context_menu` tests before suspecting a change.
 * **CI tests Linux in an `ubuntu:26.04` container**: the `*_linux.png` snapshots come from its lavapipe and the video tests from its mpv 0.41. Rewrite the snapshots when the container's release changes. The release archive is built on `ubuntu-latest` (an older glibc runs on more distributions).
 
 ## Linux

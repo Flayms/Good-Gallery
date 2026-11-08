@@ -61,6 +61,7 @@ Good Gallery gets its own look instead of a UI toolkit's defaults. The photos ar
 - **When** the toolbar is shown
 - **Then** every control is visible and usable without overlapping another or scrolling
 - **And** the media kind, date and rating filters are grouped under _Filters_, which shows how many of them are active and offers _Clear filters_
+- **And** _Filters_ sits right beside the search bar, as both narrow the gallery, while _View_ stays at the toolbar's right end
 - **And** gallery view, zoom, sort field and sort direction are grouped under _View_
 
 ### ~~REQ-013-09 · Immersive viewer~~
@@ -167,7 +168,7 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 | REQ-013-05 | `crates/app/src/theme.rs` › req_013_05_req_020_04_the_focus_ring_shows_over_any_background; `crates/app/tests/settings.rs` › req_013_05_rings_the_focused_control_but_not_a_focused_text_input | pass |
 | REQ-013-06 | `crates/app/src/glass.rs` › req_013_06_req_013_14_surfaces_are_opaque_without_glass; `crates/app/src/theme.rs` › req_013_07_req_013_06_follows_the_os_settings_for_motion_and_transparency | pass |
 | REQ-013-07 | `crates/app/src/theme.rs` › req_013_07_req_013_06_follows_the_os_settings_for_motion_and_transparency; `crates/app/tests/viewer.rs` › req_013_12_the_photo_grows_from_its_tile_and_back | pass (the OS setting is read again every 2 s) |
-| REQ-013-08 | `crates/domain/src/search.rs` › req_013_08_counts_and_clears_only_the_filters_under_filters; `crates/app/tests/search.rs` › req_007_07_req_007_09_req_013_08_filters_by_kind_and_rating_and_counts_active_filters, req_013_02_req_013_08_the_toolbar_fits_the_minimum_window_beside_the_window_controls | pass |
+| REQ-013-08 | `crates/domain/src/search.rs` › req_013_08_counts_and_clears_only_the_filters_under_filters; `crates/app/tests/search.rs` › req_007_07_req_007_09_req_013_08_filters_by_kind_and_rating_and_counts_active_filters, req_013_02_req_013_08_the_toolbar_fits_the_minimum_window_beside_the_window_controls, req_013_08_filters_sit_beside_the_search_bar | pass |
 | ~~REQ-013-09~~ | — | no test (deprecated) |
 | REQ-013-10 | `crates/domain/src/viewer.rs` › req_013_10_hides_the_controls_only_when_idle_and_nothing_keeps_them; `crates/app/tests/viewer.rs` › req_013_10_controls_step_aside_while_idle, req_015_06_the_filmstrip_steps_aside_with_the_controls; `crates/app/tests/viewer_video.rs` › req_013_10_a_paused_video_keeps_the_controls | pass |
 | REQ-013-11 | `crates/domain/src/ambient.rs` › req_013_11_darkens_and_desaturates_bright_colors, req_013_11_keeps_the_hue_of_the_photo, req_013_11_leaves_dark_muted_colors_as_they_are, req_013_11_mixes_the_tint_into_the_glass; `crates/app/tests/viewer.rs` › req_013_11_tints_the_chrome_with_the_items_colors | pass |
