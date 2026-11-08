@@ -15,6 +15,7 @@ domain.workspace = true
 image.workspace = true
 indexer.workspace = true
 media.workspace = true
+miniz_oxide.workspace = true
 regex.workspace = true
 resvg = { version = "=0.45.1", default-features = false }
 serde.workspace = true

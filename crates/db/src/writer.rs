@@ -307,8 +307,20 @@ fn write_file(
         }
     }
     let mut insert = tx.prepare_cached("INSERT INTO media_tags (media_id, tag_id) VALUES (?1, ?2)")?;
-    for tag in linked {
+    for &tag in &linked {
         insert.execute([id, tag])?;
+    }
+    // The town nearest to its position, unless it has a place of its own (REQ-042-01, REQ-042-02).
+    let tagged_place = m.tags.iter().any(|path| {
+        path.len() >= 2 && domain::tags::category_of_root(&path[0]) == Some(domain::tags::TagCategory::Places)
+    });
+    if !tagged_place
+        && let Some(place) = m.location.and_then(domain::places::place_at)
+        && let Some(tag) = tag_path_id(tx, tag_ids, parents, &place.tag_path())?
+        && !linked.contains(&tag)
+    {
+        tx.prepare_cached("INSERT INTO media_tags (media_id, tag_id, from_position) VALUES (?1, ?2, 1)")?
+            .execute([id, tag])?;
     }
     Ok(())
 }
@@ -554,6 +566,77 @@ mod tests {
         writer.write(root, &[shot("a.jpg", None, None, None)]).unwrap();
         let a = crate::media::detail(writer.conn(), a_id).unwrap().unwrap();
         assert_eq!((a.camera, a.lens, a.location), (None, None, None));
+    }
+
+    /// REQ-042-01, REQ-042-02, REQ-042-03: an item with a position and no Places tag of its own counts under the
+    /// nearest town, marked as coming from the position; its own Places tag replaces it, other tags don't; the details
+    /// point out a position the own tags disagree with.
+    #[test]
+    fn req_042_01_req_042_02_req_042_03_names_places_from_positions_unless_tagged() {
+        let (mut writer, root) = writer();
+        let munich = domain::media::Location::new(48.1374, 11.5755);
+        let located = |rel_path: &str, tags: &[&[&str]]| {
+            let mut file = file(rel_path, tags);
+            file.metadata.location = munich;
+            file
+        };
+        writer
+            .write(
+                root,
+                &[
+                    located("bare.jpg", &[]),
+                    located("beach.jpg", &[&["Beach"]]),
+                    located("rome.jpg", &[&["Places", "Italy", "Rome"]]),
+                    located("munich.jpg", &[&["Location", "Germany", "Bavaria", "Munich"]]),
+                    file("nowhere.jpg", &[]),
+                ],
+            )
+            .unwrap();
+        assert_eq!(tags_of(&writer, "bare.jpg"), ["Munich"]);
+        assert_eq!(tags_of(&writer, "beach.jpg"), ["Beach", "Munich"]);
+        assert_eq!(tags_of(&writer, "rome.jpg"), ["Rome"], "its own place wins");
+        assert!(tags_of(&writer, "nowhere.jpg").is_empty());
+        let parents = parents(&writer);
+        for (tag, parent) in [("Munich", "Bavaria"), ("Bavaria", "Germany"), ("Germany", "Places")] {
+            assert!(
+                parents.contains(&(tag.to_string(), Some(parent.to_string()))),
+                "{tag} under {parent}: {parents:?}"
+            );
+        }
+
+        let conn = writer.conn();
+        let places = crate::tags::category(conn, domain::tags::TagCategory::Places).unwrap();
+        let count = |name: &str| places.iter().find(|tag| tag.name == name).map(|tag| tag.count);
+        assert_eq!(
+            count("Munich"),
+            Some(3),
+            "bare, beach and the tagged one in the sidebar"
+        );
+        assert_eq!(count("Germany"), Some(3));
+        let detail = |rel_path: &str| {
+            let id: i64 = conn
+                .query_row("SELECT id FROM media WHERE rel_path = ?1", [rel_path], |row| row.get(0))
+                .unwrap();
+            crate::media::detail(conn, id).unwrap().unwrap()
+        };
+        let bare = detail("bare.jpg");
+        assert!(bare.tags.iter().all(|tag| tag.from_position), "{:?}", bare.tags);
+        assert_eq!(bare.position_place, None, "nothing to point out");
+        let beach = detail("beach.jpg");
+        let from_position: Vec<(&str, bool)> = beach.tags.iter().map(|t| (t.name.as_str(), t.from_position)).collect();
+        assert_eq!(from_position, [("Beach", false), ("Munich", true)]);
+        assert_eq!(
+            detail("rome.jpg").position_place.map(|place| place.city),
+            Some("Munich"),
+            "tagged Rome, taken near Munich"
+        );
+        assert_eq!(detail("munich.jpg").position_place, None, "they agree");
+
+        // Tagged by hand and read again, the position's place goes.
+        writer
+            .write(root, &[located("bare.jpg", &[&["Places", "Austria", "Salzburg"]])])
+            .unwrap();
+        assert_eq!(tags_of(&writer, "bare.jpg"), ["Salzburg"]);
     }
 
     #[test]

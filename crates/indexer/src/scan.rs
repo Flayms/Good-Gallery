@@ -962,7 +962,25 @@ mod tests {
         assert_eq!(f.scan(ScanScope::Full), ScanOutcome::Completed);
 
         assert_eq!(f.metadata.take_reads(), ["a.jpg"]);
-        assert_eq!(f.value::<i64>("SELECT meta_version FROM media"), 4);
+        assert_eq!(f.value::<i64>("SELECT meta_version FROM media"), METADATA_VERSION);
+    }
+
+    /// REQ-042-04: rows read before places were named from positions (metadata version 4) are read again.
+    #[test]
+    fn req_042_04_rereads_libraries_indexed_before_places_from_positions() {
+        let mut f = Fixture::new();
+        f.touch("a.jpg", "x");
+        f.scan(ScanScope::Full);
+        f.writer
+            .conn()
+            .execute("UPDATE media SET meta_version = 4", [])
+            .unwrap();
+        f.metadata.take_reads();
+
+        assert_eq!(f.scan(ScanScope::Full), ScanOutcome::Completed);
+
+        assert_eq!(f.metadata.take_reads(), ["a.jpg"]);
+        assert_eq!(f.value::<i64>("SELECT meta_version FROM media"), 5);
     }
 
     #[test]

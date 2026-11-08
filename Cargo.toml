@@ -28,6 +28,8 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock", "s
 crossbeam-channel = "0.5.17"
 icu_datetime = { version = "2.4.0", default-features = false, features = ["compiled_data"] }
 icu_locale_core = "2.4.0"
+# Inflates the bundled places (spec 042); pure Rust, so the browser version has it too.
+miniz_oxide = "0.8.9"
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg"] }
 fast_image_resize = { version = "6.1.0", default-features = false, features = ["image"] }
 jpeg-decoder = { version = "0.3.2", default-features = false }

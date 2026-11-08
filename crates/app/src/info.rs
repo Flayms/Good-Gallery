@@ -195,12 +195,13 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths, writable:
         ),
         ("Tags", None, None, &paths.tags),
     ] {
-        let names: Vec<&str> = detail
+        let chips: Vec<(&str, bool)> = detail
             .tags
             .iter()
             .filter(|tag| tag.category == category)
-            .map(|tag| tag.name.as_str())
+            .map(|tag| (tag.name.as_str(), tag.from_position))
             .collect();
+        let names: Vec<&str> = chips.iter().map(|(name, _)| *name).collect();
         let adding_id = ui.scope_id().with(("adding tag", label));
         let adding = ui.data(|data| data.get_temp::<String>(adding_id));
         if names.is_empty() && !editable {
@@ -212,18 +213,30 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths, writable:
         if !names.is_empty() || adding.is_none() {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                for name in &names {
+                for (name, from_position) in &chips {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    let chip = egui::Button::new(egui::RichText::new(*name).size(theme::SIZE_CAPTION))
-                        .fill(theme::selected())
-                        .corner_radius(theme::RADIUS_CONTROL)
-                        .min_size(egui::vec2(0.0, 24.0));
+                    let text = egui::RichText::new(*name).size(theme::SIZE_CAPTION);
+                    // A place from the position has a pin, and isn't the file's to remove (REQ-042-03).
+                    let chip = if *from_position {
+                        egui::Button::image_and_text(Icon::MapPin.image(12.0, theme::muted()), text)
+                    } else {
+                        egui::Button::new(text)
+                    }
+                    .fill(theme::selected())
+                    .corner_radius(theme::RADIUS_CONTROL)
+                    .min_size(egui::vec2(0.0, 24.0));
                     let response = ui.add(chip);
-                    let response = response.on_hover_text(format!("Show only {name}"));
+                    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, *name));
+                    let tip = if *from_position {
+                        format!("Near its position. Show only {name}")
+                    } else {
+                        format!("Show only {name}")
+                    };
+                    let response = response.on_hover_text(tip);
                     if response.clicked() {
                         clicked = Some(InfoAction::FilterByTag((*name).to_owned()));
                     }
-                    if editable {
+                    if editable && !from_position {
                         let remove = ui
                             .add(
                                 egui::Button::image(Icon::X.image(12.0, theme::muted()))
@@ -258,6 +271,31 @@ pub fn show(ui: &mut egui::Ui, detail: &MediaDetail, paths: &TagPaths, writable:
                     }
                 }
             });
+        }
+        if chips.iter().any(|(_, from_position)| *from_position) {
+            ui.label(
+                egui::RichText::new("From its position")
+                    .size(theme::SIZE_CAPTION)
+                    .color(theme::muted()),
+            );
+        }
+        // Its own places name somewhere else than its position (REQ-042-02).
+        if category == Some(TagCategory::Places)
+            && let Some(place) = &detail.position_place
+        {
+            let near = [Some(place.city), place.region, Some(place.country)]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(", ");
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!("Its position is near {near}"))
+                        .size(theme::SIZE_CAPTION)
+                        .color(theme::muted()),
+                )
+                .wrap(),
+            );
         }
         if let Some(mut typed) = adding {
             let opened = ui

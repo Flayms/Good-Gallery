@@ -94,8 +94,8 @@ pub fn camera_name(make: Option<&str>, model: Option<&str>) -> Option<String> {
 
 /// Bump when metadata extraction changes, so the indexer re-reads files already marked unchanged. Existing indexes were
 /// written at version 1; version 2 reads orientations from sidecars (REQ-004-12), version 3 face regions (REQ-004-13),
-/// version 4 the camera, lens and location (REQ-040-03).
-pub const METADATA_VERSION: i64 = 4;
+/// version 4 the camera, lens and location (REQ-040-03), version 5 places from positions (REQ-042-04).
+pub const METADATA_VERSION: i64 = 5;
 
 fn extension(file_name: &str) -> Option<String> {
     let dot = file_name.rfind('.')?;
