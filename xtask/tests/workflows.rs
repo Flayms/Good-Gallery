@@ -333,3 +333,69 @@ fn req_031_08_the_installer_is_tested_before_a_release() {
         assert!(packages.contains(part), "windows-packages.yml lacks {part}");
     }
 }
+
+/// REQ-014-16: the README screenshots are rendered on Windows after every successful release or by hand, never for pull
+/// requests, and pushed to a branch of their own for a person to open a pull request from.
+#[test]
+fn req_014_16_renders_the_readme_screenshots_on_windows_and_offers_them() {
+    let screenshots = workflow("screenshots.yml");
+    for trigger in [
+        "workflow_dispatch:",
+        "workflow_run:",
+        "workflows: [Release]",
+        "types: [completed]",
+    ] {
+        assert!(screenshots.contains(trigger), "screenshots.yml lacks {trigger}");
+    }
+    // Not on a timer: a week without a release has nothing new to show. Not for pull requests: 15 minutes on Windows
+    // would slow them down.
+    for trigger in ["schedule:", "pull_request:", "push:"] {
+        assert!(!screenshots.contains(trigger), "screenshots.yml runs on {trigger}");
+    }
+    assert!(
+        screenshots
+            .contains("if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'"),
+        "a failed release renders them"
+    );
+    assert!(
+        screenshots.contains("ref: ${{ github.event.workflow_run.head_sha || github.sha }}"),
+        "not the released commit"
+    );
+    assert!(
+        workflow("release.yml").contains("name: Release"),
+        "the release workflow is named otherwise"
+    );
+    assert!(
+        screenshots.contains("runs-on: windows-latest"),
+        "not rendered on Windows"
+    );
+    assert!(commands(&screenshots).contains(&"cargo xtask screenshots"));
+    assert!(
+        screenshots.contains("Set-DisplayResolution -Width 1920 -Height 1080"),
+        "the runner's small screen shrinks the window"
+    );
+    assert!(screenshots.contains("contents: write"), "it can't push the branch");
+
+    let push = &screenshots[screenshots.find("git push").expect("nothing is pushed")..];
+    assert!(
+        push.starts_with("git push --force origin screenshots-refresh"),
+        "pushed elsewhere"
+    );
+    let step = &screenshots[..screenshots.find("git push").unwrap()];
+    let step = &step[step.rfind("- name:").expect("the push is a named step")..];
+    assert!(
+        step.contains("git diff --quiet -- docs/screenshots"),
+        "unchanged screenshots are pushed"
+    );
+    assert!(
+        screenshots.contains("compare/main...screenshots-refresh"),
+        "no link to a pull request"
+    );
+    // A pull request opened with the workflow's token wouldn't run CI, and this repository doesn't let workflows
+    // open them.
+    assert!(!screenshots.contains("gh pr create"), "a person opens the pull request");
+    assert!(
+        screenshots.contains("upload-artifact"),
+        "the renders aren't attached to the run"
+    );
+}

@@ -30,6 +30,7 @@ A smart album (spec 034) keeps a search as the filters bar builds it: all of its
   - _Size_, _Duration_ or _Megapixels_: at least or at most
   - _Orientation_ is portrait, landscape or square
   - _Shows_ words, by content search (REQ-036-05), at most one per album
+  - _Camera_ and _Lens_ is or is not, _has a location_ or _has no location_ (REQ-040-05)
 - **And** each condition can be removed, and an incomplete one (no value yet) is marked and keeps _Save_ off
 
 ### REQ-039-03 · All or any

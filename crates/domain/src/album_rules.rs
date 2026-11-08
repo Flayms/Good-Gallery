@@ -133,6 +133,18 @@ pub enum Condition {
     Duration(Bound),
     Megapixels(Bound),
     Orientation(Orientation),
+    /// Taken with this camera, or not (`is: false`, which also matches items without one) (REQ-040-05).
+    Camera {
+        name: String,
+        is: bool,
+    },
+    /// Taken with this lens, or not, as [`Condition::Camera`].
+    Lens {
+        name: String,
+        is: bool,
+    },
+    /// Has a GPS position, or has none (REQ-040-05).
+    HasLocation(bool),
     /// Content search words (REQ-036-05); at most one per album.
     Shows(String),
     /// The items content words matched, put in place of [`Condition::Shows`] before a query; never stored.
@@ -143,7 +155,11 @@ impl Condition {
     /// It has every value it needs (REQ-039-02).
     pub fn is_complete(&self) -> bool {
         match self {
-            Self::Tag { name, .. } | Self::NameContains(name) | Self::Shows(name) => !name.trim().is_empty(),
+            Self::Tag { name, .. }
+            | Self::NameContains(name)
+            | Self::Shows(name)
+            | Self::Camera { name, .. }
+            | Self::Lens { name, .. } => !name.trim().is_empty(),
             Self::RatingIn(ratings) => !ratings.is_empty(),
             Self::Folder { folder, .. } => !folder.trim_matches('/').is_empty(),
             Self::Date {
@@ -335,6 +351,9 @@ pub fn rules_to_value(rules: &Rules, sort_by: SortBy, descending: bool) -> Value
                 Condition::Duration(b) => bound("duration", b),
                 Condition::Megapixels(b) => bound("megapixels", b),
                 Condition::Orientation(orientation) => json!({"type": "orientation", "is": orientation.key()}),
+                Condition::Camera { name, is } => json!({"type": "camera", "name": name, "is": is}),
+                Condition::Lens { name, is } => json!({"type": "lens", "name": name, "is": is}),
+                Condition::HasLocation(has) => json!({"type": "has_location", "is": has}),
                 Condition::Shows(words) => json!({"type": "shows", "words": words}),
                 Condition::Matches(_) => return None,
             })
@@ -393,6 +412,15 @@ fn condition_from_value(value: &Value) -> Option<Condition> {
             name: text("name")?,
             is: value.get("is")?.as_bool()?,
         },
+        "camera" => Condition::Camera {
+            name: text("name")?,
+            is: value.get("is")?.as_bool()?,
+        },
+        "lens" => Condition::Lens {
+            name: text("name")?,
+            is: value.get("is")?.as_bool()?,
+        },
+        "has_location" => Condition::HasLocation(value.get("is")?.as_bool()?),
         "has_people" => Condition::HasPeople,
         "has_places" => Condition::HasPlaces,
         "no_tags" => Condition::NoTags,
@@ -670,5 +698,35 @@ mod tests {
         assert_eq!(read.conditions, [Condition::NoTags]);
         assert!(read.any);
         assert_eq!((sort_by, descending), (SortBy::Taken, true));
+    }
+
+    #[test]
+    fn req_040_05_stores_camera_lens_and_location_conditions() {
+        let conditions = vec![
+            Condition::Camera {
+                name: "Canon EOS R5".into(),
+                is: true,
+            },
+            Condition::Camera {
+                name: "Apple iPhone 15".into(),
+                is: false,
+            },
+            Condition::Lens {
+                name: "RF24-105mm".into(),
+                is: false,
+            },
+            Condition::HasLocation(true),
+            Condition::HasLocation(false),
+        ];
+        let all = rules(false, conditions);
+        let value = rules_to_value(&all, SortBy::Taken, true);
+        assert_eq!(rules_from_value(&value), Some((all.clone(), SortBy::Taken, true)));
+        assert!(all.is_complete());
+        assert_eq!(all.as_search(), None, "the filters bar can't show them");
+        let blank = Condition::Lens {
+            name: " ".into(),
+            is: true,
+        };
+        assert!(!blank.is_complete(), "a lens must be chosen");
     }
 }

@@ -338,3 +338,65 @@ fn req_039_01_req_039_06_edits_an_album() {
         ("Seaside", false, 2)
     );
 }
+
+/// REQ-040-05: _Camera is_ offers the cameras in the index, most used first with their counts, and needs one chosen;
+/// the album then holds what that camera took.
+#[test]
+fn req_040_05_the_editor_offers_the_cameras_in_the_index() {
+    use app::gallery::album_editor::{Kind, Row};
+    let conn = db::open_in_memory().unwrap();
+    let root = db::libraries::insert(&conn, "D:\\Photos", "Photos", LibraryStatus::Online)
+        .unwrap()
+        .id;
+    let shot = |rel: &str, camera: &str| {
+        let mut file = file(rel, None, &["Trip"]);
+        file.metadata.camera = Some(camera.into());
+        file.metadata.lens = Some("RF50mm F1.8 STM".into());
+        file
+    };
+    let mut writer = IndexWriter::new(conn);
+    writer
+        .write(
+            root,
+            &[
+                shot("a.jpg", "Canon EOS R5"),
+                shot("b.jpg", "Canon EOS R5"),
+                shot("c.jpg", "Apple iPhone 15"),
+            ],
+        )
+        .unwrap();
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness(writer.into());
+    harness.set_size(egui::vec2(1000.0, 700.0));
+    settle(&mut harness);
+    set_search(
+        &mut harness,
+        GallerySearch {
+            tags: vec!["Trip".into()],
+            ..GallerySearch::default()
+        },
+    );
+    harness.get_by_label_contains("Filters").click();
+    harness.run();
+    harness.get_by_label("Save as smart album…").click();
+    harness.run();
+    let edit = editor(&mut harness);
+    edit.name = "Canon".into();
+    edit.rows = vec![Row::new(Kind::Camera)];
+    harness.run();
+    assert!(
+        harness.get_by_label("Save").accesskit_node().is_disabled(),
+        "no camera chosen"
+    );
+
+    harness.get_by_role_and_label(Role::ComboBox, "Camera").click();
+    harness.run();
+    let canon = harness.get_by_label("Canon EOS R5 (2)").rect();
+    let apple = harness.get_by_label("Apple iPhone 15 (1)").rect();
+    assert!(canon.top() < apple.top(), "most used first");
+    harness.get_by_label("Canon EOS R5 (2)").click();
+    harness.run();
+    harness.get_by_label("Save").click();
+    settle(&mut harness);
+    assert_eq!(count_of(&harness, "Canon").as_deref(), Some("2"));
+}

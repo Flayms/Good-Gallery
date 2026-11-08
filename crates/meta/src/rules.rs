@@ -333,7 +333,35 @@ pub fn extract_metadata(tags: &Tags, sidecar: Option<&Tags>) -> MediaMetadata {
         tags: extract_tags(&sources),
         edit,
         faces,
+        camera: sources.iter().find_map(|source| camera(source)),
+        lens: sources.iter().find_map(|source| lens(source)),
+        location: sources.iter().find_map(|source| location(source)),
     }
+}
+
+/// A tag's text, trimmed, if it is non-blank text.
+fn text_of<'a>(tags: &'a Tags, name: &str) -> Option<&'a str> {
+    tags.get(name)?.as_str().map(str::trim).filter(|text| !text.is_empty())
+}
+
+/// The camera a file or sidecar names (REQ-040-01).
+fn camera(tags: &Tags) -> Option<String> {
+    domain::media::camera_name(text_of(tags, "Make"), text_of(tags, "Model"))
+}
+
+/// The lens a file or sidecar names: its lens model, else its lens name, else the lens exiftool identified unless it
+/// couldn't (REQ-040-01).
+fn lens(tags: &Tags) -> Option<String> {
+    text_of(tags, "LensModel")
+        .or_else(|| text_of(tags, "Lens"))
+        .or_else(|| text_of(tags, "LensID").filter(|id| !id.starts_with("Unknown")))
+        .map(|lens| lens.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
+/// Where a file or sidecar says it was taken: exiftool's signed composite position (REQ-040-02).
+fn location(tags: &Tags) -> Option<domain::media::Location> {
+    let degrees = |name| tags.get(name).and_then(Value::as_f64);
+    domain::media::Location::new(degrees("GPSLatitude")?, degrees("GPSLongitude")?)
 }
 
 /// An orientation as EXIF numbers it (1–8); others count as none.
@@ -777,6 +805,75 @@ mod tests {
 
         let invalid = extract_metadata(&file, Some(&tags(json!({ "Orientation": 9 }))));
         assert_eq!((invalid.width, invalid.sidecar_orientation), (Some(4000), None));
+    }
+
+    #[test]
+    fn req_040_01_reads_the_camera_and_the_lens() {
+        let canon = tags(json!({
+            "Make": "Canon", "Model": "Canon EOS R5", "LensModel": "RF24-105mm F4 L IS USM", "LensID": "ignored"
+        }));
+        let metadata = extract_metadata(&canon, None);
+        assert_eq!(metadata.camera.as_deref(), Some("Canon EOS R5"));
+        assert_eq!(metadata.lens.as_deref(), Some("RF24-105mm F4 L IS USM"));
+
+        // The lens name, else the identified lens, but not an unknown one.
+        let lens = |value: Value| extract_metadata(&tags(value), None).lens;
+        assert_eq!(
+            lens(json!({"Lens": "EF50mm f/1.8", "LensID": "x"})).as_deref(),
+            Some("EF50mm f/1.8")
+        );
+        assert_eq!(
+            lens(json!({"LensID": "Sigma 35mm F1.4 DG HSM | A"})).as_deref(),
+            Some("Sigma 35mm F1.4 DG HSM | A")
+        );
+        assert_eq!(lens(json!({"LensID": "Unknown (00 40 2D 88 2C 40 4B 0E)"})), None);
+        assert_eq!(
+            lens(json!({"LensModel": "  ", "Lens": 50})),
+            None,
+            "blank, and not text"
+        );
+
+        // The sidecar fills in what the file lacks.
+        let sidecar = tags(json!({"Make": "SONY", "Model": "ILCE-7M4", "LensModel": "FE 35mm F1.8"}));
+        let metadata = extract_metadata(&tags(json!({"LensModel": "Own lens"})), Some(&sidecar));
+        assert_eq!(metadata.camera.as_deref(), Some("SONY ILCE-7M4"));
+        assert_eq!(metadata.lens.as_deref(), Some("Own lens"));
+    }
+
+    #[test]
+    fn req_040_02_reads_the_location_from_the_file_else_the_sidecar() {
+        let location = |file: Value, sidecar: Option<Value>| {
+            extract_metadata(&tags(file), sidecar.map(tags).as_ref())
+                .location
+                .map(|at| (at.latitude, at.longitude))
+        };
+        assert_eq!(
+            location(json!({"GPSLatitude": -33.45, "GPSLongitude": -70.66}), None),
+            Some((-33.45, -70.66))
+        );
+        assert_eq!(
+            location(json!({}), Some(json!({"GPSLatitude": 48.1375, "GPSLongitude": 11.575}))),
+            Some((48.1375, 11.575))
+        );
+        assert_eq!(
+            location(
+                json!({"GPSLatitude": 1.5, "GPSLongitude": 2.5}),
+                Some(json!({"GPSLatitude": 48.0, "GPSLongitude": 11.0}))
+            ),
+            Some((1.5, 2.5)),
+            "the file's own first"
+        );
+        assert_eq!(
+            location(json!({"GPSLatitude": 0.0, "GPSLongitude": 0.0}), None),
+            None,
+            "no fix"
+        );
+        assert_eq!(location(json!({"GPSLatitude": 12.0}), None), None, "half a position");
+        assert_eq!(
+            location(json!({"GPSLatitude": "12 deg N", "GPSLongitude": 3.0}), None),
+            None,
+            "not a number"
+        );
     }
 
     #[test]

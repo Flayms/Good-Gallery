@@ -97,6 +97,69 @@ fn req_004_01_req_004_10_indexes_a_photo_with_its_sidecar_without_touching_files
     assert_eq!(snapshot(library.path()), before);
 }
 
+/// REQ-040-01, REQ-040-02: the camera, the lens and the GPS position, south and west negative, come out of a real file
+/// read with the app's own exiftool arguments.
+#[test]
+fn req_040_01_req_040_02_indexes_the_camera_the_lens_and_the_location() {
+    let Some(path) = find_exiftool() else {
+        assert!(std::env::var_os("GG_REQUIRE_HELPERS").is_none(), "exiftool not found");
+        eprintln!("skipped: exiftool not found");
+        return;
+    };
+    let library = tempfile::tempdir().unwrap();
+    let photo = library.path().join("IMG_2.jpg");
+    image::RgbImage::new(8, 4).save(&photo).unwrap();
+    let written = std::process::Command::new(&path)
+        .args([
+            "-q",
+            "-overwrite_original",
+            "-Make=Canon",
+            "-Model=Canon EOS R5",
+            "-LensModel=RF24-105mm F4 L IS USM",
+            "-GPSLatitude=33.45",
+            "-GPSLatitudeRef=S",
+            "-GPSLongitude=70.66",
+            "-GPSLongitudeRef=W",
+        ])
+        .arg(&photo)
+        .status()
+        .unwrap();
+    assert!(written.success());
+    let index = tempfile::tempdir().unwrap();
+    let db_path = index.path().join("gallery.db");
+    let conn = db::open(&db_path).unwrap();
+    let id = libraries::insert(&conn, library.path().to_str().unwrap(), "L", LibraryStatus::Unknown)
+        .unwrap()
+        .id;
+    let (indexer, events) = Indexer::start(IndexerDeps {
+        writer: IndexWriter::new(conn),
+        metadata: Arc::new(ExifTool::new(path, 1)),
+        is_reachable: Arc::new(|_: &Path| true),
+        reconnect_grace: indexer::reachability::RECONNECT_GRACE,
+        concurrency: 1,
+        notify: Box::new(|| {}),
+        on_written: Box::new(|| {}),
+    });
+
+    indexer.request(id, ScanScope::Full);
+    let result = loop {
+        if let IndexerEvent::Done(_, result) = events.recv_timeout(Duration::from_secs(60)).unwrap() {
+            break result;
+        }
+    };
+
+    assert_eq!(result, ScanResult::Completed);
+    let reader = db::open_reader(&db_path).unwrap();
+    let row: (String, String, f64, f64) = reader
+        .query_row("SELECT camera, lens, latitude, longitude FROM media", [], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })
+        .unwrap();
+    assert_eq!(row.0, "Canon EOS R5");
+    assert_eq!(row.1, "RF24-105mm F4 L IS USM");
+    assert!((row.2 + 33.45).abs() < 1e-6 && (row.3 + 70.66).abs() < 1e-6, "{row:?}");
+}
+
 /// REQ-005-08, REQ-005-01: media items a scan writes get their thumbnails rendered in the background, and the
 /// library's files stay as they were.
 #[test]
