@@ -4,8 +4,7 @@ Add every pitfall you hit. A trap in a tool, library, OS or our tests that we ca
 
 ## To fix
 
-* **One `CARGO_TARGET_DIR` for several worktrees builds stale code:** cargo names a workspace crate's artifacts by its path relative to the workspace, so every worktree shares them, and a crate unchanged since another worktree's build counts as fresh. Code from the other branch is linked in, which shows up as missing fields or methods, or as another branch's UI in snapshots. After switching worktrees run `cargo clean -p domain -p meta -p db -p media -p indexer -p app -p xtask` (dependencies stay built), or give each worktree its own target folder (#107).
-* **`rgb0` leaves the fourth byte undefined**, and egui blends with alpha: force it to 255 (≈ 0.7 ms per 1080p frame) or sample with alpha 1 in a shader (#109).
+_Nothing at the moment._
 
 ## Toolchain
 
@@ -43,6 +42,7 @@ Add every pitfall you hit. A trap in a tool, library, OS or our tests that we ca
 
 ## libmpv
 
+* **`rgb0` leaves the fourth byte undefined**, and egui blends with alpha: `video::player` forces it to 255 (≈ 0.7 ms per 1080p frame).
 * **`libmpv2` (crate) only wraps the OpenGL render API.** The software renderer (`"sw"`) needs raw `mpv_render_param`s (`SW_SIZE`, `SW_FORMAT`, `SW_STRIDE`, `SW_POINTER`); use an own FFI. Its import library is MinGW (`libmpv.dll.a`), so loading the DLL at runtime with `libloading` also avoids link trouble with MSVC.
 * **The render thread must not call client functions** (`mpv_get_property` etc.): render.h forbids it, it can stall the core (timeouts, "mpv_render_context_render() not being called or stuck"). Pass the video size from the UI thread.
 * **The software renderer ignores rotation.** `video-params/rotate` is set, but frames and `dwidth` / `dheight` stay unrotated: rotate the quad.
