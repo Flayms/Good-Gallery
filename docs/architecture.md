@@ -49,7 +49,7 @@ domain ◄── meta ◄── media ◄──┐
    └────── db ◄───────────────┘
 ```
 
-- `domain` and `meta` do no IO, so layout, search, tag and metadata rules are tested without files, a database or a GPU. New pure logic goes there.
+- `domain` and `meta` do no IO, so layout, search, tag and metadata rules are tested without files, a database or a GPU. New pure logic goes there; `xtask/tests/architecture.rs` keeps them pure.
 - `db` knows SQL and the schema, nothing about files. `media` knows files and helper processes, nothing about the index.
 - `indexer` joins them: it walks folders, reads files through `media` and writes the index through `db`.
 - `app` is a library (`app::ui`, `AppState`) with a thin `main.rs` / `desktop.rs`, so the UI tests drive the same code as the window.

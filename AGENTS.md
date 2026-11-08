@@ -32,6 +32,13 @@ A desktop gallery for large photo and video libraries (50k–500k files). Media 
 - Spec-first, TDD (red → green → refactor), BDD acceptance criteria. DDD only where the domain warrants it; always use domain terms (`docs/glossary.md`).
 - Keep pure logic (layout, search model, tag normalization, date groups) in `domain`, without UI or IO dependencies, so it is easy to test.
 
+## Where things go
+
+- Pure rules and calculations → `domain`; reading metadata out of bytes → `meta`. Both stay free of IO (`xtask/tests/architecture.rs`).
+- SQL → `db`; a schema change is a new file in `crates/db/migrations/`, never an edited one. A setting → `db::settings`.
+- Files and helper programs → `media`; background work over libraries → `indexer`.
+- UI → `app`. A feature's state goes into its own module under `app/src/state/` (like `faces.rs`), not into `AppState`'s fields; slow work runs on a thread and sends an event back, applied in `AppState::poll`.
+
 ## Tiers
 
 0. No behavior change → tests pass.
@@ -67,7 +74,7 @@ A desktop gallery for large photo and video libraries (50k–500k files). Media 
 Create a new worktree for a new feature, branched from `origin/main`. Use conventional commits. When you are done, merge `origin/main` into the branch and create a PR to main. Then wait for CI and fix whatever turns red (on conflicts, merge `origin/main` again) until it is green and mergeable. Merged worktrees are removed at session start (`.claude/hooks/tidy-worktrees.sh`).
 
 > [!NOTE]
-> The storage on my machines is limited. Dont create builds on multiple worktrees in parallel as they can get very big. Instead when building, first finish one and then clean up before starting with another.
+> The storage on my machines is limited. Dont create builds on multiple worktrees in parallel as they can get very big. Instead when building, first finish one and then clean up before starting with another. Worktrees can share one `CARGO_TARGET_DIR` without building stale code (`docs/decisions.md`), so point them all at the same one.
 
 ## Note
 
