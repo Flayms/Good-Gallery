@@ -370,9 +370,9 @@ fn req_009_24_the_viewer_moves_on_from_a_deleted_item() {
     assert!(ids(&harness).is_empty());
 }
 
-/// Steps frames until one puts an image on the clipboard; its size and first pixel.
+/// Steps frames from a click on _Copy_ until one puts an image on the clipboard; its size and first pixel. Every frame
+/// is looked at: the decode may finish while the click is still being handled, and the next frame then copies it.
 fn copied_image(harness: &mut App) -> Option<([usize; 2], egui::Color32)> {
-    harness.state_mut().wait_for_jobs();
     for _ in 0..10 {
         harness.run_steps(1);
         let copied = harness
@@ -387,6 +387,7 @@ fn copied_image(harness: &mut App) -> Option<([usize; 2], egui::Color32)> {
         if copied.is_some() {
             return copied;
         }
+        harness.state_mut().wait_for_jobs();
     }
     None
 }
@@ -406,7 +407,6 @@ fn req_009_25_copies_a_photo_from_its_tile_and_the_viewer() {
     let at = tile(&harness, "a.jpg");
     right_click_at(&mut harness, at);
     menu_item(&harness, at, "Copy").click();
-    harness.run_steps(2);
     let (size, first) = copied_image(&mut harness).expect("a.jpg was copied");
     assert_eq!(size, [8, 4]);
     assert!(first.r() > 150 && first.b() < 100, "the left half is red: {first:?}");
@@ -425,6 +425,5 @@ fn req_009_25_copies_a_photo_from_its_tile_and_the_viewer() {
     let center = harness.ctx.content_rect().center();
     right_click_at(&mut harness, center);
     harness.get_by_label("Copy").click();
-    harness.run_steps(2);
     assert_eq!(copied_image(&mut harness).map(|(size, _)| size), Some([8, 4]));
 }
