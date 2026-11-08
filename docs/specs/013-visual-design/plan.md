@@ -16,7 +16,6 @@ Records the approach that was taken. Tokens and surfaces are in `docs/design.md`
 ## Known limits
 
 - The viewer's chrome blurs the scrim, not the photo under it (only visible when a zoomed photo reaches under the bar).
-- The date pickers' popups stay Raised.
 - Counts use English digit grouping.
 
 ## Tasks

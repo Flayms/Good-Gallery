@@ -203,14 +203,95 @@ fn req_007_08_sets_a_date_range_from_the_filters() {
 
     harness.get_by_label("Filters").click();
     harness.run_steps(2);
-    harness.get_by_label("Set from day").click();
+    let today = domain::time_zone::today();
+    harness
+        .get_by_role_and_label(Role::Button, &today.format("%-d %B %Y").to_string())
+        .click();
     settle(&mut harness);
-    let from = search(&harness).from.expect("a start day");
-    assert_eq!(from, domain::time_zone::today());
-    harness.get_by_label(&format!("From {}", from.format("%-d %b %Y")));
+    assert_eq!((search(&harness).from, search(&harness).to), (Some(today), Some(today)));
     harness.get_by_role_and_label(Role::Button, "Clear date range").click();
     settle(&mut harness);
     assert_eq!(search(&harness).from, None);
+}
+
+fn day(text: &str) -> chrono::NaiveDate {
+    text.parse().unwrap()
+}
+
+/// REQ-041-01, REQ-041-02: the calendar opens at the range's month and names its days with their photos and videos,
+/// which the range itself doesn't change; two clicks make a range either way round, and the next starts anew. Days
+/// without photos can be picked.
+#[test]
+fn req_041_01_req_041_02_picks_a_range_on_a_calendar_of_the_photos() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture);
+    let mut dated = search(&harness);
+    dated.from = Some(day("1970-01-05"));
+    harness.state_mut().gallery.as_mut().unwrap().set_search(dated);
+    settle(&mut harness);
+
+    harness.get_by_label("Filters, 1 active").click();
+    settle(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "January 1970");
+    let photos = "1 January 1970, 3 photos · 1 video";
+    harness.get_by_role_and_label(Role::Button, photos).click();
+    settle(&mut harness);
+    assert_eq!(
+        (search(&harness).from, search(&harness).to),
+        (Some(day("1970-01-01")), Some(day("1970-01-01")))
+    );
+    harness.get_by_role_and_label(Role::Button, "10 January 1970").click();
+    settle(&mut harness);
+    assert_eq!(
+        (search(&harness).from, search(&harness).to),
+        (Some(day("1970-01-01")), Some(day("1970-01-10")))
+    );
+    harness.get_by_role_and_label(Role::Button, "3 January 1970").click();
+    settle(&mut harness);
+    assert_eq!(
+        (search(&harness).from, search(&harness).to),
+        (Some(day("1970-01-03")), Some(day("1970-01-03"))),
+        "a new range"
+    );
+    assert!(
+        harness.query_by_label(photos).is_some(),
+        "the 1st keeps its photos outside the range"
+    );
+    harness.snapshot(common::snapshot_name("date_calendar"));
+}
+
+/// REQ-041-03, REQ-041-04: the month's name shows its year's months with their counts, arrows step years and a month
+/// opens it; a quick range sets its days and shows its first month.
+#[test]
+fn req_041_03_req_041_04_steps_through_years_and_quick_ranges() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture);
+    let mut dated = search(&harness);
+    dated.from = Some(day("1970-01-05"));
+    harness.state_mut().gallery.as_mut().unwrap().set_search(dated);
+    settle(&mut harness);
+    harness.get_by_label("Filters, 1 active").click();
+    settle(&mut harness);
+
+    harness.get_by_role_and_label(Role::Button, "Next month").click();
+    settle(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "February 1970").click();
+    settle(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "January 1970, 3 photos · 1 video");
+    harness.get_by_role_and_label(Role::Button, "Next year").click();
+    settle(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "1971");
+    harness.get_by_role_and_label(Role::Button, "Previous year").click();
+    settle(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "March 1970").click();
+    settle(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "1 March 1970");
+
+    harness.get_by_role_and_label(Role::Button, "Last year").click();
+    settle(&mut harness);
+    let (from, to) = domain::calendar::Quick::LastYear.range(domain::time_zone::today());
+    assert_eq!((search(&harness).from, search(&harness).to), (Some(from), Some(to)));
+    harness.get_by_role_and_label(Role::Button, &app::format::month_year(from));
 }
 
 #[test]
@@ -623,4 +704,95 @@ fn req_013_19_buttons_answer_the_pointer_and_filters_and_view_are_icons() {
             "{label} has the tip {tip}"
         );
     }
+}
+
+/// REQ-041-02: a day shows the thumbnail of its first item, asked for by the calendar itself: with the range on a day
+/// without photos, the gallery shows no tiles that would ask for them.
+#[test]
+fn req_041_02_shows_the_first_photo_of_each_day() {
+    const DAY: i64 = 86_400_000;
+    let conn = db::open_in_memory().unwrap();
+    let root = db::libraries::insert(&conn, "D:\\Photos", "Photos", LibraryStatus::Online)
+        .unwrap()
+        .id;
+    let mut writer = IndexWriter::new(conn);
+    writer
+        .write(
+            root,
+            &[
+                file("a.jpg", MediaKind::Image, DAY / 2, None, &[]),
+                file("b.jpg", MediaKind::Image, DAY / 2 + 60_000, None, &[]),
+                file("c.mp4", MediaKind::Video, DAY + DAY / 2, None, &[]),
+                file("d.jpg", MediaKind::Image, 2 * DAY + DAY / 2, None, &[]),
+            ],
+        )
+        .unwrap();
+    let conn: Connection = writer.into();
+    let id = |name: &str| db::media::id_of(&conn, root, name).unwrap().unwrap();
+    let firsts = [id("a.jpg"), id("c.mp4"), id("d.jpg")];
+    let second = id("b.jpg");
+    let cache = indexer::thumb_cache::ThumbCache::open(tempfile::tempdir().unwrap().keep(), u64::MAX);
+    cache.wait_ready();
+    for (n, media) in [id("a.jpg"), id("b.jpg"), id("c.mp4"), id("d.jpg")]
+        .into_iter()
+        .enumerate()
+    {
+        let key = db::thumbs::thumb_source(&conn, media).unwrap().unwrap().key;
+        let colors = [[220, 120, 60], [60, 160, 220], [80, 200, 120], [200, 80, 180]][n];
+        let pixels = colors.repeat(400 * 300);
+        let thumbnail = webp::Encoder::from_rgb(&pixels, 400, 300).encode_lossless();
+        for width in domain::thumbs::THUMB_WIDTHS {
+            let path = cache.path(&key, width);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, &*thumbnail).unwrap();
+        }
+    }
+    let render_state = egui_kittest::wgpu::create_render_state(
+        egui_kittest::wgpu::default_wgpu_setup(),
+        eframe::egui_wgpu::RendererOptions::PREDICTABLE,
+    );
+    let fixture = Fixture::new();
+    let mut state = fixture.state(conn);
+    state.gallery = state.gallery.take().map(|gallery| {
+        gallery.with_thumbnails(app::gallery::Thumbnails {
+            streamer: app::textures::TextureStreamer::new(
+                render_state.clone(),
+                cache.clone(),
+                app::textures::DEFAULT_BUDGET,
+                egui::Context::default(),
+            ),
+            cache,
+            service: None,
+            ready: std::sync::mpsc::channel().1,
+        })
+    });
+    // From the first frame on, so no tile ever asks for a thumbnail.
+    let gallery = state.gallery.as_mut().unwrap();
+    let mut empty_day = gallery.search().clone();
+    (empty_day.from, empty_day.to) = (Some(day("1970-01-05")), Some(day("1970-01-05")));
+    gallery.set_search(empty_day);
+    let mut harness = common::harness_on(state, render_state);
+    settle(&mut harness);
+    assert_eq!(count(&harness), Some(0), "no tiles");
+
+    harness.get_by_label("Filters, 1 active").click();
+    settle(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "1 January 1970, 2 photos");
+    harness.get_by_role_and_label(Role::Button, "2 January 1970, 1 video");
+    for _ in 0..500 {
+        harness.run_steps(1);
+        let gallery = harness.state_mut().gallery.as_mut().unwrap();
+        if firsts.iter().all(|media| gallery.thumbnail(*media).is_some()) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let gallery = harness.state_mut().gallery.as_mut().unwrap();
+    assert!(
+        firsts.iter().all(|media| gallery.thumbnail(*media).is_some()),
+        "each day's first thumbnail"
+    );
+    assert!(gallery.thumbnail(second).is_none(), "only the first of a day");
+    harness.run_steps(40);
+    harness.snapshot(common::snapshot_name("date_calendar_photos"));
 }
