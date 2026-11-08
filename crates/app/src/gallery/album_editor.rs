@@ -469,7 +469,8 @@ impl AlbumEditor {
                             }
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 let label = format!("Remove condition {}", at + 1);
-                                let button = ui.add(egui::Button::new(crate::icons::Icon::X.small()).frame(false));
+                                let button =
+                                    ui.add(egui::Button::new(crate::icons::Icon::X.small()).frame_when_inactive(false));
                                 button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
                                 if button.clicked() {
                                     remove = Some(at);

@@ -84,7 +84,7 @@ pub fn button(ui: &mut egui::Ui, work: &[Work]) -> bool {
     let response = ui
         .add(
             egui::Button::image(icon)
-                .frame(false)
+                .frame_when_inactive(false)
                 .min_size(egui::Vec2::splat(theme::CONTROL_HEIGHT - 4.0)),
         )
         .on_hover_text(LABEL);

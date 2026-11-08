@@ -1980,13 +1980,19 @@ impl EditSession {
 /// A collapsible section's header; a click opens or closes it.
 fn section_header(ui: &mut egui::Ui, label: &str, open: &mut bool) {
     let icon = if *open { Icon::ChevronDown } else { Icon::ChevronRight };
-    let header = ui.add(
-        egui::Button::image_and_text(
-            icon.image(14.0, theme::muted()),
-            egui::RichText::new(label).font(egui::FontId::new(theme::SIZE_BODY, theme::semibold())),
-        )
-        .frame(false),
-    );
+    // Without padding it sits where a frameless one did, and still shows the hover state (REQ-013-19).
+    let header = ui
+        .scope(|ui| {
+            ui.spacing_mut().button_padding = Vec2::ZERO;
+            ui.add(
+                egui::Button::image_and_text(
+                    icon.image(14.0, theme::muted()),
+                    egui::RichText::new(label).font(egui::FontId::new(theme::SIZE_BODY, theme::semibold())),
+                )
+                .frame_when_inactive(false),
+            )
+        })
+        .inner;
     let expanded = *open;
     let header = header.on_hover_text(if expanded { "Collapse" } else { "Expand" });
     header.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, expanded, label));
@@ -2063,7 +2069,7 @@ fn icon_button(ui: &mut egui::Ui, icon: Icon, label: &str, tooltip: &str, enable
         .add_enabled(
             enabled,
             egui::Button::image(icon.small())
-                .frame(false)
+                .frame_when_inactive(false)
                 .corner_radius(theme::CONTROL_HEIGHT / 2.0)
                 .min_size(Vec2::splat(theme::CONTROL_HEIGHT)),
         )

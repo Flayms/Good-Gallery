@@ -2627,7 +2627,7 @@ fn control_bar(
             _ => None,
         };
         let mut widget = egui::Button::image(icon.small())
-            .frame(false)
+            .frame_when_inactive(false)
             .corner_radius(theme::CONTROL_HEIGHT / 2.0);
         // A pressed toggle is filled; a fill turns the frame on.
         if pressed == Some(true) {
