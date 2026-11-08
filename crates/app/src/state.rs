@@ -856,8 +856,6 @@ impl AppState {
         self
     }
 
-    /// Saves edits with exiftool (spec 021).
-    #[cfg(not(target_arch = "wasm32"))]
     /// Keeps imported LUTs in `luts` (spec 043).
     pub fn with_luts(mut self, luts: crate::luts::Luts) -> Self {
         self.luts = Arc::new(luts);
@@ -875,6 +873,8 @@ impl AppState {
     #[cfg(target_arch = "wasm32")]
     pub fn import_lut(&mut self) {}
 
+    /// Saves edits with exiftool (spec 021).
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with_edit_tools(mut self, tools: media::edit::Tools) -> Self {
         self.edit_tools = Some(tools);
         self
