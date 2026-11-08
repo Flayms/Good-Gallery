@@ -7,6 +7,7 @@ pub mod album_rules;
 pub mod ambient;
 pub mod appearance;
 pub mod autoscroll;
+pub mod calendar;
 pub mod caption;
 pub mod content;
 pub mod crop;

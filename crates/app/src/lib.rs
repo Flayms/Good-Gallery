@@ -3,6 +3,7 @@
 // Rebuilt when another worktree built into the same target folder (`.cargo/config.toml`).
 const _: Option<&str> = option_env!("GOOD_GALLERY_WORKTREE");
 
+pub mod calendar;
 pub mod edit;
 pub mod empty_state;
 #[cfg(not(target_arch = "wasm32"))]

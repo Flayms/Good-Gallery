@@ -20,7 +20,6 @@ indexer.workspace = true
 eframe.workspace = true
 image.workspace = true
 tracing.workspace = true
-jiff.workspace = true
 tracing-subscriber.workspace = true
 web-time.workspace = true
 serde_json.workspace = true

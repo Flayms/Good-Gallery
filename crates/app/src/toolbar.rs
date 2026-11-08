@@ -6,7 +6,7 @@ use crate::icons::{Icon, icon_button};
 use crate::search_bar::{self, SearchBar};
 use crate::unreadable::{ReadAgain, Unreadable};
 use crate::{format, theme};
-use chrono::{Datelike, NaiveDate};
+use chrono::NaiveDate;
 use domain::media::MediaKind;
 use domain::search::SortBy;
 use domain::view::{GalleryView, TagIndicatorKind};
@@ -276,12 +276,17 @@ fn filters_button(ui: &mut egui::Ui, gallery: &mut Gallery) -> egui::Response {
         )
         .on_hover_text("Filters");
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
-    menu(&response, "filters menu", 320.0, |ui| filters_menu(ui, gallery));
+    menu(
+        &response,
+        "filters menu",
+        CALENDAR_WIDTH + 16.0 + OTHER_FILTERS_WIDTH,
+        |ui| filters_menu(ui, gallery),
+    );
     response
 }
 
 /// A menu under its button. It closes on Escape or a click outside both, but not on clicks in overlays on top of it
-/// (the date pickers).
+/// (a combo box's list).
 /// The menu's open state lives under the fixed `name`: a button's own id changes with its look (the filter count)
 /// and with the widgets before it (an empty gallery has none), and the menu would close with it.
 pub(crate) fn menu(button: &egui::Response, name: &str, width: f32, add: impl FnOnce(&mut egui::Ui)) {
@@ -317,116 +322,113 @@ pub(crate) fn menu(button: &egui::Response, name: &str, width: f32, add: impl Fn
 }
 
 fn filters_menu(ui: &mut egui::Ui, gallery: &mut Gallery) {
-    ui.spacing_mut().item_spacing.y = 8.0;
     let mut search = gallery.search().clone();
-
-    section(ui, "Media type", None);
-    ui.horizontal(|ui| {
-        let width = (ui.available_width() - 2.0 * ui.spacing().item_spacing.x) / 3.0;
-        let kinds = [
-            (None, "All", None),
-            (Some(MediaKind::Image), "Photos", Some(Icon::Image)),
-            (Some(MediaKind::Video), "Videos", Some(Icon::Video)),
-        ];
-        for (kind, label, icon) in kinds {
-            let button = match icon {
-                Some(icon) => egui::Button::new((icon.small(), label)),
-                None => egui::Button::new(label),
-            }
-            .min_size(vec2(width, theme::CONTROL_HEIGHT - 4.0));
-            if toggle(ui, search.kind == kind, true, button, label) {
-                search.kind = kind;
-            }
-        }
-    });
-
-    let has_date = search.from.is_some() || search.to.is_some();
-    if section_with_clear(
-        ui,
-        "Date",
-        &date_range_label(search.from, search.to),
-        has_date,
-        "Clear date range",
-    ) {
-        (search.from, search.to) = (None, None);
-    }
-    egui::Grid::new("date range")
-        .num_columns(2)
-        .spacing([8.0, 4.0])
-        .show(ui, |ui| {
-            let today = domain::time_zone::today();
-            ui.label(egui::RichText::new("From").color(theme::muted()));
-            if let Some(day) = day_field(ui, "from", search.from, search.to.unwrap_or(today)) {
-                search.from = day;
-                // The end can't be before the start.
-                if let (Some(from), Some(to)) = (search.from, search.to)
-                    && to < from
-                {
-                    search.to = Some(from);
+    // The date and its calendar at the left, the rest at the right, so the menu fits a window of the minimum size
+    // (REQ-013-08, REQ-041-01).
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 16.0;
+        ui.allocate_ui_with_layout(
+            vec2(CALENDAR_WIDTH, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_width(CALENDAR_WIDTH);
+                ui.spacing_mut().item_spacing.y = 8.0;
+                let has_date = search.from.is_some() || search.to.is_some();
+                if section_with_clear(
+                    ui,
+                    "Date",
+                    &date_range_label(search.from, search.to),
+                    has_date,
+                    "Clear date range",
+                ) {
+                    (search.from, search.to) = (None, None);
                 }
-            }
-            ui.end_row();
-            ui.label(egui::RichText::new("To").color(theme::muted()));
-            if let Some(day) = day_field(ui, "to", search.to, search.from.unwrap_or(today)) {
-                search.to = day;
-                if let (Some(from), Some(to)) = (search.from, search.to)
-                    && to < from
-                {
-                    search.from = Some(to);
+                // A calendar with the photos on its days (REQ-041-01).
+                crate::calendar::show(ui, gallery, &mut search);
+            },
+        );
+        ui.allocate_ui_with_layout(
+            vec2(OTHER_FILTERS_WIDTH, 0.0),
+            egui::Layout::top_down(egui::Align::Min),
+            |ui| {
+                ui.set_width(OTHER_FILTERS_WIDTH);
+                ui.spacing_mut().item_spacing.y = 8.0;
+                section(ui, "Media type", None);
+                ui.horizontal(|ui| {
+                    let width = (ui.available_width() - 2.0 * ui.spacing().item_spacing.x) / 3.0;
+                    let kinds = [
+                        (None, "All", None),
+                        (Some(MediaKind::Image), "Photos", Some(Icon::Image)),
+                        (Some(MediaKind::Video), "Videos", Some(Icon::Video)),
+                    ];
+                    for (kind, label, icon) in kinds {
+                        let button = match icon {
+                            Some(icon) => egui::Button::new((icon.small(), label)),
+                            None => egui::Button::new(label),
+                        }
+                        .min_size(vec2(width, theme::CONTROL_HEIGHT - 4.0));
+                        if toggle(ui, search.kind == kind, true, button, label) {
+                            search.kind = kind;
+                        }
+                    }
+                });
+
+                let has_rating = !search.ratings.is_empty();
+                if section_with_clear(
+                    ui,
+                    "Rating",
+                    &format::ratings(&search.ratings),
+                    has_rating,
+                    "Clear rating",
+                ) {
+                    search.ratings.clear();
                 }
-            }
-            ui.end_row();
-        });
+                ui.horizontal(|ui| {
+                    let width = (ui.available_width() - 5.0 * ui.spacing().item_spacing.x) / 6.0;
+                    for rating in 0..=5u8 {
+                        let (button, label) = if rating == 0 {
+                            (egui::Button::image(Icon::StarOff.small()), "Unrated".to_string())
+                        } else {
+                            (egui::Button::new(rating.to_string()), format::rating(rating))
+                        };
+                        let selected = search.ratings.contains(&rating);
+                        if toggle(
+                            ui,
+                            selected,
+                            true,
+                            button.min_size(vec2(width, theme::CONTROL_HEIGHT - 4.0)),
+                            &label,
+                        ) {
+                            search.toggle_rating(rating);
+                        }
+                    }
+                });
 
-    let has_rating = !search.ratings.is_empty();
-    if section_with_clear(
-        ui,
-        "Rating",
-        &format::ratings(&search.ratings),
-        has_rating,
-        "Clear rating",
-    ) {
-        search.ratings.clear();
-    }
-    ui.horizontal(|ui| {
-        let width = (ui.available_width() - 5.0 * ui.spacing().item_spacing.x) / 6.0;
-        for rating in 0..=5u8 {
-            let (button, label) = if rating == 0 {
-                (egui::Button::image(Icon::StarOff.small()), "Unrated".to_string())
-            } else {
-                (egui::Button::new(rating.to_string()), format::rating(rating))
-            };
-            let selected = search.ratings.contains(&rating);
-            if toggle(
-                ui,
-                selected,
-                true,
-                button.min_size(vec2(width, theme::CONTROL_HEIGHT - 4.0)),
-                &label,
-            ) {
-                search.toggle_rating(rating);
-            }
-        }
+                ui.separator();
+                if ui
+                    .add_enabled(search.active_filter_count() > 0, egui::Button::new("Clear filters"))
+                    .clicked()
+                {
+                    search.clear_filters();
+                }
+                // Below the filters, as it keeps them all with the tags and the file name (REQ-034-01).
+                if ui
+                    .add_enabled(gallery.can_save_album(), egui::Button::new("Save as smart album…"))
+                    .clicked()
+                {
+                    gallery.set_search(search.clone());
+                    gallery.ask_save_album();
+                    ui.close();
+                }
+            },
+        );
     });
-
-    ui.separator();
-    if ui
-        .add_enabled(search.active_filter_count() > 0, egui::Button::new("Clear filters"))
-        .clicked()
-    {
-        search.clear_filters();
-    }
-    // Below the filters, as it keeps them all with the tags and the file name (REQ-034-01).
-    if ui
-        .add_enabled(gallery.can_save_album(), egui::Button::new("Save as smart album…"))
-        .clicked()
-    {
-        gallery.set_search(search.clone());
-        gallery.ask_save_album();
-        ui.close();
-    }
     gallery.set_search(search);
 }
+
+/// The filters menu's columns: the date calendar, and the media type, rating and actions.
+const CALENDAR_WIDTH: f32 = 300.0;
+const OTHER_FILTERS_WIDTH: f32 = 236.0;
 
 /// A section title with its value and a _Clear_ link when `clearable`; true when it was clicked.
 fn section_with_clear(ui: &mut egui::Ui, label: &str, value: &str, clearable: bool, clear_label: &str) -> bool {
@@ -444,35 +446,6 @@ fn section_with_clear(ui: &mut egui::Ui, label: &str, value: &str, clearable: bo
         }
     });
     cleared
-}
-
-/// A day of the date range: a date picker once set, or a button that sets it to `fallback`. `Some` when it
-/// changed.
-fn day_field(ui: &mut egui::Ui, id: &str, day: Option<NaiveDate>, fallback: NaiveDate) -> Option<Option<NaiveDate>> {
-    let Some(day) = day else {
-        let label = format!("Set {id} day");
-        let response = ui.add(egui::Button::new("Any day"));
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
-        return response.clicked().then_some(Some(fallback));
-    };
-    let mut picked = jiff::civil::date(day.year() as i16, day.month() as i8, day.day() as i8);
-    let before = picked;
-    // Its popup is the area of its optional id salt under this `ui`, framed by egui_extras: glass goes behind it
-    // (REQ-013-03).
-    let popup = egui::LayerId::new(egui::Order::Foreground, ui.make_persistent_id(Some(id)));
-    let ctx = ui.ctx().clone();
-    crate::glass::behind_area(&ctx, popup, || {
-        ui.add(
-            egui_extras::DatePickerButton::new(&mut picked)
-                .id_salt(id)
-                .calendar_week(false)
-                // A date range has nothing to do with a work week (REQ-007-08).
-                .highlight_weekends(false)
-                .show_icon(false),
-        )
-    });
-    (picked != before)
-        .then(|| NaiveDate::from_ymd_opt(i32::from(picked.year()), picked.month() as u32, picked.day() as u32))
 }
 
 /// The _View_ button, showing the current view's icon, and its menu (REQ-006-01, -06, REQ-016-03, REQ-017-03).
@@ -631,108 +604,4 @@ fn view_menu(ui: &mut egui::Ui, gallery: &mut Gallery) {
             }
         }
     });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Draws a date field for 1 May 2024, clicks it and returns the frame with its popup open.
-    fn open_date_picker(ctx: &egui::Context) -> egui::FullOutput {
-        crate::glass::pretend_installed(ctx);
-        let day = NaiveDate::from_ymd_opt(2024, 5, 1).unwrap();
-        let button = std::cell::Cell::new(None);
-        let frame = |events: Vec<egui::Event>| {
-            let input = egui::RawInput {
-                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0))),
-                events,
-                ..Default::default()
-            };
-            let mut output = ctx.run_ui(input, |ui| {
-                crate::glass::begin_frame(ui.ctx());
-                if button.get().is_none() {
-                    button.set(Some(ui.next_widget_position() + vec2(12.0, 6.0)));
-                }
-                day_field(ui, "from", Some(day), day);
-            });
-            // No renderer takes the font atlas.
-            output.textures_delta.clear();
-            output
-        };
-        frame(Vec::new());
-        let at = button.get().unwrap();
-        let press = |pressed| egui::Event::PointerButton {
-            pos: at,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: egui::Modifiers::NONE,
-        };
-        frame(vec![egui::Event::PointerMoved(at), press(true), press(false)]);
-        frame(Vec::new())
-    }
-
-    /// Whether `shape`, or a shape in it, is a rectangle filled with `fill` for which `pick` holds.
-    fn has_rect(shape: &egui::Shape, fill: egui::Color32, pick: &dyn Fn(Rect) -> bool) -> bool {
-        match shape {
-            egui::Shape::Rect(rect) => rect.fill == fill && pick(rect.rect),
-            egui::Shape::Vec(shapes) => shapes.iter().any(|shape| has_rect(shape, fill, pick)),
-            _ => false,
-        }
-    }
-
-    /// REQ-007-08: the calendar doesn't mark weekends; the date range has nothing to do with a work week.
-    #[test]
-    fn req_007_08_the_date_picker_marks_no_weekends() {
-        fn rects(shape: &egui::Shape, out: &mut Vec<egui::epaint::RectShape>) {
-            match shape {
-                egui::Shape::Rect(rect) => out.push(rect.clone()),
-                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| rects(shape, out)),
-                _ => {}
-            }
-        }
-        let ctx = egui::Context::default();
-        let output = open_date_picker(&ctx);
-        let mut all = Vec::new();
-        output.shapes.iter().for_each(|clipped| rects(&clipped.shape, &mut all));
-        // The day cells are the many cells of one size; 1 May 2024, the picked day, has its own fill.
-        let size =
-            |rect: &egui::epaint::RectShape| (rect.rect.width().round() as i32, rect.rect.height().round() as i32);
-        let cell = all
-            .iter()
-            .map(size)
-            .max_by_key(|cell| all.iter().filter(|rect| size(rect) == *cell).count())
-            .unwrap();
-        let fills: Vec<_> = all
-            .iter()
-            .filter(|rect| size(rect) == cell)
-            .map(|rect| rect.fill)
-            .collect();
-        assert!(fills.len() >= 28, "the calendar is open ({} days drawn)", fills.len());
-        let usual = fills
-            .iter()
-            .max_by_key(|fill| fills.iter().filter(|other| other == fill).count())
-            .unwrap();
-        let other: Vec<_> = fills.iter().filter(|fill| *fill != usual).collect();
-        assert!(other.len() <= 1, "days other than the picked one stand out: {other:?}");
-    }
-
-    /// REQ-013-03: a date picker's popup is a glass surface like the other menus, not the opaque frame egui_extras
-    /// gives it.
-    #[test]
-    fn req_013_03_date_picker_popups_are_glass() {
-        let ctx = egui::Context::default();
-        let output = open_date_picker(&ctx);
-        let popup_fill = ctx.global_style().visuals.window_fill();
-        let wide = |rect: Rect| rect.width() > 300.0;
-        let glass = output
-            .shapes
-            .iter()
-            .any(|clipped| matches!(&clipped.shape, egui::Shape::Callback(callback) if wide(callback.rect)));
-        let opaque_frame = output
-            .shapes
-            .iter()
-            .any(|clipped| has_rect(&clipped.shape, popup_fill, &wide));
-        assert!(glass, "glass behind the popup");
-        assert!(!opaque_frame, "no opaque frame over it");
-    }
 }
