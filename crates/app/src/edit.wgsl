@@ -49,8 +49,11 @@ struct Edit {
     blur: vec4<f32>,
     // The focus (xy), 0–1 across the photo, the quarter turns clockwise (z), and the lens blur on (w, REQ-023-05).
     focus: vec4<f32>,
-    // The crop on the upright, unturned photo: x, y, w, h (spec 029).
+    // The crop on the canvas, the upright, unturned photo as straightened: x, y, w, h (spec 029).
     crop: vec4<f32>,
+    // The straightening's cosine (x) and sine (y), the photo's width per height (z), and the flips (w: 1 left to right,
+    // 2 top to bottom) (REQ-029-10, REQ-029-11).
+    transform: vec4<f32>,
     // A film look's grain (REQ-028-06): strongest in the midtones (x), how much it differs per channel (y); its change
     // per hue (z: on, REQ-028-07) and its halation (w, REQ-028-08).
     film: vec4<f32>,
@@ -299,7 +302,7 @@ fn develop(rgb: vec3<f32>, uv: vec2<f32>, subject: f32, glow: vec3<f32>) -> vec3
     lin += glow;
     let vignette = edit.fx.x;
     if vignette != 0.0 {
-        let centered = ((uv - edit.crop.xy) / edit.crop.zw - 0.5) * 2.0;
+        let centered = ((to_canvas(uv) - edit.crop.xy) / edit.crop.zw - 0.5) * 2.0;
         let r = length(centered) / sqrt(2.0);
         let t = vignette * smoothstep(edit.fx.y, edit.fx.y + 0.5, r);
         if t < 0.0 {
@@ -418,6 +421,49 @@ fn blurred(sharp: vec4<f32>, uv: vec2<f32>, sigma: f32) -> vec4<f32> {
     return mix(below, bspline(low + 1u, uv), t);
 }
 
+// The flips of `domain::edit::Geometry`: their own inverse.
+fn flipped(p: vec2<f32>) -> vec2<f32> {
+    var q = p;
+    let flips = u32(edit.transform.w);
+    if (flips & 1u) != 0u {
+        q.x = 1.0 - q.x;
+    }
+    if (flips & 2u) != 0u {
+        q.y = 1.0 - q.y;
+    }
+    return q;
+}
+
+// `domain::edit::Geometry::canvas_scale`.
+fn canvas_scale() -> vec2<f32> {
+    let c = abs(edit.transform.x);
+    let s = abs(edit.transform.y);
+    return vec2<f32>(c + s / edit.transform.z, s * edit.transform.z + c);
+}
+
+// `domain::edit::Geometry::to_canvas`: where a point of the photo lies on the canvas.
+fn to_canvas(uv: vec2<f32>) -> vec2<f32> {
+    let q = flipped(uv);
+    let a = edit.transform.z;
+    let scale = canvas_scale();
+    let x = (q.x - 0.5) * a;
+    let y = q.y - 0.5;
+    let c = edit.transform.x;
+    let s = edit.transform.y;
+    return vec2<f32>((x * c - y * s) / (a * scale.x) + 0.5, (x * s + y * c) / scale.y + 0.5);
+}
+
+// `domain::edit::Geometry::from_canvas`: where a point of the canvas lies on the photo.
+fn from_canvas(p: vec2<f32>) -> vec2<f32> {
+    let a = edit.transform.z;
+    let scale = canvas_scale();
+    let x = (p.x - 0.5) * a * scale.x;
+    let y = (p.y - 0.5) * scale.y;
+    let c = edit.transform.x;
+    let s = edit.transform.y;
+    return flipped(vec2<f32>((x * c + y * s) / a + 0.5, -x * s + y * c + 0.5));
+}
+
 // `domain::edit::Geometry::to_original`: where a point of the output lies on the photo.
 fn to_original(p: vec2<f32>) -> vec2<f32> {
     var q = p;
@@ -427,7 +473,7 @@ fn to_original(p: vec2<f32>) -> vec2<f32> {
         case 3u: { q = vec2<f32>(1.0 - p.y, p.x); }
         default: {}
     }
-    return edit.crop.xy + q * edit.crop.zw;
+    return from_canvas(edit.crop.xy + q * edit.crop.zw);
 }
 
 @fragment
@@ -436,8 +482,10 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let uv = to_original(mix(edit.uv.xy, edit.uv.zw, t));
     let texel = textureSample(photo, photo_sampler, uv);
     let subject = textureSample(subject_mask, photo_sampler, uv).r;
-    // Outside the photo: the triangle covers the whole viewport.
-    if any(t < vec2<f32>(0.0)) || any(t > vec2<f32>(1.0)) {
+    // Outside the photo: the triangle covers the whole viewport. A straightened photo leaves the canvas's corners
+    // empty (REQ-029-10); half a pixel of slack keeps its edge.
+    let slack = 0.5 / max(edit.size.xy, vec2<f32>(1.0));
+    if any(t < vec2<f32>(0.0)) || any(t > vec2<f32>(1.0)) || any(uv < -slack) || any(uv > 1.0 + slack) {
         discard;
     }
     let flags = u32(edit.size.w);

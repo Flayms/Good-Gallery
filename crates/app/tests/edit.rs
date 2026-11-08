@@ -439,6 +439,117 @@ fn req_029_02_req_029_05_crops_by_dragging_the_frame() {
     assert_eq!(session(&harness).unwrap().recipe().crop, None);
 }
 
+/// REQ-029-10 (#248): _Straighten_ turns the photo by any angle with the crop inside it; cropping shows the turned
+/// photo with its empty corners, a frame dragged outwards stops at the photo's edge, a grid shows while the slider is
+/// held, and a double-click on it takes the straightening back.
+#[test]
+fn req_029_10_straightens_with_the_crop_inside_the_photo() {
+    let fixture = Fixture::new();
+    let (mut harness, _dir) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    harness.set_size(egui::vec2(900.0, 1600.0));
+    harness.run_steps(2);
+    harness.get_by_role_and_label(Role::Slider, "Straighten");
+
+    let mut straightened = Recipe::default();
+    straightened.set_straighten(15.0, 1.5);
+    set_recipe(&mut harness, straightened.clone());
+    let (width, height) = straightened.geometry().output_size(120, 80);
+    assert_eq!(
+        session(&harness).unwrap().shown_size(false),
+        Some([width as f32, height as f32]),
+        "the crop inside the turned photo"
+    );
+
+    harness.get_by_role_and_label(Role::Button, "Crop").click();
+    harness.run_steps(2);
+    harness.snapshot(common::snapshot_name("edit_straighten"));
+    let area = session(&harness).unwrap().crop_area().expect("the photo is drawn");
+    // The top left corner far out, beyond the photo.
+    let frame = straightened.geometry().frame();
+    let corner = egui::pos2(
+        area.left() + frame[0] * area.width(),
+        area.top() + frame[1] * area.height(),
+    );
+    harness.drag_at(corner);
+    harness.run_steps(2);
+    harness.hover_at(area.left_top() - egui::vec2(40.0, 40.0));
+    harness.run_steps(2);
+    harness.drop_at(area.left_top() - egui::vec2(40.0, 40.0));
+    harness.run_steps(3);
+    let geometry = session(&harness).unwrap().recipe().geometry();
+    assert!(geometry.frame_shows_photo(geometry.frame()), "only the photo");
+    let moved = geometry
+        .frame()
+        .iter()
+        .zip(frame)
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0, f32::max);
+    assert!(
+        moved < 0.002,
+        "already as large as it can be there: {:?}",
+        geometry.frame()
+    );
+
+    let slider = harness
+        .get_by_role_and_label(Role::Slider, "Straighten")
+        .rect()
+        .center();
+    // A fine grid while the slider is held.
+    harness.event(egui::Event::PointerButton {
+        pos: slider,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    });
+    harness.run_steps(2);
+    assert!(session(&harness).unwrap().is_straightening());
+    harness.event(egui::Event::PointerButton {
+        pos: slider,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    harness.run_steps(2);
+    assert!(!session(&harness).unwrap().is_straightening());
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            harness.event(egui::Event::PointerButton {
+                pos: slider,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+            harness.run_steps(1);
+        }
+    }
+    harness.run_steps(2);
+    let recipe = session(&harness).unwrap().recipe().clone();
+    assert_eq!((recipe.straighten, recipe.crop), (0.0, None), "back to the whole photo");
+}
+
+/// REQ-029-11 (#248): _Flip horizontal_ and _Flip vertical_ mirror the photo, and undo takes it back.
+#[test]
+fn req_029_11_flips_the_photo() {
+    let fixture = Fixture::new();
+    let (mut harness, _dir) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "Flip horizontal").click();
+    harness.run_steps(2);
+    assert!(session(&harness).unwrap().recipe().flip_h);
+    harness.get_by_role_and_label(Role::Button, "Flip vertical").click();
+    harness.run_steps(2);
+    let recipe = session(&harness).unwrap().recipe();
+    assert!(recipe.flip_h && recipe.flip_v);
+    assert_eq!(session(&harness).unwrap().shown_size(false), Some([120.0, 80.0]));
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    harness.run_steps(2);
+    assert!(session(&harness).unwrap().recipe().is_neutral());
+}
+
 /// REQ-029-03: a shape gives a centered frame of it; _Swap_ turns 4:3 upright.
 #[test]
 fn req_029_03_picks_the_frames_shape() {
@@ -1021,6 +1132,9 @@ fn req_028_01_req_028_02_req_028_03_picks_a_look_and_sets_its_strength_and_grain
     open(&mut harness, "a.jpg");
     edit(&mut harness);
     assert!(harness.query_by_label("Strength").is_none(), "no look yet");
+    // What lies above folded away, so the looks are in view.
+    harness.get_by_role_and_label(Role::Button, "Crop and rotate").click();
+    harness.run_steps(2);
 
     harness.get_by_role_and_label(Role::Button, "Portra 400").click();
     harness.run_steps(2);
@@ -1398,6 +1512,9 @@ fn req_029_09_req_021_21_the_size_section_sets_the_long_edge_and_the_quality() {
     let (mut harness, _) = app(&fixture, None, None);
     open(&mut harness, "a.jpg");
     edit(&mut harness);
+    // What lies above folded away, so the section is in view.
+    harness.get_by_role_and_label(Role::Button, "Crop and rotate").click();
+    harness.run_steps(2);
     harness.get_by_role_and_label(Role::Button, "Size").click();
     harness.run_steps(2);
     harness.get_by_label("Saved at 120 × 80");

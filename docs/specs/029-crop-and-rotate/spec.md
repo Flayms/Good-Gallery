@@ -37,7 +37,7 @@ Users who find a sideways photo or one with something distracting at its edge fi
 - **Given** a photo with a crop or rotation
 - **When** other adjustments are used or were set before
 - **Then** they look the same on the part that remains: the subject (spec 022), the blur's focus (spec 023), the white balance picker and the grain stay on the same spot of the photo
-- **And** the vignette follows the crop: its center and edges are those of the cropped photo
+- **And** the vignette follows the crop: its center and edges are those of the cropped, straightened photo
 
 ### REQ-029-05 · Like any adjustment
 
@@ -64,7 +64,7 @@ Users who find a sideways photo or one with something distracting at its edge fi
 
 - **Given** a photo with face regions (REQ-004-13), in the file or its sidecar
 - **When** a crop or rotation is saved and the regions are shown (REQ-009-17)
-- **Then** they mark the same faces as before
+- **Then** they mark the same faces as before; on a straightened photo a region is the box around the turned one
 - **And** a region entirely outside the crop isn't shown, and a region partly outside is cut at the crop's edge
 - **And** People tags stay as they are, also for a person cropped away
 
@@ -76,9 +76,25 @@ Users who find a sideways photo or one with something distracting at its edge fi
 - **And** it can't be larger than the photo after its crop: there is no enlarging, and a crop made smaller afterwards saves at the crop's own size
 - **And** like any adjustment it can be undone, reset and changed later (REQ-029-05, REQ-029-07)
 
+### REQ-029-10 · Straighten
+
+- **Given** a photo in editing mode
+- **When** the user drags _Straighten_ in _Crop and rotate_, from −100° to +100° in steps of 0.1°
+- **Then** the photo turns by that angle clockwise (counterclockwise below 0°) from the next frame on, as well as by its quarter turns, and a fine grid lies over it while the slider is held
+- **And** the crop becomes the largest of its shape, centered, that holds only the photo, so no empty corner shows or is saved
+- **And** in _Crop_ the whole turned photo shows with its empty corners, and the frame can't be dragged or shaped beyond the photo: it stops at its edge
+- **And** a double-click on the slider sets it back to 0°, and like any adjustment it can be undone, reset and changed later (REQ-029-05, REQ-029-07)
+
+### REQ-029-11 · Flip
+
+- **Given** a photo in editing mode
+- **When** the user chooses _Flip horizontal_ or _Flip vertical_
+- **Then** the photo shows mirrored left to right or top to bottom, as it shows on screen, with its crop and straightening mirrored too
+- **And** choosing it again, undo or reset takes it back, and it is saved like a crop (REQ-029-06)
+
 ## Out of scope
 
-- Straightening by a free angle and flipping.
+- Straightening by drawing a line along the horizon, and finding the angle automatically.
 - Enlarging, and scaling videos (#205).
 - Rotating without opening the editor, or several selected photos at once.
 - A lossless save for a rotate-only edit (writing the orientation tag instead of new pixels). A JPEG is re-encoded once at the edit's quality (REQ-021-21), like any edit.
@@ -102,4 +118,6 @@ Users who find a sideways photo or one with something distracting at its edge fi
 | REQ-029-06 | `crates/domain/src/edit.rs` › req_029_06_the_crop_in_pixels_stays_inside_the_photo; `crates/media/src/edit.rs` › req_029_06_saves_the_cropped_turned_pixels, req_029_06_keeps_16_bits (exiftool); `crates/app/tests/edit.rs` › req_029_06_saves_what_the_frame_holds; the tile's new shape checked in the running app | pass |
 | REQ-029-07 | `crates/domain/src/edit.rs` › req_029_07_crop_and_turns_round_trip_and_hostile_ones_are_tamed, req_029_07_the_originals_size_follows_from_the_outputs; `crates/media/src/edit.rs` › req_029_07_editing_again_and_reverting_bring_back_the_whole_photo (exiftool) | pass |
 | REQ-029-08 | `crates/domain/src/edit.rs` › req_029_08_places_rectangles_on_the_output; `crates/meta/src/rules.rs` › req_029_08_moves_a_sidecars_regions_by_the_saved_edit, req_029_08_places_regions_on_the_output_and_names_who_is_gone; `crates/media/src/edit.rs` › req_029_08_saved_regions_mark_the_same_faces (exiftool) | pass |
+| REQ-029-10 | `crates/domain/src/edit.rs` › req_029_10_straightening_maps_both_ways_and_the_crop_shows_only_the_photo, req_029_10_straightening_fits_the_crop_and_round_trips, req_029_08_regions_follow_flips_and_straightening; `crates/app/src/edit.rs` › req_029_10_req_029_11_the_gpu_preview_of_flips_and_straightening_matches_the_cpu_render; `crates/media/src/edit.rs` › req_029_10_req_029_11_saves_straightened_and_flipped_pixels (exiftool); `crates/app/tests/edit.rs` › req_029_10_straightens_with_the_crop_inside_the_photo (snapshot `edit_straighten`) | pass |
+| REQ-029-11 | `crates/domain/src/edit.rs` › req_029_11_flips_mirror_the_output, req_029_08_regions_follow_flips_and_straightening; `crates/app/src/edit.rs` › req_029_10_req_029_11_the_gpu_preview_of_flips_and_straightening_matches_the_cpu_render; `crates/media/src/edit.rs` › req_029_10_req_029_11_saves_straightened_and_flipped_pixels (exiftool); `crates/app/tests/edit.rs` › req_029_11_flips_the_photo | pass |
 | REQ-029-09 | `crates/domain/src/edit.rs` › req_029_09_scales_the_long_edge_down_and_never_up, req_029_09_req_021_21_size_and_quality_are_changes_and_round_trip; `crates/media/src/edit.rs` › req_029_09_saves_at_the_smaller_size; `crates/app/tests/edit.rs` › req_029_09_req_021_21_the_size_section_sets_the_long_edge_and_the_quality (snapshot `edit_size`) | pass |

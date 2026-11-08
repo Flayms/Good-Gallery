@@ -46,3 +46,22 @@ Three PRs, each green and usable on its own:
 ## Decisions
 
 All carried out as listed under _Approach_, with the changes noted there. Added while building: _Swap_ turns the frame around its center rather than fitting inside the current frame, which would shrink it a little more on every press; a person's People tag stays through `PersonInImage` when their last region is cropped away.
+
+## Straighten and flip (#248)
+
+Added later, on the same recipe and `Geometry`:
+
+1. **A canvas between the original and the crop.** The upright original is flipped, then turned by the straightening about its center onto a canvas the size of the turned photo's bounding box; the crop lies on that canvas, then the quarter turns follow. At 0° without flips the canvas is the original, so every older recipe means what it did. Up to ±100° is allowed (the issue asked for it), and the canvas makes a 90° straightening the photo on its side rather than a squeezed one.
+   _Rejected:_ the crop on the original, as before (a turned frame doesn't fit an axis-aligned crop); a canvas of the original's size (a steep angle would cut the photo).
+2. **The recipe keeps the photo's aspect while straightened** (`aspect`), since the canvas depends on it and a saved edit's item only knows the output's size. With it, `Geometry` stays self-contained, and `original_size` still works out the whole photo from the output.
+3. **Recipe version 2, only when used.** `to_json` writes version 1 for a recipe without flips or straightening and 2 with them, so an older app reads every recipe it can render correctly and leaves a straightened one alone, editing that photo from its saved pixels instead.
+4. **The crop is refitted on every change of the angle**: the largest of its shape, centered, inside the turned photo (a closed formula on the turned rectangle). A drag or a new shape that would leave the photo goes only as far as it can (bisection on the drag), so no empty corner can be saved.
+5. **A flip mirrors what shows.** Flipping the original turns the straightening the other way, so _Flip horizontal_ also negates the angle and mirrors the crop; with an odd quarter turn the screen's horizontal is the canvas's vertical. Twice is as before.
+6. **Saving resamples.** Flips alone mirror whole pixels; a straightened photo is sampled bilinearly at full size in `media::edit::resample`. The GPU preview maps in `edit.wgsl` with the same formulas (`to_canvas`, `from_canvas`) and discards the empty corners; the CPU preview leaves them transparent. GPU and CPU stay compared by `req_029_10_req_029_11_the_gpu_preview_of_flips_and_straightening_matches_the_cpu_render`.
+7. **Face regions** go through the same `Geometry`: a turned region becomes the box around it.
+
+### Tasks
+
+- [x] `Geometry` with canvas, flips and straightening; recipe fields, version, refit (REQ-029-10, REQ-029-11)
+- [x] Shader and CPU preview, saving, vignette on the output (REQ-029-04, REQ-029-10, REQ-029-11)
+- [x] _Straighten_ slider with a grid, flip buttons, frame kept on the photo (REQ-029-10, REQ-029-11)
