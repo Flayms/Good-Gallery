@@ -20,6 +20,7 @@ pub mod faces;
 pub mod folders;
 pub mod layout;
 pub mod look;
+pub mod lut;
 pub mod map;
 pub mod media;
 pub mod orientation;

@@ -202,6 +202,7 @@ dependencies = [
  "eframe",
  "egui_extras",
  "egui_kittest",
+ "half",
  "icu_datetime",
  "icu_locale_core",
  "image",

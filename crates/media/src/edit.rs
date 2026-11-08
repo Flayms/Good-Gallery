@@ -86,6 +86,8 @@ pub struct SaveRequest {
     pub sidecar_orientation: Option<u8>,
     /// The file's versions so far, ending with the edit it holds; none for an unedited photo (REQ-021-24).
     pub history: Vec<domain::versions::Version>,
+    /// The table of the recipe's LUT, if this computer has it (REQ-043-03).
+    pub lut: Option<Arc<domain::lut::Lut>>,
 }
 
 /// exiftool and its configuration for the `gg` namespace.
@@ -127,6 +129,7 @@ pub fn save(tools: &Tools, request: &SaveRequest) -> Result<String, EditError> {
             &source,
             &request.recipe,
             request.subject.as_deref(),
+            request.lut.clone(),
             format,
             request.sidecar_orientation,
         )?;
@@ -535,6 +538,7 @@ fn render_file(
     source: &Path,
     recipe: &Recipe,
     subject: Option<&Mask>,
+    lut: Option<Arc<domain::lut::Lut>>,
     format: Format,
     sidecar_orientation: Option<u8>,
 ) -> Result<Vec<u8>, EditError> {
@@ -554,7 +558,7 @@ fn render_file(
     let size = [decoded.image.width() as f32, decoded.image.height() as f32];
     let paintings = domain::paint::draw_all(&recipe.paintings, size);
     render(
-        &Params::new(recipe).with_paintings(&paintings),
+        &Params::new(recipe).with_paintings(&paintings).with_lut(lut),
         &mut decoded.image,
         subject,
     );
@@ -833,6 +837,7 @@ mod tests {
                 subject: None,
                 sidecar_orientation: None,
                 history: Vec::new(),
+                lut: None,
             }
         }
 
@@ -958,6 +963,38 @@ mod tests {
     fn mean_red(path: &Path) -> f64 {
         let image = image::open(path).unwrap().into_rgb8();
         image.pixels().map(|p| f64::from(p[0])).sum::<f64>() / f64::from(image.width() * image.height())
+    }
+
+    /// REQ-043-02, REQ-043-03: a saved edit applies its LUT and keeps it in the recipe.
+    #[test]
+    fn req_043_02_req_043_03_saving_applies_the_lut() {
+        let Some(lib) = library() else { return };
+        jpeg_file(&lib, "a.jpg");
+        // Every color to pure red.
+        let red = "LUT_3D_SIZE 2\n".to_owned() + &"1 0 0\n".repeat(8);
+        let lut = domain::lut::Lut::parse(&red).unwrap();
+        let choice = domain::lut::LutChoice {
+            id: domain::lut::lut_id(red.as_bytes()),
+            name: "Red".into(),
+            strength: 100.0,
+        };
+        let recipe = Recipe {
+            lut: Some(choice),
+            ..Recipe::default()
+        };
+        let request = SaveRequest {
+            lut: Some(Arc::new(lut)),
+            ..lib.request("a.jpg", recipe.clone(), true)
+        };
+        let written = save(&lib.tools, &request).unwrap();
+        let image = image::open(lib.path(&written)).unwrap().into_rgb8();
+        let p = image.get_pixel(10, 10);
+        assert!(p[0] > 240 && p[1] < 15 && p[2] < 15, "{p:?}");
+        let tags = lib.read(&written);
+        assert_eq!(
+            Recipe::from_json(tags["XMP-gg:EditRecipe"].as_str().unwrap()),
+            Some(recipe)
+        );
     }
 
     #[test]
@@ -1368,7 +1405,7 @@ mod tests {
             }
         });
         disc.save(&path).unwrap();
-        let encoded = render_file(&path, &recipe, None, Format::of(&path).unwrap(), None).unwrap();
+        let encoded = render_file(&path, &recipe, None, None, Format::of(&path).unwrap(), None).unwrap();
         let saved = image::load_from_memory(&encoded).unwrap().into_rgb8();
         assert!(
             saved.get_pixel(120, 90)[1] > disc.get_pixel(120, 90)[1] + 20,
