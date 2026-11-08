@@ -1444,6 +1444,9 @@ impl Viewer {
             if cropping && let Some(session) = &self.edit {
                 session.paint_crop(&painter, target);
             }
+            if let Some(session) = self.edit.as_ref().filter(|session| session.is_straightening()) {
+                session.paint_grid(&painter, rect.intersect(clip));
+            }
             if gradient && let Some(session) = &self.edit {
                 session.paint_photo_tool(&painter, target);
             }

@@ -479,6 +479,18 @@ fn apply_geometry(image: Rgba32FImage, geometry: &Geometry) -> Rgba32FImage {
     if geometry.is_identity() {
         return image;
     }
+    if geometry.straighten() != 0.0 {
+        return resample(&image, geometry);
+    }
+    // Flips alone move whole pixels (REQ-029-11).
+    let mut image = image;
+    let [horizontal, vertical] = geometry.flips();
+    if horizontal {
+        image::imageops::flip_horizontal_in_place(&mut image);
+    }
+    if vertical {
+        image::imageops::flip_vertical_in_place(&mut image);
+    }
     let [x, y, w, h] = geometry.crop_pixels(image.width(), image.height());
     let cropped = image::imageops::crop_imm(&image, x, y, w, h).to_image();
     match geometry.quarter_turns() {
@@ -487,6 +499,35 @@ fn apply_geometry(image: Rgba32FImage, geometry: &Geometry) -> Rgba32FImage {
         3 => image::imageops::rotate270(&cropped),
         _ => cropped,
     }
+}
+
+/// The output of a straightened photo (REQ-029-10): each pixel sampled where it lies on the original, between its four
+/// nearest pixels; the edge's own pixels where rounding reaches past it.
+fn resample(image: &Rgba32FImage, geometry: &Geometry) -> Rgba32FImage {
+    let (width, height) = image.dimensions();
+    let (out_width, out_height) = geometry.output_size(width, height);
+    let (max_x, max_y) = (width.saturating_sub(1) as f32, height.saturating_sub(1) as f32);
+    Rgba32FImage::from_fn(out_width, out_height, |x, y| {
+        let point = [
+            (x as f32 + 0.5) / out_width as f32,
+            (y as f32 + 0.5) / out_height as f32,
+        ];
+        let [u, v] = geometry.to_original(point);
+        let (fx, fy) = (
+            (u * width as f32 - 0.5).clamp(0.0, max_x),
+            (v * height as f32 - 0.5).clamp(0.0, max_y),
+        );
+        let (x0, y0) = (fx.floor() as u32, fy.floor() as u32);
+        let (x1, y1) = ((x0 + 1).min(width - 1), (y0 + 1).min(height - 1));
+        let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+        let mut out = [0.0; 4];
+        for (c, value) in out.iter_mut().enumerate() {
+            let top = image.get_pixel(x0, y0)[c] * (1.0 - tx) + image.get_pixel(x1, y0)[c] * tx;
+            let bottom = image.get_pixel(x0, y1)[c] * (1.0 - tx) + image.get_pixel(x1, y1)[c] * tx;
+            *value = top * (1.0 - ty) + bottom * ty;
+        }
+        image::Rgba(out)
+    })
 }
 
 /// The original at `source` with `recipe` applied, encoded as `format`.
@@ -1110,6 +1151,41 @@ mod tests {
         let (top, bottom) = (saved.get_pixel(8, 1), saved.get_pixel(8, 30));
         assert!(bottom[0] > top[0] + 80, "{top:?} {bottom:?}");
         assert!(top[0] > 110, "only the right half: {top:?}");
+    }
+
+    /// REQ-029-10, REQ-029-11 (#248): a flipped photo is saved mirrored, and a straightened one turned by its angle,
+    /// at the size of its crop, holding only the photo.
+    #[test]
+    fn req_029_10_req_029_11_saves_straightened_and_flipped_pixels() {
+        let Some(lib) = library() else { return };
+        jpeg_file(&lib, "a.jpg");
+        let mut flipped = Recipe::default();
+        flipped.flip(true);
+        let written = save(&lib.tools, &lib.request("a.jpg", flipped, true)).unwrap();
+        let saved = image::open(lib.path(&written)).unwrap().into_rgb8();
+        assert_eq!(saved.dimensions(), (64, 32));
+        let (left, right) = (saved.get_pixel(2, 16), saved.get_pixel(61, 16));
+        assert!(left[0] > right[0] + 80, "red grows to the left now: {left:?} {right:?}");
+
+        let mut straightened = Recipe::default();
+        straightened.set_straighten(20.0, 2.0);
+        let expected = straightened.geometry().output_size(64, 32);
+        let written = save(&lib.tools, &lib.request("a.jpg", straightened, true)).unwrap();
+        let saved = image::open(lib.path(&written)).unwrap().into_rgb8();
+        assert_eq!(saved.dimensions(), expected);
+        assert!(
+            expected.0 < 64 && expected.1 < 32,
+            "the crop inside the turned photo: {expected:?}"
+        );
+        let (width, height) = saved.dimensions();
+        // Turned clockwise, the photo's top (green 0) comes down on the left: the top left is greener than the top
+        // right, and no corner is the empty black around the photo.
+        let (top_left, top_right) = (saved.get_pixel(1, 1), saved.get_pixel(width - 2, 1));
+        assert!(top_left[1] > top_right[1] + 10, "{top_left:?} {top_right:?}");
+        for (x, y) in [(0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1)] {
+            let pixel = saved.get_pixel(x, y);
+            assert!(pixel.0.iter().any(|&c| c > 40), "corner {x},{y}: {pixel:?}");
+        }
     }
 
     /// REQ-029-06: the turn works the same on a 16-bit PNG, which keeps its depth.
