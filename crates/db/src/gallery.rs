@@ -372,6 +372,23 @@ fn layout_query(conn: &Connection, search: &GallerySearch) -> Result<(String, Ve
     Ok((sql, params))
 }
 
+/// The media items `search` shows that have a GPS position, as id, longitude and latitude, newest first (REQ-044-01).
+pub fn located_items(conn: &Connection, search: &GallerySearch) -> Result<Vec<(i64, f64, f64)>> {
+    let (clause, params) = filters(conn, search)?;
+    let located = if clause.is_empty() {
+        "WHERE media.latitude IS NOT NULL".to_owned()
+    } else {
+        format!("{clause} AND media.latitude IS NOT NULL")
+    };
+    let mut stmt = conn.prepare(&format!(
+        "SELECT id, longitude, latitude FROM media {located} ORDER BY sort_date DESC, id DESC"
+    ))?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(params), |row| {
+        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
 /// How many media items match `search` (REQ-034-02).
 pub fn count(conn: &Connection, search: &GallerySearch) -> Result<u64> {
     let (clause, params) = filters(conn, search)?;
@@ -584,6 +601,31 @@ mod tests {
     }
 
     const DAY: i64 = 24 * 3600 * 1000;
+
+    /// REQ-044-01: the map's points are what the search shows with a position, newest first.
+    #[test]
+    fn req_044_01_lists_the_located_items_of_a_search_newest_first() {
+        let located = |rel_path: &str, taken_at: i64, tags: &[&[&str]], at: Option<(f64, f64)>| {
+            let mut file = file(rel_path, (4, 3), Some(taken_at), tags);
+            file.metadata.location = at.and_then(|(lat, lon)| domain::media::Location::new(lat, lon));
+            file
+        };
+        let conn = index(&[
+            located("old.jpg", DAY, &[&["Beach"]], Some((48.1, 11.5))),
+            located("new.jpg", 3 * DAY, &[&["Beach"]], Some((-33.4, -70.6))),
+            located("nowhere.jpg", 2 * DAY, &[&["Beach"]], None),
+            located("city.jpg", 4 * DAY, &[&["City"]], Some((52.5, 13.4))),
+        ]);
+        let beach = GallerySearch {
+            tags: vec!["Beach".into()],
+            ..GallerySearch::default()
+        };
+        let points = located_items(&conn, &beach).unwrap();
+        let ids: Vec<i64> = points.iter().map(|(id, _, _)| *id).collect();
+        assert_eq!(ids, [id_of(&conn, "new.jpg"), id_of(&conn, "old.jpg")]);
+        assert_eq!((points[0].1, points[0].2), (-70.6, -33.4), "longitude, latitude");
+        assert_eq!(located_items(&conn, &GallerySearch::default()).unwrap().len(), 3);
+    }
 
     /// The query plan of a search, one step per line.
     fn plan(conn: &Connection, search: &GallerySearch) -> String {

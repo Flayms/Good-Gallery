@@ -107,6 +107,14 @@ pub fn file_in(libraries: &[crate::libraries::Library], root_id: i64, rel_path: 
     absolute_path(&library.path, rel_path)
 }
 
+/// How many media items have a GPS position: without any, the sidebar offers no map (REQ-044-01).
+pub fn located_count(conn: &Connection) -> Result<u64> {
+    let n: i64 = conn.query_row("SELECT count(*) FROM media WHERE latitude IS NOT NULL", [], |row| {
+        row.get(0)
+    })?;
+    Ok(n.max(0) as u64)
+}
+
 /// The cameras in the index with how many items each, most used first (REQ-040-05).
 pub fn cameras(conn: &Connection) -> Result<Vec<(String, u64)>> {
     named_counts(conn, "camera")

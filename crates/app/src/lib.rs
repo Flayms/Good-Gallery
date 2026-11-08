@@ -18,6 +18,7 @@ pub mod instance;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod loose;
 pub mod luts;
+pub mod map;
 pub mod names;
 pub mod open_with;
 pub mod originals;
@@ -177,6 +178,7 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
             Page::Gallery => gallery_page(ui, state),
             Page::Settings => settings_page::ui(ui, state),
             Page::People => people_page::ui(ui, state),
+            Page::Map => map::ui(ui, state),
         });
         show_viewer(&ctx, state);
         // A copied photo goes on the clipboard once decoded (REQ-009-25).

@@ -59,6 +59,7 @@ icons! {
     LayoutGrid => "layout-grid",
     List => "list",
     LoaderCircle => "loader-circle",
+    Map => "map",
     MapPin => "map-pin",
     Minus => "minus",
     Pipette => "pipette",

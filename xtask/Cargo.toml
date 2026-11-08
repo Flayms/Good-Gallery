@@ -8,6 +8,8 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# Triangulates the bundled world map's land once (`cargo xtask map`, spec 044).
+earcut = "=0.4.12"
 anyhow.workspace = true
 chrono.workspace = true
 db.workspace = true

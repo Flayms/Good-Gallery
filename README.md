@@ -14,7 +14,7 @@ Written in Rust (egui on wgpu).
 - **Smart albums:** keep a search under a name in the sidebar, or build one from conditions matching all or any: tags, People and Places, ratings, dates such as the last 30 days, size, duration, megapixels, orientation and what a photo shows. It stays up to date as photos are added, tagged and rated.
 - **Libraries anywhere:** add local folders or network shares (`\\server\share`). Thumbnails are cached on your computer, so an offline share stays browsable.
 - **Always up to date:** changes on disk are picked up as they happen, with periodic checks for anything missed.
-- **Search by what's in your files:** tags from EXIF, IPTC, XMP and `.xmp` sidecars (Lightroom, digiKam, darktable and others), including hierarchies like `Places|Italy|Rome` and face regions as _People_. Photos with a GPS position but no place tag show under the nearest town in _Places_, named offline, and never written into the file. Filter by file name, folder, date, rating and type, and sort by date, name, path or size.
+- **Search by what's in your files:** tags from EXIF, IPTC, XMP and `.xmp` sidecars (Lightroom, digiKam, darktable and others), including hierarchies like `Places|Italy|Rome` and face regions as _People_. Photos with a GPS position but no place tag show under the nearest town in _Places_, named offline, and never written into the file. A world map shows where they were taken. Filter by file name, folder, date, rating and type, and sort by date, name, path or size.
 - **Faces, on your computer:** choose detection and recognition models ([compare them](docs/face-models.md)), and the app finds faces in the background and suggests who they are. A name you confirm goes into the file as a face region other programs can read. Off until you choose a model.
 - **Search by what's in the photo, on your computer:** type "a dog on a beach" and see the photos that show it, without tags. A model you download looks at each photo once, in the background, from its thumbnail. Off until you choose a model.
 - **Viewer:** step through the gallery, zoom and pan, play videos, see a photo's details, who is where in it (from its face regions) and a filmstrip of the gallery.
@@ -140,6 +140,7 @@ Development builds keep their data in `%APPDATA%\good-gallery-rust` (Linux: `~/.
 | `cargo xtask dist`                                      | Build the installer and portable zip, or on Linux the `.tar.gz`, into `target/dist/`   |
 | `cargo xtask icons`                                     | Write the lucide icons named in `app::icons` and render the app icon from its SVG      |
 | `cargo xtask places`                                    | Rebuild the places named from GPS positions from GeoNames (needs `curl`)               |
+| `cargo xtask map`                                       | Rebuild the world map from Natural Earth (needs `curl`)                               |
 | `cargo xtask web`                                       | Build the browser version into `target/web/`                                           |
 | `cargo xtask web-test`                                  | Build the browser version and run its tests in Chromium                                |
 | `cargo xtask release`                                   | Cut a release (see below)                                                              |
@@ -161,4 +162,4 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org) (`fea
 
 ## License
 
-[GPL-3.0](LICENSE). The bundled ffmpeg and libmpv builds are GPL too; see `packaging/windows/THIRD-PARTY-NOTICES.txt`. Place names come from [GeoNames](https://www.geonames.org) (CC BY 4.0).
+[GPL-3.0](LICENSE). The bundled ffmpeg and libmpv builds are GPL too; see `packaging/windows/THIRD-PARTY-NOTICES.txt`. Place names come from [GeoNames](https://www.geonames.org) (CC BY 4.0), the world map from [Natural Earth](https://www.naturalearthdata.com) (public domain).

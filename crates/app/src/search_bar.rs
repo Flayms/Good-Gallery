@@ -91,12 +91,20 @@ pub fn show(ui: &mut egui::Ui, bar: &mut SearchBar, gallery: &mut Gallery, reser
             {
                 next.rules = None;
             }
-            let hint =
-                if chips.is_empty() && search.name.is_none() && search.content.is_none() && search.rules.is_none() {
-                    LABEL
-                } else {
-                    ""
-                };
+            // Photos chosen on the map (REQ-044-03).
+            if !search.media.is_empty() && map_chip(ui, search.media.len()) {
+                next.media.clear();
+            }
+            let hint = if chips.is_empty()
+                && search.name.is_none()
+                && search.content.is_none()
+                && search.rules.is_none()
+                && search.media.is_empty()
+            {
+                LABEL
+            } else {
+                ""
+            };
             let edit = egui::TextEdit::singleline(&mut bar.query)
                 .id_salt("search bar")
                 .frame(egui::Frame::NONE)
@@ -329,6 +337,27 @@ fn rules_chip(ui: &mut egui::Ui, name: &str) -> bool {
             ui.label(egui::RichText::new(name).size(theme::SIZE_CAPTION))
                 .on_hover_text("Smart album");
             removed = remove_button(ui, &format!("Remove smart album {name}"));
+        });
+    removed
+}
+
+/// Photos chosen on the map as a chip with their count; true when its × was clicked (REQ-044-03).
+fn map_chip(ui: &mut egui::Ui, count: usize) -> bool {
+    let mut removed = false;
+    let label = if count == 1 {
+        "1 photo from the map".to_owned()
+    } else {
+        format!("{} photos from the map", crate::format::count(count as u64))
+    };
+    egui::Frame::new()
+        .stroke(egui::Stroke::new(1.0, theme::rim()))
+        .corner_radius(theme::RADIUS_CONTROL)
+        .inner_margin(egui::Margin::symmetric(4, 1))
+        .show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            ui.add(Icon::Map.image(12.0, theme::text()));
+            ui.label(egui::RichText::new(&label).size(theme::SIZE_CAPTION));
+            removed = remove_button(ui, &format!("Remove {label}"));
         });
     removed
 }

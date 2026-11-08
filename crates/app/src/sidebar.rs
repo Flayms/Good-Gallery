@@ -252,15 +252,23 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
                         );
                     }
                     SidebarGroup::Places => {
-                        category(
-                            ui,
-                            state,
-                            &mut search,
-                            group,
-                            &data.places,
-                            input.db.as_ref(),
-                            None::<fn(&mut egui::Ui)>,
-                        );
+                        // The map leads the group, below its heading, once photos have positions (REQ-044-01).
+                        let page = &mut *input.page;
+                        let map = (data.located > 0).then_some(|ui: &mut egui::Ui| {
+                            let map = Row {
+                                depth: 0,
+                                chevron: None,
+                                icon: Some((Icon::Map, theme::text())),
+                                label: "Map",
+                                active: *page == Page::Map,
+                                trailing: None,
+                                tooltip: None,
+                            };
+                            if row(ui, map).0.clicked() {
+                                *page = Page::Map;
+                            }
+                        });
+                        category(ui, state, &mut search, group, &data.places, input.db.as_ref(), map);
                     }
                     SidebarGroup::Ratings => ratings(ui, state, &mut search, data, input.db.as_ref()),
                     SidebarGroup::Tags => popular(ui, &mut search, data),

@@ -18,6 +18,7 @@ db.workspace = true
 egui_extras.workspace = true
 half = "2.7.1"
 indexer.workspace = true
+miniz_oxide.workspace = true
 eframe.workspace = true
 image.workspace = true
 tracing.workspace = true

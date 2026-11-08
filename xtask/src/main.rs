@@ -10,6 +10,7 @@ mod face_bench;
 mod gallery_bench;
 mod icons;
 mod libraries;
+mod map;
 mod places;
 mod process;
 mod release;
@@ -48,6 +49,7 @@ fn main() -> ExitCode {
         Some("dist") => report(dist::run(&args[1..])),
         Some("screenshots") => report(screenshots::run(&args[1..])),
         Some("places") => report(places::run(&args[1..])),
+        Some("map") => report(map::run(&args[1..])),
         Some("release") => ExitCode::from(release::run(&args[1..])),
         Some("release-notes") => ExitCode::from(release::run_notes(&args[1..])),
         Some("search-bench") => match search_bench::run(&args[1..]) {
@@ -63,7 +65,7 @@ fn main() -> ExitCode {
         Some("web-test") => report(web::test(&args[1..])),
         _ => {
             eprintln!(
-                "usage: cargo xtask check-specs [--summary] | libraries … | thumbs … | gallery-bench … | search-bench … | release … | release-notes <tag> … | dist … | screenshots … | places [--from <dir>] | icons [--lucide <dir>] | web [--debug] | web-test …"
+                "usage: cargo xtask check-specs [--summary] | libraries … | thumbs … | gallery-bench … | search-bench … | release … | release-notes <tag> … | dist … | screenshots … | places [--from <dir>] | map [--from <dir>] | icons [--lucide <dir>] | web [--debug] | web-test …"
             );
             ExitCode::FAILURE
         }

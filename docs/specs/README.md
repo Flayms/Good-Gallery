@@ -47,6 +47,7 @@ One folder per feature: `docs/specs/NNN-name/` with `spec.md` (what and why) and
 | [041-date-calendar](041-date-calendar/spec.md)           | Pick the date range on a calendar with a photo on each day             | Implemented |
 | [042-places-from-gps](042-places-from-gps/spec.md)       | Places from GPS positions: the nearest town, offline; tags win          | Implemented |
 | [043-luts](043-luts/spec.md)                             | Import `.cube` LUTs and apply them at a strength in the editor         | Implemented |
+| [044-world-map](044-world-map/spec.md)                   | A world map of the photos with a position, in clusters that open in the gallery | Implemented |
 
 ## Conventions
 
