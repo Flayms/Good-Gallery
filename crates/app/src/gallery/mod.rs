@@ -98,6 +98,7 @@ enum Request {
     Item {
         id: i64,
     },
+    Calendar(CalendarKey),
 }
 
 enum Loaded {
@@ -129,6 +130,77 @@ enum Loaded {
         id: i64,
         result: Result<Option<GalleryItem>, String>,
     },
+    Calendar {
+        key: CalendarKey,
+        result: Result<CalendarData, String>,
+    },
+}
+
+/// What the date calendar asks for: the search apart from its date range, and the days it shows (REQ-041-02).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CalendarKey {
+    search: GallerySearch,
+    from: chrono::NaiveDate,
+    to: chrono::NaiveDate,
+    /// The month view wants each day's first thumbnail; the year view only counts.
+    thumbnails: bool,
+}
+
+/// A day of the date calendar: its photos and videos, and its first item with its thumbnail (REQ-041-02).
+#[derive(Debug, Clone, PartialEq)]
+pub struct CalendarDay {
+    pub photos: u32,
+    pub videos: u32,
+    pub first: Option<(i64, ThumbKey)>,
+}
+
+/// The days the calendar asked for that have items, and their date groups for the year view.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CalendarData {
+    pub days: std::collections::HashMap<chrono::NaiveDate, CalendarDay>,
+    pub groups: Vec<domain::date_groups::DateGroup>,
+}
+
+/// Where the date calendar is: the month it shows, whether it shows that month's year, and the first day of a range
+/// being picked (REQ-041-01, REQ-041-03). Kept while the menu is closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CalendarView {
+    pub month: chrono::NaiveDate,
+    pub year_view: bool,
+    pub anchor: Option<chrono::NaiveDate>,
+}
+
+fn load_calendar(conn: &Connection, key: &CalendarKey, content: &ContentSlot) -> Result<CalendarData, String> {
+    let search = GallerySearch {
+        from: Some(key.from),
+        to: Some(key.to),
+        sort_by: domain::search::SortBy::Taken,
+        descending: false,
+        ..key.search.clone()
+    };
+    let search = resolve(conn, &search, content)?;
+    let layout = db::gallery::layout(conn, &search).map_err(|e| e.to_string())?;
+    let mut days = std::collections::HashMap::new();
+    for group in &layout.groups {
+        let first = match layout.ids.get(group.start) {
+            Some(&id) if key.thumbnails => db::thumbs::thumb_source(conn, id)
+                .map_err(|e| e.to_string())?
+                .map(|source| (id, source.key)),
+            _ => None,
+        };
+        days.insert(
+            group.day,
+            CalendarDay {
+                photos: group.photos,
+                videos: group.videos,
+                first,
+            },
+        );
+    }
+    Ok(CalendarData {
+        days,
+        groups: layout.groups,
+    })
 }
 
 /// What a tile's, row's or the viewer's context menu asks for (REQ-009-11).
@@ -360,6 +432,10 @@ fn run(conn: &Connection, request: Request, content: &ContentSlot) -> Loaded {
             result: db::tags::autocomplete(conn, &prefix, limit).map_err(|e| e.to_string()),
             prefix,
         },
+        Request::Calendar(key) => Loaded::Calendar {
+            result: load_calendar(conn, &key, content),
+            key,
+        },
         Request::Detail { id } => Loaded::Detail {
             id,
             result: Box::new(db::media::detail(conn, id).map_err(|e| e.to_string())),
@@ -581,6 +657,15 @@ pub struct Gallery {
     swallow_click: bool,
     /// Photos content search's model hasn't looked at yet (REQ-036-06).
     content_left: u64,
+    /// Where the date calendar is (REQ-041-01).
+    calendar: Option<CalendarView>,
+    /// What the calendar asked for last, and the answer it shows until a newer one comes (REQ-041-02).
+    calendar_asked: Option<CalendarKey>,
+    calendar_data: Option<(CalendarKey, CalendarData)>,
+    /// The calendar's thumbnails, asked for before the tiles' in the next frame (REQ-041-02).
+    calendar_wanted: Vec<(i64, ThumbKey)>,
+    /// Whether this frame asked for thumbnails yet: without tiles drawn, the calendar asks itself.
+    textures_asked: bool,
 }
 
 impl Gallery {
@@ -654,6 +739,11 @@ impl Gallery {
             autoscroll_at: egui::Pos2::ZERO,
             swallow_click: false,
             content_left: 0,
+            calendar: None,
+            calendar_asked: None,
+            calendar_data: None,
+            calendar_wanted: Vec::new(),
+            textures_asked: false,
             tiles_frame: None,
         }
     }
@@ -683,6 +773,8 @@ impl Gallery {
             generation: self.generation,
             search: self.search.clone(),
         });
+        // New items may fall on the calendar's days.
+        self.calendar_asked = None;
         // Counts and new tags while indexing (REQ-006-11).
         self.reload_sidebar();
     }
@@ -1233,8 +1325,58 @@ impl Gallery {
 
     /// Takes in finished thumbnails. Once per frame, on every page that draws them, before it does.
     pub fn begin_thumbnails(&mut self) {
+        self.textures_asked = false;
         if let Some(thumbnails) = &mut self.thumbnails {
             thumbnails.streamer.begin_frame();
+        }
+    }
+
+    /// Where the date calendar is, opening at the month of the range's start, else this month (REQ-041-01).
+    pub fn calendar_view(&mut self) -> &mut CalendarView {
+        let month = domain::calendar::month_of(self.search.from.unwrap_or_else(domain::time_zone::today));
+        self.calendar.get_or_insert(CalendarView {
+            month,
+            year_view: false,
+            anchor: None,
+        })
+    }
+
+    /// The items on the days `from` to `to` among those the search shows apart from its date range, with each
+    /// day's first thumbnail if `thumbnails`; the last answer while a new one loads (REQ-041-02, REQ-041-03).
+    pub fn calendar_days(
+        &mut self,
+        from: chrono::NaiveDate,
+        to: chrono::NaiveDate,
+        thumbnails: bool,
+    ) -> Option<&CalendarData> {
+        let key = CalendarKey {
+            search: GallerySearch {
+                from: None,
+                to: None,
+                ..self.search.clone()
+            },
+            from,
+            to,
+            thumbnails,
+        };
+        if self.calendar_asked.as_ref() != Some(&key) {
+            self.calendar_asked = Some(key.clone());
+            self.loader.send(Request::Calendar(key));
+        }
+        self.calendar_data.as_ref().map(|(_, data)| data)
+    }
+
+    /// Whether the calendar's data is for what it asked last.
+    pub fn calendar_is_current(&self) -> bool {
+        matches!((&self.calendar_asked, &self.calendar_data), (Some(asked), Some((key, _))) if asked == key)
+    }
+
+    /// Asks for the calendar's thumbnails before the tiles' in the next frame, or now when no tiles asked for theirs
+    /// in this one (none match, or another page) (REQ-041-02).
+    pub fn want_calendar_thumbnails(&mut self, wanted: Vec<(i64, ThumbKey)>, pixels_per_point: f32) {
+        self.calendar_wanted = wanted;
+        if !self.textures_asked {
+            self.request_textures(std::iter::empty(), pixels_per_point);
         }
     }
 
@@ -1380,6 +1522,10 @@ impl Gallery {
                     }));
                 }
             }
+            Loaded::Calendar { key, result } => match result {
+                Ok(data) => self.calendar_data = Some((key, data)),
+                Err(error) => tracing::error!("can't load the calendar's days: {error}"),
+            },
             Loaded::FaceGroups(result) => {
                 self.face_groups = Some(result.unwrap_or_else(|error| {
                     tracing::error!("can't load the groups of faces: {error}");
@@ -1863,9 +2009,20 @@ impl Gallery {
     /// Asks for the thumbnails of `wanted` (item index and width in points), most important first, and for rendering
     /// of those the cache doesn't have (REQ-005-07, REQ-006-13).
     fn request_textures(&mut self, wanted: impl IntoIterator<Item = (usize, f32)>, pixels_per_point: f32) {
+        self.textures_asked = true;
         let Some(data) = self.data.clone() else { return };
         let Some(thumbnails) = &mut self.thumbnails else { return };
         let mut requests = Vec::new();
+        // The date calendar's days, while it is open (REQ-041-02): small, and over the tiles.
+        let calendar = std::mem::take(&mut self.calendar_wanted);
+        let calendar_width = pick_thumb_width(40.0, pixels_per_point);
+        for (media, key) in &calendar {
+            requests.push(TextureRequest {
+                media: *media,
+                path: thumbnails.cache.path(key, calendar_width),
+                width: calendar_width,
+            });
+        }
         // The viewer's preview first: the largest thumbnail, unless one is loaded already (REQ-009-14).
         if let Some((_, id)) = self.viewed
             && let Some(item) = self.items.get(&id)
@@ -1896,10 +2053,12 @@ impl Gallery {
         thumbnails.streamer.request(requests);
         for media in thumbnails.streamer.take_missing() {
             let Some(service) = &thumbnails.service else { continue };
-            if self
-                .items
-                .get(&media)
-                .is_some_and(|item| item.thumb_status != ThumbStatus::Error)
+            let calendar_day = calendar.iter().any(|(id, _)| *id == media);
+            if (calendar_day
+                || self
+                    .items
+                    .get(&media)
+                    .is_some_and(|item| item.thumb_status != ThumbStatus::Error))
                 && self.awaiting.insert(media)
             {
                 service.request(media);
