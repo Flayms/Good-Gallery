@@ -13,12 +13,41 @@ use eframe::egui::{self, FontId, Margin, Rect, RichText, Sense, Stroke, Vec2, po
 
 const MAX_WIDTH: f32 = 720.0;
 const CROP: f32 = 72.0;
-/// Faces shown per group; the name applies to all of them.
-const SHOWN_FACES: usize = 8;
 /// How far beyond the screen, in screens, faces are loaded ahead of scrolling.
 const NEAR_SCREENS: f32 = 0.5;
-/// Faces shown of a long section at first, and more each time the user asks (REQ-032-28).
+/// Faces shown of a long section or group at first, and more each time the user asks (REQ-032-28, REQ-032-32).
 const PART: usize = 48;
+
+/// What each decision on a face does, said where it is offered, the same in the viewer and on the page (REQ-032-33).
+pub mod tips {
+    pub const NAME: &str = "Writes the name into the photo";
+    pub const NO_NAME: &str = "Type a name first";
+    pub const IGNORE: &str = "For a real person you won't name: not asked about again";
+    pub const NOT_A_FACE: &str = "For a wrong detection: not found again";
+    pub const REMOVE_BOX: &str = "Forgets this box: it may be found again when the photo is looked at again";
+    pub const REMOVE_NAME: &str = "Takes the name out of the photo";
+    pub const BACK_TO_UNKNOWN: &str = "Asks about this face again";
+}
+
+/// A button for one of a face's decisions, with what it does (REQ-032-33).
+pub fn decision(ui: &mut egui::Ui, label: &str, tip: &str) -> bool {
+    ui.button(label).on_hover_text(tip).clicked()
+}
+
+/// A button that names or renames, off until there is a name to write (REQ-032-33).
+pub fn naming(ui: &mut egui::Ui, label: &str, named: bool) -> bool {
+    ui.add_enabled(named, egui::Button::new(label))
+        .on_hover_text(tips::NAME)
+        .on_disabled_hover_text(tips::NO_NAME)
+        .clicked()
+}
+
+/// A part of the page shown in parts: a section by its title, or a group by its first face (REQ-032-32).
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Part {
+    Section(&'static str),
+    Group(i64),
+}
 
 /// What the user chose on the page.
 enum Chosen {
@@ -44,7 +73,7 @@ pub struct PeoplePage {
     names: std::collections::HashMap<i64, String>,
     pub confirm: Option<NamingGroup>,
     /// Faces shown of a long section, by its title, beyond the first part (REQ-032-28).
-    shown: std::collections::HashMap<&'static str, usize>,
+    shown: std::collections::HashMap<Part, usize>,
 }
 
 /// What an ignored face or a non-face is, for its menu (REQ-032-30).
@@ -69,16 +98,19 @@ fn crop_uv([x, y, w, h]: [f32; 4], size: [u32; 2]) -> Rect {
     Rect::from_center_size(center, vec2(half_u * 2.0, half_v * 2.0))
 }
 
-/// The menu of a face nobody decided about yet: _Ignore_ and _Not a face_ (REQ-032-29).
+/// The menu of a face nobody decided about yet: _Ignore_, _Not a face_ and _Remove box_ (REQ-032-29).
 fn open_face_menu(response: &egui::Response, face: i64) -> Option<Chosen> {
     let mut chosen = None;
     response.context_menu(|ui| {
         crate::glass::behind_menu(ui, |ui| {
-            if ui.button("Ignore").clicked() {
+            if decision(ui, "Ignore", tips::IGNORE) {
                 chosen = Some(Chosen::Face(FaceAction::Ignore { faces: vec![face] }));
             }
-            if ui.button("Not a face").clicked() {
+            if decision(ui, "Not a face", tips::NOT_A_FACE) {
                 chosen = Some(Chosen::Face(FaceAction::NotAFace { faces: vec![face] }));
+            }
+            if decision(ui, "Remove box", tips::REMOVE_BOX) {
+                chosen = Some(Chosen::Face(FaceAction::Delete { face }));
             }
         });
     });
@@ -161,18 +193,18 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
                         if !groups.suggested.is_empty() {
                             section_title(ui, "To confirm");
                             for (name, group) in &groups.suggested {
-                                let (action, card) = group_card(ui, state, group, Some(name));
+                                let (action, card, shown) = group_card(ui, state, group, Some(name));
                                 choose(action);
-                                want(&group[..group.len().min(SHOWN_FACES)], card);
+                                want(&group[..shown], card);
                                 ui.add_space(theme::SPACE * 6.0);
                             }
                         }
                         if !groups.unknown.is_empty() {
                             section_title(ui, "Unknown");
                             for group in &groups.unknown {
-                                let (action, card) = group_card(ui, state, group, None);
+                                let (action, card, shown) = group_card(ui, state, group, None);
                                 choose(action);
-                                want(&group[..group.len().min(SHOWN_FACES)], card);
+                                want(&group[..shown], card);
                                 ui.add_space(theme::SPACE * 6.0);
                             }
                         }
@@ -206,8 +238,15 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
                         }
                         on_screen.append(&mut ahead);
                         let wanted: Vec<(i64, ThumbKey)> = on_screen;
+                        let pixels_per_point = ui.ctx().pixels_per_point();
+                        let viewer = state.viewer.is_some();
                         if let Some(gallery) = &mut state.gallery {
-                            gallery.want_thumbnails(&wanted);
+                            // The viewer hides the page; its photo and filmstrip need theirs (REQ-032-26).
+                            if viewer {
+                                gallery.want_viewer_thumbnails(pixels_per_point);
+                            } else {
+                                gallery.want_thumbnails(&wanted);
+                            }
                         }
                     }
                 }
@@ -245,14 +284,17 @@ fn faces_count(count: usize) -> String {
 
 /// One group with its faces. A person's group (REQ-032-24) is confirmed with _Yes, all_, and a face's ✕ says it isn't
 /// them; an unknown group (REQ-032-15) is named in a field or ignored, and a face's ✕ takes it out (REQ-032-25).
-/// Without saying who, nothing is written. What the user chose, and where the card is.
+/// Without saying who, nothing is written. A large group shows in parts (REQ-032-32). What the user chose, where the
+/// card is, and how many faces show.
 fn group_card(
     ui: &mut egui::Ui,
     state: &mut AppState,
     group: &FaceGroup,
     person: Option<&String>,
-) -> (Option<Chosen>, Rect) {
+) -> (Option<Chosen>, Rect, usize) {
     let key = group.first().map_or(0, |(face, _)| face.id);
+    let part = Part::Group(key);
+    let shown = shown_part(state, part, group.len());
     let photos: Vec<i64> = group.iter().map(|(face, _)| face.media).collect();
     let mut chosen = None;
     let card = card_frame().show(ui, |ui| {
@@ -264,7 +306,7 @@ fn group_card(
         ui.label(RichText::new(title).font(FontId::new(theme::SIZE_BODY, theme::semibold())));
         ui.add_space(theme::SPACE * 2.0);
         ui.horizontal_wrapped(|ui| {
-            for (face, _) in group.iter().take(SHOWN_FACES) {
+            for (face, _) in &group[..shown] {
                 let shown = crop(ui, state, face.id, face.media, face.rect);
                 let corner = Rect::from_min_size(shown.rect.right_top() + vec2(-22.0, 2.0), Vec2::splat(20.0));
                 let (spoken, hover) = match person {
@@ -299,6 +341,7 @@ fn group_card(
                 }
             }
         });
+        show_more(ui, state, part, shown, group.len());
         ui.add_space(theme::SPACE * 2.0);
         let places = || group.iter().map(|(face, _)| (face.media, face.rect)).collect();
         ui.horizontal(|ui| match person {
@@ -324,35 +367,36 @@ fn group_card(
                 let spoken = format!("Who is this? Group of {}", group.len());
                 field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, &spoken));
                 let enter = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                let save = ui.button("Name them").clicked();
+                let save = naming(ui, "Name them", clean_name(name).is_some());
                 if (enter || save)
                     && let Some(name) = clean_name(name)
                 {
                     page.confirm = Some(NamingGroup { name, places: places() });
                 }
                 let faces = || group.iter().map(|(face, _)| face.id).collect();
-                if ui.button("Ignore").clicked() {
+                if decision(ui, "Ignore", tips::IGNORE) {
                     chosen = Some(Chosen::Face(FaceAction::Ignore { faces: faces() }));
                 }
-                if ui.button("Not faces").clicked() {
+                if decision(ui, "Not faces", tips::NOT_A_FACE) {
                     chosen = Some(Chosen::Face(FaceAction::NotAFace { faces: faces() }));
                 }
             }
         });
     });
-    (chosen, card.response.rect)
+    (chosen, card.response.rect, shown)
 }
 
-/// How many of a long section's faces show, and _Show more_ below them for the rest (REQ-032-28).
-fn shown_part(state: &AppState, title: &'static str, count: usize) -> usize {
-    state.people_page.shown.get(title).copied().unwrap_or(PART).min(count)
+/// How many of a long section's or group's faces show, and _Show more_ below them for the rest (REQ-032-28,
+/// REQ-032-32).
+fn shown_part(state: &AppState, part: Part, count: usize) -> usize {
+    state.people_page.shown.get(&part).copied().unwrap_or(PART).min(count)
 }
 
-fn show_more(ui: &mut egui::Ui, state: &mut AppState, title: &'static str, shown: usize, count: usize) {
+fn show_more(ui: &mut egui::Ui, state: &mut AppState, part: Part, shown: usize, count: usize) {
     if shown < count {
         ui.add_space(theme::SPACE * 2.0);
         if ui.button("Show more").clicked() {
-            state.people_page.shown.insert(title, shown + PART);
+            state.people_page.shown.insert(part, shown + PART);
         }
     }
 }
@@ -365,7 +409,8 @@ fn others_card(
     title: &'static str,
     faces: &FaceGroup,
 ) -> (Option<Chosen>, Rect, usize) {
-    let shown = shown_part(state, title, faces.len());
+    let part = Part::Section(title);
+    let shown = shown_part(state, part, faces.len());
     let mut chosen = None;
     let card = card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -382,12 +427,12 @@ fn others_card(
                 }
             }
         });
-        show_more(ui, state, title, shown, faces.len());
+        show_more(ui, state, part, shown, faces.len());
     });
     (chosen, card.response.rect, shown)
 }
 
-/// Ignored faces or non-faces. A click opens a face's menu: a name, _Back to unknown_, the other decision, _Delete_
+/// Ignored faces or non-faces. A click opens a face's menu: a name, _Back to unknown_, the other decision, _Remove box_
 /// (REQ-032-30). The viewer doesn't show them, so a click doesn't open the photo.
 fn decided_card(
     ui: &mut egui::Ui,
@@ -396,7 +441,8 @@ fn decided_card(
     faces: &FaceGroup,
     decided: Decided,
 ) -> (Option<Chosen>, Rect, usize) {
-    let shown = shown_part(state, title, faces.len());
+    let part = Part::Section(title);
+    let shown = shown_part(state, part, faces.len());
     let mut chosen = None;
     let card = card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
@@ -417,7 +463,7 @@ fn decided_card(
                     });
             }
         });
-        show_more(ui, state, title, shown, faces.len());
+        show_more(ui, state, part, shown, faces.len());
     });
     (chosen, card.response.rect, shown)
 }
@@ -439,7 +485,7 @@ fn decided_menu(
         let spoken = format!("Who is this? Face {}", face.id);
         field.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, &spoken));
         let enter = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-        if (ui.button("Save").clicked() || enter)
+        if (naming(ui, "Save", clean_name(name).is_some()) || enter)
             && let Some(name) = clean_name(name)
         {
             chosen = Some(Chosen::Faces(vec![
@@ -453,20 +499,17 @@ fn decided_menu(
     });
     ui.separator();
     let faces = vec![face.id];
-    if ui.button("Back to unknown").clicked() {
+    if decision(ui, "Back to unknown", tips::BACK_TO_UNKNOWN) {
         chosen = Some(Chosen::Face(FaceAction::Reopen { faces: faces.clone() }));
     }
     let other = match decided {
-        Decided::Ignored => ui
-            .button("Not a face")
-            .clicked()
-            .then_some(FaceAction::NotAFace { faces }),
-        Decided::NotAFace => ui.button("Ignore").clicked().then_some(FaceAction::Ignore { faces }),
+        Decided::Ignored => decision(ui, "Not a face", tips::NOT_A_FACE).then_some(FaceAction::NotAFace { faces }),
+        Decided::NotAFace => decision(ui, "Ignore", tips::IGNORE).then_some(FaceAction::Ignore { faces }),
     };
     if let Some(action) = other {
         chosen = Some(Chosen::Face(action));
     }
-    if ui.button("Delete").clicked() {
+    if decision(ui, "Remove box", tips::REMOVE_BOX) {
         chosen = Some(Chosen::Face(FaceAction::Delete { face: face.id }));
     }
     if chosen.is_some() {

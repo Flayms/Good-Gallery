@@ -812,3 +812,17 @@ fn req_006_19_shows_the_month_at_the_pointer() {
     harness.run_steps(20);
     assert!(harness.query_by_label("June 2024").is_none(), "goes with the years");
 }
+
+/// REQ-006-20: clicking the month at the pointer scrolls to that month's first item.
+#[test]
+fn req_006_20_clicking_the_month_jumps_to_its_first_item() {
+    let fixture = Fixture::new();
+    let mut harness =
+        common::harness_with_step(fixture.state(index(&photos_of_years(&[2024, 2023, 2020]))), 1.0 / 60.0);
+    settle(&mut harness);
+    harness.hover_at(egui::pos2(right_edge(&harness) - 5.0, 550.0));
+    harness.run_steps(20);
+    harness.get_by_label("June 2020").click();
+    harness.run_steps(5);
+    assert_eq!(gallery(&harness).first_visible(), 80);
+}

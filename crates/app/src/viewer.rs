@@ -675,6 +675,7 @@ impl Viewer {
 
     /// The popup of the face clicked or drawn: what it offers depends on whether it has a name.
     fn face_popup_ui(&mut self, ui: &egui::Ui, photo: Rect) -> Option<crate::state::FaceAction> {
+        use crate::people_page::{decision, naming, tips};
         use crate::state::FaceAction;
         let mut popup = self.face_popup.take()?;
         let rect = match &popup.target {
@@ -726,7 +727,8 @@ impl Viewer {
                         let typed = clean(&popup.name);
                         match &popup.target {
                             FaceTarget::Named { name, rect } => {
-                                if (ui.button("Rename").clicked() || enter)
+                                let renamed = typed.as_ref().is_some_and(|to| to != name);
+                                if (naming(ui, "Rename", renamed) || enter)
                                     && let Some(to) = typed.filter(|to| to != name)
                                 {
                                     action = Some(FaceAction::Rename {
@@ -736,7 +738,7 @@ impl Viewer {
                                         rect: *rect,
                                     });
                                 }
-                                if ui.button("Remove").clicked() {
+                                if decision(ui, "Remove name", tips::REMOVE_NAME) {
                                     action = Some(FaceAction::Remove {
                                         media,
                                         name: name.clone(),
@@ -745,7 +747,7 @@ impl Viewer {
                                 }
                             }
                             FaceTarget::Unknown(face) => {
-                                if (ui.button("Save").clicked() || enter)
+                                if (naming(ui, "Save", typed.is_some()) || enter)
                                     && let Some(name) = typed
                                 {
                                     action = Some(FaceAction::Name {
@@ -753,15 +755,18 @@ impl Viewer {
                                         places: vec![(media, face.rect)],
                                     });
                                 }
-                                if ui.button("Ignore").clicked() {
+                                if decision(ui, "Ignore", tips::IGNORE) {
                                     action = Some(FaceAction::Ignore { faces: vec![face.id] });
                                 }
-                                if ui.button("Not a face").clicked() {
+                                if decision(ui, "Not a face", tips::NOT_A_FACE) {
                                     action = Some(FaceAction::NotAFace { faces: vec![face.id] });
+                                }
+                                if decision(ui, "Remove box", tips::REMOVE_BOX) {
+                                    action = Some(FaceAction::Delete { face: face.id });
                                 }
                             }
                             FaceTarget::Drawn(rect) => {
-                                if (ui.button("Save").clicked() || enter)
+                                if (naming(ui, "Save", typed.is_some()) || enter)
                                     && let Some(name) = typed
                                 {
                                     action = Some(FaceAction::Name {

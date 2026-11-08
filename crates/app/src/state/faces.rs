@@ -462,6 +462,21 @@ impl AppState {
         if let Err(error) = decided {
             self.toasts.error(format!("Couldn't save that: {error}"));
         }
+        // Off _Unconfirmed faces_ at once, not once the groups are formed again (REQ-032-31).
+        if let Some(gallery) = &mut self.gallery {
+            match &action {
+                A::Ignore { faces } | A::NotAFace { faces } | A::Reopen { faces } => {
+                    gallery.drop_from_face_groups(|face| faces.contains(&face.id));
+                }
+                A::Delete { face: id } | A::NotThisPerson { face: id, .. } | A::Ungroup { face: id } => {
+                    gallery.drop_from_face_groups(|face| face.id == *id);
+                }
+                A::Name { places, .. } => {
+                    gallery.drop_from_face_groups(|face| places.contains(&(face.media, face.rect)))
+                }
+                A::LookAgain { .. } | A::Remove { .. } | A::Rename { .. } => {}
+            }
+        }
         let changes: Vec<(i64, RegionChange)> = match action {
             A::Ignore { .. }
             | A::Ungroup { .. }
