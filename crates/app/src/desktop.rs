@@ -145,6 +145,12 @@ struct GalleryApp {
 }
 
 impl eframe::App for GalleryApp {
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        if self.screenshot.is_some() {
+            ignore_pointer(raw_input);
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.preferences.poll(ui.ctx());
         if self.bench_no_glass {
@@ -209,6 +215,21 @@ impl eframe::App for GalleryApp {
             ui.ctx().request_repaint();
         }
     }
+}
+
+/// Drops what the mouse does, so a `--screenshot` shows no hover from wherever the pointer happens to lie, as on a CI
+/// runner (REQ-014-16).
+fn ignore_pointer(input: &mut egui::RawInput) {
+    input.events.retain(|event| {
+        !matches!(
+            event,
+            egui::Event::PointerMoved(_)
+                | egui::Event::MouseMoved(_)
+                | egui::Event::PointerButton { .. }
+                | egui::Event::PointerGone
+                | egui::Event::MouseWheel { .. }
+        )
+    });
 }
 
 fn save_png(path: &Path, image: &egui::ColorImage) -> anyhow::Result<()> {
@@ -761,6 +782,35 @@ fn run(options: Options) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// REQ-014-16: a screenshot doesn't show hover from wherever the mouse lies; keys still arrive.
+    #[test]
+    fn req_014_16_screenshots_ignore_the_pointer() {
+        let at = egui::pos2(100.0, 100.0);
+        let key = egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let mut input = egui::RawInput {
+            events: vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerGone,
+                key.clone(),
+            ],
+            ..Default::default()
+        };
+        ignore_pointer(&mut input);
+        assert_eq!(input.events, vec![key]);
+    }
 
     /// REQ-001-10: an empty data folder gets a new index, and the app starts without an error.
     #[test]

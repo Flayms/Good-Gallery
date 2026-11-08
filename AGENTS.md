@@ -6,7 +6,7 @@ A desktop gallery for large photo and video libraries (50k–500k files). Media 
 
 | Document                 | Why                                                                                                               |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `README.md`              | User facing description. Keep up to date with screenshots (`cargo xtask screenshots`).                            |
+| `README.md`              | User facing description. Its screenshots come from the _Screenshots_ workflow after each release (`cargo xtask screenshots`). |
 | `docs/architecture.md`   | Architecture overview: crates, threads, storage, rendering, platforms                                             |
 | `docs/decisions.md`      | Project-wide decisions; a feature's decisions are in its spec's `plan.md`                                          |
 | `docs/design.md`         | Visual design: principles, tokens, surfaces, type, motion, writing. Read before any UI work                       |

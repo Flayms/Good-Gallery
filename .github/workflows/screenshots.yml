@@ -1,0 +1,70 @@
+# Renders the README screenshots on Windows, which they show, after every release, so they don't fall behind while the
+# app is developed on Linux (docs/specs/014-ci-release, REQ-014-16). Changed screenshots go to the screenshots-refresh branch; a person opens
+# the pull request from the link in the run's summary. A pull request opened with this workflow's token wouldn't run
+# CI, and the repository doesn't let workflows open them.
+name: Screenshots
+
+on:
+  workflow_dispatch:
+  # After every published release, so the README shows the version people download.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  render:
+    name: Render the README screenshots
+    # A failed release published nothing new to show.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    # The app renders with wgpu on WARP, as in the snapshot tests.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # After a release, the released commit; otherwise the run's own.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - run: rustup toolchain install
+      # The verified downloads, as in ci.yml.
+      - uses: actions/cache@v4
+        with:
+          path: target/helpers/downloads
+          key: helpers-${{ hashFiles('packaging/fetch-helpers.ps1') }}
+      - name: Fetch exiftool, ffmpeg and libmpv
+        shell: pwsh
+        run: ./packaging/fetch-helpers.ps1
+      # The runner's screen is 1024 × 768, smaller than the app's 1280 × 800 window.
+      - name: Make the screen larger than the window
+        shell: pwsh
+        run: Set-DisplayResolution -Width 1920 -Height 1080 -Force
+      - run: cargo xtask screenshots
+        env:
+          GOOD_GALLERY_EXIFTOOL: ${{ github.workspace }}\target\helpers\exiftool\exiftool.exe
+          GOOD_GALLERY_FFMPEG: ${{ github.workspace }}\target\helpers\ffmpeg\ffmpeg.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: docs/screenshots/*.png
+      - name: Push changed screenshots to screenshots-refresh
+        shell: bash
+        run: |
+          if git diff --quiet -- docs/screenshots; then
+            echo "The README screenshots are up to date." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c screenshots-refresh
+          git add docs/screenshots
+          git commit -m "docs(readme): refresh the screenshots"
+          git push --force origin screenshots-refresh
+          echo "New README screenshots: [open a pull request](${{ github.server_url }}/${{ github.repository }}/compare/main...screenshots-refresh?expand=1)" >> "$GITHUB_STEP_SUMMARY"

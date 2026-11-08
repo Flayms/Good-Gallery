@@ -222,6 +222,11 @@ fn req_033_03_offers_what_needs_no_index() {
     for absent in ["Edit", "Rate 1 star", "Add"] {
         assert!(harness.query_by_label(absent).is_none(), "{absent} is offered");
     }
+    // The photo itself, which loads on a thread of its own: a slow machine took the snapshot before it.
+    if let Some(originals) = harness.state_mut().originals.as_mut() {
+        originals.wait();
+    }
+    harness.run_steps(3);
     mask_location(&mut harness);
     harness.snapshot(common::snapshot_name("loose_info"));
 }
