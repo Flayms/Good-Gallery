@@ -690,6 +690,8 @@ fn req_021_26_clears_the_version_history_after_asking() {
     std::fs::copy(dir.join("a.jpg"), backup.join("a.jpg")).unwrap();
     let pixels = image::open(dir.join("a.jpg")).unwrap().to_rgb8();
     open(&mut harness, "a.jpg");
+    // Tall enough for the whole info panel, whose button is clicked where it shows.
+    harness.set_size(egui::vec2(900.0, 1600.0));
     harness.key_press(Key::I);
     settle_all(&mut harness);
 
