@@ -1,7 +1,7 @@
 //! Content search in the app (spec 036): the settings section, the search bar's suggestion and chip, the gallery's
 //! matches and empty state, and smart albums. Words are matched by a fake: the real model runs in `media`'s tests.
 
-mod common;
+use crate::common;
 
 use app::Page;
 use common::{Fixture, settle};

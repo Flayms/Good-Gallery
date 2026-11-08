@@ -1,6 +1,6 @@
 //! The world map (spec 044): clusters of the photos with a position, opened in the gallery.
 
-mod common;
+use crate::common;
 
 use common::{Fixture, settle};
 use db::libraries::LibraryStatus;

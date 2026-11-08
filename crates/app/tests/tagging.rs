@@ -1,6 +1,6 @@
 //! Adding and removing tags in the info panel (spec 026) on a library of real photos, written with the real exiftool.
 
-mod common;
+use crate::common;
 
 use common::{Fixture, settle};
 use db::libraries::LibraryStatus;

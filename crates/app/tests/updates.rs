@@ -1,6 +1,6 @@
 //! The update's notice and button (spec 031), with a fake GitHub.
 
-mod common;
+use crate::common;
 
 use app::state::FileManager;
 use app::updates::{Phase, Updater, current_version};

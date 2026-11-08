@@ -1,6 +1,6 @@
 //! Fixing dates taken of a selection (spec 038).
 
-mod common;
+use crate::common;
 
 use common::{Fixture, settle};
 use db::libraries::LibraryStatus;

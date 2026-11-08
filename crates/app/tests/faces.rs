@@ -1,7 +1,7 @@
 //! Faces in the settings, the viewer and on the People page (spec 032), on a library of real photos and files written
 //! with exiftool. Models run in `media`'s and `indexer`'s tests; here, what they found is in the index.
 
-mod common;
+use crate::common;
 
 use app::Page;
 use common::{Fixture, settle};

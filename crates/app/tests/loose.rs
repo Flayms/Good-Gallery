@@ -1,6 +1,6 @@
 //! Files outside every library, shown without indexing them (spec 033).
 
-mod common;
+use crate::common;
 
 use common::{Fixture, settle};
 use db::libraries::LibraryStatus;
