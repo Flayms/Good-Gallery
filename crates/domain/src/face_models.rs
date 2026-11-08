@@ -436,6 +436,10 @@ pub fn same_face(a: [f32; 4], b: [f32; 4]) -> bool {
 /// How similar `face` is to a person: the mean of the best few of their faces, so one mislabeled face counts for little.
 const BEST_FEW: usize = 3;
 
+/// How much less like a face a second person may be than the first and still be suggested beside them (REQ-032-36).
+/// A default chosen by hand, not measured on a library.
+pub const ALTERNATIVE_MARGIN: f32 = 0.05;
+
 /// The person most similar to `face`, if similar enough and not `rejected` (REQ-032-10).
 pub fn suggest<'a>(
     face: &[f32],
@@ -443,13 +447,24 @@ pub fn suggest<'a>(
     threshold: f32,
     rejected: &[&str],
 ) -> Option<(&'a str, f32)> {
+    suggestions(face, known, threshold, rejected).into_iter().next()
+}
+
+/// The person most similar to `face`, and a second one as likely: similar enough too, and less similar by at most
+/// [`ALTERNATIVE_MARGIN`] (REQ-032-10, REQ-032-36). Neither is `rejected`; the closer comes first.
+pub fn suggestions<'a>(
+    face: &[f32],
+    known: &[(&'a str, &[f32])],
+    threshold: f32,
+    rejected: &[&str],
+) -> Vec<(&'a str, f32)> {
     let mut people: std::collections::HashMap<&'a str, Vec<f32>> = std::collections::HashMap::new();
     for (name, vector) in known {
         if !rejected.contains(name) {
             people.entry(name).or_default().push(cosine(face, vector));
         }
     }
-    people
+    let mut likely: Vec<(&'a str, f32)> = people
         .into_iter()
         .map(|(name, mut similarities)| {
             similarities.sort_by(|a, b| b.total_cmp(a));
@@ -457,8 +472,13 @@ pub fn suggest<'a>(
             (name, similarities.iter().sum::<f32>() / similarities.len() as f32)
         })
         .filter(|(_, similarity)| *similarity >= threshold)
-        // By name among equals, so the same faces always get the same suggestion.
-        .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| b.0.cmp(a.0)))
+        .collect();
+    // By name among equals, so the same faces always get the same suggestions.
+    likely.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    let best = likely.first().map_or(0.0, |(_, similarity)| *similarity);
+    likely.truncate(2);
+    likely.retain(|(_, similarity)| best - similarity <= ALTERNATIVE_MARGIN);
+    likely
 }
 
 /// Groups similar faces, largest first, leaving out groups smaller than `min_size` (REQ-032-15). Each face joins the
@@ -727,6 +747,30 @@ mod tests {
         assert_eq!(suggest(&unit(0.1), &known, 0.5, &["Anna"]), None);
         assert_eq!(suggest(&unit(0.8), &known, 0.9, &[]), None);
         assert_eq!(suggest(&unit(0.1), &[], 0.5, &[]), None);
+    }
+
+    /// REQ-032-36 (#253): a face about as like a second person as the first gets both, the closer first; one clearly
+    /// more like the first, one too unlike the second, or a second the user rejected gets the first alone.
+    #[test]
+    fn req_032_36_suggests_a_second_person_when_both_are_as_likely() {
+        let (anna, bea) = (unit(0.0), unit(1.0));
+        let known = [("Anna", anna.as_slice()), ("Bea", bea.as_slice())];
+        let names = |face: &[f32], threshold: f32, rejected: &[&str]| -> Vec<String> {
+            suggestions(face, &known, threshold, rejected)
+                .into_iter()
+                .map(|(name, _)| name.to_owned())
+                .collect()
+        };
+        assert_eq!(names(&unit(0.48), 0.8, &[]), ["Anna", "Bea"]);
+        assert_eq!(names(&unit(0.52), 0.8, &[]), ["Bea", "Anna"]);
+        assert_eq!(names(&unit(0.2), 0.6, &[]), ["Anna"], "clearly Anna");
+        assert_eq!(names(&unit(0.48), 0.88, &[]), ["Anna"], "Bea is too unlike");
+        assert_eq!(names(&unit(0.48), 0.8, &["Bea"]), ["Anna"]);
+        assert_eq!(
+            suggest(&unit(0.48), &known, 0.8, &[]).unwrap().0,
+            "Anna",
+            "the first is the suggestion"
+        );
     }
 
     /// REQ-032-10: one mislabeled face doesn't outweigh a person's other faces.
