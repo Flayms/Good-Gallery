@@ -162,8 +162,9 @@ fn req_036_01_req_036_03_req_036_08_uses_a_model_and_deletes_the_data() {
     assert_eq!(db::content::count(&db.lock().unwrap(), CATALOG[0].id).unwrap(), 0);
 }
 
-/// REQ-036-03, REQ-036-05: with a model chosen, typed words are first offered as what the photos show; choosing them
-/// shows the matches, combined with the other filters, until the chip is removed. Without one, no such suggestion.
+/// REQ-036-03, REQ-036-05, REQ-036-09: with a model chosen, typed words are first offered as what the photos show,
+/// with a sparkle (snapshot); choosing them shows the matches, combined with the other filters, until the chip is
+/// removed. Without one, no such suggestion.
 #[test]
 fn req_036_05_searches_by_what_the_photos_show() {
     {
