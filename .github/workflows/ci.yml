@@ -5,6 +5,8 @@ on:
   push:
     branches: [main]
   pull_request:
+    # ready_for_review: a draft gets its agent review (REQ-014-17) once it is marked ready.
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_call:
 
 permissions:
@@ -189,3 +191,96 @@ jobs:
       - run: |
           test "${{ needs.test.result }}" = success && test "${{ needs.test-linux.result }}" = success \
             && test "${{ needs.web.result }}" = success
+
+  # A second model reviews pull requests once their checks passed (REQ-014-17), with main's `.github/review.md` as its
+  # instructions. The reviewer only reads; this job posts its findings and fails on a confident critical or major one.
+  # Skipped for drafts and forks (no secrets there). The token is the owner's Claude subscription (`claude setup-token`).
+  review:
+    name: Review
+    needs: [lint-result, test-result]
+    if: >-
+      github.event_name == 'pull_request' && !github.event.pull_request.draft
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ github.event.pull_request.number }}
+      BASE: ${{ github.base_ref }}
+    steps:
+      - name: Check for the token
+        id: token
+        env:
+          TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then echo "present=true" >> "$GITHUB_OUTPUT"
+          else echo "::warning::No CLAUDE_CODE_OAUTH_TOKEN secret, so no agent review"; fi
+      - if: steps.token.outputs.present
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Read the instructions from main
+        if: steps.token.outputs.present
+        id: prompt
+        # Falls back to the pull request's own file only while main has none.
+        run: |
+          {
+            echo 'text<<END_OF_REVIEW_PROMPT'
+            echo "Pull request #$PR into \`$BASE\` (compare with \`origin/$BASE\`). HEAD is checked out with its changes."
+            echo
+            git show "origin/$BASE:.github/review.md" 2>/dev/null || cat .github/review.md
+            echo 'END_OF_REVIEW_PROMPT'
+          } >> "$GITHUB_OUTPUT"
+      - name: Review
+        if: steps.token.outputs.present
+        id: review
+        # A review that doesn't finish (the subscription's limit, an outage) must not block merging; the next step warns.
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          prompt: ${{ steps.prompt.outputs.text }}
+          claude_args: |
+            --model sonnet --max-turns 40
+            --allowedTools "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git blame:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh issue view:*)"
+            --json-schema '{"type":"object","required":["summary","findings"],"properties":{"summary":{"type":"string"},"findings":{"type":"array","items":{"type":"object","required":["severity","category","confidence","file","line","title","scenario"],"properties":{"severity":{"enum":["critical","major","minor"]},"category":{"enum":["correctness","security","performance","readability"]},"confidence":{"type":"integer","minimum":0,"maximum":100},"file":{"type":"string"},"line":{"type":"integer"},"title":{"type":"string"},"scenario":{"type":"string"},"fix":{"type":"string"}}}}}}'
+      - name: Post the findings
+        if: steps.token.outputs.present
+        env:
+          REVIEW: ${{ steps.review.outputs.structured_output }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if ! printf '%s' "$REVIEW" | jq -e '.findings' > /dev/null 2>&1; then
+            printf "<!-- agent-review -->\n## Agent review of %s\n\nThe review didn't finish, so this push has none: [the run](%s).\n" \
+              "${SHA:0:7}" "$RUN" > comment.md
+            echo "::warning::The agent review didn't finish"
+          else
+            printf '%s' "$REVIEW" > review.json
+            # Below 80 the reviewer isn't sure: listed apart, never blocking.
+            jq -r --arg sha "${SHA:0:7}" '
+              def line: "- **\(.severity)** · \(.category) · `\(.file):\(.line)`: \(.title)\n\n  \(.scenario)"
+                + if (.fix // "") != "" then "\n\n  Fix: \(.fix)" else "" end;
+              def order: sort_by({critical: 0, major: 1, minor: 2}[.severity]);
+              (.findings | map(select(.confidence >= 80)) | order) as $sure
+              | (.findings | map(select(.confidence < 80)) | order) as $unsure
+              | "<!-- agent-review -->\n## Agent review of \($sha)\n\n\(.summary)\n\n"
+                + if ($sure | length) == 0 then "No findings." else $sure | map(line) | join("\n") end
+                + if ($unsure | length) == 0 then ""
+                  else "\n\n<details><summary>Less certain (never blocking)</summary>\n\n"
+                    + ($unsure | map(line + " (confidence \(.confidence))") | join("\n")) + "\n\n</details>" end
+            ' review.json > comment.md
+          fi
+          # One comment per pull request: a later review replaces it.
+          id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq '.[] | select(.body | startswith("<!-- agent-review -->")) | .id' | tail -n 1)
+          if [ -n "$id" ]; then gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -F body=@comment.md > /dev/null
+          else gh pr comment "$PR" --body-file comment.md; fi
+          if [ -s review.json ] && jq -e 'any(.findings[]; .severity != "minor" and .confidence >= 80)' review.json > /dev/null; then
+            echo "::error::The agent review found critical or major problems; see its comment on the pull request"
+            exit 1
+          fi
