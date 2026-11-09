@@ -114,7 +114,7 @@ pub fn show(ui: &mut egui::Ui, bar: &mut SearchBar, gallery: &mut Gallery, reser
                 .hint_text(hint)
                 .align(egui::Align2::LEFT_CENTER)
                 .margin(egui::Margin::symmetric(0, 6))
-                .desired_width(ui.available_width().max(0.0));
+                .desired_width(ui.available_width().max(96.0));
             let response = ui.add(edit);
             response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, LABEL));
             input = Some(response);
