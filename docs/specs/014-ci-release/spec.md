@@ -127,7 +127,7 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 - **When** its `Lint` and `Test` checks passed
 - **Then** a different model than the one that writes the code (Sonnet) reviews it for correctness, security, performance and readability, with an eye for the mistakes AI-written code makes and nothing CI already checks; the pull request can't change these instructions
 - **And** each finding has a category, a severity (critical, major or minor), a confidence and a concrete scenario of what goes wrong
-- **And** the findings appear as one comment on the pull request, which the review of a later push replaces after checking whether the earlier findings were fixed
+- **And** the findings appear as one comment on the pull request, which the review of a later push replaces after checking whether the earlier findings were fixed; the comment ends with a note naming the model that reviewed
 - **And** the check `Review` fails on a critical or major finding of confidence 80 or more, so the author fixes it before the pull request counts as green; less certain findings are listed apart
 - **And** without the `CLAUDE_CODE_OAUTH_TOKEN` secret, or when the review doesn't finish (the subscription's limit, an outage), the check passes with a warning
 

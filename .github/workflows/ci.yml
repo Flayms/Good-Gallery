@@ -254,6 +254,7 @@ jobs:
           REVIEW: ${{ steps.review.outputs.structured_output }}
           SHA: ${{ github.event.pull_request.head.sha }}
           RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          LOG: ${{ steps.review.outputs.execution_file }}
         run: |
           if ! printf '%s' "$REVIEW" | jq -e '.findings' > /dev/null 2>&1; then
             printf "<!-- agent-review -->\n## Agent review of %s\n\nThe review didn't finish, so this push has none: [the run](%s).\n" \
@@ -275,6 +276,12 @@ jobs:
                     + ($unsure | map(line + " (confidence \(.confidence))") | join("\n")) + "\n\n</details>" end
             ' review.json > comment.md
           fi
+          # Signed with the model that ran, from the run's log: claude-sonnet-5-5 becomes Claude Sonnet 5.5.
+          model=$(jq -r '(if type == "array" then .[] else . end) | select(.type? == "system" and .subtype? == "init") | .model' \
+            "$LOG" 2>/dev/null | head -n 1)
+          model=$(printf '%s' "$model" | sed -E 's/^claude-([a-z]+)-([0-9]+)-([0-9]+).*/Claude \u\1 \2.\3/')
+          model=${model:-Claude Sonnet}
+          printf '\n> [!NOTE]\n> 🤖 Reviewed with %s\n' "$model" >> comment.md
           # One comment per pull request: a later review replaces it.
           id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
             --jq '.[] | select(.body | startswith("<!-- agent-review -->")) | .id' | tail -n 1)

@@ -443,6 +443,7 @@ fn req_014_17_a_second_model_reviews_pull_requests_after_the_checks() {
         "-X PATCH",
         ".severity != \"minor\" and .confidence >= 80",
         "exit 1",
+        "Reviewed with %s",
     ] {
         assert!(review.contains(part), "the review job lacks {part}");
     }
