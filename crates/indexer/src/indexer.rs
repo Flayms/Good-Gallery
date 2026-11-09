@@ -6,7 +6,7 @@ use crate::watcher::{LibraryWatcher, WatchEvent};
 use crate::{CurrentScan, IndexerEvent, IndexerStatus, ScanKind, ScanRequests, ScanResult};
 use db::writer::IndexWriter;
 use media::metadata::MetadataSource;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -105,7 +105,19 @@ struct Shared {
     on_written: Box<dyn Fn() + Send + Sync>,
     concurrency: AtomicUsize,
     watchers: Mutex<HashMap<i64, LibraryWatcher>>,
+    /// Files another program was still writing, by library and path, with how many waits they had (REQ-002-19).
+    writing: Mutex<HashMap<(i64, String), usize>>,
+    /// How long such a file waits before each read again.
+    write_waits: Mutex<Vec<Duration>>,
 }
+
+/// The waits before a file still being written is read again; after the last it is taken as it is (REQ-002-19).
+const WRITE_WAITS: [Duration; 4] = [
+    Duration::from_secs(5),
+    Duration::from_secs(30),
+    Duration::from_secs(120),
+    Duration::from_secs(600),
+];
 
 impl Shared {
     fn enqueue(&self, library: i64, scope: ScanScope, coverable: bool) {
@@ -213,6 +225,53 @@ impl Shared {
         }
     }
 
+    /// The files of `library` whose last wait is over: read as they are (REQ-002-19).
+    fn done_waiting(&self, library: i64) -> HashSet<String> {
+        let waits = self.write_waits.lock().unwrap_or_else(|p| p.into_inner()).len();
+        let writing = self.writing.lock().unwrap_or_else(|p| p.into_inner());
+        writing
+            .iter()
+            .filter(|((of, _), done)| *of == library && **done >= waits)
+            .map(|((_, path), _)| path.clone())
+            .collect()
+    }
+
+    /// After a scan of `library`: reads the files still being written again after their next wait, and forgets the
+    /// others it read (REQ-002-19).
+    fn wait_for_writes(self: &Arc<Self>, library: i64, scope: &ScanScope, still_written: Vec<String>) {
+        let waits = self.write_waits.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let mut due: HashMap<Duration, Vec<String>> = HashMap::new();
+        {
+            let mut writing = self.writing.lock().unwrap_or_else(|p| p.into_inner());
+            let named = match scope {
+                ScanScope::Changes(paths) | ScanScope::Files(paths) => Some(paths),
+                _ => None,
+            };
+            writing.retain(|(of, path), _| {
+                *of != library || still_written.contains(path) || named.is_some_and(|named| !named.contains(path))
+            });
+            for path in still_written {
+                let done = writing.entry((library, path.clone())).or_insert(0);
+                if let Some(&wait) = waits.get(*done) {
+                    *done += 1;
+                    due.entry(wait).or_default().push(path);
+                }
+            }
+        }
+        for (wait, paths) in due {
+            let weak = Arc::downgrade(self);
+            let spawned = std::thread::Builder::new().name("indexer wait".into()).spawn(move || {
+                std::thread::sleep(wait);
+                if let Some(shared) = weak.upgrade() {
+                    shared.enqueue(library, ScanScope::Changes(paths), false);
+                }
+            });
+            if let Err(error) = spawned {
+                tracing::warn!("Indexer: can't wait for files still being written: {error}");
+            }
+        }
+    }
+
     fn unwatch(&self, library: i64) {
         let watcher = self.watchers.lock().unwrap_or_else(|p| p.into_inner()).remove(&library);
         drop(watcher);
@@ -261,6 +320,8 @@ impl Indexer {
             on_written: deps.on_written,
             concurrency: AtomicUsize::new(deps.concurrency.max(1)),
             watchers: Mutex::new(HashMap::new()),
+            writing: Mutex::new(HashMap::new()),
+            write_waits: Mutex::new(WRITE_WAITS.to_vec()),
         });
         let worker_shared = shared.clone();
         let (writer, metadata, is_reachable, grace) =
@@ -438,6 +499,8 @@ fn run(
             }
         };
         let concurrency = shared.concurrency.load(Ordering::Relaxed);
+        let done_waiting = shared.done_waiting(job.library);
+        let mut still_written = Vec::new();
         let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| {
             let deps = ScanDeps {
                 writer: &mut writer,
@@ -447,8 +510,13 @@ fn run(
             let mut options = ScanOptions::new(concurrency, &cancel, &mut on_progress);
             options.reconnect_grace = reconnect_grace;
             options.pause = &pause;
+            options.done_waiting = Some(&done_waiting);
+            options.still_written = Some(&mut still_written);
             scan_root(deps, job.library, &job.scope, options)
         }));
+        if !cancel.load(Ordering::Relaxed) {
+            shared.wait_for_writes(job.library, &job.scope, still_written);
+        }
         let result = match outcome {
             Ok(Ok(ScanOutcome::Completed)) => ScanResult::Completed,
             Ok(Ok(ScanOutcome::Offline)) => ScanResult::Offline,
@@ -538,6 +606,8 @@ mod tests {
         gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
         /// The files read, in order.
         reads: Mutex<Vec<std::path::PathBuf>>,
+        /// Files whose metadata can't be read.
+        failing: Mutex<HashSet<String>>,
     }
 
     impl MetadataSource for Scripted {
@@ -551,6 +621,9 @@ mod tests {
                 && let Some(gate) = self.gate.lock().unwrap().take()
             {
                 let _ = gate.recv();
+            }
+            if self.failing.lock().unwrap().contains(&name) {
+                return Err(ExifToolError::Failed("locked".into()));
             }
             Ok(MediaMetadata::default())
         }
@@ -622,6 +695,45 @@ mod tests {
             let conn = db::open_reader(&self.db.path().join("gallery.db")).unwrap();
             conn.query_row("SELECT count(*) FROM media", [], |r| r.get(0)).unwrap()
         }
+    }
+
+    /// REQ-002-19: a file still being written is read again after each wait, and taken as it is after the last.
+    #[test]
+    fn req_002_19_reads_files_still_being_written_again_later() {
+        let f = Fixture::new(1);
+        *f.indexer.shared.write_waits.lock().unwrap() = vec![Duration::from_millis(200); 2];
+        f.metadata.failing.lock().unwrap().insert("busy.jpg".into());
+        std::fs::write(f.dirs[0].path().join("busy.jpg"), "x").unwrap();
+        let busy_reads = || {
+            f.metadata
+                .reads
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|path| path.ends_with("busy.jpg"))
+                .count()
+        };
+
+        f.indexer.request(f.libraries[0], ScanScope::Full);
+        f.done(1);
+        assert_eq!((f.media_count(), busy_reads()), (1, 1), "only a.jpg is indexed");
+        // The first wait: still being written.
+        f.done(1);
+        assert_eq!((f.media_count(), busy_reads()), (1, 2));
+        // The last wait: taken as it is, an unreadable file.
+        f.done(1);
+        assert_eq!((f.media_count(), busy_reads()), (2, 3));
+        let conn = db::open_reader(&f.db.path().join("gallery.db")).unwrap();
+        let error: Option<String> = conn
+            .query_row("SELECT meta_error FROM media WHERE file_name = 'busy.jpg'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(error.as_deref(), Some("exiftool: locked"));
+        assert!(f.indexer.shared.writing.lock().unwrap().is_empty());
+        // Nothing else is waiting.
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(f.indexer.status().queue.is_empty() && f.indexer.status().current.is_none());
     }
 
     #[test]
