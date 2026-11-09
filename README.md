@@ -141,6 +141,7 @@ Development builds keep their data in `%APPDATA%\good-gallery-rust` (Linux: `~/.
 | `cargo xtask icons`                                     | Write the lucide icons named in `app::icons` and render the app icon from its SVG      |
 | `cargo xtask places`                                    | Rebuild the places named from GPS positions from GeoNames (needs `curl`)               |
 | `cargo xtask map`                                       | Rebuild the world map from Natural Earth (needs `curl`)                               |
+| `cargo xtask countries`                                 | Rebuild the country names in every language from Unicode CLDR (needs `curl`)           |
 | `cargo xtask web`                                       | Build the browser version into `target/web/`                                           |
 | `cargo xtask web-test`                                  | Build the browser version and run its tests in Chromium                                |
 | `cargo xtask release`                                   | Cut a release (see below)                                                              |
@@ -162,4 +163,4 @@ Commits follow [Conventional Commits](https://www.conventionalcommits.org) (`fea
 
 ## License
 
-[GPL-3.0](LICENSE). The bundled ffmpeg and libmpv builds are GPL too; see `packaging/windows/THIRD-PARTY-NOTICES.txt`. Place names come from [GeoNames](https://www.geonames.org) (CC BY 4.0), the world map from [Natural Earth](https://www.naturalearthdata.com) (public domain).
+[GPL-3.0](LICENSE). The bundled ffmpeg and libmpv builds are GPL too; see `packaging/windows/THIRD-PARTY-NOTICES.txt`. Place names come from [GeoNames](https://www.geonames.org) (CC BY 4.0) and country names in other languages from [Unicode CLDR](https://cldr.unicode.org) (Unicode License v3), the world map from [Natural Earth](https://www.naturalearthdata.com) (public domain).

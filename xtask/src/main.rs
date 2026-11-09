@@ -5,6 +5,7 @@ const _: Option<&str> = option_env!("GOOD_GALLERY_WORKTREE");
 
 mod analysis_bench;
 mod check_specs;
+mod countries;
 mod dist;
 mod face_bench;
 mod gallery_bench;
@@ -49,6 +50,7 @@ fn main() -> ExitCode {
         Some("dist") => report(dist::run(&args[1..])),
         Some("screenshots") => report(screenshots::run(&args[1..])),
         Some("places") => report(places::run(&args[1..])),
+        Some("countries") => report(countries::run(&args[1..])),
         Some("map") => report(map::run(&args[1..])),
         Some("release") => ExitCode::from(release::run(&args[1..])),
         Some("release-notes") => ExitCode::from(release::run_notes(&args[1..])),
