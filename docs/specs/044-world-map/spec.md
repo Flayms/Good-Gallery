@@ -43,6 +43,6 @@ People want to see where they took their photos: a trip's route, the countries t
 
 | REQ        | Test | Result |
 | ---------- | ---- | ------ |
-| REQ-044-01 | `crates/domain/src/map.rs` › req_044_01_projects_onto_web_mercators_square, req_044_01_req_044_02_clusters_split_as_the_map_zooms_in; `crates/db/src/gallery.rs` › req_044_01_lists_the_located_items_of_a_search_newest_first; `crates/app/src/map.rs` › req_044_01_reads_the_bundled_world; `crates/app/tests/map.rs` › req_044_01_req_044_03_shows_clusters_and_opens_their_photos | pass (the thumbnails in clusters by looking at the running app's map) |
+| REQ-044-01 | `crates/domain/src/map.rs` › req_044_01_projects_onto_web_mercators_square, req_044_01_req_044_02_clusters_split_as_the_map_zooms_in; `crates/db/src/gallery.rs` › req_044_01_lists_the_located_items_of_a_search_newest_first; `crates/app/src/map.rs` › req_044_01_reads_the_bundled_world, req_044_01_land_triangles_cover_each_polygon_once; `crates/app/tests/map.rs` › req_044_01_req_044_03_shows_clusters_and_opens_their_photos | pass (the thumbnails in clusters by looking at the running app's map) |
 | REQ-044-02 | `crates/domain/src/map.rs` › req_044_02_zooms_around_the_pointer_and_pans, req_044_02_the_world_fills_the_view, req_044_01_req_044_02_clusters_split_as_the_map_zooms_in; `crates/app/tests/map.rs` › req_044_02_zooming_in_splits_clusters | pass (dragging, the wheel and pinching by hand) |
 | REQ-044-03 | `crates/app/tests/map.rs` › req_044_01_req_044_03_shows_clusters_and_opens_their_photos | pass |
