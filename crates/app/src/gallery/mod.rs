@@ -690,6 +690,9 @@ pub struct Gallery {
     autoscroll: Autoscroll,
     /// Until when the years beside the scrollbar stay after the user scrolled (REQ-006-18), in egui's time.
     years_until: f64,
+    /// Where the years and months were beside the scrollbar in the last frame, while shown: the pointer over it
+    /// hovers no tile or row (REQ-006-22).
+    year_lane: Option<Rect>,
     autoscroll_at: egui::Pos2,
     /// The click that stopped autoscroll: tiles and rows ignore it until every button is up again.
     swallow_click: bool,
@@ -784,6 +787,7 @@ impl Gallery {
             range_preview: None,
             autoscroll: Autoscroll::Off,
             years_until: 0.0,
+            year_lane: None,
             autoscroll_at: egui::Pos2::ZERO,
             swallow_click: false,
             content_left: 0,
@@ -2037,6 +2041,16 @@ impl Gallery {
         ctx.request_repaint();
         paint_autoscroll_marker(ctx, self.autoscroll_at);
         self.autoscroll.velocity(pointer.y) * dt.min(domain::autoscroll::MAX_FRAME)
+    }
+
+    /// Whether the pointer is over a tile or row's `response`, and not over the years beside the scrollbar above it
+    /// (REQ-006-22).
+    fn under_pointer(&self, ui: &egui::Ui, response: &egui::Response) -> bool {
+        response.contains_pointer()
+            && !self.year_lane.is_some_and(|lane| {
+                ui.input(|input| input.pointer.latest_pos())
+                    .is_some_and(|pos| lane.contains(pos))
+            })
     }
 
     /// Whether tiles and rows react to the pointer: not while autoscroll is on or the click that stopped it lasts.

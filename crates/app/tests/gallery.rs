@@ -827,6 +827,73 @@ fn req_006_20_clicking_the_month_jumps_to_its_first_item() {
     assert_eq!(gallery(&harness).first_visible(), 80);
 }
 
+/// REQ-006-21: dragging beside the bar, where the years are, moves the thumb with the pointer and shows the month, as
+/// dragging the bar does; it neither drags the gallery the other way nor opens a photo.
+#[test]
+fn req_006_21_dragging_beside_the_bar_scrolls_like_the_bar() {
+    use egui::PointerButton::Primary;
+    let fixture = Fixture::new();
+    let mut harness =
+        common::harness_with_step(fixture.state(index(&photos_of_years(&[2024, 2023, 2020]))), 1.0 / 60.0);
+    settle(&mut harness);
+    let x = right_edge(&harness) - 30.0;
+    let start = egui::pos2(x, 300.0);
+    harness.hover_at(start);
+    harness.run_steps(20);
+    press(&harness, Primary, start, true);
+    harness.run_steps(2);
+    for y in [400.0, 500.0, 590.0] {
+        harness.hover_at(egui::pos2(x, y));
+        harness.run_steps(3);
+    }
+    assert!(gallery(&harness).offset() > 100.0, "{}", gallery(&harness).offset());
+    assert!(harness.query_by_label("June 2020").is_some(), "the month at the thumb");
+    press(&harness, Primary, egui::pos2(x, 590.0), false);
+    harness.run_steps(5);
+    assert!(harness.state().viewer.is_none(), "no photo opened");
+    let end = gallery(&harness).offset();
+
+    // Back up again: the thumb follows the pointer, the gallery isn't dragged like content.
+    let start = egui::pos2(x, 550.0);
+    harness.hover_at(start);
+    harness.run_steps(5);
+    press(&harness, Primary, start, true);
+    harness.run_steps(2);
+    harness.hover_at(egui::pos2(x, 100.0));
+    harness.run_steps(5);
+    press(&harness, Primary, egui::pos2(x, 100.0), false);
+    harness.run_steps(5);
+    assert!(
+        gallery(&harness).offset() < end,
+        "{} < {end}",
+        gallery(&harness).offset()
+    );
+}
+
+/// REQ-006-22: with the pointer on a year, the tile below it shows no hover and no circle.
+#[test]
+fn req_006_22_a_year_hides_the_tile_below_from_the_pointer() {
+    let fixture = Fixture::new();
+    let mut harness =
+        common::harness_with_step(fixture.state(index(&photos_of_years(&[2024, 2023, 2020]))), 1.0 / 60.0);
+    settle(&mut harness);
+    harness.hover_at(egui::pos2(right_edge(&harness) - 30.0, 400.0));
+    harness.run_steps(20);
+    let year = harness.get_by_label("2023").rect().center();
+    harness.hover_at(year);
+    harness.run_steps(5);
+    assert!(harness.query_by_label("2023").is_some());
+    assert!(
+        harness.query_by_label_contains("Select 20").is_none(),
+        "no circle under the year"
+    );
+
+    // Beside the years, the tile reacts as usual.
+    harness.hover_at(egui::pos2(right_edge(&harness) - 120.0, year.y));
+    harness.run_steps(5);
+    assert!(harness.query_by_label_contains("Select 20").is_some());
+}
+
 /// REQ-006-01: the View menu keeps its size and place while it is open, in every view and under the pointer (#285).
 #[test]
 fn req_006_01_the_view_menu_holds_still() {
