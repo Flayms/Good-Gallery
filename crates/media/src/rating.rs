@@ -34,7 +34,7 @@ pub fn write(
     crate::replace::recover(&file)?;
     let name = rel_path.rsplit('/').next().unwrap_or(rel_path);
     let folder = file.parent().ok_or(WriteError::UnsafePath)?;
-    let sidecar = existing_sidecar(folder, name).expect("the folder of an indexed file can be read");
+    let sidecar = existing_sidecar(folder, name)?;
     let file_has_rating = kind == MediaKind::Video && has_rating(exiftool, &file)?;
     let mut targets = vec![match Target::of(kind, file_has_rating) {
         Target::File => file.clone(),
