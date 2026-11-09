@@ -796,3 +796,25 @@ fn req_041_02_shows_the_first_photo_of_each_day() {
     harness.run_steps(40);
     harness.snapshot(common::snapshot_name("date_calendar_photos"));
 }
+
+#[test]
+fn req_008_12_a_place_replaces_the_place_in_the_search() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture);
+    harness.get_by_label("Expand Italy").click();
+    settle(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "Rome").click();
+    settle(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "Anna").click();
+    settle(&mut harness);
+    assert_eq!(search(&harness).tags, ["Rome", "Anna"]);
+
+    // Another place replaces Rome; the person stays.
+    harness.get_by_role_and_label(Role::Button, "Italy").click();
+    settle(&mut harness);
+    assert_eq!(search(&harness).tags, ["Anna", "Italy"]);
+    // Clicking it again still removes it.
+    harness.get_by_role_and_label(Role::Button, "Italy").click();
+    settle(&mut harness);
+    assert_eq!(search(&harness).tags, ["Anna"]);
+}

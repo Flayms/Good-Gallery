@@ -13,6 +13,7 @@ People want to see where they took their photos: a trip's route, the countries t
 - **Given** media items with a GPS position (REQ-040-02) among those the search shows
 - **When** the user clicks _Map_ at the top of Places
 - **Then** a world map of land and country borders, bundled with the app, shows them as clusters: the photos close together on screen as one round thumbnail of the newest, with how many it holds
+- **And** every cluster is the same size, big enough to make out its photo, and no two overlap
 - **And** a cluster's tip and name say how many photos it holds and near which town ("2 photos near Munich", spec 042)
 - **And** _Map_ shows in Places once any media item has a position; when the search shows none of them, the map says so
 
@@ -21,7 +22,8 @@ People want to see where they took their photos: a trip's route, the countries t
 - **Given** the map
 - **When** the user drags it, turns the wheel, pinches, double-clicks, or clicks _Zoom in_ or _Zoom out_
 - **Then** it pans, or zooms around the pointer (the buttons around its center), from the whole world filling the page down to a town's streets
-- **And** clusters split into smaller ones as it zooms in, and the map remembers where it was while the user is elsewhere
+- **And** clusters split into smaller ones as it zooms in, only at set zoom steps, so they hold still while it zooms between them
+- **And** the map remembers where it was while the user is elsewhere
 
 ### REQ-044-03 · A place's photos
 
@@ -43,6 +45,6 @@ People want to see where they took their photos: a trip's route, the countries t
 
 | REQ        | Test | Result |
 | ---------- | ---- | ------ |
-| REQ-044-01 | `crates/domain/src/map.rs` › req_044_01_projects_onto_web_mercators_square, req_044_01_req_044_02_clusters_split_as_the_map_zooms_in; `crates/db/src/gallery.rs` › req_044_01_lists_the_located_items_of_a_search_newest_first; `crates/app/src/map.rs` › req_044_01_reads_the_bundled_world, req_044_01_land_triangles_cover_each_polygon_once; `crates/app/tests/map.rs` › req_044_01_req_044_03_shows_clusters_and_opens_their_photos | pass (the thumbnails in clusters by looking at the running app's map) |
-| REQ-044-02 | `crates/domain/src/map.rs` › req_044_02_zooms_around_the_pointer_and_pans, req_044_02_the_world_fills_the_view, req_044_01_req_044_02_clusters_split_as_the_map_zooms_in; `crates/app/tests/map.rs` › req_044_02_zooming_in_splits_clusters | pass (dragging, the wheel and pinching by hand) |
+| REQ-044-01 | `crates/domain/src/map.rs` › req_044_01_projects_onto_web_mercators_square, req_044_01_req_044_02_clusters_split_as_the_map_zooms_in, req_044_01_req_044_02_clusters_never_overlap; `crates/db/src/gallery.rs` › req_044_01_lists_the_located_items_of_a_search_newest_first; `crates/app/src/map.rs` › req_044_01_reads_the_bundled_world, req_044_01_land_triangles_cover_each_polygon_once; `crates/app/tests/map.rs` › req_044_01_req_044_03_shows_clusters_and_opens_their_photos, req_044_01_clusters_are_all_the_same_size | pass (the thumbnails in clusters by looking at the running app's map) |
+| REQ-044-02 | `crates/domain/src/map.rs` › req_044_02_zooms_around_the_pointer_and_pans, req_044_02_clusters_hold_still_while_zooming_within_a_level, req_044_01_req_044_02_clusters_never_overlap, req_044_02_the_world_fills_the_view, req_044_01_req_044_02_clusters_split_as_the_map_zooms_in; `crates/app/tests/map.rs` › req_044_02_zooming_in_splits_clusters | pass (dragging, the wheel and pinching by hand) |
 | REQ-044-03 | `crates/app/tests/map.rs` › req_044_01_req_044_03_shows_clusters_and_opens_their_photos | pass |

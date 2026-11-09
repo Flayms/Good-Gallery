@@ -196,6 +196,10 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
     let mut album_action = None;
     let empty = SidebarData::default();
     let data = gallery.sidebar().unwrap_or(&empty);
+    // An open smart album: leaving it for a library, folder or page starts from an empty search (REQ-034-08).
+    let in_album = data.albums.iter().any(|row| row.album.search == search);
+    let mut left_album = false;
+    let mut to_faces = false;
     // Folders leading to the active folder start expanded (REQ-008-02).
     let active = search.library.map(|library| (library, search.folder.clone()));
     if active != state.expanded_for {
@@ -214,6 +218,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
             group_label(ui, "Libraries");
             if libraries(ui, state, &mut search, &mut select_all, data, &input, on_settings) {
                 *input.page = Page::Gallery;
+                left_album = true;
             }
             // The groups in the user's order, without the switched-off ones (REQ-008-10).
             let shown: Vec<SidebarGroup> = state.layout.shown().collect();
@@ -239,6 +244,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
                             };
                             if row(ui, unknown).0.clicked() {
                                 *page = Page::People;
+                                to_faces = true;
                             }
                         });
                         category(
@@ -276,9 +282,18 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
             }
         });
     settings_row(ui, input.page);
+    if in_album && (left_album || to_faces) {
+        search = GallerySearch {
+            library: search.library,
+            folder: search.folder.take(),
+            ..GallerySearch::default()
+        };
+    }
     if search != *gallery.search() {
-        // Filtering from the sidebar shows the gallery.
-        *input.page = Page::Gallery;
+        // Filtering from the sidebar shows the gallery; leaving an album for Unconfirmed faces shows that.
+        if !to_faces {
+            *input.page = Page::Gallery;
+        }
         gallery.set_search(search);
     }
     if select_all {
@@ -569,7 +584,7 @@ fn libraries(
             && !on_settings
             && let Some((_, folders)) = data.folders.as_ref().filter(|(id, _)| *id == library.id)
         {
-            folder_items(ui, state, search, select_all, library.id, folders, 1);
+            clicked |= folder_items(ui, state, search, select_all, library.id, folders, 1);
         }
     }
     clicked
@@ -583,7 +598,8 @@ fn folder_items(
     library: i64,
     nodes: &[FolderNode],
     depth: usize,
-) {
+) -> bool {
+    let mut picked = false;
     for node in nodes {
         let open = state.expanded_folders.contains(&node.path);
         let has_children = !node.children.is_empty();
@@ -609,11 +625,13 @@ fn folder_items(
             (search.library, search.folder) = (Some(library), Some(node.path.clone()));
             state.expanded_folders.insert(node.path.clone());
             *select_all |= select;
+            picked = true;
         }
         if open && has_children {
-            folder_items(ui, state, search, select_all, library, &node.children, depth + 1);
+            picked |= folder_items(ui, state, search, select_all, library, &node.children, depth + 1);
         }
     }
+    picked
 }
 
 /// Clicking a tag includes it, or removes it if it is in the search (REQ-008-06).
@@ -625,7 +643,16 @@ fn toggle_tag(search: &mut GallerySearch, name: &str) {
     }
 }
 
-fn tag_row(ui: &mut egui::Ui, state: &mut SidebarState, search: &mut GallerySearch, node: &TagNode, depth: usize) {
+/// A tag of People or Places and its children. In Places, `places` holds every place's name: one replaces the others
+/// (REQ-008-12).
+fn tag_row(
+    ui: &mut egui::Ui,
+    state: &mut SidebarState,
+    search: &mut GallerySearch,
+    node: &TagNode,
+    depth: usize,
+    places: Option<&[String]>,
+) {
     let mode = search.tag_mode(&node.name);
     let open = state.expanded_tags.contains(&node.id);
     let has_children = !node.children.is_empty();
@@ -652,11 +679,14 @@ fn tag_row(ui: &mut egui::Ui, state: &mut SidebarState, search: &mut GallerySear
             state.expanded_tags.insert(node.id);
         }
     } else if response.clicked() {
-        toggle_tag(search, &node.name);
+        match places {
+            Some(places) if mode.is_none() => search.with_one_tag_of(&node.name, places.iter().map(String::as_str)),
+            _ => toggle_tag(search, &node.name),
+        }
     }
     if open {
         for child in &node.children {
-            tag_row(ui, state, search, child, depth + 1);
+            tag_row(ui, state, search, child, depth + 1, places);
         }
     }
 }
@@ -684,8 +714,19 @@ fn category(
     } else {
         nodes.len().min(PREVIEW)
     };
+    let places = (group == SidebarGroup::Places).then(|| {
+        fn names(nodes: &[TagNode], out: &mut Vec<String>) {
+            for node in nodes {
+                out.push(node.name.clone());
+                names(&node.children, out);
+            }
+        }
+        let mut all = Vec::new();
+        names(nodes, &mut all);
+        all
+    });
     for node in &nodes[..shown] {
-        tag_row(ui, state, search, node, 0);
+        tag_row(ui, state, search, node, 0, places.as_deref());
     }
     if nodes.len() > PREVIEW {
         let text = if state.show_all.contains(id) {

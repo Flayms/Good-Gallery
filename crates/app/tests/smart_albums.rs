@@ -400,3 +400,44 @@ fn req_040_05_the_editor_offers_the_cameras_in_the_index() {
     settle(&mut harness);
     assert_eq!(count_of(&harness, "Canon").as_deref(), Some("2"));
 }
+
+/// REQ-034-08: picking a library or _All libraries_ leaves an open smart album with an empty search; a tag narrows it.
+#[test]
+fn req_034_08_leaving_a_smart_album_starts_from_an_empty_search() {
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness(index());
+    settle(&mut harness);
+    set_search(&mut harness, beach());
+    save_as(&mut harness, "Sea");
+    set_search(&mut harness, GallerySearch::default());
+    let open_sea = |harness: &mut App| {
+        harness.get_by_role_and_label(Role::Button, "Sea").click();
+        settle(harness);
+        assert_eq!(search(harness), beach());
+    };
+
+    open_sea(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "Photos").click();
+    settle(&mut harness);
+    let library = search(&harness).library;
+    assert!(library.is_some());
+    assert_eq!(
+        search(&harness),
+        GallerySearch {
+            library,
+            ..GallerySearch::default()
+        },
+        "the album's tag is gone"
+    );
+
+    open_sea(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "All libraries").click();
+    settle(&mut harness);
+    assert_eq!(search(&harness), GallerySearch::default());
+
+    // A tag narrows the album instead.
+    open_sea(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "Berlin").click();
+    settle(&mut harness);
+    assert_eq!(search(&harness).tags, ["Beach", "Berlin"]);
+}

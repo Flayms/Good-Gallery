@@ -100,44 +100,104 @@ pub struct Cluster {
     pub bounds: [f64; 4],
 }
 
-/// Groups `points` (id, longitude, latitude; newest first) into clusters of what falls in the same `cell` × `cell`
-/// points of the view's grid (REQ-044-01, REQ-044-02).
-pub fn clusters(points: &[(i64, f64, f64)], view: &MapView, cell: f64) -> Vec<Cluster> {
-    // Cells counted from the world's corner, so clusters don't change while the map pans.
-    let size = view.scale() / cell;
-    let mut by_cell: std::collections::HashMap<(i64, i64), usize> = std::collections::HashMap::new();
-    let mut found: Vec<(Cluster, [f64; 2])> = Vec::new();
-    for &(id, longitude, latitude) in points {
-        let p = project(longitude, latitude);
-        let key = ((p[0] * size).floor() as i64, (p[1] * size).floor() as i64);
-        let at = *by_cell.entry(key).or_insert_with(|| {
-            found.push((
-                Cluster {
-                    center: p,
-                    ids: Vec::new(),
-                    bounds: [longitude, latitude, longitude, latitude],
-                },
-                [0.0, 0.0],
-            ));
-            found.len() - 1
-        });
-        let (cluster, sum) = &mut found[at];
-        cluster.ids.push(id);
-        *sum = [sum[0] + p[0], sum[1] + p[1]];
-        let b = &mut cluster.bounds;
-        *b = [
-            b[0].min(longitude),
-            b[1].min(latitude),
-            b[2].max(longitude),
-            b[3].max(latitude),
-        ];
+/// The zoom level clusters are grouped at for a view: whole levels, so they keep their grouping while the map zooms
+/// between two and only regroup on reaching the next (REQ-044-02).
+pub fn cluster_level(view: &MapView) -> f64 {
+    view.zoom.floor()
+}
+
+/// Groups `points` (id, longitude, latitude; newest first) into clusters at zoom `level`: what falls in the same
+/// `spacing` × `spacing` points of its grid, then any two closer than `spacing` points to each other, merged until none
+/// are. Clusters are drawn at most `spacing` wide, so they don't overlap at `level` and, as zooming in only moves them
+/// apart, at any zoom of that level either (REQ-044-01, REQ-044-02).
+pub fn clusters(points: &[(i64, f64, f64)], level: f64, spacing: f64) -> Vec<Cluster> {
+    let size = WORLD_POINTS * level.exp2() / spacing;
+    let cell_of = |p: [f64; 2]| ((p[0] * size).floor() as i64, (p[1] * size).floor() as i64);
+
+    /// A cluster as it grows: the indexes of its points, the sum of their world points, its bounds.
+    struct Group {
+        members: Vec<usize>,
+        sum: [f64; 2],
+        bounds: [f64; 4],
     }
-    found
+    impl Group {
+        fn center(&self) -> [f64; 2] {
+            let n = self.members.len() as f64;
+            [self.sum[0] / n, self.sum[1] / n]
+        }
+        fn absorb(&mut self, other: Group) {
+            self.members.extend(other.members);
+            self.sum = [self.sum[0] + other.sum[0], self.sum[1] + other.sum[1]];
+            let (a, b) = (&mut self.bounds, other.bounds);
+            *a = [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])];
+        }
+    }
+
+    // By grid cell first.
+    let mut by_cell: std::collections::HashMap<(i64, i64), usize> = std::collections::HashMap::new();
+    let mut groups: Vec<Group> = Vec::new();
+    for (index, &(_, longitude, latitude)) in points.iter().enumerate() {
+        let p = project(longitude, latitude);
+        let at = *by_cell.entry(cell_of(p)).or_insert_with(|| {
+            groups.push(Group {
+                members: Vec::new(),
+                sum: [0.0, 0.0],
+                bounds: [longitude, latitude, longitude, latitude],
+            });
+            groups.len() - 1
+        });
+        groups[at].absorb(Group {
+            members: vec![index],
+            sum: p,
+            bounds: [longitude, latitude, longitude, latitude],
+        });
+    }
+
+    // Then neighbors that came out too close, until none are: a merged cluster's middle moves, which can bring it
+    // close to another.
+    let too_close = 1.0 / size;
+    loop {
+        let mut placed: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+        let mut merged: Vec<Group> = Vec::with_capacity(groups.len());
+        let mut changed = false;
+        for group in groups {
+            let center = group.center();
+            let (x, y) = cell_of(center);
+            let near = (x - 1..=x + 1)
+                .flat_map(|cx| (y - 1..=y + 1).map(move |cy| (cx, cy)))
+                .filter_map(|cell| placed.get(&cell))
+                .flatten()
+                .copied()
+                .find(|&other| {
+                    let c = merged[other].center();
+                    (c[0] - center[0]).hypot(c[1] - center[1]) < too_close
+                });
+            match near {
+                Some(other) => {
+                    merged[other].absorb(group);
+                    changed = true;
+                }
+                None => {
+                    placed.entry((x, y)).or_default().push(merged.len());
+                    merged.push(group);
+                }
+            }
+        }
+        groups = merged;
+        if !changed {
+            break;
+        }
+    }
+
+    groups
         .into_iter()
-        .map(|(mut cluster, sum)| {
-            let n = cluster.ids.len() as f64;
-            cluster.center = [sum[0] / n, sum[1] / n];
-            cluster
+        .map(|mut group| {
+            group.members.sort_unstable();
+            Cluster {
+                center: group.center(),
+                ids: group.members.iter().map(|&index| points[index].0).collect(),
+                bounds: group.bounds,
+            }
         })
         .collect()
 }
@@ -207,12 +267,76 @@ mod tests {
         assert!(close(view.zoom, 5.0), "zoomed in stays");
     }
 
+    /// Photos spread over Europe in a fixed pseudo-random pattern, newest first.
+    fn scattered(n: i64) -> Vec<(i64, f64, f64)> {
+        let mut seed: u64 = 7;
+        let mut next = move || {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        (0..n)
+            .rev()
+            .map(|id| (id, -10.0 + 40.0 * next(), 36.0 + 24.0 * next()))
+            .collect()
+    }
+
+    /// REQ-044-02: while the map zooms between two whole levels, the clusters keep their photos; they only regroup on
+    /// reaching the next level (#293).
+    #[test]
+    fn req_044_02_clusters_hold_still_while_zooming_within_a_level() {
+        let points = scattered(400);
+        let at = |zoom: f64| {
+            let view = MapView {
+                center: project(10.0, 48.0),
+                zoom,
+            };
+            let mut groups: Vec<Vec<i64>> = clusters(&points, cluster_level(&view), 64.0)
+                .into_iter()
+                .map(|cluster| cluster.ids)
+                .collect();
+            groups.sort();
+            groups
+        };
+        let level = at(4.0);
+        for zoom in [4.1, 4.37, 4.5, 4.83, 4.999] {
+            assert_eq!(at(zoom), level, "regrouped at zoom {zoom}");
+        }
+        assert!(at(5.0).len() > level.len(), "split on reaching the next level");
+    }
+
+    /// REQ-044-01, REQ-044-02: no two clusters come closer than their spacing on screen at any zoom, so they never
+    /// overlap; each photo is in exactly one, and each lists its photos newest first (#296).
+    #[test]
+    fn req_044_01_req_044_02_clusters_never_overlap() {
+        let points = scattered(600);
+        for zoom in [1.0, 2.5, 3.0, 4.2, 5.7, 7.0, 9.9] {
+            let view = MapView {
+                center: project(10.0, 48.0),
+                zoom,
+            };
+            let found = clusters(&points, cluster_level(&view), 64.0);
+            let mut ids: Vec<i64> = found.iter().flat_map(|cluster| cluster.ids.clone()).collect();
+            ids.sort_unstable();
+            assert_eq!(ids, (0..600).collect::<Vec<_>>(), "zoom {zoom}");
+            assert!(found.iter().all(|cluster| cluster.ids.windows(2).all(|w| w[0] > w[1])));
+            let screen: Vec<[f64; 2]> = found.iter().map(|cluster| view.to_screen(cluster.center)).collect();
+            for (i, a) in screen.iter().enumerate() {
+                for b in &screen[i + 1..] {
+                    let apart = (a[0] - b[0]).hypot(a[1] - b[1]);
+                    assert!(apart >= 64.0 - 1e-6, "zoom {zoom}: two clusters {apart} points apart");
+                }
+            }
+        }
+    }
+
     #[test]
     fn req_044_01_req_044_02_clusters_split_as_the_map_zooms_in() {
         // Two photos in Munich, one in Berlin (newest first: Berlin, Munich, Munich).
         let points = [(3, 13.40, 52.52), (2, 11.58, 48.14), (1, 11.57, 48.13)];
         let world = MapView::default();
-        let together = clusters(&points, &world, 64.0);
+        let together = clusters(&points, cluster_level(&world), 64.0);
         assert_eq!(together.len(), 1, "one cluster for Germany seen from afar");
         assert_eq!(together[0].ids, [3, 2, 1], "newest first");
         let b = together[0].bounds;
@@ -222,7 +346,7 @@ mod tests {
             center: project(12.0, 50.0),
             zoom: 6.0,
         };
-        let mut apart = clusters(&points, &germany, 64.0);
+        let mut apart = clusters(&points, cluster_level(&germany), 64.0);
         apart.sort_by_key(|cluster| cluster.ids.len());
         assert_eq!(apart.len(), 2);
         assert_eq!((apart[0].ids.clone(), apart[1].ids.clone()), (vec![3], vec![2, 1]));
@@ -230,6 +354,10 @@ mod tests {
             center: project(11.575, 48.135),
             zoom: 16.0,
         };
-        assert_eq!(clusters(&points, &streets, 64.0).len(), 3, "close up, each photo alone");
+        assert_eq!(
+            clusters(&points, cluster_level(&streets), 64.0).len(),
+            3,
+            "close up, each photo alone"
+        );
     }
 }
