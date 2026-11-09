@@ -114,3 +114,20 @@ fn req_044_02_zooming_in_splits_clusters() {
         "apart up close"
     );
 }
+
+/// REQ-044-01: every cluster is the same size, however many photos it holds; its count says how many (#294, #295).
+#[test]
+fn req_044_01_clusters_are_all_the_same_size() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture);
+    harness.get_by_role_and_label(Role::Button, "Map").click();
+    settle(&mut harness);
+    let two = harness
+        .get_by_role_and_label(Role::Button, "2 photos near Munich")
+        .rect();
+    let one = harness
+        .get_by_role_and_label(Role::Button, "1 photo near Santiago")
+        .rect();
+    assert_eq!(two.size(), one.size());
+    assert!(one.width() >= 52.0, "big enough to make out the photo: {one:?}");
+}
