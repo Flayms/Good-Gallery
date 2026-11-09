@@ -25,6 +25,24 @@ pub(super) struct PendingOpen {
     scanned: bool,
 }
 
+/// Files on their way to the viewer: opened with the app, or from outside every library.
+#[derive(Default)]
+pub(super) struct Opening {
+    /// Files later starts of the app ask it to show (REQ-027-02).
+    #[cfg(not(target_arch = "wasm32"))]
+    requests: Option<Receiver<crate::instance::Request>>,
+    /// A file opened with the app, shown in the viewer once the gallery lists it (REQ-027-01).
+    pub(super) pending: Option<PendingOpen>,
+    /// The window has drawn a frame.
+    window_shown: bool,
+    /// A file whose folder is being added as a library from the viewer, opened once the library is there (REQ-033-04).
+    #[cfg(not(target_arch = "wasm32"))]
+    when_added: Option<PathBuf>,
+    /// Where files outside every library are read into scratch indexes (spec 033).
+    #[cfg(not(target_arch = "wasm32"))]
+    loose_files: Option<crate::loose::LooseFiles>,
+}
+
 impl AppState {
     /// Offers _Open with_ in the settings, for the installed Windows app (REQ-027-06).
     pub fn with_open_with(mut self, entries: Arc<dyn crate::open_with::OpenWithEntries>) -> Self {
@@ -56,14 +74,14 @@ impl AppState {
     /// (spec 033).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn with_loose_files(mut self, scratch: PathBuf, metadata: Arc<dyn media::metadata::MetadataSource>) -> Self {
-        self.loose_files = Some(crate::loose::LooseFiles { scratch, metadata });
+        self.opening.loose_files = Some(crate::loose::LooseFiles { scratch, metadata });
         self
     }
 
     /// Takes the files later starts of the app hand over (REQ-027-02).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn with_open_requests(mut self, requests: Receiver<crate::instance::Request>) -> Self {
-        self.open_requests = Some(requests);
+        self.opening.requests = Some(requests);
         self
     }
 
@@ -121,11 +139,11 @@ impl AppState {
                 gallery.set_search(search);
             }
         }
-        self.pending_open = Some(PendingOpen {
+        self.opening.pending = Some(PendingOpen {
             library,
             rel_path,
             id: None,
-            at_start: (!self.window_shown).then(Instant::now),
+            at_start: (!self.opening.window_shown).then(Instant::now),
             scanned: false,
         });
         self.find_pending_open();
@@ -135,7 +153,7 @@ impl AppState {
     #[cfg(not(target_arch = "wasm32"))]
     fn open_loose(&mut self, file: PathBuf) {
         let name = file.file_name().unwrap_or_default().to_string_lossy().into_owned();
-        let (Some(files), Some(db)) = (&self.loose_files, &self.db) else {
+        let (Some(files), Some(db)) = (&self.opening.loose_files, &self.db) else {
             self.toasts
                 .error(format!("Couldn't open {name}: it isn't in a library"));
             return;
@@ -145,7 +163,7 @@ impl AppState {
                 self.page = Page::Gallery;
                 self.viewer = None;
                 self.info_sheet = None;
-                self.pending_open = None;
+                self.opening.pending = None;
                 self.loose = Some(loose);
             }
             Err(error) => {
@@ -155,9 +173,36 @@ impl AppState {
         }
     }
 
+    /// Opens the files later starts of the app hand over (REQ-027-02), shows a file from a scratch index once it is
+    /// read (REQ-033-01), and the file whose folder was added from the viewer once it is a library (REQ-033-04).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn poll_opening(&mut self) {
+        let requests: Vec<_> = self.opening.requests.iter().flat_map(|rx| rx.try_iter()).collect();
+        for request in requests {
+            self.bring_to_front = true;
+            if let crate::instance::Request::Open(file) = request {
+                self.open_file(file);
+            }
+        }
+        self.show_loose();
+        // The folder added from the viewer is a library now (REQ-033-04).
+        if let Some(file) = &self.opening.when_added {
+            let path = file.to_string_lossy();
+            if self
+                .libraries
+                .iter()
+                .any(|library| domain::media::rel_path_in(&library.path, &path, cfg!(windows)).is_some())
+            {
+                let file = file.clone();
+                self.opening.when_added = None;
+                self.open_file(file);
+            }
+        }
+    }
+
     /// Opens the viewer on a file outside every library once its scratch index has it (REQ-033-01).
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn show_loose(&mut self) {
+    fn show_loose(&mut self) {
         let Some(loose) = &mut self.loose else { return };
         loose.poll();
         if loose.shown {
@@ -192,7 +237,7 @@ impl AppState {
         };
         let Some(folder) = file.parent() else { return };
         self.add_library(folder.to_string_lossy().into_owned());
-        self.open_when_added = Some(file);
+        self.opening.when_added = Some(file);
     }
 
     /// The viewer closed: a file shown from a scratch index goes with it, and isn't opened later (REQ-033-05).
@@ -200,15 +245,16 @@ impl AppState {
         self.face_photos_closed();
         #[cfg(not(target_arch = "wasm32"))]
         if self.loose.take().is_some() {
-            self.pending_open = None;
-            self.open_when_added = None;
+            self.opening.pending = None;
+            self.opening.when_added = None;
         }
     }
 
     /// A scan of `library` finished: the file opened with the app may be indexed now.
     pub(super) fn library_scanned(&mut self, library: i64) {
         if self
-            .pending_open
+            .opening
+            .pending
             .as_ref()
             .is_some_and(|pending| pending.library == library)
         {
@@ -219,7 +265,7 @@ impl AppState {
     /// Looks up the media item of the file opened with the app; asks for a scan of it ahead of the others the first
     /// time the index doesn't have it, and gives up once that scan found nothing (a skipped folder).
     fn find_pending_open(&mut self) {
-        let (Some(pending), Some(db)) = (&mut self.pending_open, &self.db) else {
+        let (Some(pending), Some(db)) = (&mut self.opening.pending, &self.db) else {
             return;
         };
         if pending.id.is_some() {
@@ -250,10 +296,10 @@ impl AppState {
         if !waiting {
             let rel_path = pending.rel_path.clone();
             let name = rel_path.rsplit('/').next().unwrap_or_default().to_owned();
-            self.pending_open = None;
+            self.opening.pending = None;
             // In a folder its library skips: shown as a file outside every library (REQ-033-06).
             #[cfg(not(target_arch = "wasm32"))]
-            if self.loose_files.is_some()
+            if self.opening.loose_files.is_some()
                 && let Some(folder) = self.libraries.iter().find(|root| root.id == library)
             {
                 let file = std::path::Path::new(&folder.path).join(rel_path);
@@ -267,9 +313,9 @@ impl AppState {
     /// Whether the window waits for the viewer to show the file it was started with, showing nothing else
     /// (REQ-027-07). Marks the window as shown.
     pub fn waiting_to_open(&mut self) -> bool {
-        self.window_shown = true;
+        self.opening.window_shown = true;
         self.viewer.is_none()
-            && self.pending_open.as_ref().is_some_and(|pending| {
+            && self.opening.pending.as_ref().is_some_and(|pending| {
                 pending.id.is_some()
                     && pending
                         .at_start
@@ -279,7 +325,7 @@ impl AppState {
 
     /// Opens the viewer on the file opened with the app once the gallery lists it (REQ-027-01). Called every frame.
     pub fn show_pending_open(&mut self) {
-        let (Some(PendingOpen { id: Some(id), .. }), Some(gallery)) = (&self.pending_open, &self.gallery) else {
+        let (Some(PendingOpen { id: Some(id), .. }), Some(gallery)) = (&self.opening.pending, &self.gallery) else {
             return;
         };
         if gallery.is_loading() {
@@ -287,7 +333,8 @@ impl AppState {
         }
         let Some(index) = gallery.position_of(*id) else { return };
         let at_start = self
-            .pending_open
+            .opening
+            .pending
             .as_ref()
             .is_some_and(|pending| pending.at_start.is_some());
         // Started with it: once the item is there, so the viewer draws the photo in its first frame (REQ-027-07).
@@ -301,7 +348,7 @@ impl AppState {
                 viewer.open_at_once();
             }
             self.viewer = Some(viewer);
-            self.pending_open = None;
+            self.opening.pending = None;
             // The indexed item takes the place of the one from a scratch index (REQ-033-04).
             #[cfg(not(target_arch = "wasm32"))]
             {

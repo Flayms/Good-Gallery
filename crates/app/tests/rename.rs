@@ -70,7 +70,8 @@ fn open_dialog(harness: &mut App) {
     for _ in 0..200 {
         let loaded = harness
             .state()
-            .rename_dialog
+            .rename
+            .dialog
             .as_ref()
             .is_some_and(|dialog| !dialog.rows().is_empty());
         if loaded {

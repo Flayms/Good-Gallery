@@ -363,34 +363,34 @@ fn confirm_clear_history(ctx: &egui::Context, state: &mut AppState) {
 /// The rename dialog, while open (spec 035).
 #[cfg(not(target_arch = "wasm32"))]
 fn rename_dialog(ctx: &egui::Context, state: &mut AppState) {
-    let Some(dialog) = &mut state.rename_dialog else { return };
+    let Some(dialog) = &mut state.rename.dialog else { return };
     match dialog.show(ctx) {
         Some(rename::Asked::Rename(job)) => {
-            state.rename_dialog = None;
+            state.rename.dialog = None;
             state.start_rename(job);
         }
         Some(rename::Asked::Undo) => {
-            state.rename_dialog = None;
+            state.rename.dialog = None;
             state.undo_rename();
         }
-        Some(rename::Asked::Close) => state.rename_dialog = None,
+        Some(rename::Asked::Close) => state.rename.dialog = None,
         None => {}
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn date_dialog(ctx: &egui::Context, state: &mut AppState) {
-    let Some(dialog) = &mut state.date_dialog else { return };
+    let Some(dialog) = &mut state.dates.dialog else { return };
     match dialog.show(ctx) {
         Some(fix_dates::Asked::Fix(job)) => {
-            state.date_dialog = None;
+            state.dates.dialog = None;
             state.start_fix_dates(job);
         }
         Some(fix_dates::Asked::Undo) => {
-            state.date_dialog = None;
+            state.dates.dialog = None;
             state.undo_fix_dates();
         }
-        Some(fix_dates::Asked::Close) => state.date_dialog = None,
+        Some(fix_dates::Asked::Close) => state.dates.dialog = None,
         None => {}
     }
 }

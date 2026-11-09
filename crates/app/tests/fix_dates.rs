@@ -122,7 +122,8 @@ fn wait_until_read(harness: &mut App) {
         harness.run_steps(1);
         if harness
             .state()
-            .date_dialog
+            .dates
+            .dialog
             .as_ref()
             .is_some_and(app::fix_dates::FixDatesDialog::is_read)
         {
@@ -136,7 +137,7 @@ fn wait_until_read(harness: &mut App) {
 
 /// The outcome of the dialog's row for `name`.
 fn outcome(harness: &App, name: &str) -> Outcome {
-    let dialog = harness.state().date_dialog.as_ref().expect("the dialog is open");
+    let dialog = harness.state().dates.dialog.as_ref().expect("the dialog is open");
     let id: i64 = {
         let db = harness.state().db().unwrap();
         let conn = db.lock().unwrap();
@@ -161,7 +162,7 @@ fn req_038_01_req_038_05_the_preview_shows_old_and_new_dates() {
     let fixture = Fixture::new();
     let (mut harness, _) = app(&fixture, &exiftool);
     open_for_all(&mut harness);
-    assert_eq!(harness.state().date_dialog.as_ref().unwrap().count(), 4);
+    assert_eq!(harness.state().dates.dialog.as_ref().unwrap().count(), 4);
     assert_eq!(
         changed_to(&outcome(&harness, "IMG_20230512_101500.jpg")).as_deref(),
         Some("2023:05:12 10:15:00")
@@ -176,7 +177,7 @@ fn req_038_01_req_038_05_the_preview_shows_old_and_new_dates() {
     harness.snapshot(common::snapshot_name("fix_dates_dialog"));
 
     // REQ-038-04: a shift moves the date taken the file has; one without can't be shifted.
-    let dialog = harness.state_mut().date_dialog.as_mut().unwrap();
+    let dialog = harness.state_mut().dates.dialog.as_mut().unwrap();
     dialog.kind = app::fix_dates::Kind::Shift;
     dialog.shift = [0, 1, 30];
     harness.run_steps(2);
@@ -198,7 +199,7 @@ fn req_038_08_req_038_09_fixes_and_undoes() {
     open_for_all(&mut harness);
     harness.get_by_label("Fix 1").click();
     settle(&mut harness);
-    assert!(harness.state().date_dialog.is_none(), "closed");
+    assert!(harness.state().dates.dialog.is_none(), "closed");
     assert_eq!(taken(&exiftool, &photo).as_deref(), Some("2023:05:12 10:15:00"));
     assert_eq!(taken(&exiftool, &dir.join("b.jpg")), None, "left alone");
     assert!(
@@ -272,6 +273,6 @@ fn req_038_01_the_context_menu_opens_the_dialog() {
     harness.run_steps(2);
     harness.get_by_label("Fix dates…").click();
     wait_until_read(&mut harness);
-    assert_eq!(harness.state().date_dialog.as_ref().unwrap().count(), 1);
+    assert_eq!(harness.state().dates.dialog.as_ref().unwrap().count(), 1);
     assert!(harness.query_by_label("Fix the date of 1 item").is_some());
 }

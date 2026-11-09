@@ -13,7 +13,6 @@ mod rename;
 mod writes;
 
 pub use edits::{ClearHistory, RevertTarget};
-use open::PendingOpen;
 use writes::ChangedMany;
 pub use writes::{CONFIRM_MANY_ABOVE, ChangeMany, Many, Rate, TagChange};
 
@@ -351,20 +350,14 @@ pub struct AppState {
     pub settings_page: SettingsPage,
     pub people_page: crate::people_page::PeoplePage,
     pub toasts: Toasts,
-    /// The rename dialog, while open (spec 035).
+    /// Renaming a selection (spec 035).
     #[cfg(not(target_arch = "wasm32"))]
-    pub rename_dialog: Option<crate::rename::RenameDialog>,
-    /// Where renames are journaled (REQ-035-08, REQ-035-09); renaming is off without it.
+    pub rename: rename::Rename,
+    /// Fixing the date taken of a selection (spec 038).
     #[cfg(not(target_arch = "wasm32"))]
-    rename_journal: Option<PathBuf>,
-    #[cfg(not(target_arch = "wasm32"))]
-    pub date_dialog: Option<crate::fix_dates::FixDatesDialog>,
-    /// Where date fixes are journaled (REQ-038-09); fixing dates is off without it.
-    #[cfg(not(target_arch = "wasm32"))]
-    date_journal: Option<PathBuf>,
-    /// exiftool processes that read dates for the date fix dialog, started when it first opens.
-    #[cfg(not(target_arch = "wasm32"))]
-    date_reader: Option<Arc<media::exiftool::ExifTool>>,
+    pub dates: fix_dates::FixDates,
+    /// Files opened with the app (spec 027) or from outside every library (spec 033).
+    opening: open::Opening,
     /// Moves a deleted file to the Recycle Bin (REQ-009-23); tests put their own in its place.
     #[cfg(not(target_arch = "wasm32"))]
     trash: media::delete::Remove,
@@ -416,25 +409,12 @@ pub struct AppState {
     pending_copy: Option<(i64, String)>,
     /// Files whose metadata couldn't be read, for the toolbar's notice (REQ-002-16).
     pub unreadable: crate::unreadable::Unreadable,
-    /// Files later starts of the app ask it to show (REQ-027-02).
-    #[cfg(not(target_arch = "wasm32"))]
-    open_requests: Option<Receiver<crate::instance::Request>>,
     /// A later start asked for the window: it comes to the front in the next frame (REQ-027-02).
     pub bring_to_front: bool,
-    /// A file opened with the app, shown in the viewer once the gallery lists it (REQ-027-01).
-    pending_open: Option<PendingOpen>,
-    /// The window has drawn a frame.
-    window_shown: bool,
     /// A group's photos from _Unconfirmed faces_ in the viewer, and the search to go back to (REQ-032-26).
     face_photos: Option<FacePhotos>,
     /// The installed Windows app's _Open with_ entries, and whether they are on (REQ-027-06).
     open_with: Option<(Arc<dyn crate::open_with::OpenWithEntries>, bool)>,
-    /// A file whose folder is being added as a library from the viewer, opened once the library is there (REQ-033-04).
-    #[cfg(not(target_arch = "wasm32"))]
-    open_when_added: Option<PathBuf>,
-    /// Where files outside every library are read into scratch indexes (spec 033).
-    #[cfg(not(target_arch = "wasm32"))]
-    loose_files: Option<crate::loose::LooseFiles>,
     /// A file outside every library, shown from its scratch index (spec 033).
     #[cfg(not(target_arch = "wasm32"))]
     pub loose: Option<crate::loose::Loose>,
@@ -806,33 +786,20 @@ impl AppState {
             #[cfg(not(target_arch = "wasm32"))]
             edit_tools: None,
             confirm_revert: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            rename: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            dates: Default::default(),
+            opening: Default::default(),
             confirm_clear_history: None,
             confirm_many: None,
             today: None,
             #[cfg(not(target_arch = "wasm32"))]
-            rename_dialog: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            rename_journal: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            date_dialog: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            date_journal: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            date_reader: None,
-            #[cfg(not(target_arch = "wasm32"))]
             trash: media::delete::to_trash,
             pending_copy: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            open_requests: None,
             bring_to_front: false,
-            pending_open: None,
-            window_shown: false,
             face_photos: None,
             open_with: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            open_when_added: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            loose_files: None,
             #[cfg(not(target_arch = "wasm32"))]
             loose: None,
             unreadable: Default::default(),
@@ -1038,29 +1005,7 @@ impl AppState {
             self.apply(event);
         }
         #[cfg(not(target_arch = "wasm32"))]
-        {
-            let requests: Vec<_> = self.open_requests.iter().flat_map(|rx| rx.try_iter()).collect();
-            for request in requests {
-                self.bring_to_front = true;
-                if let crate::instance::Request::Open(file) = request {
-                    self.open_file(file);
-                }
-            }
-            self.show_loose();
-            // The folder added from the viewer is a library now (REQ-033-04).
-            if let Some(file) = &self.open_when_added {
-                let path = file.to_string_lossy();
-                if self
-                    .libraries
-                    .iter()
-                    .any(|library| domain::media::rel_path_in(&library.path, &path, cfg!(windows)).is_some())
-                {
-                    let file = file.clone();
-                    self.open_when_added = None;
-                    self.open_file(file);
-                }
-            }
-        }
+        self.poll_opening();
         let events: Vec<IndexerEvent> = self.indexer_events.iter().flat_map(|rx| rx.try_iter()).collect();
         for event in events {
             self.apply_indexer(event);
@@ -1103,7 +1048,7 @@ impl AppState {
             || self.indexer_status.current.is_some()
             || self.written_since_refresh
             || self.gallery.as_ref().is_some_and(Gallery::is_loading)
-            || self.pending_open.is_some()
+            || self.opening.pending.is_some()
             || self.loose_busy()
     }
 
