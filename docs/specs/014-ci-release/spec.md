@@ -127,7 +127,7 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 - **When** its `Lint` and `Test` checks passed
 - **Then** a different model than the one that writes the code (Sonnet) reviews it for correctness, security, performance and readability, with an eye for the mistakes AI-written code makes and nothing CI already checks; the pull request can't change these instructions
 - **And** each finding has a category, a severity (critical, major or minor), a confidence and a concrete scenario of what goes wrong
-- **And** the findings appear as one comment on the pull request, which the review of a later push replaces after checking whether the earlier findings were fixed
+- **And** the findings appear as one comment on the pull request, which the review of a later push replaces after checking whether the earlier findings were fixed; the comment ends with a note naming the model that reviewed
 - **And** the check `Review` fails on a critical or major finding of confidence 80 or more, so the author fixes it before the pull request counts as green; less certain findings are listed apart
 - **And** without the `CLAUDE_CODE_OAUTH_TOKEN` secret, or when the review doesn't finish (the subscription's limit, an outage), the check passes with a warning
 
@@ -165,4 +165,4 @@ Every commit is checked automatically, so a broken change never lands on `main` 
 | REQ-014-15 | `xtask/tests/packaging.rs` › req_014_15_the_installer_offers_and_remembers_its_options; `packaging/smoke-test.ps1` (Windows packages workflow: the defaults of a silent install, an update keeping changed choices) | pass |
 | REQ-014-14 | `xtask/tests/workflows.rs` › req_014_14_the_builds_run_side_by_side_and_publish_waits_for_them, req_014_14_main_warms_the_cache_the_release_builds_restore; the 15 minutes are measured by the next release | partial |
 | REQ-014-16 | `xtask/tests/workflows.rs` › req_014_16_renders_the_readme_screenshots_on_windows_and_offers_them; `crates/app/src/desktop.rs` › req_014_16_screenshots_ignore_the_pointer; `xtask/src/screenshots.rs` › req_014_16_noise_is_no_change | partial (the dark appearance and the window size only by looking at a run's screenshots: #271's run) |
-| REQ-014-17 | `xtask/tests/workflows.rs` › req_014_17_a_second_model_reviews_pull_requests_after_the_checks; the review itself runs on GitHub (#313's pull request) | partial |
+| REQ-014-17 | `xtask/tests/workflows.rs` › req_014_17_a_second_model_reviews_pull_requests_after_the_checks; the review itself on #315: "No findings" on a docs change; an `.expect()` planted in `media::rating` came back critical, failed `Review` and replaced the comment, signed with Claude Sonnet 5.5 | pass |
