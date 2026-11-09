@@ -102,8 +102,12 @@ fn world(dir: &Path) -> anyhow::Result<Vec<u8>> {
             start += ring.len();
         }
         let mut triangles: Vec<u32> = Vec::new();
+        // On the projected map, where they are drawn: triangles of longitude and latitude bend when projected and
+        // overlap near the poles (#297).
         earcut.earcut(
-            vertices.iter().map(|[x, y]| [f64::from(*x), f64::from(*y)]),
+            vertices
+                .iter()
+                .map(|[x, y]| domain::map::project(f64::from(*x), f64::from(*y))),
             &holes,
             &mut triangles,
         );

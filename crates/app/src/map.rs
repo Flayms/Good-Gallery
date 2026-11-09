@@ -25,6 +25,9 @@ struct Land {
     bounds: [f32; 4],
     vertices: Vec<[f32; 2]>,
     triangles: Vec<u32>,
+    /// How many of the vertices each ring has, the outer ring first, then its holes.
+    #[cfg_attr(not(test), allow(dead_code))]
+    rings: Vec<u32>,
 }
 
 /// The world as drawn: land and the borders between countries, on the world square.
@@ -83,12 +86,14 @@ fn read_world(bytes: &[u8]) -> Option<World> {
         words(1, &mut values)?;
         let rings = values[0] as usize;
         words(rings, &mut values)?;
+        let rings = values.clone();
         let [west, north] = projected(bounds[0], bounds[3]);
         let [east, south] = projected(bounds[2], bounds[1]);
         land.push(Land {
             bounds: [west, north, east, south],
             vertices,
             triangles,
+            rings,
         });
     }
     words(1, &mut values)?;
@@ -349,5 +354,40 @@ mod tests {
             (west..=east).contains(&germany[0]) && (north..=south).contains(&germany[1])
         }));
         assert!(world.land.iter().all(|land| land.triangles.len() % 3 == 0));
+    }
+
+    /// REQ-044-01: on the projected map, the land's triangles cover each polygon once: no overlaps that would show
+    /// brighter, no gaps (#297). Their areas add up to the polygon's, its holes taken out.
+    #[test]
+    fn req_044_01_land_triangles_cover_each_polygon_once() {
+        let at = |land: &Land, i: u32| land.vertices[i as usize].map(f64::from);
+        let twice_area =
+            |a: [f64; 2], b: [f64; 2], c: [f64; 2]| (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]);
+        let mut worst = (0.0, 0);
+        for (index, land) in world().land.iter().enumerate() {
+            let triangles: f64 = land
+                .triangles
+                .chunks_exact(3)
+                .map(|t| twice_area(at(land, t[0]), at(land, t[1]), at(land, t[2])).abs())
+                .sum();
+            let mut start = 0;
+            let mut polygon = 0.0;
+            for (ring, &count) in land.rings.iter().enumerate() {
+                let ring_area: f64 = (0..count)
+                    .map(|i| {
+                        let (a, b) = (at(land, start + i), at(land, start + (i + 1) % count));
+                        a[0] * b[1] - b[0] * a[1]
+                    })
+                    .sum::<f64>()
+                    .abs();
+                polygon += if ring == 0 { ring_area } else { -ring_area };
+                start += count;
+            }
+            let off = (triangles - polygon).abs() / polygon.max(1e-12);
+            if off > worst.0 {
+                worst = (off, index);
+            }
+        }
+        assert!(worst.0 < 1e-3, "polygon {} is off by {:.4}%", worst.1, worst.0 * 100.0);
     }
 }
