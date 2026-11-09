@@ -796,3 +796,32 @@ fn req_041_02_shows_the_first_photo_of_each_day() {
     harness.run_steps(40);
     harness.snapshot(common::snapshot_name("date_calendar_photos"));
 }
+
+/// REQ-008-03: a country without towns lines up with one that has them (#289).
+#[test]
+fn req_008_03_places_line_up_with_and_without_towns() {
+    let conn = db::open_in_memory().unwrap();
+    let root = db::libraries::insert(&conn, "D:\\Photos", "Photos", LibraryStatus::Online)
+        .unwrap()
+        .id;
+    let mut writer = IndexWriter::new(conn);
+    writer
+        .write(
+            root,
+            &[
+                file(
+                    "rome.jpg",
+                    MediaKind::Image,
+                    2_000,
+                    None,
+                    &[&["Places", "Italy", "Rome"]],
+                ),
+                file("chile.jpg", MediaKind::Image, 1_000, None, &[&["Places", "Chile"]]),
+            ],
+        )
+        .unwrap();
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness(writer.into());
+    settle(&mut harness);
+    harness.snapshot(common::snapshot_name("places_tree"));
+}

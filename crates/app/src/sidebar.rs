@@ -231,6 +231,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
                             let unknown = Row {
                                 depth: 0,
                                 chevron: None,
+                                gutter: false,
                                 icon: Some((Icon::ScanFace, theme::text())),
                                 label: "Unconfirmed faces",
                                 active: *page == Page::People,
@@ -258,6 +259,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
                             let map = Row {
                                 depth: 0,
                                 chevron: None,
+                                gutter: false,
                                 icon: Some((Icon::Map, theme::text())),
                                 label: "Map",
                                 active: *page == Page::Map,
@@ -336,6 +338,7 @@ fn albums(
             Row {
                 depth: 0,
                 chevron: None,
+                gutter: false,
                 icon: Some(icon),
                 label: &album.name,
                 active: *search == album.search,
@@ -429,11 +432,24 @@ fn collapsible(
 struct Row<'a> {
     depth: usize,
     chevron: Option<bool>,
+    /// Keeps the chevron's room without one, so a leaf lines up with siblings that have one (REQ-008-03).
+    gutter: bool,
     icon: Option<(Icon, Color32)>,
     label: &'a str,
     active: bool,
     trailing: Option<String>,
     tooltip: Option<String>,
+}
+
+/// Where a row's icon or text starts: its depth's indent, then the chevron's room for a row with one, below another,
+/// or in a tree with chevrons beside it (REQ-008-03).
+fn text_indent(depth: usize, chevron: bool, gutter: bool) -> f32 {
+    let base = 8.0 + depth as f32 * INDENT;
+    if depth > 0 || chevron || gutter {
+        base + 20.0
+    } else {
+        base
+    }
 }
 
 fn row(ui: &mut egui::Ui, row: Row) -> (egui::Response, Option<egui::Response>) {
@@ -450,7 +466,7 @@ fn row(ui: &mut egui::Ui, row: Row) -> (egui::Response, Option<egui::Response>) 
     } else if response.hovered() {
         ui.painter().rect_filled(rect, theme::RADIUS_CONTROL, theme::hover());
     }
-    let mut x = rect.left() + 8.0 + row.depth as f32 * INDENT;
+    let mut x = rect.left() + text_indent(row.depth, false, false);
     let mut chevron = None;
     if let Some(open) = row.chevron {
         let area = Rect::from_center_size(pos2(x + 10.0, rect.center().y), Vec2::splat(20.0));
@@ -462,9 +478,7 @@ fn row(ui: &mut egui::Ui, row: Row) -> (egui::Response, Option<egui::Response>) 
             .paint_at(ui, Rect::from_center_size(area.center(), Vec2::splat(14.0)));
         chevron = Some(toggle);
     }
-    if row.depth > 0 || row.chevron.is_some() {
-        x += 20.0;
-    }
+    x = rect.left() + text_indent(row.depth, row.chevron.is_some(), row.gutter);
     if let Some((icon, color)) = row.icon {
         icon.image(theme::ICON_SIZE, color).paint_at(
             ui,
@@ -509,6 +523,7 @@ fn libraries(
     let all = Row {
         depth: 0,
         chevron: None,
+        gutter: false,
         icon: Some((Icon::Layers, theme::text())),
         label: "All libraries",
         active: !on_settings && search.library.is_none(),
@@ -531,6 +546,7 @@ fn libraries(
             Row {
                 depth: 0,
                 chevron: None,
+                gutter: false,
                 icon: Some(if offline {
                     (Icon::Unplug, theme::alert())
                 } else {
@@ -592,6 +608,7 @@ fn folder_items(
             Row {
                 depth,
                 chevron: has_children.then_some(open),
+                gutter: false,
                 icon: Some((if open { Icon::FolderOpen } else { Icon::Folder }, theme::text())),
                 label: &node.name,
                 active: search.library == Some(library) && search.folder.as_deref() == Some(node.path.as_str()),
@@ -625,7 +642,16 @@ fn toggle_tag(search: &mut GallerySearch, name: &str) {
     }
 }
 
-fn tag_row(ui: &mut egui::Ui, state: &mut SidebarState, search: &mut GallerySearch, node: &TagNode, depth: usize) {
+/// A tag of People or Places and its children; `tree` when some tag of the group has children, so leaves line up with
+/// them (REQ-008-03).
+fn tag_row(
+    ui: &mut egui::Ui,
+    state: &mut SidebarState,
+    search: &mut GallerySearch,
+    node: &TagNode,
+    depth: usize,
+    tree: bool,
+) {
     let mode = search.tag_mode(&node.name);
     let open = state.expanded_tags.contains(&node.id);
     let has_children = !node.children.is_empty();
@@ -639,6 +665,7 @@ fn tag_row(ui: &mut egui::Ui, state: &mut SidebarState, search: &mut GallerySear
         Row {
             depth,
             chevron: has_children.then_some(open),
+            gutter: tree,
             // Only exclusions get an icon; a tag icon on every row would just repeat itself.
             icon: (mode == Some(TagMode::Exclude)).then_some((Icon::Minus, theme::alert())),
             label: &node.name,
@@ -656,7 +683,7 @@ fn tag_row(ui: &mut egui::Ui, state: &mut SidebarState, search: &mut GallerySear
     }
     if open {
         for child in &node.children {
-            tag_row(ui, state, search, child, depth + 1);
+            tag_row(ui, state, search, child, depth + 1, tree);
         }
     }
 }
@@ -684,8 +711,9 @@ fn category(
     } else {
         nodes.len().min(PREVIEW)
     };
+    let tree = nodes.iter().any(|node| !node.children.is_empty());
     for node in &nodes[..shown] {
-        tag_row(ui, state, search, node, 0);
+        tag_row(ui, state, search, node, 0, tree);
     }
     if nodes.len() > PREVIEW {
         let text = if state.show_all.contains(id) {
@@ -696,6 +724,7 @@ fn category(
         let toggle = Row {
             depth: 0,
             chevron: None,
+            gutter: false,
             icon: None,
             label: &text,
             active: false,
@@ -727,6 +756,7 @@ fn ratings(
             Row {
                 depth: 0,
                 chevron: None,
+                gutter: false,
                 icon: (rating == 0).then_some((Icon::StarOff, theme::text())),
                 // Stars are drawn over the label's place.
                 label: if rating == 0 { &label } else { "" },
@@ -777,6 +807,7 @@ fn popular(ui: &mut egui::Ui, search: &mut GallerySearch, data: &SidebarData) {
             Row {
                 depth: 0,
                 chevron: None,
+                gutter: false,
                 icon: (mode == Some(TagMode::Exclude)).then_some((Icon::Minus, theme::alert())),
                 label: &tag.name,
                 active: mode == Some(TagMode::Include),
@@ -795,6 +826,7 @@ fn settings_row(ui: &mut egui::Ui, page: &mut Page) {
     let settings = Row {
         depth: 0,
         chevron: None,
+        gutter: false,
         icon: Some((Icon::Settings, theme::text())),
         label: "Settings",
         active: *page == Page::Settings,
@@ -803,5 +835,19 @@ fn settings_row(ui: &mut egui::Ui, page: &mut Page) {
     };
     if row(ui, settings).0.clicked() {
         *page = Page::Settings;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// REQ-008-03: in a tree, a country without towns lines up with the countries that have them (#289); a flat list
+    /// keeps its rows at the edge.
+    #[test]
+    fn req_008_03_leaves_line_up_with_their_siblings_in_a_tree() {
+        assert_eq!(text_indent(0, false, true), text_indent(0, true, false));
+        assert!(text_indent(0, false, false) < text_indent(0, true, false));
+        assert!(text_indent(1, false, true) > text_indent(0, true, false));
     }
 }
