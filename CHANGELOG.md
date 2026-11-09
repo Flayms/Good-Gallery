@@ -1,6 +1,76 @@
 # Changelog
 
 All notable changes to Good Gallery. Versions follow [Semantic Versioning](https://semver.org), entries are generated from [Conventional Commits](https://www.conventionalcommits.org).
+## [0.7.0](https://github.com/Flayms/Good-Gallery/releases/tag/v0.7.0) · 2026-11-09
+
+### ✨ Features
+
+- **sidebar:** Smart albums keep a search under a name (#201) (#209) ([`1ccd4e1`](https://github.com/Flayms/Good-Gallery/commit/1ccd4e189a549cad831e32fc06daae80d1f0a7e9))
+- **edit:** Scale photos down, set the quality, save without a backup (#165) (#213) ([`3f2eb8e`](https://github.com/Flayms/Good-Gallery/commit/3f2eb8ee980c07aa988f352c2dfe4de0952bc965))
+- **rename:** Rename a selection with search and replace and placeholders (#163) (#210) ([`5a0154d`](https://github.com/Flayms/Good-Gallery/commit/5a0154dfc1d5e1cf0dc94f53a19b2c88e89d159c))
+- **viewer:** The photo sits in the middle, the control bar above it (#211) (#214) ([`7c9cea3`](https://github.com/Flayms/Good-Gallery/commit/7c9cea3d83d73266e2d072025e9f59879da08bf4))
+- **faces:** Unconfirmed faces: confirm suggestions, take faces out, see the photo (#212) (#216) ([`efbce3e`](https://github.com/Flayms/Good-Gallery/commit/efbce3edcdc6f5dc836e6f5c250238f8b06568c3))
+- **edit:** Lens blur spreads lights into discs (#202) (#217) ([`88db945`](https://github.com/Flayms/Good-Gallery/commit/88db945987ae574576b35a13c7cf860a4e638b4c))
+- **content:** Search photos by what they show (#200) (#218) ([`d07049b`](https://github.com/Flayms/Good-Gallery/commit/d07049b8e4f7bf2048d48074ef9396fde2d768d1))
+- **gallery:** Years while scrolling, month at the pointer (#228) ([`678a9a9`](https://github.com/Flayms/Good-Gallery/commit/678a9a90c0dc979093bcaa9e5461f2dea0574f99))
+- **viewer:** A zoomed photo fills the window (#229) ([`b02ca26`](https://github.com/Flayms/Good-Gallery/commit/b02ca26951708e4ec606f169ee6680b1f86344f2))
+- **open-with:** Started with a file, the viewer comes first (#221) (#231) ([`cb9e55a`](https://github.com/Flayms/Good-Gallery/commit/cb9e55a14058393fc74e364037743cae719d2bcd))
+- **menu:** Rename, rate and rotate from the context menu (#230) ([`acf86bd`](https://github.com/Flayms/Good-Gallery/commit/acf86bde9e4519787754e3e80e8b7396c800d075))
+- **analysis:** Faces and content passes look at several photos at once (#226) ([`118eb23`](https://github.com/Flayms/Good-Gallery/commit/118eb235ad40ad1e20f731c35ee84406e4ebec08))
+- **faces:** Every unknown face and the decisions on Unconfirmed faces (#233) ([`502265b`](https://github.com/Flayms/Good-Gallery/commit/502265b32beadd4c397dbb513fe821b4cbd12152))
+- **menu:** Delete from the context menu and with the Delete key (#236) ([`739ab11`](https://github.com/Flayms/Good-Gallery/commit/739ab117cc6dbe730421f5991ccf96e08b158af4))
+- **dates:** Fix the dates taken of a selection (#234) ([`1843094`](https://github.com/Flayms/Good-Gallery/commit/1843094129063a365adc8652a285264ec5ddd425))
+- **albums:** Smart albums from conditions matching all or any (#235) ([`2a2daf6`](https://github.com/Flayms/Good-Gallery/commit/2a2daf6952c5ee8b315e454ca98f19a8e9b317cf))
+- **gallery:** A click on the month beside the scrollbar jumps to it (#251) ([`cf6d968`](https://github.com/Flayms/Good-Gallery/commit/cf6d96868f5278a5ffc0b47c20f38e4f192dce6c))
+- **faces:** A group to confirm can be someone else, ignored or not faces (#254) ([`c9ac667`](https://github.com/Flayms/Good-Gallery/commit/c9ac667d49fe74d345b0d7a09456f29537c0c6b5))
+- **ui:** Buttons answer the pointer, icon-only Filters and View, sparkle for content search (#255) ([`940eb51`](https://github.com/Flayms/Good-Gallery/commit/940eb51c301960a2e47c05ebe82a9df483d278e8))
+- **menu:** Copy a photo to the clipboard from its context menu (#257) ([`4bbd631`](https://github.com/Flayms/Good-Gallery/commit/4bbd63124832a74f529b447a08bd71c20e44cc58))
+- **edit:** Compare shows the photo as editing started (#258) ([`610e6c4`](https://github.com/Flayms/Good-Gallery/commit/610e6c45fa46b1239d0eb7720a27f85b767709a0))
+- **edit:** Version history with a Versions menu and Clear version history (#262) ([`e660b43`](https://github.com/Flayms/Good-Gallery/commit/e660b43e95963a21b6fe1eee8f6f7506582cc8cf))
+- **edit:** Straighten by any angle and flip (#265) ([`7b1c8c6`](https://github.com/Flayms/Good-Gallery/commit/7b1c8c6077505f9c9acfdee191db2cd6cb44e197))
+- **faces:** Suggest a second person when a face is as like them (#266) ([`4a9ff7a`](https://github.com/Flayms/Good-Gallery/commit/4a9ff7a6ef88c021c469a55b4dbb9c7bebbfcb1a))
+- **toolbar:** Filters sit right beside the search bar (#267) ([`e5f9eff`](https://github.com/Flayms/Good-Gallery/commit/e5f9effba19397cb786530779e24dfe979929264))
+- **metadata:** Camera, lens and location in the index, info panel and smart albums (#279) ([`26d6d15`](https://github.com/Flayms/Good-Gallery/commit/26d6d153b8dfab7eb5a6ba160c0492c07701d597))
+- **filters:** Pick the date range on a calendar with a photo on each day (#280) ([`4f84233`](https://github.com/Flayms/Good-Gallery/commit/4f8423342c4d74d3d29c6a2b0a6442b3dd4b4943))
+- **places:** Name the town nearest to a photo's GPS position, offline (#281) ([`9b62892`](https://github.com/Flayms/Good-Gallery/commit/9b62892c1a9227784906d9aaf548b67d37f04eff))
+- **edit:** Import .cube LUTs and apply them at a strength (#283) ([`932b266`](https://github.com/Flayms/Good-Gallery/commit/932b26619e03a6c51018ed24c85638a712bca5bd))
+- **map:** A world map of the photos with a position (#284) ([`5fe4910`](https://github.com/Flayms/Good-Gallery/commit/5fe4910cd9e640dba841d594fb971fa5a73136d6))
+- **places:** Places from positions take the user's name for their country (#289) (#312) ([`b0686e0`](https://github.com/Flayms/Good-Gallery/commit/b0686e0da8a1b5fd39d0008a1ff47f423f1df30c))
+
+### 🐛 Bug fixes
+
+- **sidebar:** Unconfirmed faces lead the People group (#227) ([`a1d8fdf`](https://github.com/Flayms/Good-Gallery/commit/a1d8fdfad51c3b42b987db965dc0bc53c72defda))
+- **faces:** Unconfirmed faces keeps its page, shows whole groups, explains decisions (#250) ([`377ae53`](https://github.com/Flayms/Good-Gallery/commit/377ae5330b68129e7e5c1fcd71a6c38b8932ffa1))
+- **filters:** The date picker marks no weekends (#268) ([`fdd0c74`](https://github.com/Flayms/Good-Gallery/commit/fdd0c7481be12705652eef21c3e61127a9f45179))
+- **toolbar:** The View menu holds still while it is open (#304) ([`8172b22`](https://github.com/Flayms/Good-Gallery/commit/8172b221ebbb3d1a9aee73c203f70ee448cb7d2b))
+- **indexing:** Files still being written are read again later, not counted as unreadable (#287) (#305) ([`269ad2f`](https://github.com/Flayms/Good-Gallery/commit/269ad2fe71317718c241860456351658f609d538))
+- **map:** Clusters hold still while zooming, never overlap, all one bigger size (#306) ([`d33241b`](https://github.com/Flayms/Good-Gallery/commit/d33241b4d5d5d5dc460be17c0ffe9198240adc28))
+- **places:** A place replaces the place in the search (#288) (#308) ([`6a7d386`](https://github.com/Flayms/Good-Gallery/commit/6a7d386d972826dbec466f5fb84b8c5a51a140c3))
+- **albums:** Leaving a smart album starts from an empty search (#270) (#309) ([`4ffa976`](https://github.com/Flayms/Good-Gallery/commit/4ffa9767596c92baa8a9d5fba8583b7136d0af44))
+- **search:** Chips are one height and stay inside the search bar (#310) ([`9d6e46b`](https://github.com/Flayms/Good-Gallery/commit/9d6e46b459cf8e30f06c6cec26a3f19d63fcd8f4))
+- **map:** No bright lines over the land near the poles (#307) ([`1c7f192`](https://github.com/Flayms/Good-Gallery/commit/1c7f19262498254f1123e18c1ffd4623f1270d6b))
+- **sidebar:** Places without towns line up with the others (#311) ([`75ea022`](https://github.com/Flayms/Good-Gallery/commit/75ea022a78347f63a77cc52da443ecbe56ca41ce))
+
+### ♻️ Refactoring
+
+- **app:** Move five features out of state.rs into state/ modules (#298) ([`088d74a`](https://github.com/Flayms/Good-Gallery/commit/088d74a36765c4755795f135cac877b2c886ae49))
+- **app:** Split edit.rs into an edit/ module (#301) ([`2c40be6`](https://github.com/Flayms/Good-Gallery/commit/2c40be6e3dc8efe1079cb41eca53e6b309a39834))
+- **app:** Split viewer.rs into a viewer/ module (#302) ([`b704963`](https://github.com/Flayms/Good-Gallery/commit/b70496384b3075ef5dbaf44991cc6037ecb44616))
+- **app:** AppState keeps renaming, date fixing and opening files in their modules (#303) ([`5a7d0e3`](https://github.com/Flayms/Good-Gallery/commit/5a7d0e3e772033a6c4948a7e69849cc510523a6c))
+
+### 📝 Documentation
+
+- Format glossary ([`d4bc735`](https://github.com/Flayms/Good-Gallery/commit/d4bc735cafba27a857e40df1ed20811789394117))
+- Say where code goes, drop stale pitfalls, keep domain and meta pure (#290) ([`1af591d`](https://github.com/Flayms/Good-Gallery/commit/1af591d1bcb0d3658f396bdc2fdec13f0e96a849))
+
+### 🔧 Maintenance
+
+- **rename:** Draw the preview before asking for it (#219) ([`1d5802a`](https://github.com/Flayms/Good-Gallery/commit/1d5802a181c9674eb9cb5eca14dcbdc88dd94c9f))
+- Render the README screenshots on Windows after each release (#271) ([`82d9608`](https://github.com/Flayms/Good-Gallery/commit/82d960857fdc69752dfeefb00a709977ff63234e))
+- **app:** Run the UI tests as one binary (#286) ([`6392bff`](https://github.com/Flayms/Good-Gallery/commit/6392bff7e7b929dbf606f7e874a683adcace7bce))
+- Pin today for the UI tests, so the calendar snapshot holds (#300) ([`91fc7ff`](https://github.com/Flayms/Good-Gallery/commit/91fc7ffe16af280ef9afbd1d9a0257cff984e307))
+
+**Full changelog:** [v0.6.0...v0.7.0](https://github.com/Flayms/Good-Gallery/compare/v0.6.0...v0.7.0)
 ## [0.6.0](https://github.com/Flayms/Good-Gallery/releases/tag/v0.6.0) · 2026-11-05
 
 ### ✨ Features
