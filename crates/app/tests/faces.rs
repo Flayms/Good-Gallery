@@ -1597,3 +1597,35 @@ fn req_032_35_a_group_to_confirm_can_be_someone_else_or_ignored() {
     assert!(harness.query_by_label("Ben? · 1 face").is_none());
     harness.get_by_label("Ignored · 1");
 }
+
+/// REQ-032-37: resting the pointer on a face shows its whole photo beside it, clear of the face's button, until the
+/// pointer leaves.
+#[test]
+fn req_032_37_resting_on_a_face_shows_its_whole_photo_beside_it() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, true, None);
+    harness.set_size(egui::vec2(1000.0, 800.0));
+    harness.get_by_label("Unconfirmed faces").click();
+    settle(&mut harness);
+    let face = harness.query_all_by_label_contains("Show face").next().unwrap().rect();
+    let button = harness
+        .query_all_by_role(egui::accesskit::Role::Button)
+        .map(|node| node.rect())
+        .find(|rect| face.contains(rect.center()) && rect.width() < face.width() / 2.0)
+        .expect("the face's button");
+    harness.hover_at(face.center());
+    harness.run_steps(2);
+    assert!(harness.query_by_label_contains("Whole photo").is_none(), "not at once");
+    harness.run_steps(40);
+    let preview = harness.get_by_label_contains("Whole photo").rect();
+    assert!(!preview.intersects(button), "{preview:?} covers the button {button:?}");
+    assert!(
+        !preview.intersects(face.shrink(1.0)),
+        "beside the face: {preview:?} {face:?}"
+    );
+    harness.snapshot(common::snapshot_name("faces_preview"));
+
+    harness.hover_at(egui::pos2(5.0, 5.0));
+    harness.run_steps(5);
+    assert!(harness.query_by_label_contains("Whole photo").is_none());
+}
