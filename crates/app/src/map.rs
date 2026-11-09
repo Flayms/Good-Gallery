@@ -11,7 +11,11 @@ use std::sync::OnceLock;
 /// The bundled map, `cargo xtask map` writes it.
 const DATA: &[u8] = include_bytes!("../data/world.deflate");
 /// Points a cluster's grid cell is wide: closer photos merge.
-const CELL: f64 = 72.0;
+/// Every cluster's radius, its white ring around it (REQ-044-01).
+const RADIUS: f32 = 26.0;
+const RING: f32 = 2.0;
+/// How close two clusters' middles may come: their width and a gap (REQ-044-02).
+const SPACING: f64 = (2.0 * (RADIUS + RING) + 8.0) as f64;
 /// A wheel step of this many points zooms one level.
 const POINTS_PER_LEVEL: f32 = 240.0;
 
@@ -135,9 +139,9 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
                 );
             }
             Some(points) => {
-                let clusters = domain::map::clusters(points, &view, CELL);
+                let clusters = gallery.map_clusters(points, domain::map::cluster_level(&view), SPACING);
                 let mut wanted: Vec<(i64, ThumbKey)> = Vec::new();
-                for cluster in &clusters {
+                for cluster in clusters.iter() {
                     if let Some(ids) = cluster_ui(ui, gallery, map, &view, cluster, &mut wanted) {
                         clicked = Some(Clicked::Photos(ids));
                     }
@@ -245,7 +249,7 @@ fn cluster_ui(
     let [x, y] = view.to_screen(cluster.center);
     let at = map.center() + vec2(x as f32, y as f32);
     let count = cluster.ids.len();
-    let radius = 18.0 + 4.0 * (count as f32).log10().min(3.0);
+    let radius = RADIUS;
     let rect = Rect::from_center_size(at, vec2(radius, radius) * 2.0);
     if !rect.intersects(map) {
         return None;
@@ -257,8 +261,8 @@ fn cluster_ui(
         .on_hover_cursor(egui::CursorIcon::PointingHand);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
     let painter = ui.painter_at(map);
-    painter.circle_filled(at + vec2(0.0, 2.0), radius + 2.0, Color32::from_black_alpha(90));
-    painter.circle_filled(at, radius + 2.0, Color32::WHITE);
+    painter.circle_filled(at + vec2(0.0, 2.0), radius + RING, Color32::from_black_alpha(90));
+    painter.circle_filled(at, radius + RING, Color32::WHITE);
     let newest = cluster.ids[0];
     let texture = gallery.map_key(newest).and_then(|key| {
         wanted.push((newest, key));
@@ -279,7 +283,7 @@ fn cluster_ui(
         }
     }
     if response.hovered() {
-        painter.circle_stroke(at, radius + 2.0, Stroke::new(2.0, theme::text()));
+        painter.circle_stroke(at, radius + RING, Stroke::new(2.0, theme::text()));
     }
     if count > 1 {
         let text = crate::format::count(count as u64);
