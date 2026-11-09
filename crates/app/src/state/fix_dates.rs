@@ -5,16 +5,27 @@ use crate::format;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// The date fix dialog, where date fixes are journaled, and what reads dates for it.
+#[derive(Default)]
+pub struct FixDates {
+    /// The date fix dialog, while open (spec 038).
+    pub dialog: Option<crate::fix_dates::FixDatesDialog>,
+    /// Where date fixes are journaled (REQ-038-09); fixing dates is off without it.
+    journal: Option<PathBuf>,
+    /// exiftool processes that read dates for the date fix dialog, started when it first opens.
+    reader: Option<Arc<media::exiftool::ExifTool>>,
+}
+
 impl AppState {
     /// Journals date fixes at `path` (REQ-038-09).
     pub fn with_date_journal(mut self, path: PathBuf) -> Self {
-        self.date_journal = Some(path);
+        self.dates.journal = Some(path);
         self
     }
 
     /// Opens the date fix dialog for `ids` (REQ-038-01).
     pub fn open_fix_dates(&mut self, ids: Vec<i64>) {
-        let (Some(db), Some(journal)) = (self.db.clone(), &self.date_journal) else {
+        let (Some(db), Some(journal)) = (self.db.clone(), &self.dates.journal) else {
             return;
         };
         if ids.is_empty() {
@@ -26,11 +37,12 @@ impl AppState {
             return;
         };
         let reader = self
-            .date_reader
+            .dates
+            .reader
             .get_or_insert_with(|| Arc::new(media::exiftool::ExifTool::new(path, 2)))
             .clone();
         let undo = crate::fix_dates::can_undo(journal);
-        self.date_dialog = Some(crate::fix_dates::FixDatesDialog::open(
+        self.dates.dialog = Some(crate::fix_dates::FixDatesDialog::open(
             db,
             reader,
             &self.libraries,
@@ -43,7 +55,7 @@ impl AppState {
     pub fn start_fix_dates(&mut self, job: crate::fix_dates::FixJob) {
         let (Some(db), Some(journal), Some(exiftool)) = (
             self.db.clone(),
-            self.date_journal.clone(),
+            self.dates.journal.clone(),
             self.edit_tools.as_ref().map(|tools| tools.exiftool.clone()),
         ) else {
             return;
@@ -59,7 +71,7 @@ impl AppState {
     pub fn undo_fix_dates(&mut self) {
         let (Some(db), Some(journal), Some(exiftool)) = (
             self.db.clone(),
-            self.date_journal.clone(),
+            self.dates.journal.clone(),
             self.edit_tools.as_ref().map(|tools| tools.exiftool.clone()),
         ) else {
             return;

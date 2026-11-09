@@ -3,28 +3,37 @@
 use super::{AppState, Event};
 use std::path::PathBuf;
 
+/// The rename dialog and where renames are journaled.
+#[derive(Default)]
+pub struct Rename {
+    /// The rename dialog, while open (spec 035).
+    pub dialog: Option<crate::rename::RenameDialog>,
+    /// Where renames are journaled (REQ-035-08, REQ-035-09); renaming is off without it.
+    journal: Option<PathBuf>,
+}
+
 impl AppState {
     /// Journals renames at `path` (REQ-035-08, REQ-035-09).
     pub fn with_rename_journal(mut self, path: PathBuf) -> Self {
-        self.rename_journal = Some(path);
+        self.rename.journal = Some(path);
         self
     }
 
     /// Opens the rename dialog for `ids` (REQ-035-01).
     pub fn open_rename(&mut self, ids: Vec<i64>) {
-        let (Some(db), Some(journal)) = (self.db.clone(), &self.rename_journal) else {
+        let (Some(db), Some(journal)) = (self.db.clone(), &self.rename.journal) else {
             return;
         };
         if ids.is_empty() {
             return;
         }
         let undo = crate::rename::undo_job(&db, journal).is_some();
-        self.rename_dialog = Some(crate::rename::RenameDialog::open(db, &self.libraries, ids, undo));
+        self.rename.dialog = Some(crate::rename::RenameDialog::open(db, &self.libraries, ids, undo));
     }
 
     /// Renames in the background, the index first (REQ-035-06, REQ-035-07).
     pub fn start_rename(&mut self, job: crate::rename::RenameJob) {
-        let (Some(db), Some(journal)) = (self.db.clone(), self.rename_journal.clone()) else {
+        let (Some(db), Some(journal)) = (self.db.clone(), self.rename.journal.clone()) else {
             return;
         };
         let cache = self.thumbnail_cache();
@@ -33,7 +42,7 @@ impl AppState {
 
     /// Takes the last rename back (REQ-035-08).
     pub fn undo_rename(&mut self) {
-        let (Some(db), Some(journal)) = (self.db.clone(), &self.rename_journal) else {
+        let (Some(db), Some(journal)) = (self.db.clone(), &self.rename.journal) else {
             return;
         };
         match crate::rename::undo_job(&db, journal) {
@@ -46,7 +55,7 @@ impl AppState {
 
     /// Finishes a rename the app was ended in, once its libraries are there (REQ-035-09).
     pub fn recover_rename(&mut self) {
-        let (Some(db), Some(journal)) = (self.db.clone(), self.rename_journal.clone()) else {
+        let (Some(db), Some(journal)) = (self.db.clone(), self.rename.journal.clone()) else {
             return;
         };
         let cache = self.thumbnail_cache();

@@ -140,7 +140,7 @@ fn read(exiftool: &Path, file: &Path, tag: &str) -> Option<i64> {
 }
 
 fn rename_ids(harness: &App) -> Option<usize> {
-    harness.state().rename_dialog.as_ref().map(|dialog| dialog.count())
+    harness.state().rename.dialog.as_ref().map(|dialog| dialog.count())
 }
 
 /// REQ-009-21, REQ-009-22: on a selected item the menu rates, rotates and renames the whole selection; on another
@@ -186,7 +186,7 @@ fn req_009_21_the_menu_renames_rates_and_rotates_the_selection() {
     menu_item(&harness, at, "Rename…").click();
     settle(&mut harness);
     assert_eq!(rename_ids(&harness), Some(2));
-    harness.state_mut().rename_dialog = None;
+    harness.state_mut().rename.dialog = None;
     harness.run_steps(2);
 
     // Not in the selection: that item alone.
