@@ -40,7 +40,12 @@ fn ci_runs_every_check_on_main_and_pull_requests() {
     ] {
         assert!(commands.contains(&check), "ci.yml doesn't run {check}");
     }
-    assert!(!ci.contains("continue-on-error"), "a failing check must fail the run");
+    // Only the agent review may give up without failing (REQ-014-17).
+    let checks = ci.replace(&ci_job(&ci, "review"), "");
+    assert!(
+        !checks.contains("continue-on-error"),
+        "a failing check must fail the run"
+    );
     // Every test runs, so the uploaded diffs show all failing snapshots.
     let nextest = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.config/nextest.toml"))
         .expect("can't read .config/nextest.toml");
@@ -397,5 +402,89 @@ fn req_014_16_renders_the_readme_screenshots_on_windows_and_offers_them() {
     assert!(
         screenshots.contains("upload-artifact"),
         "the renders aren't attached to the run"
+    );
+}
+
+/// The lines of a job in `ci.yml`, from its key up to the next job.
+fn ci_job(ci: &str, key: &str) -> String {
+    let start = ci
+        .find(&format!("\n  {key}:\n"))
+        .unwrap_or_else(|| panic!("ci.yml has no {key} job"));
+    ci[start + 1..]
+        .lines()
+        .enumerate()
+        .take_while(|(i, line)| *i == 0 || line.is_empty() || line.starts_with("   "))
+        .map(|(_, line)| format!("{line}\n"))
+        .collect()
+}
+
+/// REQ-014-17: once lint and tests passed, a second model (Sonnet) reviews ready pull requests from this repository
+/// with read-only tools and main's instructions, posts one comment that later reviews replace, and fails the `Review`
+/// check only on a confident critical or major finding.
+#[test]
+fn req_014_17_a_second_model_reviews_pull_requests_after_the_checks() {
+    let ci = workflow("ci.yml");
+    let review = ci_job(&ci, "review");
+    for part in [
+        "name: Review",
+        "needs: [lint-result, test-result]",
+        "github.event_name == 'pull_request'",
+        "!github.event.pull_request.draft",
+        "github.event.pull_request.head.repo.full_name == github.repository",
+        "uses: anthropics/claude-code-action@v1",
+        "claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}",
+        "--model sonnet",
+        "--json-schema",
+        "\"severity\":{\"enum\":[\"critical\",\"major\",\"minor\"]}",
+        "\"category\":{\"enum\":[\"correctness\",\"security\",\"performance\",\"readability\"]}",
+        "\"confidence\":{\"type\":\"integer\"",
+        "<!-- agent-review -->",
+        "gh pr comment",
+        "-X PATCH",
+        ".severity != \"minor\" and .confidence >= 80",
+        "exit 1",
+    ] {
+        assert!(review.contains(part), "the review job lacks {part}");
+    }
+    assert!(
+        ci.contains("types: [opened, synchronize, reopened, ready_for_review]"),
+        "a draft isn't reviewed once it is marked ready"
+    );
+    // The instructions come from main, so a pull request can't soften its own review.
+    assert!(
+        review.contains("git show \"origin/$BASE:.github/review.md\""),
+        "the prompt isn't main's"
+    );
+    let prompt = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.github/review.md"))
+        .expect(".github/review.md is missing");
+    for part in [
+        "<untrusted_input>",
+        "<!-- agent-review -->",
+        "critical",
+        "major",
+        "minor",
+        "confidence",
+    ] {
+        assert!(prompt.contains(part), "the review prompt lacks {part}");
+    }
+    // The reviewer only reads; the workflow posts its comment.
+    let tools = review
+        .lines()
+        .find(|line| line.contains("--allowedTools"))
+        .expect("no allowed tools");
+    for writing in ["Edit", "Write", "gh pr comment", "gh pr review", "gh api", "git push"] {
+        assert!(!tools.contains(writing), "the reviewer may use {writing}");
+    }
+    // A review that doesn't finish (the subscription's limit, an outage) warns instead of blocking the merge.
+    assert!(
+        review.contains("continue-on-error: true"),
+        "an unfinished review blocks the merge"
+    );
+    // A called workflow's jobs can't ask for more than the caller grants, or the release wouldn't start.
+    let release = workflow("release.yml");
+    let checks = &release[release.find("uses: ./.github/workflows/ci.yml").unwrap()..];
+    assert!(
+        checks[..checks.find("\n\n").unwrap()].contains("pull-requests: write"),
+        "the release doesn't grant ci.yml's review job its permission"
     );
 }

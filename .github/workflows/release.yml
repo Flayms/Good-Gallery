@@ -21,6 +21,10 @@ jobs:
   checks:
     name: Checks
     uses: ./.github/workflows/ci.yml
+    # A called workflow gets no more than this, and ci.yml's review job asks for it (it skips outside pull requests).
+    permissions:
+      contents: read
+      pull-requests: write
 
   linux:
     name: Build and test the Linux downloads
