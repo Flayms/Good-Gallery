@@ -81,7 +81,7 @@ Users who edit a photo (spec 021) give it the color response and grain of a well
 | REQ-028-02 | `crates/domain/src/look.rs` › req_028_02_strength_moves_between_none_and_the_full_look; `crates/app/tests/edit.rs` › req_028_01_req_028_02_req_028_03_… | pass |
 | REQ-028-03 | `crates/domain/src/look.rs` › req_028_03_grain_changes_only_the_grain; `crates/app/tests/edit.rs` › req_028_01_req_028_02_req_028_03_… | pass |
 | REQ-028-04 | `crates/domain/src/look.rs` › req_028_04_adjustments_add_to_the_look_and_curves_bend_its_result, req_028_04_the_look_is_saved_with_the_edit | pass |
-| REQ-028-05 | `crates/app/src/edit.rs` › req_028_05_the_gpu_preview_of_a_look_matches_the_cpu_render | pass |
-| REQ-028-06 | `crates/domain/src/look.rs` › req_028_06_grain_is_strongest_in_the_midtones, req_028_06_color_film_has_grain_per_channel; `crates/app/src/edit.rs` › req_028_05_the_gpu_preview_of_a_look_matches_the_cpu_render | pass |
-| REQ-028-07 | `crates/domain/src/look.rs` › req_028_07_looks_treat_hues_differently, req_028_07_greys_stay_and_strength_scales_it; `crates/app/src/edit.rs` › req_028_05_the_gpu_preview_of_a_look_matches_the_cpu_render | pass |
-| REQ-028-08 | `crates/domain/src/look.rs` › req_028_08_bright_lights_glow_red_around_them; `crates/media/src/edit.rs` › req_028_08_saving_lets_bright_lights_glow; `crates/app/src/edit.rs` › req_028_08_the_gpu_halation_matches_the_cpu_render | pass |
+| REQ-028-05 | `crates/app/src/edit/tests.rs` › req_028_05_the_gpu_preview_of_a_look_matches_the_cpu_render | pass |
+| REQ-028-06 | `crates/domain/src/look.rs` › req_028_06_grain_is_strongest_in_the_midtones, req_028_06_color_film_has_grain_per_channel; `crates/app/src/edit/tests.rs` › req_028_05_the_gpu_preview_of_a_look_matches_the_cpu_render | pass |
+| REQ-028-07 | `crates/domain/src/look.rs` › req_028_07_looks_treat_hues_differently, req_028_07_greys_stay_and_strength_scales_it; `crates/app/src/edit/tests.rs` › req_028_05_the_gpu_preview_of_a_look_matches_the_cpu_render | pass |
+| REQ-028-08 | `crates/domain/src/look.rs` › req_028_08_bright_lights_glow_red_around_them; `crates/media/src/edit.rs` › req_028_08_saving_lets_bright_lights_glow; `crates/app/src/edit/tests.rs` › req_028_08_the_gpu_halation_matches_the_cpu_render | pass |
