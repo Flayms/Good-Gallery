@@ -596,6 +596,11 @@ struct FrameState {
     fading: bool,
 }
 
+/// The map's points: id, longitude, latitude; newest first.
+type MapPoints = Vec<(i64, f64, f64)>;
+/// Clusters of the map's points at a zoom level.
+type MapClusters = (Arc<MapPoints>, f64, Arc<Vec<domain::map::Cluster>>);
+
 pub struct Gallery {
     /// Where view choices are stored (the UI's write connection).
     settings: Arc<Mutex<Connection>>,
@@ -704,6 +709,8 @@ pub struct Gallery {
     /// The search the map asked for last, and its located items once loaded (REQ-044-01).
     map_asked: Option<GallerySearch>,
     map_points: Option<Arc<Vec<(i64, f64, f64)>>>,
+    /// The clusters of `map_points` at a zoom level, kept until either changes: grouping every photo each frame is slow.
+    map_clusters: Option<MapClusters>,
     /// Thumbnail keys of photos the map showed, `None` for one without; each asked for once.
     map_keys: HashMap<i64, Option<ThumbKey>>,
     map_keys_asked: HashSet<i64>,
@@ -788,6 +795,7 @@ impl Gallery {
             map_view: Default::default(),
             map_asked: None,
             map_points: None,
+            map_clusters: None,
             map_keys: HashMap::new(),
             map_keys_asked: HashSet::new(),
             tiles_frame: None,
@@ -1439,6 +1447,24 @@ impl Gallery {
             self.loader.send(Request::Located(search));
         }
         self.map_points.clone()
+    }
+
+    /// The clusters of the map's `points` at zoom `level` (REQ-044-01, REQ-044-02), grouped again only when either
+    /// changes.
+    pub fn map_clusters(
+        &mut self,
+        points: &Arc<MapPoints>,
+        level: f64,
+        spacing: f64,
+    ) -> Arc<Vec<domain::map::Cluster>> {
+        match &self.map_clusters {
+            Some((of, at, clusters)) if Arc::ptr_eq(of, points) && *at == level => clusters.clone(),
+            _ => {
+                let clusters = Arc::new(domain::map::clusters(points, level, spacing));
+                self.map_clusters = Some((points.clone(), level, clusters.clone()));
+                clusters
+            }
+        }
     }
 
     /// The thumbnail key of photo `id`, asked for when first wanted; `None` while unknown or for one without.

@@ -89,6 +89,13 @@ The user browses by structure rather than by typing: libraries and their folders
 - **And** _Reset to default_ in the _Sidebar_ section brings back Smart albums, People, Places, Ratings, Tags, all switched on. It is disabled while that is already the case
 - **And** a stored choice that lacks a group (e.g. one added by an update) shows that group switched on at the end, and unknown or repeated entries are ignored
 
+### REQ-008-12 · One place at a time
+
+- **Given** a place from the Places group in the search
+- **When** the user clicks another place in Places
+- **Then** it replaces the place in the search, since a photo is taken in one place, and the other filters stay
+- **And** excluded places stay excluded
+
 ## Out of scope
 
 - Configuring which tag names count as People or Places roots, or adding categories.
@@ -118,3 +125,4 @@ The user browses by structure rather than by typing: libraries and their folders
 | REQ-008-09 | `crates/app/tests/search.rs` › req_008_08_req_008_09_hides_and_shows_the_sidebar_and_remembers_it | pass |
 | REQ-008-10 | `crates/domain/src/sidebar.rs` › req_008_10_moves_groups_and_switches_them_off; `crates/app/tests/search.rs` › req_008_10_req_008_11_orders_and_hides_groups_from_the_settings_and_remembers_them (snapshot `settings_sidebar`) | pass |
 | REQ-008-11 | `crates/domain/src/sidebar.rs` › req_008_11_reads_back_what_it_stores_and_repairs_odd_values, req_008_11_resets_to_the_default; `crates/app/tests/search.rs` › req_008_10_req_008_11_orders_and_hides_groups_from_the_settings_and_remembers_them | pass |
+| REQ-008-12 | `crates/domain/src/search.rs` › req_008_12_includes_one_of_a_group_at_a_time; `crates/app/tests/search.rs` › req_008_12_a_place_replaces_the_place_in_the_search | pass |

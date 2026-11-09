@@ -152,6 +152,13 @@ impl GallerySearch {
         }
     }
 
+    /// Includes `name` in place of the included tags of `group` (e.g. the places, REQ-008-12); excluded ones stay.
+    pub fn with_one_tag_of<'a>(&mut self, name: &str, group: impl IntoIterator<Item = &'a str>) {
+        let group: std::collections::HashSet<String> = group.into_iter().map(normalize_tag).collect();
+        self.tags.retain(|other| !group.contains(&normalize_tag(other)));
+        self.with_tag(name, TagMode::Include);
+    }
+
     pub fn tag_mode(&self, name: &str) -> Option<TagMode> {
         let norm = normalize_tag(name);
         let has = |names: &[String]| names.iter().any(|other| normalize_tag(other) == norm);
@@ -239,6 +246,21 @@ mod tests {
 
     use super::*;
     use chrono::{Local, TimeZone};
+
+    #[test]
+    fn req_008_12_includes_one_of_a_group_at_a_time() {
+        let places = ["Italy", "Rome", "France"];
+        let mut search = GallerySearch::default();
+        search.with_tag("Anna", TagMode::Include);
+        search.with_tag("France", TagMode::Exclude);
+        search.with_tag("rome", TagMode::Include);
+        search.with_one_tag_of("Italy", places);
+        assert_eq!(search.tags, ["Anna", "Italy"], "Rome replaced, Anna kept");
+        assert_eq!(search.exclude, ["France"], "exclusions stay");
+        search.with_one_tag_of("France", places);
+        assert_eq!(search.tags, ["Anna", "France"]);
+        assert!(search.exclude.is_empty(), "France moved from excluded to included");
+    }
 
     #[test]
     fn req_007_05_req_008_06_adds_moves_and_removes_tags_case_insensitively() {

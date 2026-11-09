@@ -296,7 +296,13 @@ pub(crate) fn menu(button: &egui::Response, name: &str, width: f32, add: impl Fn
         .align(egui::RectAlign::BOTTOM_END)
         .width(width);
     let id = popup.get_id();
-    let Some(shown) = popup.show(|ui| crate::glass::behind_menu(ui, add)) else {
+    let Some(shown) = popup.show(|ui| {
+        // The content gets the menu's width, not the width it had the frame before: rows that share out the
+        // available width would otherwise widen the menu a little every frame (#285).
+        let margin = ui.style().spacing.menu_margin.sum().x;
+        ui.set_width(width - margin);
+        crate::glass::behind_menu(ui, add)
+    }) else {
         return;
     };
     let ctx = &button.ctx;
@@ -542,22 +548,24 @@ fn view_menu(ui: &mut egui::Ui, gallery: &mut Gallery) {
                 gallery.zoom(1);
             }
         });
-        let mut zoom = MIN_COLUMNS + MAX_COLUMNS - columns;
-        let slider_width = ui.available_width() - theme::CONTROL_HEIGHT - ui.spacing().item_spacing.x;
-        ui.spacing_mut().slider_width = slider_width.max(40.0);
-        let response = ui.add_enabled(
-            zoomable,
-            egui::Slider::new(&mut zoom, MIN_COLUMNS..=MAX_COLUMNS)
-                .show_value(false)
-                .trailing_fill(true),
-        );
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Slider, zoomable, "Zoom"));
-        if response.changed() {
-            gallery.set_columns(MIN_COLUMNS + MAX_COLUMNS - zoom);
-        }
-        ui.add_enabled_ui(zoomable && columns > MIN_COLUMNS, |ui| {
-            if icon_button(ui, Icon::ZoomIn, "Zoom in", "Zoom in (Ctrl + wheel)").clicked() {
-                gallery.zoom(-1);
+        // _Zoom in_ first, from the right, so the slider takes exactly the room between the buttons.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_enabled_ui(zoomable && columns > MIN_COLUMNS, |ui| {
+                if icon_button(ui, Icon::ZoomIn, "Zoom in", "Zoom in (Ctrl + wheel)").clicked() {
+                    gallery.zoom(-1);
+                }
+            });
+            let mut zoom = MIN_COLUMNS + MAX_COLUMNS - columns;
+            ui.spacing_mut().slider_width = ui.available_width().max(40.0);
+            let response = ui.add_enabled(
+                zoomable,
+                egui::Slider::new(&mut zoom, MIN_COLUMNS..=MAX_COLUMNS)
+                    .show_value(false)
+                    .trailing_fill(true),
+            );
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Slider, zoomable, "Zoom"));
+            if response.changed() {
+                gallery.set_columns(MIN_COLUMNS + MAX_COLUMNS - zoom);
             }
         });
     });
@@ -589,6 +597,8 @@ fn view_menu(ui: &mut egui::Ui, gallery: &mut Gallery) {
     }
     // The picks are kept while indicators are off, so turning them on again restores them.
     ui.horizontal(|ui| {
+        // Four names in a row only fit with less padding around each.
+        ui.spacing_mut().button_padding.x = 2.0;
         let width = (ui.available_width() - 3.0 * ui.spacing().item_spacing.x) / 4.0;
         for kind in TagIndicatorKind::ALL {
             let button = egui::Button::new(kind.label()).min_size(vec2(width, theme::CONTROL_HEIGHT - 4.0));
