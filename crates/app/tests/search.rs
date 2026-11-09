@@ -7,7 +7,7 @@ use db::libraries::LibraryStatus;
 use db::rusqlite::Connection;
 use db::writer::{IndexWriter, IndexedFile};
 use domain::media::{MediaKind, MediaMetadata};
-use domain::search::SortBy;
+use domain::search::{SortBy, TagMode};
 use eframe::egui::{self, accesskit::Role};
 use egui_kittest::Harness;
 use egui_kittest::kittest::{NodeT as _, Queryable as _};
@@ -824,6 +824,66 @@ fn req_008_03_places_line_up_with_and_without_towns() {
     let mut harness = fixture.harness(writer.into());
     settle(&mut harness);
     harness.snapshot(common::snapshot_name("places_tree"));
+}
+
+/// REQ-007-15: chips of every kind are one height, long names are shortened, and chips that don't fit are counted in
+/// a "+N" chip, so they all stay left of the input, which stays left of _Filters_ (#299).
+#[test]
+fn req_007_15_chips_are_one_height_and_stay_in_the_search_bar() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture);
+    // Wide enough for these four chips.
+    harness.set_size(egui::vec2(1400.0, 600.0));
+    let mut search = domain::search::GallerySearch::default();
+    search.with_tag("Beach", TagMode::Include);
+    search.with_tag("A tag with a rather long name for a chip", TagMode::Include);
+    search.with_tag("Berlin", TagMode::Exclude);
+    search.content = Some("dog".into());
+    harness.state_mut().gallery.as_mut().unwrap().set_search(search.clone());
+    settle(&mut harness);
+    harness.snapshot(common::snapshot_name("search_chips"));
+
+    let heights: Vec<f32> = [
+        harness.get_by_label("Beach, included").rect(),
+        harness.get_by_label("Berlin, excluded").rect(),
+        harness.get_by_label("Photos showing dog").rect(),
+    ]
+    .iter()
+    .map(|rect| rect.height())
+    .collect();
+    assert!(heights.windows(2).all(|w| (w[0] - w[1]).abs() < 0.5), "{heights:?}");
+    let long = harness
+        .get_by_label("A tag with a rather long name for a chip, included")
+        .rect();
+    assert!(long.width() < 200.0, "shortened: {long:?}");
+
+    // Many more tags than fit.
+    for i in 0..12 {
+        search.with_tag(&format!("Tag {i}"), TagMode::Include);
+    }
+    harness.state_mut().gallery.as_mut().unwrap().set_search(search);
+    settle(&mut harness);
+    let input = harness
+        .get_by_role_and_label(Role::TextInput, app::search_bar::LABEL)
+        .rect();
+    let filters = harness.get_by_role_and_label(Role::Button, "Filters").rect();
+    assert!(input.width() >= 60.0, "room to type: {input:?}");
+    assert!(
+        input.right() <= filters.left(),
+        "{input:?} overlaps Filters at {filters:?}"
+    );
+    let more = (1..=16)
+        .find_map(|n| harness.query_by_label(&format!("{n} more")).map(|node| node.rect()))
+        .expect("a +N chip");
+    assert!(more.right() <= input.left() + 0.5, "{more:?}");
+    for i in 0..12 {
+        if let Some(chip) = harness.query_by_label(&format!("Tag {i}, included")) {
+            assert!(
+                chip.rect().right() <= input.left() + 0.5,
+                "Tag {i} reaches into the input"
+            );
+        }
+    }
 }
 
 #[test]

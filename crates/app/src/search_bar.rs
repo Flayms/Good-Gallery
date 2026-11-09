@@ -6,7 +6,7 @@ use crate::icons::Icon;
 use crate::{format, theme};
 use domain::search::TagMode;
 use domain::tags::normalize_tag;
-use eframe::egui::{self, Color32, Rect, Vec2, pos2, vec2};
+use eframe::egui::{self, Color32, FontId, Rect, Vec2, pos2, vec2};
 
 /// Suggestions shown at most.
 const SUGGESTIONS: usize = 10;
@@ -54,57 +54,60 @@ pub fn show(ui: &mut egui::Ui, bar: &mut SearchBar, gallery: &mut Gallery, reser
         |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             ui.add(Icon::Search.image(theme::ICON_SIZE, theme::muted()));
-            let chips: Vec<(String, TagMode)> = search
+            let tags: Vec<(String, TagMode)> = search
                 .tags
                 .iter()
                 .map(|name| (name.clone(), TagMode::Include))
                 .chain(search.exclude.iter().map(|name| (name.clone(), TagMode::Exclude)))
                 .collect();
-            for (name, mode) in &chips {
-                match tag_chip(ui, name, *mode) {
+            let mut chips: Vec<(Chip, ChipFor)> = tags
+                .iter()
+                .map(|(name, mode)| (Chip::tag(name, *mode), ChipFor::Tag(name.clone(), *mode)))
+                .collect();
+            if let Some(name) = &search.name {
+                chips.push((Chip::file_name(name), ChipFor::FileName));
+            }
+            // Searching while the model reads the words (REQ-036-05).
+            if let Some(words) = &search.content {
+                chips.push((Chip::content(words, gallery.is_loading()), ChipFor::Content));
+            }
+            // A smart album's rules, as one chip with its name (REQ-039-05).
+            if let Some(rules) = &search.rules {
+                chips.push((Chip::rules(&rules.name), ChipFor::Rules));
+            }
+            // Photos chosen on the map (REQ-044-03).
+            if !search.media.is_empty() {
+                chips.push((Chip::map(search.media.len()), ChipFor::Map));
+            }
+            let hint = if chips.is_empty() { LABEL } else { "" };
+            // As many chips as fit before the room to type; the rest are counted in a last chip (REQ-007-15).
+            let room = ui.available_width() - MIN_INPUT;
+            let shown = fitting(ui, &chips, room);
+            for (index, (chip, target)) in chips.iter().enumerate().take(shown) {
+                match chip.show(ui, index) {
                     Some(ChipAction::Toggle) => {
-                        let other = if *mode == TagMode::Include {
-                            TagMode::Exclude
-                        } else {
-                            TagMode::Include
-                        };
-                        next.with_tag(name, other);
+                        if let ChipFor::Tag(name, mode) = target {
+                            let other = if *mode == TagMode::Include {
+                                TagMode::Exclude
+                            } else {
+                                TagMode::Include
+                            };
+                            next.with_tag(name, other);
+                        }
                     }
-                    Some(ChipAction::Remove) => next.without_tag(name),
+                    Some(ChipAction::Remove) => match target {
+                        ChipFor::Tag(name, _) => next.without_tag(name),
+                        ChipFor::FileName => next.name = None,
+                        ChipFor::Content => next.content = None,
+                        ChipFor::Rules => next.rules = None,
+                        ChipFor::Map => next.media.clear(),
+                    },
                     None => {}
                 }
             }
-            if let Some(name) = &search.name
-                && file_name_chip(ui, name)
-            {
-                next.name = None;
+            if shown < chips.len() {
+                more_chip(ui, &chips[shown..]);
             }
-            // Searching while the model reads the words (REQ-036-05).
-            if let Some(words) = &search.content
-                && content_chip(ui, words, gallery.is_loading())
-            {
-                next.content = None;
-            }
-            // A smart album's rules, as one chip with its name (REQ-039-05).
-            if let Some(rules) = &search.rules
-                && rules_chip(ui, &rules.name)
-            {
-                next.rules = None;
-            }
-            // Photos chosen on the map (REQ-044-03).
-            if !search.media.is_empty() && map_chip(ui, search.media.len()) {
-                next.media.clear();
-            }
-            let hint = if chips.is_empty()
-                && search.name.is_none()
-                && search.content.is_none()
-                && search.rules.is_none()
-                && search.media.is_empty()
-            {
-                LABEL
-            } else {
-                ""
-            };
             let edit = egui::TextEdit::singleline(&mut bar.query)
                 .id_salt("search bar")
                 .frame(egui::Frame::NONE)
@@ -279,135 +282,247 @@ enum ChipAction {
     Remove,
 }
 
-/// A tag in the search: its name switches between included and excluded (struck through), × removes it.
-fn tag_chip(ui: &mut egui::Ui, name: &str, mode: TagMode) -> Option<ChipAction> {
-    let excluded = mode == TagMode::Exclude;
-    let (icon, text, fill) = if excluded {
-        (Icon::Minus, egui::RichText::new(name).strikethrough(), {
+/// Every chip's height, and the room kept to type beside them (REQ-007-15).
+const CHIP_HEIGHT: f32 = 22.0;
+const MIN_INPUT: f32 = 80.0;
+/// The longest a chip's name gets before it is shortened with "…".
+const MAX_CHIP_TEXT: f32 = 140.0;
+const CHIP_PAD: f32 = 6.0;
+const CHIP_ICON: f32 = 12.0;
+/// The square of a chip's ×.
+const CHIP_REMOVE: f32 = 18.0;
+const CHIP_GAP: f32 = 4.0;
+
+/// What a chip in the search stands for, to change the search when it is clicked.
+enum ChipFor {
+    Tag(String, TagMode),
+    FileName,
+    Content,
+    Rules,
+    Map,
+}
+
+/// A chip in the search bar: an icon (a spinner while searching), its text, and ×. Tags are filled, excluded ones
+/// struck through on red, the other filters outlined. All are one height (REQ-007-15).
+struct Chip {
+    /// `None`: a spinner.
+    icon: Option<Icon>,
+    text: String,
+    excluded: bool,
+    filled: bool,
+    /// A click on the text switches it (tags, REQ-007-05).
+    toggles: bool,
+    /// How screen readers and tests name its text.
+    spoken: String,
+    tip: &'static str,
+    remove: String,
+}
+
+impl Chip {
+    fn tag(name: &str, mode: TagMode) -> Self {
+        let excluded = mode == TagMode::Exclude;
+        Self {
+            icon: Some(if excluded { Icon::Minus } else { Icon::Tag }),
+            text: name.to_owned(),
+            excluded,
+            filled: true,
+            toggles: true,
+            spoken: format!("{name}, {}", if excluded { "excluded" } else { "included" }),
+            tip: if excluded {
+                "Excluded – click to include"
+            } else {
+                "Included – click to exclude"
+            },
+            remove: format!("Remove {name}"),
+        }
+    }
+
+    fn outlined(icon: Option<Icon>, text: &str, spoken: String, tip: &'static str, remove: String) -> Self {
+        Self {
+            icon,
+            text: text.to_owned(),
+            excluded: false,
+            filled: false,
+            toggles: false,
+            spoken,
+            tip,
+            remove,
+        }
+    }
+
+    fn file_name(name: &str) -> Self {
+        let remove = format!("Remove file name filter {name}");
+        Self::outlined(Some(Icon::File), name, name.to_owned(), "File name contains", remove)
+    }
+
+    fn content(words: &str, searching: bool) -> Self {
+        let icon = (!searching).then_some(Icon::Sparkles);
+        let (spoken, remove) = (
+            format!("Photos showing {words}"),
+            format!("Remove photos showing {words}"),
+        );
+        Self::outlined(icon, words, spoken, "Photos showing this", remove)
+    }
+
+    fn rules(name: &str) -> Self {
+        let remove = format!("Remove smart album {name}");
+        Self::outlined(Some(Icon::Search), name, name.to_owned(), "Smart album", remove)
+    }
+
+    fn map(count: usize) -> Self {
+        let label = if count == 1 {
+            "1 photo from the map".to_owned()
+        } else {
+            format!("{} photos from the map", crate::format::count(count as u64))
+        };
+        Self::outlined(Some(Icon::Map), &label, label.clone(), "", format!("Remove {label}"))
+    }
+
+    fn galley(&self, ui: &egui::Ui) -> std::sync::Arc<egui::Galley> {
+        let mut format = egui::TextFormat::simple(FontId::proportional(theme::SIZE_CAPTION), theme::text());
+        if self.excluded {
+            format.strikethrough = egui::Stroke::new(1.0, theme::text());
+        }
+        let mut job = egui::text::LayoutJob::single_section(self.text.clone(), format);
+        job.wrap = egui::text::TextWrapping::truncate_at_width(MAX_CHIP_TEXT);
+        ui.fonts_mut(|fonts| fonts.layout_job(job))
+    }
+
+    fn width(&self, ui: &egui::Ui) -> f32 {
+        chip_width(self.galley(ui).size().x)
+    }
+
+    fn show(&self, ui: &mut egui::Ui, index: usize) -> Option<ChipAction> {
+        let galley = self.galley(ui);
+        let (rect, _) = ui.allocate_exact_size(vec2(chip_width(galley.size().x), CHIP_HEIGHT), egui::Sense::hover());
+        let body = Rect::from_min_max(rect.min, pos2(rect.right() - CHIP_REMOVE - 2.0, rect.bottom()));
+        let cross = Rect::from_center_size(
+            pos2(rect.right() - 2.0 - CHIP_REMOVE / 2.0, rect.center().y),
+            Vec2::splat(CHIP_REMOVE),
+        );
+        let id = ui.scope_id().with(("chip", index));
+        let sense = if self.toggles {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        };
+        let mut text_response = ui.interact(body, id.with("text"), sense);
+        let tip = if galley.elided {
+            if self.tip.is_empty() {
+                self.text.clone()
+            } else {
+                format!("{}\n{}", self.text, self.tip)
+            }
+        } else {
+            self.tip.to_owned()
+        };
+        if !tip.is_empty() {
+            text_response = text_response.on_hover_text(tip);
+        }
+        let role = if self.toggles {
+            egui::Role::Button
+        } else {
+            egui::Role::Label
+        };
+        text_response.widget_info(|| egui::WidgetInfo::labeled(role, true, &self.spoken));
+        let remove_response = ui.interact(cross, id.with("remove"), egui::Sense::click());
+        remove_response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &self.remove));
+
+        let painter = ui.painter();
+        let radius = theme::RADIUS_CONTROL;
+        if self.excluded {
             // Alert at 16 %.
             let alert = theme::alert();
-            Color32::from_rgba_unmultiplied(alert.r(), alert.g(), alert.b(), 40)
+            painter.rect_filled(
+                rect,
+                radius,
+                Color32::from_rgba_unmultiplied(alert.r(), alert.g(), alert.b(), 40),
+            );
+        } else if self.filled {
+            painter.rect_filled(rect, radius, theme::selected());
+        } else {
+            painter.rect_stroke(
+                rect,
+                radius,
+                egui::Stroke::new(1.0, theme::rim()),
+                egui::StrokeKind::Inside,
+            );
+        }
+        if self.toggles && text_response.hovered() {
+            painter.rect_filled(body, radius, theme::hover());
+        }
+        if remove_response.hovered() {
+            painter.rect_filled(cross.shrink(1.0), radius, theme::hover());
+        }
+        let icon_rect = Rect::from_center_size(
+            pos2(rect.left() + CHIP_PAD + CHIP_ICON / 2.0, rect.center().y),
+            Vec2::splat(CHIP_ICON),
+        );
+        match self.icon {
+            Some(icon) => icon.image(CHIP_ICON, theme::text()).paint_at(ui, icon_rect),
+            None => egui::Spinner::new().size(CHIP_ICON).paint_at(ui, icon_rect),
+        }
+        let text_at = pos2(icon_rect.right() + 4.0, rect.center().y - galley.size().y / 2.0);
+        ui.painter().galley(text_at, galley, theme::text());
+        Icon::X
+            .image(CHIP_ICON, theme::muted())
+            .paint_at(ui, Rect::from_center_size(cross.center(), Vec2::splat(CHIP_ICON)));
+
+        if remove_response.clicked() {
+            Some(ChipAction::Remove)
+        } else if self.toggles && text_response.clicked() {
+            Some(ChipAction::Toggle)
+        } else {
+            None
+        }
+    }
+}
+
+/// A chip's width for a text this wide.
+fn chip_width(text: f32) -> f32 {
+    CHIP_PAD + CHIP_ICON + 4.0 + text + 2.0 + CHIP_REMOVE + 2.0
+}
+
+/// How many of `chips` fit in `room`, with a "+N" chip after them if not all do (REQ-007-15).
+fn fitting(ui: &egui::Ui, chips: &[(Chip, ChipFor)], room: f32) -> usize {
+    let widths: Vec<f32> = chips.iter().map(|(chip, _)| chip.width(ui) + CHIP_GAP).collect();
+    if widths.iter().sum::<f32>() <= room {
+        return chips.len();
+    }
+    let more = MORE_WIDTH + CHIP_GAP;
+    let mut used = 0.0;
+    widths
+        .iter()
+        .take_while(|width| {
+            used += **width;
+            used + more <= room
         })
-    } else {
-        (Icon::Tag, egui::RichText::new(name), theme::selected())
-    };
-    let mut action = None;
-    egui::Frame::new()
-        .fill(fill)
-        .corner_radius(theme::RADIUS_CONTROL)
-        .inner_margin(egui::Margin::symmetric(4, 1))
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            let label = if excluded {
-                format!("{name}, excluded")
-            } else {
-                format!("{name}, included")
-            };
-            let toggle = ui
-                .add(
-                    egui::Button::new((icon.image(12.0, theme::text()), text.size(theme::SIZE_CAPTION)))
-                        .frame_when_inactive(false),
-                )
-                .on_hover_text(if excluded {
-                    "Excluded – click to include"
-                } else {
-                    "Included – click to exclude"
-                });
-            toggle.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
-            if toggle.clicked() {
-                action = Some(ChipAction::Toggle);
-            }
-            if remove_button(ui, &format!("Remove {name}")) {
-                action = Some(ChipAction::Remove);
-            }
-        });
-    action
+        .count()
 }
 
-/// A smart album's rules as a chip with its name; true when its × was clicked (REQ-039-05).
-fn rules_chip(ui: &mut egui::Ui, name: &str) -> bool {
-    let mut removed = false;
-    egui::Frame::new()
-        .stroke(egui::Stroke::new(1.0, theme::rim()))
-        .corner_radius(theme::RADIUS_CONTROL)
-        .inner_margin(egui::Margin::symmetric(4, 1))
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            ui.add(Icon::Search.image(12.0, theme::text()));
-            ui.label(egui::RichText::new(name).size(theme::SIZE_CAPTION))
-                .on_hover_text("Smart album");
-            removed = remove_button(ui, &format!("Remove smart album {name}"));
-        });
-    removed
-}
+/// Room for the "+N" chip.
+const MORE_WIDTH: f32 = 36.0;
 
-/// Photos chosen on the map as a chip with their count; true when its × was clicked (REQ-044-03).
-fn map_chip(ui: &mut egui::Ui, count: usize) -> bool {
-    let mut removed = false;
-    let label = if count == 1 {
-        "1 photo from the map".to_owned()
-    } else {
-        format!("{} photos from the map", crate::format::count(count as u64))
-    };
-    egui::Frame::new()
-        .stroke(egui::Stroke::new(1.0, theme::rim()))
-        .corner_radius(theme::RADIUS_CONTROL)
-        .inner_margin(egui::Margin::symmetric(4, 1))
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            ui.add(Icon::Map.image(12.0, theme::text()));
-            ui.label(egui::RichText::new(&label).size(theme::SIZE_CAPTION));
-            removed = remove_button(ui, &format!("Remove {label}"));
-        });
-    removed
-}
-
-/// The file name filter as a chip; true when its × was clicked.
-fn file_name_chip(ui: &mut egui::Ui, name: &str) -> bool {
-    let mut removed = false;
-    egui::Frame::new()
-        .stroke(egui::Stroke::new(1.0, theme::rim()))
-        .corner_radius(theme::RADIUS_CONTROL)
-        .inner_margin(egui::Margin::symmetric(4, 1))
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            ui.add(Icon::File.image(12.0, theme::text()));
-            ui.label(egui::RichText::new(name).size(theme::SIZE_CAPTION))
-                .on_hover_text("File name contains");
-            removed = remove_button(ui, &format!("Remove file name filter {name}"));
-        });
-    removed
-}
-
-/// The content words as a chip, spinning while the model reads them; true when its × was clicked (REQ-036-05).
-fn content_chip(ui: &mut egui::Ui, words: &str, searching: bool) -> bool {
-    let mut removed = false;
-    egui::Frame::new()
-        .stroke(egui::Stroke::new(1.0, theme::rim()))
-        .corner_radius(theme::RADIUS_CONTROL)
-        .inner_margin(egui::Margin::symmetric(4, 1))
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
-            if searching {
-                ui.add(egui::Spinner::new().size(12.0));
-            } else {
-                ui.add(Icon::Sparkles.image(12.0, theme::text()));
-            }
-            let label = ui
-                .label(egui::RichText::new(words).size(theme::SIZE_CAPTION))
-                .on_hover_text("Photos showing this");
-            let spoken = format!("Photos showing {words}");
-            label.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &spoken));
-            removed = remove_button(ui, &format!("Remove photos showing {words}"));
-        });
-    removed
-}
-
-fn remove_button(ui: &mut egui::Ui, label: &str) -> bool {
-    let response = ui.add(egui::Button::image(Icon::X.image(12.0, theme::muted())).frame_when_inactive(false));
-    let label = label.to_string();
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
-    response.clicked()
+/// The chips that didn't fit, counted; their names on hover (REQ-007-15).
+fn more_chip(ui: &mut egui::Ui, hidden: &[(Chip, ChipFor)]) {
+    let (rect, response) = ui.allocate_exact_size(vec2(MORE_WIDTH, CHIP_HEIGHT), egui::Sense::hover());
+    ui.painter().rect_stroke(
+        rect,
+        theme::RADIUS_CONTROL,
+        egui::Stroke::new(1.0, theme::rim()),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        format!("+{}", hidden.len()),
+        FontId::proportional(theme::SIZE_CAPTION),
+        theme::text(),
+    );
+    let names: Vec<&str> = hidden.iter().map(|(chip, _)| chip.spoken.as_str()).collect();
+    let spoken = format!("{} more", hidden.len());
+    let response = response.on_hover_text(names.join("\n"));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &spoken));
 }
 
 /// A suggestion: + or − and the tag with its count, or the file name filter (REQ-007-04, -06).
