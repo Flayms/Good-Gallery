@@ -142,6 +142,13 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 - **Then** it shows the hover state (a light fill, `docs/design.md`), so the user sees it can be clicked
 - **And** _Filters_ and _View_ in the toolbar show their icon alone (a funnel for _Filters_, with the number of active filters when there are any, and the current view for _View_), and name themselves in a tip
 
+### REQ-013-20 · Scrollbars only while the pointer is over them
+
+- **Given** a page or panel that scrolls (the gallery, the sidebar, Settings)
+- **When** the pointer is elsewhere
+- **Then** its scrollbar doesn't show; it shows while the pointer is over what it scrolls, and while it is dragged (#278)
+- **And** the sidebar's scrollbar lies beside its rows, so it never covers a row's highlight or its count
+
 ## Out of scope
 
 - A light theme or following the OS light / dark setting (the app stays dark).
@@ -180,3 +187,4 @@ Deprecated 2026-10-25: a backdrop made from the item itself hides where the user
 | REQ-013-17 | `crates/app/src/theme.rs` › req_013_17_the_setting_or_the_os_reduces_transparency; `crates/app/tests/settings.rs` › req_013_17_the_setting_turns_glass_off_and_stays_after_a_restart; `crates/db/src/settings.rs` › req_010_01_starts_with_defaults_and_persists_updates | pass |
 | REQ-013-18 | `crates/app/tests/viewer.rs` › req_013_18_the_viewers_bar_buttons_stay_apart; snapshot `viewer_faces` for what is painted | pass |
 | REQ-013-19 | `crates/app/tests/search.rs` › req_013_19_buttons_answer_the_pointer_and_filters_and_view_are_icons; snapshots of the toolbar (`filters_menu` and others) | pass |
+| REQ-013-20 | `crates/app/tests/gallery.rs` › req_013_20_the_gallerys_scrollbar_shows_only_with_the_pointer_over_it, req_013_20_the_sidebars_scrollbar_lies_beside_its_rows | pass |

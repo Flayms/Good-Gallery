@@ -137,7 +137,7 @@ lucide, 16px, stroke 1.75 (in lucide's 24-unit grid, so it scales with the icon)
 
 - Content runs into the title bar: the toolbar and sidebar header are the window's drag area, and empty toolbar space drags the window.
 - The native window controls stay (right on Windows and Linux, left on macOS). Their space is reserved, so nothing in the app overlaps them. This is the only platform difference.
-- Scrollbars are the app's own: a thin pill (white at 24 %, 40 % on hover) on a transparent track. Pages that scroll under the toolbar start the track below it, so the thumb never hides under the window controls. Beside the gallery's scrollbar, years show only while the pointer is near or the bar is being dragged, as solid badges like those on tiles.
+- Scrollbars are the app's own: a thin pill (white at 24 %, 40 % on hover) on a transparent track, shown only while the pointer is over what they scroll. The sidebar's lies in its margin, beside the rows. Pages that scroll under the toolbar start the track below it, so the thumb never hides under the window controls. Beside the gallery's scrollbar, years show only while the pointer is near or the bar is being dragged, as solid badges like those on tiles.
 
 ## Writing
 

@@ -545,7 +545,8 @@ fn style(style: &mut egui::Style, palette: &Palette) {
     bar.dormant_background_opacity = 0.0;
     bar.active_background_opacity = 0.0;
     bar.interact_background_opacity = 0.0;
-    bar.dormant_handle_opacity = 1.0;
+    // Only while the pointer is over what it scrolls, as in VS Code (REQ-013-20).
+    bar.dormant_handle_opacity = 0.0;
     bar.active_handle_opacity = 1.0;
     bar.interact_handle_opacity = 1.0;
 

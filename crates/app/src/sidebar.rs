@@ -17,6 +17,8 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 pub const WIDTH: f32 = 256.0;
+/// The space around the sidebar's content; its scrollbar lies in the right one (REQ-013-20).
+pub const MARGIN: i8 = 8;
 /// Below this window width the sidebar doesn't take room: it opens over the gallery (REQ-019-15).
 pub const NARROW: f32 = 600.0;
 const ROW: f32 = 32.0;
@@ -210,11 +212,22 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
     }
 
     let footer = ROW + 12.0;
+    // The scrollbar lies in the margin right of the rows, narrow enough not to reach them, so it covers no highlight
+    // or count (REQ-013-20): the scroll area reaches into the margin, its rows keep their width.
+    let rows_width = ui.available_width();
+    let area = Rect::from_min_size(
+        ui.cursor().min,
+        vec2(rows_width + f32::from(MARGIN), ui.available_height() - footer),
+    );
+    let mut scroll = ui.new_child(egui::UiBuilder::new().max_rect(area));
+    scroll.set_clip_rect(scroll.clip_rect().union(area));
+    scroll.spacing_mut().scroll.bar_width = 6.0;
     egui::ScrollArea::vertical()
         .id_salt("sidebar")
-        .max_height(ui.available_height() - footer)
+        .max_height(area.height())
         .auto_shrink([false, false])
-        .show(ui, |ui| {
+        .show(&mut scroll, |ui| {
+            ui.set_max_width(rows_width);
             group_label(ui, "Libraries");
             if libraries(ui, state, &mut search, &mut select_all, data, &input, on_settings) {
                 *input.page = Page::Gallery;
@@ -283,6 +296,7 @@ pub fn show(ui: &mut egui::Ui, state: &mut SidebarState, gallery: Option<&mut Ga
                 }
             }
         });
+    ui.advance_cursor_after_rect(Rect::from_min_size(area.min, vec2(rows_width, area.height())));
     settings_row(ui, input.page);
     if in_album && (left_album || to_faces) {
         search = GallerySearch {
