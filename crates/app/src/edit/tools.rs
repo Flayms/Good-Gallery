@@ -13,13 +13,35 @@ impl EditSession {
         self.cropping
     }
 
-    /// Where the whole photo was last drawn while cropping.
+    /// Where the whole turned photo was drawn this frame, while cropping or straightening (REQ-029-12).
     pub fn crop_area(&self) -> Option<Rect> {
         self.crop_area
     }
 
-    pub fn set_crop_area(&mut self, area: Rect) {
-        self.crop_area = Some(area);
+    pub fn set_crop_area(&mut self, area: Option<Rect>) {
+        self.crop_area = area;
+    }
+
+    /// While _Straighten_ is held, the whole turned photo's place on screen when the crop shows at `crop`
+    /// (REQ-029-12).
+    pub fn straightening_area(&self, crop: Rect) -> Option<Rect> {
+        if !self.straightening {
+            return None;
+        }
+        let [x, y, w, h] = self.crop_frame();
+        if w <= 0.0 || h <= 0.0 {
+            return None;
+        }
+        let size = Vec2::new(crop.width() / w, crop.height() / h);
+        Some(Rect::from_min_size(
+            pos2(crop.left() - x * size.x, crop.top() - y * size.y),
+            size,
+        ))
+    }
+
+    /// Dims what straightening cuts off: `area` outside `crop` (REQ-029-12).
+    pub fn paint_cut_off(&self, painter: &egui::Painter, area: Rect, crop: Rect) {
+        paint_outside(painter, area, crop, Color32::from_black_alpha(150));
     }
 
     pub fn is_dragging_crop(&self) -> bool {
@@ -401,15 +423,7 @@ impl EditSession {
             pos2(area.left() + x * area.width(), area.top() + y * area.height()),
             Vec2::new(w * area.width(), h * area.height()),
         );
-        let dark = Color32::from_black_alpha(150);
-        for outside in [
-            Rect::from_min_max(area.min, pos2(area.right(), frame.top())),
-            Rect::from_min_max(pos2(area.left(), frame.bottom()), area.max),
-            Rect::from_min_max(pos2(area.left(), frame.top()), pos2(frame.left(), frame.bottom())),
-            Rect::from_min_max(pos2(frame.right(), frame.top()), pos2(area.right(), frame.bottom())),
-        ] {
-            painter.rect_filled(outside, 0.0, dark);
-        }
+        paint_outside(painter, area, frame, Color32::from_black_alpha(150));
         let thin = egui::Stroke::new(1.0, Color32::from_white_alpha(120));
         for third in [1.0, 2.0] {
             let across = frame.left() + frame.width() * third / 3.0;
@@ -541,5 +555,17 @@ impl EditSession {
         Adjustment::Temperature.set(&mut recipe, temperature.round());
         Adjustment::Tint.set(&mut recipe, tint.round());
         self.commit(recipe);
+    }
+}
+
+/// Fills `area` outside `inner` with `color`.
+fn paint_outside(painter: &egui::Painter, area: Rect, inner: Rect, color: Color32) {
+    for outside in [
+        Rect::from_min_max(area.min, pos2(area.right(), inner.top())),
+        Rect::from_min_max(pos2(area.left(), inner.bottom()), area.max),
+        Rect::from_min_max(pos2(area.left(), inner.top()), pos2(inner.left(), inner.bottom())),
+        Rect::from_min_max(pos2(inner.right(), inner.top()), pos2(area.right(), inner.bottom())),
+    ] {
+        painter.rect_filled(outside, 0.0, color);
     }
 }

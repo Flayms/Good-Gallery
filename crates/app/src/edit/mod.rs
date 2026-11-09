@@ -708,7 +708,7 @@ impl EditSession {
         if width == 0 || height == 0 {
             return None;
         }
-        let (width, height) = self.shown_geometry(compare).output_size(width, height);
+        let (width, height) = self.sized_geometry(compare).output_size(width, height);
         Some([width as f32, height as f32])
     }
 
@@ -738,9 +738,19 @@ impl EditSession {
         self.shown_recipe(compare).needs_subject() && matches!(self.subject, Subject::Unknown | Subject::Finding(_))
     }
 
-    /// What is drawn of the photo: while comparing the output as editing started, while cropping all of it turned, else
-    /// the output.
+    /// What is drawn of the photo: as [`Self::sized_geometry`], but all of it turned while _Straighten_ is held, around
+    /// the crop at its size (REQ-029-12).
     fn shown_geometry(&self, compare: bool) -> Geometry {
+        if self.straightening && !compare {
+            self.draft.geometry().uncropped()
+        } else {
+            self.sized_geometry(compare)
+        }
+    }
+
+    /// What the viewer fits: while comparing the output as editing started, while cropping all of it turned, else the
+    /// output.
+    fn sized_geometry(&self, compare: bool) -> Geometry {
         if compare {
             self.saved.geometry()
         } else if self.cropping {

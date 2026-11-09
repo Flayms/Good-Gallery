@@ -529,6 +529,64 @@ fn req_029_10_straightens_with_the_crop_inside_the_photo() {
     assert_eq!((recipe.straighten, recipe.crop), (0.0, None), "back to the whole photo");
 }
 
+/// REQ-029-12: while _Straighten_ is held, the whole turned photo shows, dimmed beyond the crop, which keeps its place;
+/// let go, only the crop shows.
+#[test]
+fn req_029_12_straightening_shows_what_it_cuts_off_dimmed() {
+    let fixture = Fixture::new();
+    let (mut harness, _dir) = app(&fixture, None, None);
+    open(&mut harness, "a.jpg");
+    edit(&mut harness);
+    harness.set_size(egui::vec2(900.0, 1600.0));
+    harness.run_steps(2);
+    let slider = harness
+        .get_by_role_and_label(Role::Slider, "Straighten")
+        .rect()
+        .center();
+    // Held at the middle (0°), then dragged to the right: turned clockwise, the slider still held.
+    let press = |harness: &mut App, pos: egui::Pos2, pressed: bool| {
+        harness.event(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        });
+        harness.run_steps(3);
+    };
+    harness.hover_at(slider);
+    press(&mut harness, slider, true);
+    let held_at = slider + egui::vec2(15.0, 0.0);
+    harness.hover_at(held_at);
+    harness.run_steps(3);
+    let recipe = session(&harness).unwrap().recipe().clone();
+    assert!(recipe.straighten > 2.0, "turned: {}", recipe.straighten);
+    let (width, height) = recipe.geometry().output_size(120, 80);
+    assert_eq!(
+        session(&harness).unwrap().shown_size(false),
+        Some([width as f32, height as f32]),
+        "the crop keeps its size"
+    );
+    let area = session(&harness)
+        .unwrap()
+        .crop_area()
+        .expect("the whole photo is drawn");
+    let frame = recipe.geometry().frame();
+    // Just left of the crop, halfway down: cut off, but still the photo.
+    let beside = egui::pos2(
+        area.left() + frame[0] * area.width() - 4.0,
+        area.top() + (frame[1] + frame[3] / 2.0) * area.height(),
+    );
+    let pixel = |harness: &mut App| {
+        let image = harness.render().unwrap();
+        image.get_pixel(beside.x as u32, beside.y as u32).0
+    };
+    let held = pixel(&mut harness);
+    harness.snapshot(common::snapshot_name("edit_straightening"));
+    press(&mut harness, held_at, false);
+    assert!(session(&harness).unwrap().crop_area().is_none(), "only the crop again");
+    assert_ne!(pixel(&mut harness), held, "what is cut off goes");
+}
+
 /// REQ-029-11 (#248): _Flip horizontal_ and _Flip vertical_ mirror the photo, and undo takes it back.
 #[test]
 fn req_029_11_flips_the_photo() {
