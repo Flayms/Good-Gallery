@@ -168,8 +168,15 @@ impl Gallery {
         if (selecting || under_pointer) && self.tile_sense() != egui::Sense::hover() {
             let spot = Rect::from_center_size(thumb_rect.center(), Vec2::splat(18.0));
             let name = item.file_name.clone();
-            if super::tiles::selection_circle(ui, spot, id, &name, selected, selecting).clicked() {
+            if super::tiles::selection_circle(ui, spot, id, &name, selected, selecting && !under_pointer).clicked() {
                 self.circle_clicked(ui, index);
+            }
+            // At the row's end (REQ-025-17).
+            if selecting && under_pointer {
+                let spot = Rect::from_center_size(pos2(rect.right() - PADDING - 9.0, y), Vec2::splat(18.0));
+                if super::tiles::open_button(ui, spot, id, &name).clicked() {
+                    self.opened = Some(index);
+                }
             }
         }
         let Some(item) = self.items.get(&id) else { return };

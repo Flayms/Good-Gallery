@@ -107,6 +107,11 @@ impl Gallery {
             if !ui.is_rect_visible(rect) {
                 continue;
             }
+            // A selected tile shrinks within its place (REQ-025-16).
+            let shrunk =
+                ui.ctx()
+                    .animate_bool_with_time(ui.make_persistent_id(("shrink", id)), selected, theme::DURATION_FAST);
+            let rect = rect.shrink(shrunk * selected_inset(rect));
             self.paint_thumbnail(ui, rect, radius, id, &mut frame);
             let previewed = !selected && self.range_preview.as_ref().is_some_and(|range| range.contains(&index));
             if previewed {
@@ -123,13 +128,17 @@ impl Gallery {
             if !indicators.is_empty() {
                 indicator_badge(ui, rect, &indicators, video);
             }
-            if selected {
-                selected_mark(ui, rect, radius);
-            }
             if (selecting || under_pointer) && self.tile_sense() != egui::Sense::hover() {
                 let spot = circle_spot(rect);
-                if selection_circle(ui, spot, id, &name, selected, selecting).clicked() {
+                if selection_circle(ui, spot, id, &name, selected, selecting && !under_pointer).clicked() {
                     self.circle_clicked(ui, index);
+                }
+                // While selecting a click selects, so the magnifier opens (REQ-025-17).
+                if selecting && under_pointer {
+                    let spot = Rect::from_min_size(pos2(rect.right() - 6.0 - spot.width(), spot.top()), spot.size());
+                    if open_button(ui, spot, id, &name).clicked() {
+                        self.opened = Some(index);
+                    }
                 }
             }
         }
@@ -226,22 +235,24 @@ fn video_badge(ui: &egui::Ui, tile: Rect, duration: Option<f64>) {
     }
 }
 
-/// A selected tile (REQ-025-12): a ring like the focus ring, Paper inside a dark one, so it shows on any photo.
-pub(super) fn selected_mark(ui: &egui::Ui, tile: Rect, radius: u8) {
-    let painter = ui.painter();
-    let inner = tile.shrink(2.0);
-    painter.rect_stroke(
-        tile.shrink(1.0),
-        radius,
-        egui::Stroke::new(2.0, theme::ring_outer()),
-        egui::StrokeKind::Middle,
-    );
-    painter.rect_stroke(
-        inner.shrink(1.0),
-        radius,
-        egui::Stroke::new(2.0, theme::ring()),
-        egui::StrokeKind::Middle,
-    );
+/// How far a selected tile shrinks on each side (REQ-025-16): a little, more on large tiles.
+fn selected_inset(tile: Rect) -> f32 {
+    (tile.width().min(tile.height()) * 0.06).clamp(4.0, 12.0)
+}
+
+/// The magnifier that opens an item while selecting (REQ-025-17), in `spot`, like the circle.
+pub(super) fn open_button(ui: &mut egui::Ui, spot: Rect, id: i64, name: &str) -> egui::Response {
+    let area = spot.expand(3.0);
+    let response = ui
+        .interact(area, ui.make_persistent_id(("open", id)), egui::Sense::CLICK)
+        .on_hover_text("Open");
+    let spoken = format!("Open {name}");
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &spoken));
+    let fill = if response.hovered() { Color32::BLACK } else { BADGE };
+    ui.painter().circle_filled(spot.center(), spot.width() / 2.0, fill);
+    let icon = Rect::from_center_size(spot.center(), Vec2::splat(spot.width() * 0.65));
+    Icon::ZoomIn.image(icon.width(), Color32::WHITE).paint_at(ui, icon);
+    response
 }
 
 /// Where a tile's circle goes: its top-left corner, smaller on small tiles.
@@ -250,15 +261,15 @@ fn circle_spot(tile: Rect) -> Rect {
     Rect::from_min_size(tile.min + vec2(6.0, 6.0), Vec2::splat(size))
 }
 
-/// The circle that selects an item: a faint tick while only hovering (REQ-025-11), empty or ticked with a selection
-/// (REQ-025-12). Not a tab stop: Space selects the focused item. A larger area than it shows takes the click.
+/// The circle that selects an item: a faint tick while only hovering (REQ-025-11) or under the pointer while selecting
+/// (REQ-025-15), else empty (`empty`) or ticked with a selection (REQ-025-12). Not a tab stop: Space selects the focused item. A larger area than it shows takes the click.
 pub(super) fn selection_circle(
     ui: &mut egui::Ui,
     spot: Rect,
     id: i64,
     name: &str,
     selected: bool,
-    selecting: bool,
+    empty: bool,
 ) -> egui::Response {
     /// How much of a hint shows until the pointer is on it.
     const HINT: f32 = 0.7;
@@ -274,7 +285,7 @@ pub(super) fn selection_circle(
         Icon::Check
             .image(tick.width(), theme::ring_outer().to_opaque())
             .paint_at(ui, tick);
-    } else if selecting {
+    } else if empty {
         painter.circle(center, radius - 1.0, BADGE, egui::Stroke::new(2.0, Color32::WHITE));
     } else {
         let strength = if response.hovered() { 1.0 } else { HINT };

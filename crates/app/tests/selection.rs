@@ -468,3 +468,105 @@ fn req_025_07_asks_before_rating_many() {
     assert_eq!(indexed(&harness, "0.png"), None);
     assert_eq!(selected(&harness).len(), 101, "the selection stays");
 }
+
+/// The rect of the tile of `name`, selected or not.
+fn tile_rect(harness: &App, name: &str) -> egui::Rect {
+    let selected = format!("{name}, selected");
+    harness
+        .query_by_role_and_label(Role::Image, name)
+        .unwrap_or_else(|| harness.get_by_role_and_label(Role::Image, &selected))
+        .rect()
+}
+
+fn pixel(image: &image::RgbaImage, pos: egui::Pos2) -> [u8; 3] {
+    let [r, g, b, _] = image.get_pixel(pos.x as u32, pos.y as u32).0;
+    [r, g, b]
+}
+
+/// How many light pixels lie within 6 points of the middle of the circle of the tile at `tile`: a tick has some, an
+/// empty circle none.
+fn light_in_circle(image: &image::RgbaImage, tile: egui::Rect) -> usize {
+    let center = tile.min + egui::vec2(16.0, 16.0);
+    let mut light = 0;
+    for dy in -6..=6 {
+        for dx in -6..=6 {
+            if dx * dx + dy * dy > 36 {
+                continue;
+            }
+            let [r, g, b] = pixel(image, center + egui::vec2(dx as f32, dy as f32));
+            if r.min(g).min(b) > 150 {
+                light += 1;
+            }
+        }
+    }
+    light
+}
+
+/// REQ-025-15: while selecting, the circle under the pointer shows the faint tick; the others stay empty.
+#[test]
+fn req_025_15_the_circle_under_the_pointer_shows_the_tick() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, 4, false, None);
+    tick(&mut harness, "0.png");
+    hover_tile(&mut harness, "2.png", Modifiers::NONE);
+    harness.run_steps(10);
+    let image = harness.render().unwrap();
+    assert_eq!(
+        light_in_circle(&image, tile_rect(&harness, "3.png")),
+        0,
+        "empty away from the pointer"
+    );
+    assert!(
+        light_in_circle(&image, tile_rect(&harness, "2.png")) > 5,
+        "a tick under the pointer"
+    );
+}
+
+/// REQ-025-16: a selected tile shrinks within its place, so the gallery shows around it.
+#[test]
+fn req_025_16_a_selected_tile_shrinks() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, 4, false, None);
+    tick(&mut harness, "1.png");
+    harness.hover_at(egui::pos2(990.0, 690.0));
+    harness.run_steps(30);
+    let image = harness.render().unwrap();
+    let edge = |rect: egui::Rect| egui::pos2(rect.left() + 3.0, rect.center().y);
+    let (selected, other) = (tile_rect(&harness, "1.png"), tile_rect(&harness, "2.png"));
+    let gallery = pixel(&image, egui::pos2(selected.left() - 2.0, selected.center().y));
+    assert_eq!(
+        pixel(&image, edge(selected)),
+        gallery,
+        "the gallery around the selected tile"
+    );
+    assert_ne!(pixel(&image, edge(other)), gallery, "the others fill their place");
+    assert_ne!(pixel(&image, selected.center()), gallery, "the photo inside");
+}
+
+/// REQ-025-17: while selecting, the magnifier on the tile under the pointer opens it and keeps the selection; without
+/// a selection there is none.
+#[test]
+fn req_025_17_the_magnifier_opens_while_selecting() {
+    let fixture = Fixture::new();
+    let (mut harness, _) = app(&fixture, 4, false, None);
+    hover_tile(&mut harness, "2.png", Modifiers::NONE);
+    assert!(
+        harness.query_by_label("Open 2.png").is_none(),
+        "a click opens without one"
+    );
+
+    tick(&mut harness, "0.png");
+    hover_tile(&mut harness, "2.png", Modifiers::NONE);
+    assert!(harness.query_by_label("Open 3.png").is_none(), "only under the pointer");
+    let magnifier = harness.get_by_label("Open 2.png").rect();
+    let tile = tile_rect(&harness, "2.png");
+    assert!(
+        magnifier.right() > tile.center().x && magnifier.top() < tile.center().y,
+        "top-right"
+    );
+    harness.get_by_label("Open 2.png").click();
+    settle(&mut harness);
+    let viewer = harness.state().viewer.as_ref().expect("opens the viewer");
+    assert_eq!(viewer.index(), 2);
+    assert_eq!(selected_names(&harness), ["0.png"], "the selection stays");
+}
