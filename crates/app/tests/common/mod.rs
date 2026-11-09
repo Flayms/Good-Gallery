@@ -107,6 +107,8 @@ impl Fixture {
 fn pin_dates() {
     app::format::set_locale("en-GB");
     domain::time_zone::set_fixed(chrono::FixedOffset::east_opt(0));
+    // The day the snapshots that show today (the calendar) were taken.
+    domain::time_zone::set_today(chrono::NaiveDate::from_ymd_opt(2026, 11, 8));
 }
 
 pub fn harness(state: AppState) -> Harness<'static, AppState> {

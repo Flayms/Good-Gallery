@@ -1,7 +1,7 @@
 //! The time zone dates are shown, grouped and searched in: the computer's, or a fixed offset set with [`set_fixed`]
 //! so that tests and snapshots don't depend on the machine.
 
-use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use std::sync::atomic::{AtomicI64, Ordering};
 
 /// No fixed offset: the computer's zone. Offsets are within a day, so this is never one.
@@ -14,6 +14,17 @@ static FIXED: AtomicI64 = AtomicI64::new(COMPUTER);
 pub fn set_fixed(offset: Option<FixedOffset>) {
     let seconds = offset.map_or(COMPUTER, |offset| i64::from(offset.local_minus_utc()));
     FIXED.store(seconds, Ordering::Relaxed);
+}
+
+/// The fixed day as days since the Common Era began, or [`COMPUTER`] for the clock's.
+static TODAY: AtomicI64 = AtomicI64::new(COMPUTER);
+
+/// Uses `day` as today from now on, so snapshots that show today don't depend on the date; `None` goes back to the clock.
+pub fn set_today(day: Option<NaiveDate>) {
+    TODAY.store(
+        day.map_or(COMPUTER, |day| i64::from(day.num_days_from_ce())),
+        Ordering::Relaxed,
+    );
 }
 
 fn fixed() -> Option<FixedOffset> {
@@ -53,5 +64,11 @@ pub fn earliest(local: &NaiveDateTime) -> Option<i64> {
 
 /// Today's date.
 pub fn today() -> NaiveDate {
+    if let Some(day) = i32::try_from(TODAY.load(Ordering::Relaxed))
+        .ok()
+        .and_then(NaiveDate::from_num_days_from_ce_opt)
+    {
+        return day;
+    }
     wall_clock(Utc::now().timestamp_millis()).map_or_else(|| Local::now().date_naive(), |now| now.date())
 }
