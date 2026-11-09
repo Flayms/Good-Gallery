@@ -135,6 +135,13 @@ Every library is mirrored in a local index, so browsing and searching 50k–500k
 - **Then** its changes scan runs next, before the waiting scans
 - **And** a running full or quick scan pauses for it: what it has read so far is kept, and it continues right after, without reading those files again
 
+### REQ-002-19 · Files still being written
+
+- **Given** a new or changed file that another program is still writing (e.g. a copy to a network share): it is locked, or its metadata can't be read and it changed less than a minute ago
+- **When** it is scanned
+- **Then** it isn't indexed yet and doesn't count as unreadable (a file indexed before keeps its last indexed state)
+- **And** it is read again after 5 seconds, 30 seconds, 2 minutes and 10 minutes, until a read succeeds; the last read takes it as it is (REQ-002-12)
+
 ## Out of scope
 
 - File types beyond those in REQ-002-01: HEIC, RAW, PSD and similar.
@@ -171,3 +178,4 @@ Every library is mirrored in a local index, so browsing and searching 50k–500k
 | REQ-002-16 | `crates/app/tests/indexing.rs` › lists_unreadable_files_with_their_library_folder_and_reason (snapshot `unreadable_files`), shows_nothing_without_unreadable_files; `crates/app/src/unreadable.rs` › names_the_library_and_folder | pass |
 | REQ-002-17 | `crates/app/tests/indexing.rs` › reads_files_again_and_drops_those_read_successfully; `crates/indexer/src/scan.rs` › changes_scans_read_an_unreadable_file_again | pass |
 | REQ-002-18 | `crates/indexer/src/indexer.rs` › urgent_paths_go_first_and_pause_the_running_scan; `crates/indexer/src/scan.rs` › a_paused_scan_removes_nothing_and_saves_no_folders | pass |
+| REQ-002-19 | `crates/indexer/src/scan.rs` › req_002_19_skips_files_still_being_written_until_the_last_wait; `crates/indexer/src/indexer.rs` › req_002_19_reads_files_still_being_written_again_later | pass |

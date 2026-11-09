@@ -826,3 +826,65 @@ fn req_006_20_clicking_the_month_jumps_to_its_first_item() {
     harness.run_steps(5);
     assert_eq!(gallery(&harness).first_visible(), 80);
 }
+
+/// REQ-006-01: the View menu keeps its size and place while it is open, in every view and under the pointer (#285).
+#[test]
+fn req_006_01_the_view_menu_holds_still() {
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness(index(&photos(6)));
+    settle(&mut harness);
+    open_view_menu(&mut harness);
+    for view in ["Masonry", "Justified", "Grid", "List"] {
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::Button, view)
+            .click();
+        harness.run_steps(4);
+        // Under the pointer: hovered buttons get their fill.
+        harness
+            .get_by_role_and_label(egui::accesskit::Role::Slider, "Zoom")
+            .hover();
+        harness.run_steps(4);
+        let rects = |harness: &egui_kittest::Harness<'_, app::AppState>| {
+            [
+                "Masonry",
+                "Justified",
+                "Grid",
+                "List",
+                "Rating",
+                "Places",
+                "People",
+                "Tags",
+                "Zoom",
+            ]
+            .map(|label| {
+                harness
+                    .query_all_by_label(label)
+                    .map(|node| node.rect())
+                    .collect::<Vec<_>>()
+            })
+        };
+        let before = rects(&harness);
+        // Every toggle sits within the Layout row, which spans the menu's content.
+        let left = harness
+            .get_by_role_and_label(egui::accesskit::Role::Button, "Masonry")
+            .rect()
+            .left();
+        let right = harness
+            .get_by_role_and_label(egui::accesskit::Role::Button, "List")
+            .rect()
+            .right();
+        for label in ["Zoom out", "Zoom in", "Rating", "Places", "People", "Tags"] {
+            let rect = harness
+                .get_by_role_and_label(egui::accesskit::Role::Button, label)
+                .rect();
+            assert!(
+                rect.left() >= left && rect.right() <= right,
+                "{view}: {label} sticks out: {rect:?}"
+            );
+        }
+        for frame in 0..30 {
+            harness.run_steps(1);
+            assert_eq!(rects(&harness), before, "{view}: the menu moved after {frame} frames");
+        }
+    }
+}

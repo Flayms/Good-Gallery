@@ -84,6 +84,10 @@ pub struct ScanOptions<'a> {
     /// (REQ-002-18).
     pub pause: &'a AtomicBool,
     pub on_progress: &'a mut dyn FnMut(ScanProgress),
+    /// Gets the files another program is still writing, which weren't indexed yet (REQ-002-19).
+    pub still_written: Option<&'a mut Vec<String>>,
+    /// Files whose last wait is over: read as they are, even if still being written (REQ-002-19).
+    pub done_waiting: Option<&'a HashSet<String>>,
 }
 
 impl<'a> ScanOptions<'a> {
@@ -97,6 +101,8 @@ impl<'a> ScanOptions<'a> {
             cancel,
             pause: &NEVER,
             on_progress,
+            still_written: None,
+            done_waiting: None,
         }
     }
 }
@@ -163,6 +169,8 @@ enum JobResult {
     Vanished,
     /// Couldn't be read; it keeps its last indexed state.
     Failed(String),
+    /// Another program is still writing it: not indexed yet, read again later (REQ-002-19).
+    StillWritten(String),
     /// Aborted (cancelled or offline).
     Skipped,
 }
@@ -209,6 +217,13 @@ fn read_file(job: Job, deps: &WorkerDeps, root_path: &Path) -> JobResult {
             if deps.aborted() {
                 return JobResult::Skipped;
             }
+            if !deps.done_waiting.contains(&job.rel_path) && still_written(&job.abs_path, mtime) {
+                tracing::info!(
+                    "Indexer: {} is still being written; reading it later",
+                    job.abs_path.display()
+                );
+                return JobResult::StillWritten(job.rel_path);
+            }
             tracing::warn!("Indexer: unreadable metadata in {}: {error}", job.abs_path.display());
             // Kept as an unreadable file, read again by the next scans (REQ-002-12, REQ-002-15).
             (MediaMetadata::default(), Some(error.to_string()))
@@ -232,6 +247,8 @@ struct WorkerDeps<'a> {
     is_reachable: &'a (dyn Fn(&Path) -> bool + Sync),
     cancel: &'a AtomicBool,
     pause: &'a AtomicBool,
+    /// Files read as they are, even if still being written (REQ-002-19).
+    done_waiting: &'a HashSet<String>,
     offline: AtomicBool,
     /// Serializes reachability probes and remembers when the library last answered.
     last_reachable: std::sync::Mutex<Option<Instant>>,
@@ -319,11 +336,13 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
         _ => None,
     };
 
+    let no_waits = HashSet::new();
     let worker_deps = WorkerDeps {
         metadata,
         is_reachable,
         cancel: options.cancel,
         pause: options.pause,
+        done_waiting: options.done_waiting.unwrap_or(&no_waits),
         offline: AtomicBool::new(false),
         last_reachable: std::sync::Mutex::new(None),
     };
@@ -345,6 +364,7 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
         cancel: options.cancel,
         on_progress: options.on_progress,
         pending: Vec::new(),
+        still_written: Vec::new(),
         progress: ScanProgress {
             library: root_id,
             ..Default::default()
@@ -535,6 +555,9 @@ pub fn scan_root(deps: ScanDeps, root_id: i64, requested: &ScanScope, options: S
         return Ok(ScanOutcome::Cancelled);
     }
     result?;
+    if let Some(still_written) = options.still_written {
+        still_written.append(&mut sink.still_written);
+    }
     if worker_deps.offline.load(Ordering::Relaxed) {
         sink.writer.set_root_status(root_id, LibraryStatus::Offline, None)?;
         return Ok(ScanOutcome::Offline);
@@ -575,6 +598,7 @@ struct Sink<'a> {
     cancel: &'a AtomicBool,
     on_progress: &'a mut dyn FnMut(ScanProgress),
     pending: Vec<IndexedFile>,
+    still_written: Vec<String>,
     progress: ScanProgress,
     batch_size: usize,
     flush_interval: Duration,
@@ -593,6 +617,10 @@ impl Sink<'_> {
             }
             JobResult::Failed(rel_path) => {
                 unseen.remove(&rel_path);
+            }
+            JobResult::StillWritten(rel_path) => {
+                unseen.remove(&rel_path);
+                self.still_written.push(rel_path);
             }
             JobResult::Vanished | JobResult::Skipped => {}
         }
@@ -625,6 +653,20 @@ impl Sink<'_> {
             (self.on_progress)(self.progress);
         }
     }
+}
+
+/// How long after its last change a file whose metadata can't be read may still be being written (REQ-002-19).
+const STILL_WRITTEN_WITHIN: Duration = Duration::from_secs(60);
+
+/// Whether another program is still writing the file: Windows says it is locked, or it changed just now. Copies keep
+/// the original's modification time on some systems, so the lock is the surer sign where there is one.
+fn still_written(path: &Path, mtime: i64) -> bool {
+    now_ms() - mtime < STILL_WRITTEN_WITHIN.as_millis() as i64 || is_locked(path)
+}
+
+/// ERROR_SHARING_VIOLATION and ERROR_LOCK_VIOLATION.
+fn is_locked(path: &Path) -> bool {
+    cfg!(windows) && std::fs::File::open(path).is_err_and(|error| matches!(error.raw_os_error(), Some(32 | 33)))
 }
 
 fn now_ms() -> i64 {
@@ -757,6 +799,29 @@ mod tests {
 
         fn scan(&mut self, scope: ScanScope) -> ScanOutcome {
             self.scan_with(scope, 2, Duration::from_secs(2)).0
+        }
+
+        /// A scan that reads the files of `done_waiting` as they are; returns the files still being written.
+        fn scan_waiting(&mut self, scope: ScanScope, done_waiting: &[&str]) -> Vec<String> {
+            let cancel = AtomicBool::new(false);
+            let mut on_progress = |_: ScanProgress| {};
+            let is_reachable = |_: &Path| true;
+            let done_waiting: HashSet<String> = done_waiting.iter().map(|p| p.to_string()).collect();
+            let mut still_written = Vec::new();
+            let mut options = ScanOptions::new(2, &cancel, &mut on_progress);
+            options.done_waiting = Some(&done_waiting);
+            options.still_written = Some(&mut still_written);
+            let deps = ScanDeps {
+                writer: &mut self.writer,
+                metadata: &self.metadata,
+                is_reachable: &is_reachable,
+            };
+            assert_eq!(
+                scan_root(deps, self.root, &scope, options).unwrap(),
+                ScanOutcome::Completed
+            );
+            still_written.sort();
+            still_written
         }
 
         /// A scan asked to pause before it started.
@@ -1074,9 +1139,55 @@ mod tests {
     }
 
     #[test]
+    fn req_002_19_skips_files_still_being_written_until_the_last_wait() {
+        let mut f = Fixture::new();
+        // Changed just now and unreadable: still being written.
+        f.touch("new.jpg", "x");
+        // Unreadable for long: unreadable (REQ-002-12).
+        f.touch_past("old.jpg", "x");
+        // Changed just now and readable: indexed.
+        f.touch("ok.jpg", "x");
+        f.metadata
+            .failing
+            .lock()
+            .unwrap()
+            .extend(["new.jpg".into(), "old.jpg".into()]);
+
+        assert_eq!(f.scan_waiting(ScanScope::Full, &[]), ["new.jpg"]);
+        assert_eq!(f.paths(), ["ok.jpg", "old.jpg"]);
+        assert_eq!(
+            f.value::<i64>("SELECT COUNT(*) FROM media WHERE meta_error IS NOT NULL"),
+            1,
+            "only old.jpg is unreadable"
+        );
+
+        // Read again later, still being written: still not indexed, and not removed by the changes scan either.
+        let changes = || ScanScope::Changes(vec!["new.jpg".into()]);
+        assert_eq!(f.scan_waiting(changes(), &[]), ["new.jpg"]);
+        assert_eq!(f.paths(), ["ok.jpg", "old.jpg"]);
+
+        // After the last wait it is taken as it is.
+        assert!(f.scan_waiting(changes(), &["new.jpg"]).is_empty());
+        assert_eq!(f.paths(), ["new.jpg", "ok.jpg", "old.jpg"]);
+        assert_eq!(
+            f.value::<i64>("SELECT COUNT(*) FROM media WHERE meta_error IS NOT NULL"),
+            2
+        );
+
+        // Once it can be read, it is no longer unreadable.
+        f.metadata.failing.lock().unwrap().clear();
+        assert!(f.scan_waiting(changes(), &[]).is_empty());
+        assert_eq!(
+            f.value::<i64>("SELECT COUNT(*) FROM media WHERE meta_error IS NOT NULL"),
+            1
+        );
+    }
+
+    #[test]
     fn req_002_12_indexes_new_files_with_unreadable_metadata_without_it_and_with_the_reason() {
         let mut f = Fixture::new();
-        f.touch("a.jpg", "x");
+        // Changed long ago: not one still being written (REQ-002-19).
+        f.touch_past("a.jpg", "x");
         f.metadata.failing.lock().unwrap().insert("a.jpg".into());
 
         assert_eq!(f.scan(ScanScope::Full), ScanOutcome::Completed);
@@ -1164,7 +1275,7 @@ mod tests {
     #[test]
     fn req_002_15_req_002_17_changes_scans_read_an_unreadable_file_again() {
         let mut f = Fixture::new();
-        f.touch("a.jpg", "x");
+        f.touch_past("a.jpg", "x");
         f.metadata.failing.lock().unwrap().insert("a.jpg".into());
         f.scan(ScanScope::Full);
         assert_eq!(f.value::<i64>("SELECT meta_version FROM media"), METADATA_VERSION);

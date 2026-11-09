@@ -57,6 +57,13 @@ Users return to the same searches: a trip's tag, five-star photos of one person,
 - **When** the app starts again
 - **Then** they are there, in the index, with their searches unchanged
 
+### REQ-034-08 · Leaving a smart album
+
+- **Given** an open smart album (its row is active)
+- **When** the user picks a library, a folder, _All libraries_ or _Unconfirmed faces_ in the sidebar
+- **Then** that starts from an empty search, so none of the album's filters stay behind
+- **And** a tag, person, place or rating clicked in the sidebar still narrows the album
+
 ## Out of scope
 
 - Conditions the search doesn't have, matching any instead of all conditions, and relative dates (#203).
@@ -79,3 +86,4 @@ Users return to the same searches: a trip's tag, five-star photos of one person,
 | REQ-034-05 | `crates/db/src/smart_albums.rs` › req_034_01_req_034_05_req_034_07_keeps_renames_and_deletes_albums_by_name; `crates/domain/src/smart_albums.rs` › req_034_01_req_034_05_trims_names_and_refuses_empty_ones; `crates/app/tests/smart_albums.rs` › req_034_05_renames_and_deletes_a_smart_album | pass |
 | REQ-034-06 | `crates/db/src/smart_albums.rs` › req_034_02_req_034_04_req_034_06_counts_albums_and_finds_what_is_gone | partial (the warning icon and its text: by inspection) |
 | REQ-034-07 | `crates/domain/src/smart_albums.rs` › req_034_07_reads_back_every_part_of_a_search, req_034_07_keeps_defaults_for_what_it_cant_read; `crates/db/src/smart_albums.rs` › req_034_01_req_034_05_req_034_07_keeps_renames_and_deletes_albums_by_name | pass |
+| REQ-034-08 | `crates/app/tests/smart_albums.rs` › req_034_08_leaving_a_smart_album_starts_from_an_empty_search | partial (_Unconfirmed faces_: by inspection) |
