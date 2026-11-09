@@ -131,9 +131,77 @@ impl Index {
     }
 }
 
+/// Every country's names in Unicode CLDR's fully covered languages, `cargo xtask countries` writes them.
+const COUNTRIES: &[u8] = include_bytes!("../data/countries.deflate");
+
+/// The country a name means in any of those languages, as its two-letter code; letter case, spacing and accents as
+/// tags compare them. `None` for a name that isn't a country's, or that names different countries (REQ-042-06).
+pub fn country_code(name: &str) -> Option<&'static str> {
+    static NAMES: OnceLock<HashMap<String, Option<&'static str>>> = OnceLock::new();
+    let names = NAMES.get_or_init(|| {
+        let inflate = |data: &[u8]| -> &'static str {
+            let bytes = miniz_oxide::inflate::decompress_to_vec(data).unwrap_or_default();
+            Box::leak(String::from_utf8(bytes).unwrap_or_default().into_boxed_str())
+        };
+        let mut names: HashMap<String, Option<&'static str>> = HashMap::new();
+        let mut add = |code: &'static str, name: &str| {
+            names
+                .entry(crate::tags::normalize_tag(name))
+                .and_modify(|known| {
+                    if *known != Some(code) {
+                        *known = None;
+                    }
+                })
+                .or_insert(Some(code));
+        };
+        for line in inflate(COUNTRIES).lines().filter(|line| !line.starts_with('#')) {
+            let mut fields = line.split('\t');
+            let code = fields.next().unwrap_or_default();
+            fields.for_each(|name| add(code, name));
+        }
+        // GeoNames' names of the bundled places' countries, which CLDR may spell differently ("and" for "&").
+        for line in inflate(DATA).lines() {
+            if let ["C", code, name] = line.split('\t').collect::<Vec<_>>().as_slice() {
+                add(code, name);
+            }
+        }
+        names
+    });
+    names.get(&crate::tags::normalize_tag(name)).copied().flatten()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn req_042_06_knows_a_country_by_its_name_in_any_language() {
+        for name in [
+            "Germany",
+            "Deutschland",
+            "deutschland",
+            "Allemagne",
+            "Alemania",
+            "Niemcy",
+            "ドイツ",
+            "Германия",
+        ] {
+            assert_eq!(country_code(name), Some("DE"), "{name}");
+        }
+        assert_eq!(country_code("USA"), Some("US"), "short names too");
+        assert_eq!(country_code("Mexico"), Some("MX"));
+        assert_eq!(country_code("México"), Some("MX"), "accents as tags compare them");
+        assert_eq!(country_code("Berlin"), None);
+        // The bundled places' countries are all known.
+        let index = INDEX.get_or_init(Index::load);
+        let unknown: std::collections::BTreeSet<&str> = index
+            .cities
+            .iter()
+            .map(|city| city.country)
+            .filter(|country| country_code(country).is_none())
+            .collect();
+        assert!(unknown.is_empty(), "{unknown:?}");
+    }
 
     fn at(latitude: f64, longitude: f64) -> Option<Place> {
         place_at(Location::new(latitude, longitude).unwrap())

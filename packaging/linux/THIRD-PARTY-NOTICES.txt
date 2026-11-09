@@ -14,6 +14,8 @@ Atkinson Hyperlegible Next, the typeface. Copyright the Braille Institute of Ame
 Lucide icons. License: ISC.
 Place names of towns, regions and countries, from GeoNames (https://www.geonames.org).
   License: Creative Commons Attribution 4.0. Shortened to towns of 5,000 people or more.
+Country names in many languages, from Unicode CLDR (https://cldr.unicode.org).
+  License: Unicode License v3. Copyright Unicode, Inc.
 The world map's land and country borders, from Natural Earth (https://www.naturalearthdata.com). Public domain.
 U²-Net-p, the network that finds a photo's subject. Copyright Xuebin Qin et al.
   License: Apache-2.0. https://github.com/xuebinqin/U-2-Net

@@ -179,16 +179,20 @@ impl IndexWriter {
 
     /// Upserts files and replaces their tags in one transaction.
     pub fn write(&mut self, root: i64, files: &[IndexedFile]) -> Result<()> {
-        let result = (|| {
+        let result = (|| -> rusqlite::Result<bool> {
             let tx = self.conn.transaction()?;
             for file in files {
                 write_file(&tx, &mut self.tag_ids, &mut self.parents, root, file)?;
             }
-            tx.commit()
+            let moved = one_name_per_country(&tx)?;
+            tx.commit()?;
+            Ok(moved)
         })();
-        if result.is_err() {
+        // Tags moved to another parent: the caches knew the old one.
+        if !matches!(result, Ok(false)) {
             self.clear_caches();
         }
+        let result = result.map(|_| ());
         Ok(result?)
     }
 
@@ -355,6 +359,70 @@ fn write_unreadable(tx: &Transaction, root: i64, file: &IndexedFile, error: &str
 }
 
 /// The id of a tag path's leaf, creating missing tags and parent links. `None` for an empty path.
+/// Moves places named from positions to the name the user's own Places tags give their country, the most used one
+/// where they name it several ways; a country name only positions use is left without media items and pruned. The
+/// files' own tags stay as they are. True when something moved (REQ-042-06).
+fn one_name_per_country(tx: &Transaction) -> rusqlite::Result<bool> {
+    // Countries: the tags right below a Places root.
+    let mut countries: HashMap<&'static str, Vec<i64>> = HashMap::new();
+    {
+        let mut stmt = tx.prepare_cached(
+            "SELECT tags.id, tags.name, roots.name FROM tags JOIN tags AS roots ON roots.id = tags.parent_id
+             WHERE roots.parent_id IS NULL",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (id, name, root) = row?;
+            if domain::tags::category_of_root(&root) == Some(domain::tags::TagCategory::Places)
+                && let Some(code) = domain::places::country_code(&name)
+            {
+                countries.entry(code).or_default().push(id);
+            }
+        }
+    }
+    let mut moved = false;
+    for ids in countries.values().filter(|ids| ids.len() > 1) {
+        // Media items whose own tags are this country or below it.
+        let mut own = tx.prepare_cached(
+            "WITH RECURSIVE below(id) AS (SELECT ?1 UNION SELECT tags.id FROM tags JOIN below ON tags.parent_id = below.id)
+             SELECT COUNT(DISTINCT media_id) FROM media_tags WHERE from_position = 0 AND tag_id IN (SELECT id FROM below)",
+        )?;
+        let mut counted = Vec::with_capacity(ids.len());
+        for &id in ids {
+            counted.push((own.query_row([id], |row| row.get::<_, i64>(0))?, id));
+        }
+        let Some(&(most, name)) = counted.iter().max() else {
+            continue;
+        };
+        if most == 0 {
+            continue;
+        }
+        for &(own, other) in &counted {
+            if own > 0 || other == name {
+                continue;
+            }
+            tx.prepare_cached("UPDATE tags SET parent_id = ?1 WHERE parent_id = ?2")?
+                .execute([name, other])?;
+            tx.prepare_cached(
+                "INSERT OR IGNORE INTO media_tags (media_id, tag_id, from_position)
+                 SELECT media_id, ?1, from_position FROM media_tags WHERE tag_id = ?2",
+            )?
+            .execute([name, other])?;
+            tx.prepare_cached("DELETE FROM media_tags WHERE tag_id = ?1")?
+                .execute([other])?;
+            tx.prepare_cached("DELETE FROM tags WHERE id = ?1")?.execute([other])?;
+            moved = true;
+        }
+    }
+    Ok(moved)
+}
+
 fn tag_path_id(
     tx: &Transaction,
     tag_ids: &mut HashMap<String, i64>,
@@ -566,6 +634,57 @@ mod tests {
         writer.write(root, &[shot("a.jpg", None, None, None)]).unwrap();
         let a = crate::media::detail(writer.conn(), a_id).unwrap().unwrap();
         assert_eq!((a.camera, a.lens, a.location), (None, None, None));
+    }
+
+    /// REQ-042-06: places from positions move to the name the user's own tags give their country, whichever is indexed
+    /// first; the files' own tags stay as they are.
+    #[test]
+    fn req_042_06_places_from_positions_take_the_users_country_name() {
+        let (mut writer, root) = writer();
+        let in_munich = |rel_path: &str| {
+            let mut file = file(rel_path, &[]);
+            file.metadata.location = domain::media::Location::new(48.1374, 11.5755);
+            file
+        };
+        writer.write(root, &[in_munich("first.jpg")]).unwrap();
+        let country_of = |writer: &IndexWriter, tag: &str| {
+            let parents = parents(writer);
+            let region = parents
+                .iter()
+                .find(|(name, _)| name == tag)
+                .and_then(|(_, p)| p.clone());
+            region.and_then(|region| {
+                parents
+                    .iter()
+                    .find(|(name, _)| *name == region)
+                    .and_then(|(_, p)| p.clone())
+            })
+        };
+        assert_eq!(
+            country_of(&writer, "Munich").as_deref(),
+            Some("Germany"),
+            "the bundled name without tags"
+        );
+
+        // The user's tags call it Deutschland: the position's places move there.
+        writer
+            .write(root, &[file("berlin.jpg", &[&["Places", "Deutschland", "Berlin"]])])
+            .unwrap();
+        assert_eq!(country_of(&writer, "Munich").as_deref(), Some("Deutschland"));
+        let names: Vec<String> = parents(&writer).into_iter().map(|(name, _)| name).collect();
+        assert!(
+            !names.contains(&"Germany".to_string()),
+            "no Germany beside it: {names:?}"
+        );
+
+        // Placed later, straight under Deutschland.
+        writer.write(root, &[in_munich("later.jpg")]).unwrap();
+        assert_eq!(tags_of(&writer, "later.jpg"), ["Munich"]);
+        assert_eq!(country_of(&writer, "Munich").as_deref(), Some("Deutschland"));
+        let places = crate::tags::category(writer.conn(), domain::tags::TagCategory::Places).unwrap();
+        let count = |name: &str| places.iter().find(|tag| tag.name == name).map(|tag| tag.count);
+        assert_eq!((count("Deutschland"), count("Germany")), (Some(3), None));
+        assert_eq!(tags_of(&writer, "berlin.jpg"), ["Berlin"], "the file's own tag stays");
     }
 
     /// REQ-042-01, REQ-042-02, REQ-042-03: an item with a position and no Places tag of its own counts under the
