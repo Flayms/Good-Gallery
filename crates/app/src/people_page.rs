@@ -14,6 +14,10 @@ use eframe::egui::{self, FontId, Margin, Rect, RichText, Sense, Stroke, Vec2, po
 
 const MAX_WIDTH: f32 = 720.0;
 const CROP: f32 = 72.0;
+/// How long the pointer rests on a face before its whole photo shows, in seconds, and that photo's long side
+/// (REQ-032-37).
+const PREVIEW_DELAY: f32 = 0.4;
+const PREVIEW: f32 = 240.0;
 /// How far beyond the screen, in screens, faces are loaded ahead of scrolling.
 const NEAR_SCREENS: f32 = 0.5;
 /// Faces shown of a long section or group at first, and more each time the user asks (REQ-032-28, REQ-032-32).
@@ -146,14 +150,76 @@ fn crop_spoken(ui: &mut egui::Ui, state: &mut AppState, media: i64, rect: [f32; 
         return response;
     }
     let texture = state.gallery.as_mut().and_then(|gallery| gallery.thumbnail(media));
-    if let Some(texture) = texture {
+    if let Some(texture) = &texture {
         let uv = crop_uv(rect, texture.size);
         egui::Image::new((texture.id, area.size()))
             .uv(uv)
             .corner_radius(theme::RADIUS_CONTROL)
             .paint_at(ui, area);
     }
+    // Resting on the face, its whole photo beside it (REQ-032-37). Not over its own buttons, which are on it.
+    if response.hovered() {
+        let rested = ui.input(|input| input.pointer.time_since_last_movement());
+        if rested >= PREVIEW_DELAY {
+            let size = texture.as_ref().map_or([4, 3], |texture| texture.size);
+            preview(ui, area, rect, size, texture.map(|texture| texture.id));
+        } else {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs_f32(PREVIEW_DELAY - rested));
+        }
+    }
     response
+}
+
+/// The whole photo of a face shown at `crop` (REQ-032-37): beside it on the right, or the left where the window ends,
+/// with the face's box (`rect`, fractions of the photo) outlined; the photo's thumbnail is `size` pixels large.
+fn preview(ui: &egui::Ui, crop: Rect, rect: [f32; 4], size: [u32; 2], texture: Option<egui::TextureId>) {
+    let (width, height) = (size[0].max(1) as f32, size[1].max(1) as f32);
+    let scale = PREVIEW / width.max(height);
+    let shown = vec2(width * scale, height * scale);
+    let screen = ui.ctx().content_rect();
+    let gap = theme::SPACE;
+    let x = if crop.right() + gap + shown.x <= screen.right() {
+        crop.right() + gap
+    } else {
+        crop.left() - gap - shown.x
+    };
+    let y = crop.top().min(screen.bottom() - shown.y).max(screen.top());
+    let photo = Rect::from_min_size(pos2(x, y), shown);
+    let layer = egui::LayerId::new(egui::Order::Tooltip, ui.scope_id().with("face preview"));
+    let painter = ui.ctx().layer_painter(layer);
+    painter.rect_filled(photo.expand(4.0), theme::RADIUS_PANEL, theme::raised());
+    match texture {
+        Some(texture) => {
+            painter.image(
+                texture,
+                photo,
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+        None => {
+            painter.rect_filled(photo, 0.0, theme::placeholder());
+        }
+    }
+    let [fx, fy, fw, fh] = rect;
+    let face = Rect::from_min_size(
+        pos2(photo.left() + fx * photo.width(), photo.top() + fy * photo.height()),
+        vec2(fw * photo.width(), fh * photo.height()),
+    );
+    painter.rect_stroke(
+        face,
+        2.0,
+        Stroke::new(2.0, egui::Color32::WHITE),
+        egui::StrokeKind::Outside,
+    );
+    // For screen readers and tests: what shows, where.
+    let response = ui.interact(
+        photo,
+        ui.scope_id().with(("face preview", rect.map(f32::to_bits))),
+        Sense::hover(),
+    );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, "Whole photo of the face"));
 }
 
 pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {

@@ -275,6 +275,12 @@ Users with large libraries want to find people without tagging each photo by han
 - **And** in the first person's group to confirm (REQ-032-24) that face says "or Bea", and a click names it Bea
 - **And** at most two people are suggested; a person the user said it isn't is never one of them, and _Not this person_ goes for the first
 
+### REQ-032-37 · The whole photo at a glance
+
+- **Given** a face on _Unconfirmed faces_
+- **When** the pointer rests on it for a moment
+- **Then** its whole photo shows beside it, with the face's box outlined, without covering the face's own buttons, and goes away when the pointer leaves (#291)
+
 ## Out of scope
 
 - Videos, pets and the browser version.
@@ -330,3 +336,4 @@ Users with large libraries want to find people without tagging each photo by han
 | REQ-032-34 | `crates/app/src/names.rs` › req_032_34_suggests_known_people_starting_with_what_was_typed_first; `crates/app/tests/faces.rs` › req_032_34_picks_a_known_person_on_the_page, req_032_34_picks_a_known_person_with_the_keys, req_032_34_suggests_known_people_in_the_viewer; snapshot `people_page_names` | pass |
 | REQ-032-35 | `crates/app/tests/faces.rs` › req_032_35_a_group_to_confirm_can_be_someone_else_or_ignored; snapshot `people_page` | pass |
 | REQ-032-36 | `crates/domain/src/face_models.rs` › req_032_36_suggests_a_second_person_when_both_are_as_likely; `crates/db/src/faces.rs` › req_032_36_a_face_like_two_people_names_both; `crates/app/tests/faces.rs` › req_032_36_the_viewer_offers_both_people, req_032_36_a_group_offers_the_second_person (snapshot `people_alternative`) (exiftool) | pass, with a margin of 0.05 chosen by hand, not measured on a library |
+| REQ-032-37 | `crates/app/tests/faces.rs` › req_032_37_resting_on_a_face_shows_its_whole_photo_beside_it (snapshot `faces_preview`) | pass |
