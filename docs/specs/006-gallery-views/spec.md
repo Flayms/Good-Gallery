@@ -143,6 +143,19 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 - **When** the user clicks them
 - **Then** the gallery scrolls to the first item of that month, as clicking a year does to the year's first item (REQ-006-16)
 
+### REQ-006-21 · Drag beside the bar
+
+- **Given** the years shown beside the scrollbar (REQ-006-16)
+- **When** the user presses beside the bar, where the years are, and drags
+- **Then** the gallery scrolls as when dragging the scrollbar: the thumb's middle follows the pointer and the month shows beside it (REQ-006-17)
+- **And** the gallery isn't dragged like content and no photo opens; a click on a year or the month without dragging still jumps (REQ-006-16, REQ-006-20)
+
+### REQ-006-22 · Years cover the tiles
+
+- **Given** the years shown beside the scrollbar over the edge of the gallery
+- **When** the pointer is on them
+- **Then** the tile or row below shows no hover and no selection circle (#276)
+
 ## Out of scope
 
 - Selecting multiple media items, and drag and drop to other apps.
@@ -180,3 +193,5 @@ The user scrolls through hundreds of thousands of media items as smoothly as thr
 | REQ-006-18 | `crates/app/tests/gallery.rs` › req_006_18_scrolling_shows_the_years_until_it_stops, req_006_18_a_jump_shows_no_years | pass |
 | REQ-006-19 | `crates/domain/src/scrollbar.rs` › req_006_19_the_offset_at_a_height_undoes_the_thumbs_center; `crates/app/tests/gallery.rs` › req_006_19_shows_the_month_at_the_pointer (snapshot `gallery_years_hover`) | pass |
 | REQ-006-20 | `crates/app/tests/gallery.rs` › req_006_20_clicking_the_month_jumps_to_its_first_item | pass |
+| REQ-006-21 | `crates/app/tests/gallery.rs` › req_006_21_dragging_beside_the_bar_scrolls_like_the_bar | pass |
+| REQ-006-22 | `crates/app/tests/gallery.rs` › req_006_22_a_year_hides_the_tile_below_from_the_pointer | pass |

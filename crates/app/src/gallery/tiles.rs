@@ -73,7 +73,7 @@ impl Gallery {
             let response = ui.interact(rect, ui.make_persistent_id(("tile", id)), self.tile_sense());
             self.respond(ui, &response, index);
             // Also over the tile's circle, which is a widget of its own.
-            let under_pointer = response.contains_pointer();
+            let under_pointer = self.under_pointer(ui, &response);
             if under_pointer {
                 self.hovered = Some(index);
             }
