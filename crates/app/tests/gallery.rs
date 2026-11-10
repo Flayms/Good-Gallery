@@ -955,3 +955,68 @@ fn req_006_01_the_view_menu_holds_still() {
         }
     }
 }
+
+/// The color drawn at `pos`.
+fn pixel(harness: &mut egui_kittest::Harness<'_, app::AppState>, pos: egui::Pos2) -> egui::Color32 {
+    let image = harness.render().unwrap();
+    let [r, g, b, _] = image.get_pixel(pos.x as u32, pos.y as u32).0;
+    egui::Color32::from_rgb(r, g, b)
+}
+
+/// REQ-013-20: the gallery's scrollbar shows only while the pointer is over the gallery (#278).
+#[test]
+fn req_013_20_the_gallerys_scrollbar_shows_only_with_the_pointer_over_it() {
+    let fixture = Fixture::new();
+    let mut harness =
+        common::harness_with_step(fixture.state(index(&photos_of_years(&[2024, 2023, 2020]))), 1.0 / 60.0);
+    settle(&mut harness);
+    let x = right_edge(&harness) - 4.0;
+    // At the top the thumb is at the top of the track; farther down there is only the track.
+    let (thumb, track) = (egui::pos2(x, 70.0), egui::pos2(x, 580.0));
+    harness.hover_at(egui::pos2(500.0, 300.0));
+    harness.run_steps(30);
+    assert_ne!(
+        pixel(&mut harness, thumb),
+        pixel(&mut harness, track),
+        "shown over the gallery"
+    );
+
+    harness.hover_at(egui::pos2(100.0, 300.0));
+    harness.run_steps(30);
+    assert_eq!(
+        pixel(&mut harness, thumb),
+        pixel(&mut harness, track),
+        "hidden with the pointer in the sidebar"
+    );
+}
+
+/// REQ-013-20: the sidebar's scrollbar lies beside its rows, not over their highlight or counts (#278).
+#[test]
+fn req_013_20_the_sidebars_scrollbar_lies_beside_its_rows() {
+    let fixture = Fixture::new();
+    // Enough tags and ratings for the sidebar to scroll.
+    let mut files = photos(12);
+    for (i, file) in files.iter_mut().enumerate() {
+        file.metadata.tags = vec![vec![format!("Tag {i}")]];
+        file.metadata.rating = Some(i as i64 % 6);
+    }
+    let mut harness = fixture.harness(index(&files));
+    harness.set_size(egui::vec2(900.0, 400.0));
+    settle(&mut harness);
+    let row = harness.get_by_label("All libraries").rect();
+    harness.hover_at(row.center());
+    harness.run_steps(30);
+    let bars: Vec<egui::Rect> = harness
+        .get_all_by_role(egui::accesskit::Role::ScrollBar)
+        .map(|node| node.rect())
+        .filter(|rect| rect.left() < app::sidebar::WIDTH)
+        .collect();
+    assert_eq!(bars.len(), 1, "the sidebar scrolls: {bars:?}");
+    assert!(bars[0].left() >= row.right(), "{:?} beside {row:?}", bars[0]);
+    assert!(
+        bars[0].right() <= app::sidebar::WIDTH,
+        "{:?} inside the sidebar",
+        bars[0]
+    );
+    harness.snapshot(common::snapshot_name("sidebar_scrollbar"));
+}

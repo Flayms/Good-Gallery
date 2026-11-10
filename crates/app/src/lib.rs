@@ -155,7 +155,7 @@ pub fn ui(ui: &mut egui::Ui, state: &mut AppState) {
             let sidebar = egui::Panel::left("sidebar")
                 .exact_size(sidebar::WIDTH)
                 .resizable(false)
-                .frame(egui::Frame::new().fill(theme::recess()).inner_margin(8))
+                .frame(egui::Frame::new().fill(theme::recess()).inner_margin(sidebar::MARGIN))
                 .show(ui, |ui| sidebar::show(ui, &mut state.sidebar, gallery, input));
             // Behind the viewer the sidebar shows through the scrim too (REQ-013-14).
             glass::record_solid(&ctx, sidebar.response.rect, theme::recess(), true);
@@ -452,7 +452,7 @@ fn sidebar_drawer(
             egui::Frame::new()
                 .fill(theme::recess())
                 .stroke(egui::Stroke::new(1.0, theme::rim()))
-                .inner_margin(8)
+                .inner_margin(sidebar::MARGIN)
                 .show(ui, |ui| {
                     let inner = egui::vec2(width - 16.0, screen.height() - 16.0);
                     ui.set_min_size(inner);
