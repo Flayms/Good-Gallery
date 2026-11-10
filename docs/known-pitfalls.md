@@ -35,6 +35,7 @@ _Nothing at the moment._
 ## Visual checks
 
 * **Screenshot of the real app:** `cargo run -p app -- --screenshot <file.png>` renders 3 frames, saves the window and exits. Save into the scratchpad, then look at the PNG. Snapshot tests: `cargo test -p app`; `UPDATE_SNAPSHOTS=1` rewrites `crates/app/tests/snapshots/*.png` (check the new PNG before committing it; `*.new.png` / `*.diff.png` are ignored).
+* **Two PRs green alone can break a snapshot together** (#317 hid scrollbars, #318 snapshotted one, #324). Merge `origin/main` into a snapshot PR again right before it merges. A failing CI run uploads `*.new.png` for both platforms (`gh run download`).
 * **Snapshots must not depend on the machine.** `tests/common` pins the locale (`format::set_locale`) and the time zone (`domain::time_zone::set_fixed`, UTC) and today (`set_today`) for every harness. Go through `domain::time_zone` instead of `chrono::Local` or `Utc::now` for anything shown, grouped or searched by day, or snapshots fail on the UTC CI runner or the next day.
 * **One `Fixture` per test.** `Fixture::new` holds the GPU lock until it is dropped, so a second one in the same test waits for ever, and so does every later test in that process. Put a second index in a test of its own.
 * **The sidebar's rows report their active state as _toggled_, not _selected_:** `accesskit_node().toggled() == Some(Toggled::True)`; `is_selected()` is `None` for them.
