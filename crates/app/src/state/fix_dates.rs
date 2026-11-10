@@ -64,7 +64,12 @@ impl AppState {
         let count = job.changes.len();
         self.toasts
             .success(format!("Fixing the dates of {} photos…", format::count(count as u64)));
-        self.spawn_write(move || Event::DatesFixed(crate::fix_dates::run(&db, &exiftool, &journal, &job, mtime)));
+        self.spawn_write(move || {
+            Event::to(
+                Self::dates_fixed,
+                crate::fix_dates::run(&db, &exiftool, &journal, &job, mtime),
+            )
+        });
     }
 
     /// Takes the last date fix back (REQ-038-09).
@@ -76,7 +81,7 @@ impl AppState {
         ) else {
             return;
         };
-        self.spawn_write(move || Event::DatesFixed(crate::fix_dates::undo(&db, &exiftool, &journal)));
+        self.spawn_write(move || Event::to(Self::dates_fixed, crate::fix_dates::undo(&db, &exiftool, &journal)));
     }
 
     pub(super) fn dates_fixed(&mut self, result: Result<crate::fix_dates::DatesDone, String>) {
