@@ -56,8 +56,8 @@ A blur draws the eye to what stays sharp. Users who edit a photo (spec 021) blur
 
 | REQ        | Test | Result |
 | ---------- | ---- | ------ |
-| REQ-023-01 | `crates/domain/src/edit.rs` › req_023_01_no_blur_or_blur_at_zero_changes_nothing; `crates/app/tests/edit.rs` › req_023_01_req_023_02_req_023_03_chooses_a_blur_and_places_its_focus | pass |
-| REQ-023-02 | `crates/domain/src/edit.rs` › req_023_02_background_blur_spares_the_subject; `crates/app/tests/edit.rs` › req_023_01_req_023_02_req_023_03_chooses_a_blur_and_places_its_focus; `crates/app/src/edit/tests.rs` › req_023_04_the_gpu_blur_matches_the_cpu_blur | pass |
-| REQ-023-03 | `crates/domain/src/edit.rs` › req_023_03_tilt_shift_and_radial_keep_the_focus_sharp; `crates/app/tests/edit.rs` › req_023_01_req_023_02_req_023_03_chooses_a_blur_and_places_its_focus | pass |
-| REQ-023-04 | `crates/domain/src/edit.rs` › req_023_04_the_pyramid_blurs_smoothly_and_keeps_flat_areas; `crates/media/src/edit.rs` › req_023_04_saving_blurs_away_from_the_focus; `crates/app/src/edit/tests.rs` › req_023_04_the_gpu_blur_matches_the_cpu_blur | pass |
-| REQ-023-05 | `crates/domain/src/edit.rs` › req_023_05_a_light_spreads_into_an_even_disc; `crates/media/src/edit.rs` › req_023_05_saving_spreads_a_light_into_a_disc; `crates/app/src/edit/tests.rs` › req_023_04_the_gpu_blur_matches_the_cpu_blur; `crates/app/tests/edit.rs` › req_023_05_chooses_lens_blur | pass |
+| REQ-023-01 | `crates/domain/src/edit/tests.rs` › req_023_01_no_blur_or_blur_at_zero_changes_nothing; `crates/app/tests/edit.rs` › req_023_01_req_023_02_req_023_03_chooses_a_blur_and_places_its_focus | pass |
+| REQ-023-02 | `crates/domain/src/edit/tests.rs` › req_023_02_background_blur_spares_the_subject; `crates/app/tests/edit.rs` › req_023_01_req_023_02_req_023_03_chooses_a_blur_and_places_its_focus; `crates/app/src/edit/tests.rs` › req_023_04_the_gpu_blur_matches_the_cpu_blur | pass |
+| REQ-023-03 | `crates/domain/src/edit/tests.rs` › req_023_03_tilt_shift_and_radial_keep_the_focus_sharp; `crates/app/tests/edit.rs` › req_023_01_req_023_02_req_023_03_chooses_a_blur_and_places_its_focus | pass |
+| REQ-023-04 | `crates/domain/src/edit/tests.rs` › req_023_04_the_pyramid_blurs_smoothly_and_keeps_flat_areas; `crates/media/src/edit.rs` › req_023_04_saving_blurs_away_from_the_focus; `crates/app/src/edit/tests.rs` › req_023_04_the_gpu_blur_matches_the_cpu_blur | pass |
+| REQ-023-05 | `crates/domain/src/edit/tests.rs` › req_023_05_a_light_spreads_into_an_even_disc; `crates/media/src/edit.rs` › req_023_05_saving_spreads_a_light_into_a_disc; `crates/app/src/edit/tests.rs` › req_023_04_the_gpu_blur_matches_the_cpu_blur; `crates/app/tests/edit.rs` › req_023_05_chooses_lens_blur | pass |

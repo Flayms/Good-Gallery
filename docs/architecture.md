@@ -41,15 +41,18 @@ web/        the browser page: index.html (content security policy), browser chec
 packaging/  helper downloads, NSIS installer, smoke test (windows/); .desktop file, install script (linux/)
 ```
 
-Dependencies point one way:
+Dependencies point one way; each crate is used only by those after its arrow:
 
 ```
-domain ◄── meta ◄── media ◄──┐
-   ▲                          ├── indexer ◄── app
-   └────── db ◄───────────────┘
+domain  ◄── every crate
+meta    ◄── media, app (browser)
+db      ◄── indexer, app, xtask
+media   ◄── indexer (desktop), app (desktop), xtask
+indexer ◄── app, xtask
 ```
 
-- `domain` and `meta` do no IO, so layout, search, tag and metadata rules are tested without files, a database or a GPU. New pure logic goes there; `xtask/tests/architecture.rs` keeps them pure.
+- `xtask/tests/architecture.rs` checks these edges and keeps `domain` and `meta` pure.
+- `domain` and `meta` do no IO, so layout, search, tag and metadata rules are tested without files, a database or a GPU. New pure logic goes there.
 - `db` knows SQL and the schema, nothing about files. `media` knows files and helper processes, nothing about the index.
 - `indexer` joins them: it walks folders, reads files through `media` and writes the index through `db`.
 - `app` is a library (`app::ui`, `AppState`) with a thin `main.rs` / `desktop.rs`, so the UI tests drive the same code as the window.
@@ -118,4 +121,5 @@ Platform code sits behind `cfg(windows)`, `cfg(target_os = "linux")` and `cfg(ta
 - **Network:** the desktop app connects only for what the user allowed: the update check and download (spec 031), through the system's `curl`, a face model they asked for (spec 032), and a content search model they asked for (spec 036). The browser version sends nothing (REQ-019-12); `xtask/tests/no_network.rs` keeps it that way.
 - **Specs and tests:** every test that covers a REQ names it (`fn req_007_01_…` or a doc comment); `cargo xtask check-specs` checks it.
 - **Visual checks:** `egui_kittest` snapshots (`UPDATE_SNAPSHOTS=1`), and `cargo run -p app -- --screenshot <file.png>` for the real window with glass.
+- **File size:** source files stay under 800 lines; larger ones are listed with a ceiling that may only shrink (`xtask/tests/file_size.rs`).
 - **Pinned UI crates:** egui, eframe, egui_kittest and wgpu are pinned to exact versions.

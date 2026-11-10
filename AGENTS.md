@@ -18,7 +18,7 @@ A desktop gallery for large photo and video libraries (50k–500k files). Media 
 
 - Stack: Rust, eframe / egui on wgpu, rusqlite (SQLite WAL), exiftool, ffmpeg and libmpv as bundled helpers. Details in `docs/architecture.md`.
 - Toolchain: pinned in `rust-toolchain.toml`. Windows needs the MSVC C++ build tools (see `docs/known-pitfalls.md`).
-- Test: `cargo test --workspace` · Lint: `cargo fmt --all --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo xtask check-specs` · Run: `cargo run -p app` · Release: `cargo xtask release` (conventional commits, see `README.md`)
+- Test: `cargo test --workspace` (while working: `cargo test -p <crate>`; `domain`, `meta`, `db` take seconds, `app`'s UI tests minutes) · Lint: `cargo fmt --all --check` + `cargo clippy --workspace --all-targets -- -D warnings` + `cargo xtask check-specs` · Run: `cargo run -p app` · Release: `cargo xtask release` (conventional commits, see `README.md`)
 - UI changes need a look at the result: a snapshot test (`UPDATE_SNAPSHOTS=1` rewrites them) or `cargo run -p app -- --screenshot <file.png>`.
 - Pin exact crate versions for egui, eframe, egui_kittest and wgpu; their APIs change between minor versions. Check docs.rs for the pinned version instead of relying on memory.
 - The user's real index and thumbnail cache (`%APPDATA%\good-gallery`) are read-only for development. Copy them into a temp folder before opening them. Development builds use `%APPDATA%\good-gallery-rust`.
@@ -47,6 +47,8 @@ A desktop gallery for large photo and video libraries (50k–500k files). Media 
 3. Large or architectural → `spec.md` + `plan.md` (with tasks)
 
 ## Specs
+
+Adding a feature: the `new-feature` skill (`.claude/skills/`) has the steps.
 
 `docs/specs/NNN-name/`. IDs are `REQ-NNN-XX`: never reused, deprecated rather than deleted, and referenced in tests. Spec and code change together.
 
