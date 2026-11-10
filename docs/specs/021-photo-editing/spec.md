@@ -192,6 +192,12 @@ Users who find a photo that is too dark, has a color cast or lacks punch fix it 
 - **Then** the file keeps only the version it holds: the photo, its other metadata, its date modified and its original stay
 - **And** a photo with one version doesn't offer it
 
+### REQ-021-27 · Earlier edits render as they were saved
+
+- **Given** a photo saved with an edit by an earlier version of the app
+- **When** it is edited again, a version is shown or restored (REQ-021-25), or a newer version changes how an adjustment works
+- **Then** its edit reads and renders as it did when it was saved: a changed formula applies only to edits saved with it (#273)
+
 ## Out of scope
 
 - Crop and rotate, which are in spec 029.
@@ -236,3 +242,4 @@ Users who find a photo that is too dark, has a color cast or lacks punch fix it 
 | REQ-021-24 | `crates/domain/src/versions.rs` › req_021_24_a_save_adds_a_version_and_the_oldest_go, req_021_24_reads_what_a_file_holds; `crates/media/src/edit.rs` › req_021_24_req_021_26_saves_carry_the_versions_and_clearing_keeps_the_last (exiftool); `crates/db/src/writer.rs` › req_021_11_stores_the_saved_edit_and_drops_it_when_the_file_has_none; `crates/meta/src/rules.rs` › req_021_11_reads_the_saved_edit_from_the_file_but_not_from_its_sidecar; `crates/app/tests/edit.rs` › req_021_24_req_021_25_lists_previews_and_restores_versions (snapshot `edit_versions`), req_021_24_no_versions_without_an_earlier_edit | pass |
 | REQ-021-25 | `crates/app/tests/edit.rs` › req_021_24_req_021_25_lists_previews_and_restores_versions | pass |
 | REQ-021-26 | `crates/domain/src/versions.rs` › req_021_26_clearing_keeps_the_current_version; `crates/media/src/edit.rs` › req_021_24_req_021_26_saves_carry_the_versions_and_clearing_keeps_the_last (exiftool); `crates/app/tests/edit.rs` › req_021_26_clears_the_version_history_after_asking (exiftool), req_021_26_no_clearing_with_one_version | pass |
+| REQ-021-27 | `crates/media/src/edit.rs` › req_021_27_saved_recipes_read_and_render_as_they_were_saved | pass |

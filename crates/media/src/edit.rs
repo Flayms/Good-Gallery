@@ -772,6 +772,173 @@ fn move_regions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The recipes pinned by `tests/renders/` (REQ-021-27): one per area of the editor, with what it covers.
+    fn pinned_recipes() -> Vec<(&'static str, Recipe)> {
+        use domain::edit::{BlurKind, LocalMask, MaskShape};
+        use domain::look::{Look, LookChoice};
+        let base = Recipe::default;
+        let mut light = base();
+        (light.exposure, light.brightness, light.contrast) = (0.5, 20.0, 30.0);
+        (light.highlights, light.shadows, light.whites, light.blacks) = (-40.0, 35.0, 10.0, -15.0);
+        let mut curves = base();
+        curves.curves.all.points = vec![[0.0, 0.05], [0.3, 0.2], [0.7, 0.85], [1.0, 0.95]];
+        curves.curves.red.points = vec![[0.0, 0.0], [0.5, 0.6], [1.0, 1.0]];
+        curves.curves.blue.points = vec![[0.0, 0.1], [1.0, 0.9]];
+        let mut color = base();
+        (color.temperature, color.tint, color.hue) = (25.0, -10.0, 30.0);
+        (color.vibrance, color.saturation) = (40.0, -20.0);
+        let mut effects = base();
+        (effects.grain, effects.grain_size) = (40.0, 50.0);
+        (effects.vignette, effects.vignette_midpoint) = (-50.0, 40.0);
+        let mut blur = base();
+        (blur.blur_kind, blur.blur, blur.blur_size, blur.blur_feather) = (BlurKind::Radial, 60.0, 30.0, 50.0);
+        blur.blur_focus = [0.4, 0.5];
+        let mut lens = blur.clone();
+        (lens.blur_kind, lens.blur_lens) = (BlurKind::TiltShift, true);
+        let mut parts = base();
+        parts.subject = Some(Box::new(Recipe {
+            exposure: 0.7,
+            saturation: 30.0,
+            ..base()
+        }));
+        parts.background = Some(Box::new(Recipe {
+            exposure: -0.6,
+            saturation: -50.0,
+            ..base()
+        }));
+        let mut masks = base();
+        let mut gradient = LocalMask::new(MaskShape::Linear {
+            from: [0.0, 0.0],
+            to: [1.0, 1.0],
+        });
+        gradient.recipe.exposure = 1.0;
+        let mut luminance = LocalMask::new(MaskShape::Luminance {
+            low: 0.2,
+            high: 0.6,
+            feather: 0.2,
+        });
+        (luminance.invert, luminance.recipe.contrast) = (true, 40.0);
+        let mut hues = LocalMask::new(MaskShape::Color {
+            hue: 200.0,
+            range: 40.0,
+            feather: 20.0,
+        });
+        hues.recipe.saturation = -80.0;
+        masks.masks = vec![gradient, luminance, hues];
+        let mut looks = base();
+        looks.look = Some(LookChoice {
+            strength: 70.0,
+            ..LookChoice::new(Look::Portra400)
+        });
+        let mut geometry = base();
+        (geometry.quarter_turns, geometry.crop) = (1, Some([0.1, 0.2, 0.7, 0.6]));
+        geometry.long_edge = Some(24);
+        let mut straightened = base();
+        straightened.set_straighten(7.5, 1.5);
+        straightened.flip(true);
+        [
+            ("light", light),
+            ("curves", curves),
+            ("color", color),
+            ("effects", effects),
+            ("blur", blur),
+            ("lens", lens),
+            ("parts", parts),
+            ("masks", masks),
+            ("look", looks),
+            ("geometry", geometry),
+            ("straightened", straightened),
+        ]
+        .into_iter()
+        // As a saved file holds them, with their version.
+        .map(|(name, recipe)| (name, Recipe::from_json(&recipe.to_json()).expect("reads")))
+        .collect()
+    }
+
+    /// A 48 × 32 photo with a gradient, saturated patches and bright spots for the lens blur; the subject is its left
+    /// half.
+    fn pinned_original() -> (Rgba32FImage, Mask) {
+        let image = Rgba32FImage::from_fn(48, 32, |x, y| {
+            let (u, v) = (x as f32 / 47.0, y as f32 / 31.0);
+            let rgb = match (x / 12, y / 16) {
+                (1, 0) => [0.9, 0.15, 0.1],
+                (2, 1) => [0.1, 0.3, 0.85],
+                _ if (x + 3 * y) % 23 == 0 => [1.0, 1.0, 0.95],
+                _ => [u, 0.5 * (u + v), v],
+            };
+            image::Rgba([rgb[0], rgb[1], rgb[2], 1.0])
+        });
+        let subject = (0..48 * 32).map(|i| if i % 48 < 24 { 1.0 } else { 0.0 }).collect();
+        (image, Mask::new(48, 32, subject).expect("sized"))
+    }
+
+    /// `recipe` applied to [`pinned_original`] as saving does, in 8 bits.
+    fn pinned_render(recipe: &Recipe) -> image::RgbImage {
+        let (mut image, subject) = pinned_original();
+        let size = [image.width() as f32, image.height() as f32];
+        let paintings = domain::paint::draw_all(&recipe.paintings, size);
+        render(
+            &Params::new(recipe).with_paintings(&paintings),
+            &mut image,
+            Some(&subject),
+        );
+        let image = scale_down(apply_geometry(image, &recipe.geometry()), recipe.long_edge);
+        let bytes = image
+            .pixels()
+            .flat_map(|pixel| (0..3).map(move |c| (pixel[c] * 255.0).round().clamp(0.0, 255.0) as u8))
+            .collect();
+        image::RgbImage::from_raw(image.width(), image.height(), bytes).expect("sized")
+    }
+
+    /// REQ-021-27: recipes saved by earlier versions (`tests/renders/*.json`) still read and render as they did when
+    /// pinned (`*.png`, within two levels for floating point across platforms). A failure means a change to how recipes
+    /// read or render: keep the old behavior for the older `RECIPE_VERSION` and bump it (`docs/decisions.md`).
+    /// `UPDATE_RENDERS=1` pins the current recipes and renders; only right when no saved file can hold the old ones.
+    #[test]
+    fn req_021_27_saved_recipes_read_and_render_as_they_were_saved() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/renders");
+        let update = std::env::var_os("UPDATE_RENDERS").is_some();
+        let mut failures = Vec::new();
+        for (name, recipe) in pinned_recipes() {
+            let (json, png) = (dir.join(format!("{name}.json")), dir.join(format!("{name}.png")));
+            if update {
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(&json, recipe.to_json() + "\n").unwrap();
+                pinned_render(&recipe).save(&png).unwrap();
+            }
+            let saved = std::fs::read_to_string(&json)
+                .unwrap_or_else(|_| panic!("{} is missing: run with UPDATE_RENDERS=1", json.display()));
+            let Some(read) = Recipe::from_json(saved.trim()) else {
+                failures.push(format!("{name}: the saved recipe no longer reads"));
+                continue;
+            };
+            if read != recipe {
+                failures.push(format!("{name}: the saved recipe reads as another one than pinned"));
+            }
+            let expected = image::open(&png).unwrap().into_rgb8();
+            let rendered = pinned_render(&read);
+            if rendered.dimensions() != expected.dimensions() {
+                failures.push(format!(
+                    "{name}: {:?} instead of {:?}",
+                    rendered.dimensions(),
+                    expected.dimensions()
+                ));
+                continue;
+            }
+            let worst = rendered
+                .as_raw()
+                .iter()
+                .zip(expected.as_raw())
+                .map(|(a, b)| a.abs_diff(*b))
+                .max()
+                .unwrap_or(0);
+            if worst > 2 {
+                failures.push(format!("{name}: renders differently, by up to {worst} levels"));
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
     use domain::edit::Adjustment;
     use image::ImageDecoder as _;
     use serde_json::Value;
