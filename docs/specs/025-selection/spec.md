@@ -79,7 +79,7 @@ Deprecated (#191): a click opens (REQ-025-10), and a double-click does nothing m
 
 - **Given** at least one selected item
 - **When** the gallery shows
-- **Then** every item shows a circle, empty or ticked, and a selected item keeps its ring (a row: the selected background)
+- **Then** every item shows a circle, empty or ticked, and a selected tile shrinks within its place, with the gallery showing around it (REQ-025-16; a row: the selected background)
 - **And** a click anywhere on an item, or Space on the focused item, selects it or no longer does, and keeps the rest of the selection; Ctrl changes nothing; Enter on the focused item opens it
 - **And** once nothing is selected any more a click opens again (REQ-025-10), and only the circle under the pointer shows
 
@@ -95,6 +95,25 @@ Deprecated (#191): a click opens (REQ-025-10), and a double-click does nothing m
 - **When** the user holds Shift
 - **Then** the items a click would add (REQ-025-02) are slightly brighter, and the item under the pointer is too, instead of darker
 - **And** letting go of Shift takes that away at once
+
+### REQ-025-15 · The circle under the pointer while selecting
+
+- **Given** at least one selected item
+- **When** the pointer is over an item that isn't selected
+- **Then** its circle shows the faint tick of REQ-025-11 instead of the empty circle, so the user sees a click selects it (#274)
+
+### REQ-025-16 · Selected tiles shrink
+
+- **Given** the gallery in a tile view
+- **When** an item is selected
+- **Then** its tile shrinks a little within its place, so the gallery shows around it, quickly animated; deselected, it grows back (#274)
+
+### REQ-025-17 · Open while selecting
+
+- **Given** at least one selected item, and the pointer over a tile or row
+- **When** the user clicks the magnifier in the tile's top-right corner (a row: at its end)
+- **Then** the viewer opens on it, and the selection stays as it was (#275)
+- **And** without a selection no magnifier shows: a click opens (REQ-025-10)
 
 ## Out of scope
 
@@ -126,3 +145,6 @@ Deprecated (#191): a click opens (REQ-025-10), and a double-click does nothing m
 | REQ-025-12 | `crates/domain/src/selection.rs` › req_025_12_toggles_items, req_025_12_the_last_item_leaves_no_anchor; `crates/app/tests/selection.rs` › req_025_06_req_025_12_circles_select_and_the_toolbar_counts (snapshot `selection`), req_025_12_a_selection_makes_clicks_select, req_025_12_ctrl_does_nothing_special, req_025_12_enter_still_opens | pass |
 | REQ-025-13 | `crates/app/tests/selection.rs` › req_025_11_the_circle_shows_under_the_pointer (snapshot `selection_hover`), req_025_13_req_025_14_shift_shows_what_a_click_would_add | pass |
 | REQ-025-14 | `crates/domain/src/selection.rs` › req_025_14_says_what_a_shift_click_covers; `crates/app/tests/selection.rs` › req_025_13_req_025_14_shift_shows_what_a_click_would_add (snapshot `selection_preview`) | pass |
+| REQ-025-15 | `crates/app/tests/selection.rs` › req_025_15_the_circle_under_the_pointer_shows_the_tick | pass |
+| REQ-025-16 | `crates/app/tests/selection.rs` › req_025_16_a_selected_tile_shrinks (snapshot `selection`) | pass |
+| REQ-025-17 | `crates/app/tests/selection.rs` › req_025_17_the_magnifier_opens_while_selecting | pass |
