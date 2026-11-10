@@ -1,5 +1,5 @@
-//! `domain` and `meta` stay pure (docs/architecture.md): no IO, no UI, no database, so their rules are tested without
-//! files, a GPU or an index.
+//! The crates' layering (docs/architecture.md): `domain` and `meta` stay pure (no IO, no UI, no database, so their rules
+//! are tested without files, a GPU or an index), and workspace crates depend on each other only as the diagram shows.
 
 use std::path::{Path, PathBuf};
 
@@ -85,4 +85,71 @@ fn pure_crates_do_no_io_outside_tests() {
             }
         }
     }
+}
+
+/// Every dependency between workspace crates, as `from -> to` with its platform when it has one. A new edge is an
+/// architecture change: add it here and to the diagram in docs/architecture.md.
+const EDGES: [&str; 16] = [
+    "app -> db",
+    "app -> domain",
+    "app -> indexer",
+    "app -> media [desktop]",
+    "app -> meta [web]",
+    "db -> domain",
+    "indexer -> db",
+    "indexer -> domain",
+    "indexer -> media [desktop]",
+    "media -> domain",
+    "media -> meta",
+    "meta -> domain",
+    "xtask -> db",
+    "xtask -> domain",
+    "xtask -> indexer",
+    "xtask -> media",
+];
+
+#[test]
+fn workspace_crates_depend_on_each_other_only_as_documented() {
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let output = std::process::Command::new(cargo)
+        .args(["metadata", "--format-version", "1", "--no-deps", "--offline"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("cargo metadata runs");
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let packages = metadata["packages"].as_array().unwrap();
+    let members: Vec<&str> = packages
+        .iter()
+        .map(|package| package["name"].as_str().unwrap())
+        .collect();
+    let mut edges: Vec<String> = packages
+        .iter()
+        .flat_map(|package| {
+            let from = package["name"].as_str().unwrap();
+            package["dependencies"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(move |dependency| (from, dependency))
+        })
+        .filter(|(_, dependency)| members.contains(&dependency["name"].as_str().unwrap()))
+        .map(|(from, dependency)| {
+            let to = dependency["name"].as_str().unwrap();
+            match dependency["target"].as_str() {
+                None => format!("{from} -> {to}"),
+                Some(r#"cfg(not(target_arch = "wasm32"))"#) => format!("{from} -> {to} [desktop]"),
+                Some(r#"cfg(target_arch = "wasm32")"#) => format!("{from} -> {to} [web]"),
+                Some(target) => format!("{from} -> {to} [{target}]"),
+            }
+        })
+        .collect();
+    edges.sort();
+    edges.dedup();
+    let mut documented = EDGES.map(String::from).to_vec();
+    documented.sort();
+    assert_eq!(
+        edges, documented,
+        "the dependencies between workspace crates changed; update EDGES and the diagram in docs/architecture.md"
+    );
 }
