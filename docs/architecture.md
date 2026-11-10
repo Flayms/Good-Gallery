@@ -118,4 +118,5 @@ Platform code sits behind `cfg(windows)`, `cfg(target_os = "linux")` and `cfg(ta
 - **Network:** the desktop app connects only for what the user allowed: the update check and download (spec 031), through the system's `curl`, a face model they asked for (spec 032), and a content search model they asked for (spec 036). The browser version sends nothing (REQ-019-12); `xtask/tests/no_network.rs` keeps it that way.
 - **Specs and tests:** every test that covers a REQ names it (`fn req_007_01_…` or a doc comment); `cargo xtask check-specs` checks it.
 - **Visual checks:** `egui_kittest` snapshots (`UPDATE_SNAPSHOTS=1`), and `cargo run -p app -- --screenshot <file.png>` for the real window with glass.
+- **File size:** source files stay under 800 lines; larger ones are listed with a ceiling that may only shrink (`xtask/tests/file_size.rs`).
 - **Pinned UI crates:** egui, eframe, egui_kittest and wgpu are pinned to exact versions.
