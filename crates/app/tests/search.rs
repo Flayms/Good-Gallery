@@ -337,6 +337,31 @@ fn req_008_01_req_008_02_req_007_10_limits_the_gallery_to_a_library_and_its_fold
     assert_eq!(count(&harness), Some(4));
 }
 
+/// REQ-008-02: choosing the shown library again folds its folders away and choosing it once more shows them; with a
+/// folder chosen, the library is chosen instead (#323).
+#[test]
+fn req_008_02_choosing_the_shown_library_again_folds_its_folders() {
+    let fixture = Fixture::new();
+    let mut harness = app(&fixture);
+    harness.get_by_role_and_label(Role::Button, "Photos").click();
+    settle(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "trip");
+
+    harness.get_by_role_and_label(Role::Button, "Photos").click();
+    settle(&mut harness);
+    assert!(harness.query_by_label("trip").is_none(), "folded");
+    assert!(search(&harness).library.is_some(), "still the library's media");
+
+    harness.get_by_role_and_label(Role::Button, "Photos").click();
+    settle(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "trip").click();
+    settle(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "Photos").click();
+    settle(&mut harness);
+    assert_eq!(search(&harness).folder, None, "the library instead of the folder");
+    harness.get_by_role_and_label(Role::Button, "trip");
+}
+
 #[test]
 fn req_008_03_req_008_06_filters_by_clicking_people_places_and_tags() {
     let fixture = Fixture::new();
@@ -824,6 +849,47 @@ fn req_008_03_places_line_up_with_and_without_towns() {
     let mut harness = fixture.harness(writer.into());
     settle(&mut harness);
     harness.snapshot(common::snapshot_name("places_tree"));
+}
+
+/// REQ-008-02, REQ-008-03: below the top level a chevron sits left of the folder's icon and the place's name, not on
+/// them (#323).
+#[test]
+fn req_008_02_req_008_03_nested_chevrons_stay_beside_the_icon_and_name() {
+    let conn = db::open_in_memory().unwrap();
+    let root = db::libraries::insert(&conn, "D:\\Photos", "Photos", LibraryStatus::Online)
+        .unwrap()
+        .id;
+    let mut writer = IndexWriter::new(conn);
+    let munich = &[&["Places", "Germany", "Bavaria", "Munich"][..]];
+    writer
+        .write(
+            root,
+            &[
+                file("2024/summer/day 1/munich.jpg", MediaKind::Image, 2_000, None, munich),
+                file(
+                    "2024/berlin.jpg",
+                    MediaKind::Image,
+                    1_000,
+                    None,
+                    &[&["Places", "Germany", "Berlin"]],
+                ),
+            ],
+        )
+        .unwrap();
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness(writer.into());
+    settle(&mut harness);
+    harness.get_by_role_and_label(Role::Button, "Photos").click();
+    settle(&mut harness);
+    harness.get_by_label("Expand 2024").click();
+    settle(&mut harness);
+    harness.get_by_label("Expand Germany").click();
+    settle(&mut harness);
+    harness.get_by_label("Expand summer");
+    harness.get_by_label("Expand Bavaria");
+    harness.hover_at(egui::pos2(600.0, 400.0));
+    settle(&mut harness);
+    harness.snapshot(common::snapshot_name("sidebar_nested"));
 }
 
 /// REQ-007-15: chips of every kind are one height, long names are shortened, and chips that don't fit are counted in

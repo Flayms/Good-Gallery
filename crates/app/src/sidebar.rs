@@ -37,6 +37,8 @@ pub struct SidebarState {
     expanded_tags: HashSet<i64>,
     show_all: HashSet<&'static str>,
     collapsed: HashSet<String>,
+    /// Libraries whose folders were folded away by choosing them again (REQ-008-02).
+    folded_libraries: HashSet<i64>,
     /// The library whose folder tree was expanded for the active folder.
     expanded_for: Option<(i64, Option<String>)>,
     /// Hidden with _Hide sidebar_ or Ctrl + B, stored under `sidebar.hidden` (REQ-008-08, REQ-008-09).
@@ -473,11 +475,28 @@ struct Row<'a> {
 /// Where a row's icon or text starts: its depth's indent, then the chevron's room for a row with one, below another,
 /// or in a tree with chevrons beside it (REQ-008-03).
 fn text_indent(depth: usize, chevron: bool, gutter: bool) -> f32 {
-    let base = 8.0 + depth as f32 * INDENT;
+    let base = chevron_left(depth);
     if depth > 0 || chevron || gutter {
-        base + 20.0
+        base + CHEVRON
     } else {
         base
+    }
+}
+
+/// The chevron's width; a row with one starts its icon or name after it.
+const CHEVRON: f32 = 20.0;
+
+/// Where a row's chevron starts: its depth's indent; its icon or name follow after it (REQ-008-03).
+fn chevron_left(depth: usize) -> f32 {
+    8.0 + depth as f32 * INDENT
+}
+
+/// A folder's or library's icon: open only while it shows what is inside (REQ-008-02).
+fn folder_icon(open: bool, has_children: bool) -> Icon {
+    if open && has_children {
+        Icon::FolderOpen
+    } else {
+        Icon::Folder
     }
 }
 
@@ -495,10 +514,10 @@ fn row(ui: &mut egui::Ui, row: Row) -> (egui::Response, Option<egui::Response>) 
     } else if response.hovered() {
         ui.painter().rect_filled(rect, theme::RADIUS_CONTROL, theme::hover());
     }
-    let mut x = rect.left() + text_indent(row.depth, false, false);
     let mut chevron = None;
     if let Some(open) = row.chevron {
-        let area = Rect::from_center_size(pos2(x + 10.0, rect.center().y), Vec2::splat(20.0));
+        let left = rect.left() + chevron_left(row.depth);
+        let area = Rect::from_center_size(pos2(left + CHEVRON / 2.0, rect.center().y), Vec2::splat(CHEVRON));
         let toggle = ui.interact(area, response.id.with("chevron"), egui::Sense::click());
         let name = format!("{} {}", if open { "Collapse" } else { "Expand" }, row.label);
         toggle.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
@@ -507,7 +526,7 @@ fn row(ui: &mut egui::Ui, row: Row) -> (egui::Response, Option<egui::Response>) 
             .paint_at(ui, Rect::from_center_size(area.center(), Vec2::splat(14.0)));
         chevron = Some(toggle);
     }
-    x = rect.left() + text_indent(row.depth, row.chevron.is_some(), row.gutter);
+    let mut x = rect.left() + text_indent(row.depth, row.chevron.is_some(), row.gutter);
     if let Some((icon, color)) = row.icon {
         icon.image(theme::ICON_SIZE, color).paint_at(
             ui,
@@ -567,6 +586,13 @@ fn libraries(
     for library in input.libraries {
         let offline = library.status == LibraryStatus::Offline;
         let selected = search.library == Some(library.id);
+        let folders = data
+            .folders
+            .as_ref()
+            .filter(|(id, folders)| *id == library.id && !folders.is_empty())
+            .map(|(_, folders)| folders.as_slice())
+            .filter(|_| selected && !on_settings);
+        let unfolded = !state.folded_libraries.contains(&library.id);
         // A spinner while scanned (drawn below), else the offline badge.
         let trailing =
             (input.scanning != Some(library.id) && offline).then(|| crate::status_label(library.status).to_string());
@@ -579,7 +605,7 @@ fn libraries(
                 icon: Some(if offline {
                     (Icon::Unplug, theme::alert())
                 } else {
-                    (Icon::Folder, theme::text())
+                    (folder_icon(unfolded, folders.is_some()), theme::text())
                 }),
                 label: &library.label,
                 active: !on_settings && selected && search.folder.is_none(),
@@ -604,16 +630,21 @@ fn libraries(
             );
         }
         let select = select_all_menu(&response, "Select all in library");
-        if response.clicked() || select {
+        if response.clicked() && !select && selected && !on_settings && search.folder.is_none() {
+            // Choosing the shown library again folds its folders away, or shows them again (REQ-008-02).
+            if unfolded {
+                state.folded_libraries.insert(library.id);
+            } else {
+                state.folded_libraries.remove(&library.id);
+            }
+        } else if response.clicked() || select {
             // A library replaces any folder, the other filters stay.
             (search.library, search.folder) = (Some(library.id), None);
+            state.folded_libraries.remove(&library.id);
             clicked = true;
             *select_all |= select;
         }
-        if selected
-            && !on_settings
-            && let Some((_, folders)) = data.folders.as_ref().filter(|(id, _)| *id == library.id)
-        {
+        if let Some(folders) = folders.filter(|_| !state.folded_libraries.contains(&library.id)) {
             clicked |= folder_items(ui, state, search, select_all, library.id, folders, 1);
         }
     }
@@ -639,7 +670,7 @@ fn folder_items(
                 depth,
                 chevron: has_children.then_some(open),
                 gutter: false,
-                icon: Some((if open { Icon::FolderOpen } else { Icon::Folder }, theme::text())),
+                icon: Some((folder_icon(open, has_children), theme::text())),
                 label: &node.name,
                 active: search.library == Some(library) && search.folder.as_deref() == Some(node.path.as_str()),
                 trailing: None,
@@ -652,9 +683,11 @@ fn folder_items(
                 state.expanded_folders.insert(node.path.clone());
             }
         } else if response.clicked() || select {
-            // Choosing a folder also expands it.
+            // Choosing a folder also expands it, if there is something to show.
             (search.library, search.folder) = (Some(library), Some(node.path.clone()));
-            state.expanded_folders.insert(node.path.clone());
+            if has_children {
+                state.expanded_folders.insert(node.path.clone());
+            }
             *select_all |= select;
             picked = true;
         }
@@ -896,5 +929,25 @@ mod tests {
         assert_eq!(text_indent(0, false, true), text_indent(0, true, false));
         assert!(text_indent(0, false, false) < text_indent(0, true, false));
         assert!(text_indent(1, false, true) > text_indent(0, true, false));
+    }
+
+    /// REQ-008-02, REQ-008-03: at every depth the chevron ends where the row's icon or name starts, so it covers
+    /// neither (#323).
+    #[test]
+    fn req_008_02_req_008_03_the_chevron_stays_left_of_the_icon_and_name() {
+        for depth in 0..4 {
+            assert!(
+                chevron_left(depth) + CHEVRON <= text_indent(depth, true, false),
+                "depth {depth}"
+            );
+        }
+    }
+
+    /// REQ-008-02: only a folder with subfolders opens; a chosen one without them keeps its closed icon (#323).
+    #[test]
+    fn req_008_02_only_a_folder_with_subfolders_shows_open() {
+        assert_eq!(folder_icon(true, true), Icon::FolderOpen);
+        assert_eq!(folder_icon(false, true), Icon::Folder);
+        assert_eq!(folder_icon(true, false), Icon::Folder);
     }
 }
