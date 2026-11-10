@@ -102,7 +102,7 @@ impl Viewer {
         } else if cropping {
             let target = photo_rect(area, fitted, FIT);
             if let Some(session) = &mut self.edit {
-                session.set_crop_area(target);
+                session.set_crop_area(Some(target));
                 // A drag goes on over the chrome.
                 if !over_chrome || session.is_dragging_crop() {
                     session.crop_input(ui, backdrop, target);
@@ -197,13 +197,23 @@ impl Viewer {
                 }
             }
         }
+        // While _Straighten_ is held, the whole turned photo around the crop, which keeps its place (REQ-029-12).
+        let straightening = (editing && !compare && !cropping && transition.is_none())
+            .then(|| self.edit.as_ref()?.straightening_area(rect))
+            .flatten();
+        if !cropping && let Some(session) = &mut self.edit {
+            session.set_crop_area(straightening);
+        }
         let edited = editing
             && transition.is_none()
             && self
                 .edit
                 .as_mut()
-                .is_some_and(|session| session.paint(ui, rect, uv, clip, compare, 1.0));
+                .is_some_and(|session| session.paint(ui, straightening.unwrap_or(rect), uv, clip, compare, 1.0));
         if edited {
+            if let (Some(area), Some(session)) = (straightening, &self.edit) {
+                session.paint_cut_off(&painter, area.intersect(clip), rect);
+            }
             if cropping && let Some(session) = &self.edit {
                 session.paint_crop(&painter, target);
             }

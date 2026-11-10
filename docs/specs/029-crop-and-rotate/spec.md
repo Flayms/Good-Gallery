@@ -92,6 +92,13 @@ Users who find a sideways photo or one with something distracting at its edge fi
 - **Then** the photo shows mirrored left to right or top to bottom, as it shows on screen, with its crop and straightening mirrored too
 - **And** choosing it again, undo or reset takes it back, and it is saved like a crop (REQ-029-06)
 
+### REQ-029-12 · What straightening cuts off
+
+- **Given** a photo in editing mode, outside _Crop_
+- **When** the user holds or drags _Straighten_
+- **Then** the turned photo shows whole: the crop at its place and size, and around it, dimmed, what it cuts off (#272)
+- **And** once the slider is let go, only the crop shows again
+
 ## Out of scope
 
 - Straightening by drawing a line along the horizon, and finding the angle automatically.
@@ -120,4 +127,5 @@ Users who find a sideways photo or one with something distracting at its edge fi
 | REQ-029-08 | `crates/domain/src/edit.rs` › req_029_08_places_rectangles_on_the_output; `crates/meta/src/rules.rs` › req_029_08_moves_a_sidecars_regions_by_the_saved_edit, req_029_08_places_regions_on_the_output_and_names_who_is_gone; `crates/media/src/edit.rs` › req_029_08_saved_regions_mark_the_same_faces (exiftool) | pass |
 | REQ-029-10 | `crates/domain/src/edit.rs` › req_029_10_straightening_maps_both_ways_and_the_crop_shows_only_the_photo, req_029_10_straightening_fits_the_crop_and_round_trips, req_029_08_regions_follow_flips_and_straightening; `crates/app/src/edit/tests.rs` › req_029_10_req_029_11_the_gpu_preview_of_flips_and_straightening_matches_the_cpu_render; `crates/media/src/edit.rs` › req_029_10_req_029_11_saves_straightened_and_flipped_pixels (exiftool); `crates/app/tests/edit.rs` › req_029_10_straightens_with_the_crop_inside_the_photo (snapshot `edit_straighten`) | pass |
 | REQ-029-11 | `crates/domain/src/edit.rs` › req_029_11_flips_mirror_the_output, req_029_08_regions_follow_flips_and_straightening; `crates/app/src/edit/tests.rs` › req_029_10_req_029_11_the_gpu_preview_of_flips_and_straightening_matches_the_cpu_render; `crates/media/src/edit.rs` › req_029_10_req_029_11_saves_straightened_and_flipped_pixels (exiftool); `crates/app/tests/edit.rs` › req_029_11_flips_the_photo | pass |
+| REQ-029-12 | `crates/app/tests/edit.rs` › req_029_12_straightening_shows_what_it_cuts_off_dimmed (snapshot `edit_straightening`) | pass |
 | REQ-029-09 | `crates/domain/src/edit.rs` › req_029_09_scales_the_long_edge_down_and_never_up, req_029_09_req_021_21_size_and_quality_are_changes_and_round_trip; `crates/media/src/edit.rs` › req_029_09_saves_at_the_smaller_size; `crates/app/tests/edit.rs` › req_029_09_req_021_21_the_size_section_sets_the_long_edge_and_the_quality (snapshot `edit_size`) | pass |
