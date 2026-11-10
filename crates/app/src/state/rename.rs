@@ -37,7 +37,7 @@ impl AppState {
             return;
         };
         let cache = self.thumbnail_cache();
-        self.spawn_write(move || Event::Renamed(crate::rename::run(&db, cache.as_ref(), &journal, &job)));
+        self.spawn_write(move || Event::to(Self::renamed, crate::rename::run(&db, cache.as_ref(), &journal, &job)));
     }
 
     /// Takes the last rename back (REQ-035-08).
@@ -59,10 +59,9 @@ impl AppState {
             return;
         };
         let cache = self.thumbnail_cache();
-        self.spawn_write(move || match crate::rename::recover(&db, cache.as_ref(), &journal) {
-            Ok(Some(done)) => Event::Renamed(Ok(done)),
-            Ok(None) => Event::Renamed(Ok(crate::rename::RenameDone::default())),
-            Err(error) => Event::Renamed(Err(error)),
+        self.spawn_write(move || {
+            let recovered = crate::rename::recover(&db, cache.as_ref(), &journal);
+            Event::to(Self::renamed, recovered.map(Option::unwrap_or_default))
         });
     }
 

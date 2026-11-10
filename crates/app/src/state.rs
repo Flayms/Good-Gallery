@@ -13,7 +13,6 @@ mod rename;
 mod writes;
 
 pub use edits::{ClearHistory, RevertTarget};
-use writes::ChangedMany;
 pub use writes::{CONFIRM_MANY_ABOVE, ChangeMany, Many, Rate, TagChange};
 
 use crate::gallery::Gallery;
@@ -239,68 +238,19 @@ struct Written {
 #[cfg(not(target_arch = "wasm32"))]
 const COPY_MAX_SIDE: u32 = 8192;
 
-/// Results of background jobs, applied on the UI thread. The browser has no background threads or folder dialog, so
-/// some never happen there.
-#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-enum Event {
-    /// A LUT the user picked was imported, or why not (REQ-043-01); `None` when they cancelled.
-    LutImported(Option<Result<crate::luts::LutEntry, String>>),
-    #[cfg(not(target_arch = "wasm32"))]
-    FaceModelArrived {
-        key: String,
-        name: String,
-        result: Result<media::face_store::StoredModel, media::face_store::StoreError>,
-    },
-    #[cfg(not(target_arch = "wasm32"))]
-    FaceModelChecked(bool),
-    #[cfg(not(target_arch = "wasm32"))]
-    ContentModelArrived {
-        model: &'static domain::content::ContentModel,
-        result: Result<(), media::face_store::StoreError>,
-    },
-    #[cfg(not(target_arch = "wasm32"))]
-    FaceRegionsWritten {
-        written: Vec<(i64, String)>,
-        failed: Option<String>,
-    },
-    /// The latest published version, or `None` if the check failed (REQ-031-03).
-    UpdateChecked(Option<domain::update::Version>),
-    /// The installer runs, or why it doesn't (REQ-031-05, REQ-031-06).
-    UpdateInstalled(Result<(), String>),
-    LibraryAdded(Result<Library, String>),
-    /// The browser's folder picker closed: the library it added or made readable again, or `None` when cancelled
-    /// (REQ-019-02, REQ-019-09).
-    #[cfg(target_arch = "wasm32")]
-    FolderAdded(Result<Option<crate::web::folders::Picked>, String>),
-    LibraryRemoved(Result<(), String>),
-    FolderPicked(Option<PathBuf>),
-    /// Explorer couldn't show a file: why.
-    ExplorerFailed(Option<String>),
-    /// A photo decoded for the clipboard, or why it couldn't be (REQ-009-25).
-    #[cfg(not(target_arch = "wasm32"))]
-    ImageCopied(Result<eframe::egui::ColorImage, String>),
-    /// The thumbnail cache was cleared; its new size.
-    CacheCleared(u64),
-    /// An edit was saved (REQ-021-09, REQ-021-10), or why not.
-    EditSaved(i64, Result<Written, String>),
-    /// An original was put back (REQ-021-12), or why not.
-    Reverted(Result<Written, String>),
-    /// A photo's earlier versions were removed (REQ-021-26), or why not.
-    HistoryCleared(Result<Written, String>),
-    /// A rating was written into the file and the index (REQ-024-03), or why not (REQ-024-04).
-    Rated(Result<(i64, String), String>),
-    /// Files were renamed (spec 035), or why not.
-    #[cfg(not(target_arch = "wasm32"))]
-    Renamed(Result<crate::rename::RenameDone, String>),
-    /// Dates taken were fixed or taken back (spec 038), or why not.
-    #[cfg(not(target_arch = "wasm32"))]
-    DatesFixed(Result<crate::fix_dates::DatesDone, String>),
-    /// A tag was written into the file (REQ-026-03), or why not (REQ-026-04).
-    Tagged(Result<(i64, String), String>),
-    /// Several items were rated or tagged (REQ-025-07, REQ-026-06), or why none could be.
-    ChangedMany(Result<ChangedMany, String>),
-    /// The job panicked; its flags are reset and the user gets an error.
-    Failed,
+/// The result of a background job: what it changes in the state, applied on the UI thread by [`AppState::poll`]. Each
+/// feature applies its results with a method in its own module (`Event::to(AppState::renamed, result)`).
+struct Event(Box<dyn FnOnce(&mut AppState) + Send>);
+
+impl Event {
+    fn new(apply: impl FnOnce(&mut AppState) + Send + 'static) -> Self {
+        Self(Box::new(apply))
+    }
+
+    /// Applies `value` with `apply`.
+    fn to<T: Send + 'static>(apply: impl FnOnce(&mut AppState, T) + Send + 'static, value: T) -> Self {
+        Self::new(move |state| apply(state, value))
+    }
 }
 
 /// Inputs and dialogs of the Settings page.
@@ -530,7 +480,7 @@ impl AppState {
             return;
         };
         self.settings_page.clearing = true;
-        self.spawn(move || Event::CacheCleared(targets.clear_cache()));
+        self.spawn(move || Event::to(Self::cache_cleared, targets.clear_cache()));
     }
 
     /// Shows files in `file_manager` instead of Explorer.
@@ -545,16 +495,19 @@ impl AppState {
         self.spawn(move || {
             let ffmpeg = media::ffmpeg::find_ffmpeg();
             let image = media::original::load_original(&file, ffmpeg.as_deref(), COPY_MAX_SIDE, sidecar_orientation);
-            Event::ImageCopied(match image {
-                Ok(image) => Ok(eframe::egui::ColorImage::from_rgba_unmultiplied(
-                    [image.width() as usize, image.height() as usize],
-                    image.as_raw(),
-                )),
-                Err(error) => {
-                    tracing::error!("can't copy {}: {error}", file.display());
-                    Err(format!("Couldn't copy the photo: {error}"))
-                }
-            })
+            Event::to(
+                Self::image_copied,
+                match image {
+                    Ok(image) => Ok(eframe::egui::ColorImage::from_rgba_unmultiplied(
+                        [image.width() as usize, image.height() as usize],
+                        image.as_raw(),
+                    )),
+                    Err(error) => {
+                        tracing::error!("can't copy {}: {error}", file.display());
+                        Err(format!("Couldn't copy the photo: {error}"))
+                    }
+                },
+            )
         });
     }
 
@@ -569,13 +522,19 @@ impl AppState {
         let file_manager = self.file_manager.clone();
         self.spawn(move || {
             if !file.exists() {
-                return Event::ExplorerFailed(Some(format!("{} no longer exists.", file.display())));
+                return Event::to(
+                    Self::explorer_failed,
+                    Some(format!("{} no longer exists.", file.display())),
+                );
             }
-            Event::ExplorerFailed(file_manager.show_in_folder(&file).err().map(|error| {
-                tracing::error!("can't show {} in the file manager: {error}", file.display());
-                let program = if cfg!(windows) { "Explorer" } else { "the file manager" };
-                format!("Couldn't open {program}: {error}")
-            }))
+            Event::to(
+                Self::explorer_failed,
+                file_manager.show_in_folder(&file).err().map(|error| {
+                    tracing::error!("can't show {} in the file manager: {error}", file.display());
+                    let program = if cfg!(windows) { "Explorer" } else { "the file manager" };
+                    format!("Couldn't open {program}: {error}")
+                }),
+            )
         });
     }
 
@@ -584,10 +543,13 @@ impl AppState {
         let file_manager = self.file_manager.clone();
         let url = url.into();
         self.spawn(move || {
-            Event::ExplorerFailed(file_manager.open_in_browser(&url).err().map(|error| {
-                tracing::error!("can't open {url}: {error}");
-                format!("Couldn't open the browser: {error}")
-            }))
+            Event::to(
+                Self::explorer_failed,
+                file_manager.open_in_browser(&url).err().map(|error| {
+                    tracing::error!("can't open {url}: {error}");
+                    format!("Couldn't open the browser: {error}")
+                }),
+            )
         });
     }
 
@@ -623,7 +585,8 @@ impl AppState {
     fn spawn_update_check(&mut self) {
         let Some(updater) = self.updates.updater() else { return };
         self.spawn(move || {
-            Event::UpdateChecked(
+            Event::to(
+                Self::update_checked,
                 updater
                     .latest()
                     .map_err(|error| tracing::info!("update check: {error}"))
@@ -644,7 +607,7 @@ impl AppState {
             Asked::Install => {
                 let Some(updater) = self.updates.updater() else { return };
                 self.updates.phase = Phase::Installing(version);
-                self.spawn(move || Event::UpdateInstalled(updater.install(&version)));
+                self.spawn(move || Event::to(Self::update_installed, updater.install(&version)));
             }
         }
     }
@@ -704,6 +667,7 @@ impl AppState {
     }
 
     /// After a file was written: the index reads it again, the viewer shows it anew (REQ-021-10, REQ-021-12).
+    #[cfg(not(target_arch = "wasm32"))]
     fn written(&mut self, written: &Written) {
         self.scans
             .request_paths(written.root_id, vec![written.rel_path.clone()]);
@@ -862,7 +826,8 @@ impl AppState {
         let tx = self.events.0.clone();
         self.pending_jobs += 1;
         std::thread::spawn(move || {
-            let event = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).unwrap_or(Event::Failed);
+            let event = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+                .unwrap_or_else(|_| Event::new(AppState::job_failed));
             let _ = tx.send(event);
         });
     }
@@ -890,7 +855,8 @@ impl AppState {
             jobs
         });
         let _ = writer.send(Box::new(move || {
-            let event = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job)).unwrap_or(Event::Failed);
+            let event = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+                .unwrap_or_else(|_| Event::new(AppState::job_failed));
             let _ = tx.send(event);
         }));
     }
@@ -918,7 +884,7 @@ impl AppState {
                 let conn = lock(&db);
                 indexer::libraries::insert_checked(&conn, &path, scans.as_ref())
             });
-            Event::LibraryAdded(added.map_err(|e| e.to_string()))
+            Event::to(Self::library_added, added.map_err(|e| e.to_string()))
         });
     }
 
@@ -931,7 +897,7 @@ impl AppState {
     pub fn browse_for_library(&mut self) {
         let picker = self.picker.clone();
         self.settings_page.picking = true;
-        self.spawn(move || Event::FolderPicked(picker.pick_folder()));
+        self.spawn(move || Event::to(Self::folder_picked, picker.pick_folder()));
     }
 
     /// Opens the browser's folder picker; the picked folder becomes a library and is scanned (REQ-019-02).
@@ -942,7 +908,7 @@ impl AppState {
         self.settings_page.picking = true;
         self.pending_jobs += 1;
         crate::web::folders::pick_folder(db, scans, move |added| {
-            let _ = tx.send(Event::FolderAdded(added));
+            let _ = tx.send(Event::to(Self::folder_added, added));
         });
     }
 
@@ -952,7 +918,10 @@ impl AppState {
         let scans = self.scans.clone();
         self.spawn(move || {
             let conn = lock(&db);
-            Event::LibraryRemoved(indexer::libraries::remove(&conn, id, scans.as_ref()).map_err(|e| e.to_string()))
+            Event::to(
+                Self::library_removed,
+                indexer::libraries::remove(&conn, id, scans.as_ref()).map_err(|e| e.to_string()),
+            )
         });
     }
 
@@ -1077,154 +1046,120 @@ impl AppState {
 
     fn apply(&mut self, event: Event) {
         self.pending_jobs -= 1;
-        match event {
-            #[cfg(not(target_arch = "wasm32"))]
-            Event::FaceModelArrived { key, name, result } => self.face_model_arrived(&key, &name, result),
-            Event::LutImported(Some(Ok(entry))) => self.toasts.success(format!("Imported the LUT {}", entry.name)),
-            Event::LutImported(Some(Err(error))) => self.toasts.error(error),
-            Event::LutImported(None) => {}
-            #[cfg(not(target_arch = "wasm32"))]
-            Event::FaceModelChecked(wrong) => self.face_model_checked(wrong),
-            #[cfg(not(target_arch = "wasm32"))]
-            Event::ContentModelArrived { model, result } => self.content_model_arrived(model, result),
-            #[cfg(not(target_arch = "wasm32"))]
-            Event::FaceRegionsWritten { written, failed } => self.face_regions_written(written, failed),
-            Event::LibraryAdded(result) => {
-                self.settings_page.adding = false;
-                match result {
-                    Ok(library) => {
-                        self.toasts.success(format!("Added {}, indexing…", library.label));
-                        self.settings_page.path_input.clear();
-                        self.refresh();
-                    }
-                    Err(error) => self.toasts.error(error),
-                }
-            }
-            Event::LibraryRemoved(result) => {
-                if let Err(error) = result {
-                    self.toasts.error(error);
-                }
-                // Its thumbnails are gone (or going): show the cache's new size soon, not in 10 s.
-                self.usage_read_at = None;
-                self.usage_fast_until = Some(Instant::now() + USAGE_REFRESH);
+        (event.0)(self);
+    }
+
+    /// A job panicked: its flags are reset and the user gets an error.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn job_failed(&mut self) {
+        if let Some(viewer) = &mut self.viewer
+            && let Some(media) = viewer.editing().filter(|session| session.saving).map(|s| s.media())
+        {
+            viewer.edit_saved(media, false);
+        }
+        self.settings_page.adding = false;
+        self.settings_page.picking = false;
+        self.settings_page.clearing = false;
+        self.toasts.error("Something went wrong. Details are in the log.");
+        self.refresh();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn library_added(&mut self, result: Result<Library, String>) {
+        self.settings_page.adding = false;
+        match result {
+            Ok(library) => {
+                self.toasts.success(format!("Added {}, indexing…", library.label));
+                self.settings_page.path_input.clear();
                 self.refresh();
             }
-            #[cfg(target_arch = "wasm32")]
-            Event::FolderAdded(result) => {
-                self.settings_page.picking = false;
-                match result {
-                    Ok(Some(picked)) => {
-                        let label = &picked.library.label;
-                        self.toasts.success(if picked.added {
-                            format!("Added {label}, indexing…")
-                        } else {
-                            format!("{label} is readable again, checking for changes…")
-                        });
-                        self.refresh();
-                    }
-                    Ok(None) => {}
-                    Err(error) => self.toasts.error(error),
-                }
-            }
-            Event::FolderPicked(folder) => {
-                self.settings_page.picking = false;
-                if let Some(folder) = folder {
-                    self.add_library(folder.to_string_lossy().into_owned());
-                }
-            }
-            Event::UpdateChecked(latest) => self.updates.checked(latest, self.settings.check_for_updates),
-            Event::UpdateInstalled(result) => {
-                use crate::updates::Phase;
-                match result {
-                    Ok(()) => self.updates.close = true,
-                    Err(error) => {
-                        tracing::error!("can't install the update: {error}");
-                        self.toasts.error(format!("Couldn't install the update: {error}"));
-                        if let Phase::Installing(version) = self.updates.phase {
-                            self.updates.phase = Phase::Available(version);
-                        }
-                    }
-                }
-            }
-            Event::ExplorerFailed(error) => {
-                if let Some(error) = error {
-                    self.toasts.error(error);
-                }
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            Event::ImageCopied(result) => match result {
-                Ok(image) => {
-                    self.copied = Some(image);
-                    self.toasts.success("Copied");
-                }
-                Err(error) => self.toasts.error(error),
-            },
-            Event::CacheCleared(bytes) => {
-                self.settings_page.clearing = false;
-                self.cache_usage = CacheUsage::Bytes(bytes);
-                self.usage_read_at = Some(Instant::now());
-                self.toasts.success("Thumbnail cache cleared");
-            }
-            Event::EditSaved(media, result) => {
-                let saved = result.is_ok();
-                match result {
-                    Ok(written) => {
-                        self.toasts.success(if written.copy { "Saved a copy" } else { "Saved" });
-                        self.written(&written);
-                    }
-                    Err(error) => self.toasts.error(format!("Couldn't save: {error}")),
-                }
-                if let Some(viewer) = &mut self.viewer {
-                    viewer.edit_saved(media, saved);
-                }
-            }
-            Event::Reverted(result) => match result {
-                Ok(written) => {
-                    self.toasts.success("Reverted to the original");
-                    self.written(&written);
-                }
-                Err(error) => self.toasts.error(format!("Couldn't revert: {error}")),
-            },
-            Event::HistoryCleared(result) => match result {
-                Ok(written) => {
-                    self.toasts.success("Version history cleared");
-                    self.written(&written);
-                }
-                Err(error) => self
-                    .toasts
-                    .error(format!("Couldn't clear the version history: {error}")),
-            },
-            #[cfg(not(target_arch = "wasm32"))]
-            Event::Renamed(result) => self.renamed(result),
-            #[cfg(not(target_arch = "wasm32"))]
-            Event::DatesFixed(result) => self.dates_fixed(result),
-            Event::Rated(result) => match result {
-                Ok((root_id, rel_path)) => {
-                    // A new sidecar is noted on the next read; the rating read then is the same.
-                    self.scans.request_paths(root_id, vec![rel_path]);
-                    self.refresh();
-                }
-                Err(error) => self.toasts.error(format!("Couldn't save the rating: {error}")),
-            },
-            Event::ChangedMany(result) => self.changed_many(result),
-            Event::Tagged(result) => match result {
-                // The index reads the file again, which updates the tags everywhere.
-                Ok((root_id, rel_path)) => self.scans.request_paths(root_id, vec![rel_path]),
-                Err(error) => self.toasts.error(format!("Couldn't save the tag: {error}")),
-            },
-            Event::Failed => {
-                if let Some(viewer) = &mut self.viewer
-                    && let Some(media) = viewer.editing().filter(|session| session.saving).map(|s| s.media())
-                {
-                    viewer.edit_saved(media, false);
-                }
-                self.settings_page.adding = false;
-                self.settings_page.picking = false;
-                self.settings_page.clearing = false;
-                self.toasts.error("Something went wrong. Details are in the log.");
+            Err(error) => self.toasts.error(error),
+        }
+    }
+
+    fn library_removed(&mut self, result: Result<(), String>) {
+        if let Err(error) = result {
+            self.toasts.error(error);
+        }
+        // Its thumbnails are gone (or going): show the cache's new size soon, not in 10 s.
+        self.usage_read_at = None;
+        self.usage_fast_until = Some(Instant::now() + USAGE_REFRESH);
+        self.refresh();
+    }
+
+    /// The browser's folder picker closed: the library it added or made readable again, or `None` when cancelled
+    /// (REQ-019-02, REQ-019-09).
+    #[cfg(target_arch = "wasm32")]
+    fn folder_added(&mut self, result: Result<Option<crate::web::folders::Picked>, String>) {
+        self.settings_page.picking = false;
+        match result {
+            Ok(Some(picked)) => {
+                let label = &picked.library.label;
+                self.toasts.success(if picked.added {
+                    format!("Added {label}, indexing…")
+                } else {
+                    format!("{label} is readable again, checking for changes…")
+                });
                 self.refresh();
+            }
+            Ok(None) => {}
+            Err(error) => self.toasts.error(error),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn folder_picked(&mut self, folder: Option<PathBuf>) {
+        self.settings_page.picking = false;
+        if let Some(folder) = folder {
+            self.add_library(folder.to_string_lossy().into_owned());
+        }
+    }
+
+    /// The latest published version, or `None` if the check failed (REQ-031-03).
+    fn update_checked(&mut self, latest: Option<domain::update::Version>) {
+        self.updates.checked(latest, self.settings.check_for_updates);
+    }
+
+    /// The installer runs, or why it doesn't (REQ-031-05, REQ-031-06).
+    fn update_installed(&mut self, result: Result<(), String>) {
+        use crate::updates::Phase;
+        match result {
+            Ok(()) => self.updates.close = true,
+            Err(error) => {
+                tracing::error!("can't install the update: {error}");
+                self.toasts.error(format!("Couldn't install the update: {error}"));
+                if let Phase::Installing(version) = self.updates.phase {
+                    self.updates.phase = Phase::Available(version);
+                }
             }
         }
+    }
+
+    /// Explorer couldn't show a file: why.
+    fn explorer_failed(&mut self, error: Option<String>) {
+        if let Some(error) = error {
+            self.toasts.error(error);
+        }
+    }
+
+    /// A photo decoded for the clipboard, or why it couldn't be (REQ-009-25).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn image_copied(&mut self, result: Result<eframe::egui::ColorImage, String>) {
+        match result {
+            Ok(image) => {
+                self.copied = Some(image);
+                self.toasts.success("Copied");
+            }
+            Err(error) => self.toasts.error(error),
+        }
+    }
+
+    /// The thumbnail cache was cleared; its new size.
+    fn cache_cleared(&mut self, bytes: u64) {
+        self.settings_page.clearing = false;
+        self.cache_usage = CacheUsage::Bytes(bytes);
+        self.usage_read_at = Some(Instant::now());
+        self.toasts.success("Thumbnail cache cleared");
     }
 }
 

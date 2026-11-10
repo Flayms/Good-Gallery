@@ -56,7 +56,12 @@ impl AppState {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn import_lut(&mut self) {
         let (picker, luts) = (self.picker.clone(), self.luts.clone());
-        self.spawn(move || Event::LutImported(picker.pick_lut_file().map(|file| luts.import(&file))));
+        self.spawn(move || {
+            Event::to(
+                Self::lut_imported,
+                picker.pick_lut_file().map(|file| luts.import(&file)),
+            )
+        });
     }
 
     /// The browser version doesn't edit (REQ-021-01).
@@ -105,18 +110,16 @@ impl AppState {
                 tracing::error!("can't save the edit of {}: {error}", save.rel_path);
                 error.to_string()
             });
-            Event::EditSaved(
-                media,
-                result.map(|rel_path| {
-                    forget_index_entry(db.as_deref(), cache.as_ref(), root_id, &rel_path);
-                    Written {
-                        media,
-                        root_id,
-                        rel_path,
-                        copy,
-                    }
-                }),
-            )
+            let result = result.map(|rel_path| {
+                forget_index_entry(db.as_deref(), cache.as_ref(), root_id, &rel_path);
+                Written {
+                    media,
+                    root_id,
+                    rel_path,
+                    copy,
+                }
+            });
+            Event::to(Self::edit_saved, (media, result))
         });
     }
 
@@ -140,15 +143,18 @@ impl AppState {
                 tracing::error!("can't revert {}: {error}", target.rel_path);
                 error.to_string()
             });
-            Event::Reverted(result.map(|()| {
-                forget_index_entry(db.as_deref(), cache.as_ref(), target.root_id, &target.rel_path);
-                Written {
-                    media: target.media,
-                    root_id: target.root_id,
-                    rel_path: target.rel_path,
-                    copy: false,
-                }
-            }))
+            Event::to(
+                Self::reverted,
+                result.map(|()| {
+                    forget_index_entry(db.as_deref(), cache.as_ref(), target.root_id, &target.rel_path);
+                    Written {
+                        media: target.media,
+                        root_id: target.root_id,
+                        rel_path: target.rel_path,
+                        copy: false,
+                    }
+                }),
+            )
         });
     }
 
@@ -175,18 +181,73 @@ impl AppState {
                     tracing::error!("can't clear the versions of {}: {error}", target.rel_path);
                     error.to_string()
                 });
-            Event::HistoryCleared(result.map(|()| {
-                forget_index_entry(db.as_deref(), cache.as_ref(), target.root_id, &target.rel_path);
-                Written {
-                    media: target.media,
-                    root_id: target.root_id,
-                    rel_path: target.rel_path,
-                    copy: false,
-                }
-            }))
+            Event::to(
+                Self::history_cleared,
+                result.map(|()| {
+                    forget_index_entry(db.as_deref(), cache.as_ref(), target.root_id, &target.rel_path);
+                    Written {
+                        media: target.media,
+                        root_id: target.root_id,
+                        rel_path: target.rel_path,
+                        copy: false,
+                    }
+                }),
+            )
         });
     }
 
     #[cfg(target_arch = "wasm32")]
     pub fn clear_history(&mut self, _clear: ClearHistory) {}
+
+    /// A LUT the user picked was imported, or why not (REQ-043-01); `None` when they cancelled.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn lut_imported(&mut self, imported: Option<Result<crate::luts::LutEntry, String>>) {
+        match imported {
+            Some(Ok(entry)) => self.toasts.success(format!("Imported the LUT {}", entry.name)),
+            Some(Err(error)) => self.toasts.error(error),
+            None => {}
+        }
+    }
+
+    /// An edit was saved (REQ-021-09, REQ-021-10), or why not.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn edit_saved(&mut self, (media, result): (i64, Result<Written, String>)) {
+        let saved = result.is_ok();
+        match result {
+            Ok(written) => {
+                self.toasts.success(if written.copy { "Saved a copy" } else { "Saved" });
+                self.written(&written);
+            }
+            Err(error) => self.toasts.error(format!("Couldn't save: {error}")),
+        }
+        if let Some(viewer) = &mut self.viewer {
+            viewer.edit_saved(media, saved);
+        }
+    }
+
+    /// An original was put back (REQ-021-12), or why not.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn reverted(&mut self, result: Result<Written, String>) {
+        match result {
+            Ok(written) => {
+                self.toasts.success("Reverted to the original");
+                self.written(&written);
+            }
+            Err(error) => self.toasts.error(format!("Couldn't revert: {error}")),
+        }
+    }
+
+    /// A photo's earlier versions were removed (REQ-021-26), or why not.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn history_cleared(&mut self, result: Result<Written, String>) {
+        match result {
+            Ok(written) => {
+                self.toasts.success("Version history cleared");
+                self.written(&written);
+            }
+            Err(error) => self
+                .toasts
+                .error(format!("Couldn't clear the version history: {error}")),
+        }
+    }
 }

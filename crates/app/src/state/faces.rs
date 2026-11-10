@@ -292,11 +292,7 @@ impl AppState {
         let Some(store) = self.faces.store.clone() else { return };
         let mut progress = self.arriving_progress(model.sha256.to_owned());
         let key = model.sha256.to_owned();
-        self.spawn(move || Event::FaceModelArrived {
-            key,
-            name: model.name.to_owned(),
-            result: store.download(model, &mut progress),
-        });
+        self.spawn(move || model_arrived(key, model.name.to_owned(), store.download(model, &mut progress)));
     }
 
     /// Stops a download; the file is dropped with it.
@@ -317,11 +313,7 @@ impl AppState {
                 Some(file) => store.add_file(&file, &|file| identify(file, style), &mut progress),
                 None => Err(StoreError::Cancelled),
             };
-            Event::FaceModelArrived {
-                key: "added".to_owned(),
-                name: "the model".to_owned(),
-                result,
-            }
+            model_arrived("added".to_owned(), "the model".to_owned(), result)
         });
     }
 
@@ -330,10 +322,9 @@ impl AppState {
         let Some(store) = self.faces.store.clone() else { return };
         let style = self.faces.added_style.0;
         let mut progress = self.arriving_progress("added".to_owned());
-        self.spawn(move || Event::FaceModelArrived {
-            key: "added".to_owned(),
-            name: "the model".to_owned(),
-            result: store.add_file(&file, &|file| identify(file, style), &mut progress),
+        self.spawn(move || {
+            let result = store.add_file(&file, &|file| identify(file, style), &mut progress);
+            model_arrived("added".to_owned(), "the model".to_owned(), result)
         });
     }
 
@@ -436,7 +427,10 @@ impl AppState {
         }
         self.faces.model_checked = Some(Instant::now());
         self.spawn(move || {
-            Event::FaceModelChecked(faces::model_seems_wrong(&lock(&db), &detector, &recognizer).unwrap_or(false))
+            Event::to(
+                Self::face_model_checked,
+                faces::model_seems_wrong(&lock(&db), &detector, &recognizer).unwrap_or(false),
+            )
         });
     }
 
@@ -549,7 +543,7 @@ impl AppState {
                     }
                 }
             }
-            Event::FaceRegionsWritten { written, failed }
+            Event::new(move |state| state.face_regions_written(written, failed))
         });
     }
 
@@ -645,6 +639,11 @@ fn write_region(
         }
     }
     Ok(())
+}
+
+/// A face model arrived under `key` (`name` in messages), or why not.
+fn model_arrived(key: String, name: String, result: Result<StoredModel, StoreError>) -> Event {
+    Event::new(move |state| state.face_model_arrived(&key, &name, result))
 }
 
 #[cfg(test)]

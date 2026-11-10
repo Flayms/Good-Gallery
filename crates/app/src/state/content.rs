@@ -200,10 +200,8 @@ impl AppState {
                 }
                 !cancel.load(Ordering::SeqCst)
             };
-            Event::ContentModelArrived {
-                model,
-                result: store.download(model, &mut progress),
-            }
+            let result = store.download(model, &mut progress);
+            Event::new(move |state| state.content_model_arrived(model, result))
         });
     }
 

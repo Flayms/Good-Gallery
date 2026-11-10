@@ -3,6 +3,7 @@
 use super::AppState;
 #[cfg(not(target_arch = "wasm32"))]
 use super::{Event, faces, forget_index_entry, ids_roots, lock};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::format;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
@@ -150,14 +151,17 @@ impl AppState {
                     tracing::error!("can't rate {}: {error}", rate.rel_path);
                     error.to_string()
                 });
-            Event::Rated(written.map(|()| {
-                if let Some(db) = &db
-                    && let Err(error) = db::media::set_rating(&lock(db), rate.media, rate.rating)
-                {
-                    tracing::error!("can't store the rating of {}: {error}", rate.rel_path);
-                }
-                (rate.root_id, rate.rel_path)
-            }))
+            Event::to(
+                Self::rated,
+                written.map(|()| {
+                    if let Some(db) = &db
+                        && let Err(error) = db::media::set_rating(&lock(db), rate.media, rate.rating)
+                    {
+                        tracing::error!("can't store the rating of {}: {error}", rate.rel_path);
+                    }
+                    (rate.root_id, rate.rel_path)
+                }),
+            )
         });
     }
 
@@ -225,64 +229,69 @@ impl AppState {
         let trash = self.trash;
         self.spawn_write(move || {
             let files = db::media::files_of(&lock(&db), &change.ids).map_err(|error| error.to_string());
-            Event::ChangedMany(files.map(|files| {
-                let mut done = ChangedMany {
-                    what: change.what.clone(),
-                    changed: Vec::new(),
-                    media: Vec::new(),
-                    failed: 0,
-                    first_failure: None,
-                };
-                for file in files {
-                    let library = std::path::Path::new(&file.root);
-                    let written = match &change.what {
-                        Many::Rate(rating) => {
-                            media::rating::write(&exiftool, library, &file.rel_path, file.kind, *rating)
-                                .map(|()| db::media::set_rating(&lock(&db), file.id, *rating))
-                        }
-                        Many::Tag(path) => {
-                            let tag = domain::tagging::Change::Add(path.clone());
-                            media::tagging::write(&exiftool, library, &file.rel_path, file.kind, &tag)
-                                .map(|()| db::media::mark_for_reading(&lock(&db), file.id))
-                        }
-                        // A new thumbnail, and the faces looked for again on the turned photo.
-                        Many::Turn(turn) => media::rotate::turn(&exiftool, library, &file.rel_path, *turn).map(|_| {
-                            forget_index_entry(Some(&db), cache.as_ref(), file.root_id, &file.rel_path);
-                            db::faces::look_again(&lock(&db), Some(file.id)).map(|()| true)
-                        }),
-                        // Out of the index and the thumbnail cache right away (REQ-009-24).
-                        Many::Delete { permanently } => {
-                            // Of a selection across libraries, those with a Recycle Bin still use it.
-                            let permanently = *permanently && media::delete::deletes_permanently(library);
-                            let remove = if permanently { media::delete::permanently } else { trash };
-                            media::delete::delete(library, &file.rel_path, remove).map(|()| {
-                                let key = db::media::remove(&lock(&db), file.id)?;
-                                if let (Some(key), Some(cache)) = (key, &cache) {
-                                    for width in domain::thumbs::THUMB_WIDTHS {
-                                        let _ = std::fs::remove_file(cache.path(&key, width));
-                                    }
-                                }
-                                Ok(true)
-                            })
-                        }
+            Event::to(
+                Self::changed_many,
+                files.map(|files| {
+                    let mut done = ChangedMany {
+                        what: change.what.clone(),
+                        changed: Vec::new(),
+                        media: Vec::new(),
+                        failed: 0,
+                        first_failure: None,
                     };
-                    match written {
-                        Ok(indexed) => {
-                            if let Err(error) = indexed {
-                                tracing::error!("can't update the index for {}: {error}", file.rel_path);
+                    for file in files {
+                        let library = std::path::Path::new(&file.root);
+                        let written = match &change.what {
+                            Many::Rate(rating) => {
+                                media::rating::write(&exiftool, library, &file.rel_path, file.kind, *rating)
+                                    .map(|()| db::media::set_rating(&lock(&db), file.id, *rating))
                             }
-                            done.changed.push((file.root_id, file.rel_path));
-                            done.media.push(file.id);
-                        }
-                        Err(error) => {
-                            tracing::error!("can't change {}: {error}", file.rel_path);
-                            done.failed += 1;
-                            done.first_failure.get_or_insert((file.file_name, error.to_string()));
+                            Many::Tag(path) => {
+                                let tag = domain::tagging::Change::Add(path.clone());
+                                media::tagging::write(&exiftool, library, &file.rel_path, file.kind, &tag)
+                                    .map(|()| db::media::mark_for_reading(&lock(&db), file.id))
+                            }
+                            // A new thumbnail, and the faces looked for again on the turned photo.
+                            Many::Turn(turn) => {
+                                media::rotate::turn(&exiftool, library, &file.rel_path, *turn).map(|_| {
+                                    forget_index_entry(Some(&db), cache.as_ref(), file.root_id, &file.rel_path);
+                                    db::faces::look_again(&lock(&db), Some(file.id)).map(|()| true)
+                                })
+                            }
+                            // Out of the index and the thumbnail cache right away (REQ-009-24).
+                            Many::Delete { permanently } => {
+                                // Of a selection across libraries, those with a Recycle Bin still use it.
+                                let permanently = *permanently && media::delete::deletes_permanently(library);
+                                let remove = if permanently { media::delete::permanently } else { trash };
+                                media::delete::delete(library, &file.rel_path, remove).map(|()| {
+                                    let key = db::media::remove(&lock(&db), file.id)?;
+                                    if let (Some(key), Some(cache)) = (key, &cache) {
+                                        for width in domain::thumbs::THUMB_WIDTHS {
+                                            let _ = std::fs::remove_file(cache.path(&key, width));
+                                        }
+                                    }
+                                    Ok(true)
+                                })
+                            }
+                        };
+                        match written {
+                            Ok(indexed) => {
+                                if let Err(error) = indexed {
+                                    tracing::error!("can't update the index for {}: {error}", file.rel_path);
+                                }
+                                done.changed.push((file.root_id, file.rel_path));
+                                done.media.push(file.id);
+                            }
+                            Err(error) => {
+                                tracing::error!("can't change {}: {error}", file.rel_path);
+                                done.failed += 1;
+                                done.first_failure.get_or_insert((file.file_name, error.to_string()));
+                            }
                         }
                     }
-                }
-                done
-            }))
+                    done
+                }),
+            )
         });
     }
 
@@ -314,7 +323,7 @@ impl AppState {
                     let removed = faces::remove_person(&exiftool, &photo, name, db, detector.as_deref());
                     if let Err(error) = removed {
                         tracing::error!("can't remove {name}'s regions from {}: {error}", tag.rel_path);
-                        return Event::Tagged(Err(error));
+                        return Event::to(Self::tagged, Err(error));
                     }
                 }
             }
@@ -323,14 +332,17 @@ impl AppState {
                     tracing::error!("can't tag {}: {error}", tag.rel_path);
                     error.to_string()
                 });
-            Event::Tagged(written.map(|()| {
-                if let Some(db) = &db
-                    && let Err(error) = db::media::mark_for_reading(&lock(db), tag.media)
-                {
-                    tracing::error!("can't mark {} for reading: {error}", tag.rel_path);
-                }
-                (tag.root_id, tag.rel_path)
-            }))
+            Event::to(
+                Self::tagged,
+                written.map(|()| {
+                    if let Some(db) = &db
+                        && let Err(error) = db::media::mark_for_reading(&lock(db), tag.media)
+                    {
+                        tracing::error!("can't mark {} for reading: {error}", tag.rel_path);
+                    }
+                    (tag.root_id, tag.rel_path)
+                }),
+            )
         });
     }
 
@@ -338,7 +350,31 @@ impl AppState {
     #[cfg(target_arch = "wasm32")]
     pub fn tag(&mut self, _tag: TagChange) {}
 
+    /// A rating was written into the file and the index (REQ-024-03), or why not (REQ-024-04).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn rated(&mut self, result: Result<(i64, String), String>) {
+        match result {
+            Ok((root_id, rel_path)) => {
+                // A new sidecar is noted on the next read; the rating read then is the same.
+                self.scans.request_paths(root_id, vec![rel_path]);
+                self.refresh();
+            }
+            Err(error) => self.toasts.error(format!("Couldn't save the rating: {error}")),
+        }
+    }
+
+    /// A tag was written into the file (REQ-026-03), or why not (REQ-026-04).
+    #[cfg(not(target_arch = "wasm32"))]
+    fn tagged(&mut self, result: Result<(i64, String), String>) {
+        match result {
+            // The index reads the file again, which updates the tags everywhere.
+            Ok((root_id, rel_path)) => self.scans.request_paths(root_id, vec![rel_path]),
+            Err(error) => self.toasts.error(format!("Couldn't save the tag: {error}")),
+        }
+    }
+
     /// Reads the changed files again and says how changing many items went (REQ-025-07, REQ-026-06).
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn changed_many(&mut self, result: Result<ChangedMany, String>) {
         match result {
             Ok(done) => {
