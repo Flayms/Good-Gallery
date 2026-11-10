@@ -2037,9 +2037,14 @@ impl Gallery {
             return 0.0;
         };
         self.autoscroll.pointer_at(pointer.y);
-        ctx.set_cursor_icon(egui::CursorIcon::AllScroll);
+        // The app draws the pointer: no system cursor points one way only on every platform (REQ-006-23).
+        ctx.set_cursor_icon(egui::CursorIcon::None);
         ctx.request_repaint();
-        paint_autoscroll_marker(ctx, self.autoscroll_at);
+        match self.autoscroll.heading(pointer.y) {
+            Some(domain::autoscroll::Heading::Up) => paint_autoscroll_arrow(ctx, pointer, -1.0),
+            Some(domain::autoscroll::Heading::Down) => paint_autoscroll_arrow(ctx, pointer, 1.0),
+            _ => paint_autoscroll_marker(ctx, self.autoscroll_at),
+        }
         self.autoscroll.velocity(pointer.y) * dt.min(domain::autoscroll::MAX_FRAME)
     }
 
@@ -2187,16 +2192,27 @@ impl Gallery {
 
 /// Where autoscroll started: a round marker with arrows up and down (REQ-006-14).
 fn paint_autoscroll_marker(ctx: &egui::Context, at: egui::Pos2) {
+    // Chevrons pointing up and down, 2.5 points apart from the center.
+    paint_autoscroll_disc(ctx, at, &[(-1.0, 2.5), (1.0, 2.5)]);
+}
+
+/// The pointer once it left the dead zone (REQ-006-23): one chevron in the middle, up (`-1.0`) or down (`1.0`).
+fn paint_autoscroll_arrow(ctx: &egui::Context, at: egui::Pos2, direction: f32) {
+    paint_autoscroll_disc(ctx, at, &[(direction, -2.25)]);
+}
+
+/// A disc at `at` with a chevron 8 points wide and 4.5 high for each `(direction, from)`: pointing up (`-1.0`) or down
+/// (`1.0`), its base `from` points from the center that way.
+fn paint_autoscroll_disc(ctx: &egui::Context, at: egui::Pos2, chevrons: &[(f32, f32)]) {
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::Foreground,
         egui::Id::unique("autoscroll"),
     ));
     painter.circle(at, 14.0, theme::raised(), egui::Stroke::new(1.0, theme::muted()));
     let stroke = egui::Stroke::new(1.5, theme::text());
-    // Chevrons pointing up and down, 8 points wide, 2.5 points apart from the center.
-    for direction in [-1.0, 1.0] {
-        let tip = at + vec2(0.0, direction * 7.0);
-        let base = at.y + direction * 2.5;
+    for &(direction, from) in chevrons {
+        let base = at.y + direction * from;
+        let tip = pos2(at.x, base + direction * 4.5);
         painter.line(vec![pos2(at.x - 4.0, base), tip, pos2(at.x + 4.0, base)], stroke);
     }
 }

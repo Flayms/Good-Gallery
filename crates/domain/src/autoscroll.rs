@@ -12,6 +12,15 @@ const FIREFOX_FRAME: f32 = 0.02;
 /// The longest frame to scroll for, in seconds (Firefox's 100 ms): a stalled frame doesn't make it leap.
 pub const MAX_FRAME: f32 = 0.1;
 
+/// What the pointer shows while autoscroll is on (REQ-006-23): the marker until it leaves the dead zone, then which way
+/// the gallery scrolls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Heading {
+    Still,
+    Up,
+    Down,
+}
+
 /// Whether and how autoscroll is on. `origin` is the pointer's height where the middle button was pressed.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum Autoscroll {
@@ -73,6 +82,18 @@ impl Autoscroll {
         *self = Self::Off;
     }
 
+    /// What the pointer shows at height `y` (REQ-006-23); `None` while off.
+    pub fn heading(self, y: f32) -> Option<Heading> {
+        let origin = self.origin()?;
+        Some(if (y - origin).abs() <= DEAD_ZONE {
+            Heading::Still
+        } else if y < origin {
+            Heading::Up
+        } else {
+            Heading::Down
+        })
+    }
+
     /// How fast to scroll with the pointer at height `y`, in points per second (positive scrolls down).
     pub fn velocity(self, y: f32) -> f32 {
         let Some(origin) = self.origin() else { return 0.0 };
@@ -110,6 +131,21 @@ mod tests {
             per_second(13.0) > 0.0 && per_second(13.0) < 10.0,
             "starts slowly past the dead zone"
         );
+    }
+
+    #[test]
+    fn req_006_23_shows_the_marker_in_the_dead_zone_and_the_direction_beyond() {
+        let mut autoscroll = Autoscroll::default();
+        assert_eq!(autoscroll.heading(100.0), None, "off");
+        autoscroll.press_middle(100.0);
+        assert_eq!(autoscroll.heading(100.0), Some(Heading::Still));
+        assert_eq!(autoscroll.heading(100.0 + DEAD_ZONE), Some(Heading::Still));
+        assert_eq!(autoscroll.heading(100.0 - DEAD_ZONE), Some(Heading::Still));
+        assert_eq!(autoscroll.heading(100.0 + DEAD_ZONE + 1.0), Some(Heading::Down));
+        assert_eq!(autoscroll.heading(20.0), Some(Heading::Up));
+        // Back in the dead zone, the marker again.
+        autoscroll.pointer_at(300.0);
+        assert_eq!(autoscroll.heading(105.0), Some(Heading::Still));
     }
 
     #[test]

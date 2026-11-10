@@ -310,6 +310,34 @@ fn req_006_14_scrolls_while_the_middle_button_is_held_and_after_a_middle_click()
     );
 }
 
+/// REQ-006-23: during autoscroll the app draws the pointer instead of the system cursor: the marker in the dead zone,
+/// then an arrow the way it scrolls.
+#[test]
+fn req_006_23_draws_an_arrow_the_way_it_scrolls() {
+    use egui::PointerButton::Middle;
+    let fixture = Fixture::new();
+    let mut harness = fixture.harness(index(&photos(300)));
+    settle(&mut harness);
+    let start = egui::pos2(450.0, 300.0);
+    harness.hover_at(start);
+    harness.run_steps(1);
+    assert_ne!(harness.output().platform_output.cursor_icon, egui::CursorIcon::None);
+    press(&harness, Middle, start, true);
+    harness.run_steps(2);
+    assert_eq!(harness.output().platform_output.cursor_icon, egui::CursorIcon::None);
+    harness.hover_at(start + egui::vec2(0.0, 60.0));
+    harness.run_steps(2);
+    assert_eq!(harness.output().platform_output.cursor_icon, egui::CursorIcon::None);
+    harness.snapshot(common::snapshot_name("gallery_autoscroll_down"));
+    press(&harness, Middle, start + egui::vec2(0.0, 60.0), false);
+    harness.run_steps(2);
+    assert_ne!(
+        harness.output().platform_output.cursor_icon,
+        egui::CursorIcon::None,
+        "back once it stops"
+    );
+}
+
 /// REQ-006-10: gray tiles while the layout loads, and the error when it can't be loaded.
 #[test]
 fn req_006_10_shows_skeleton_tiles_while_loading_and_the_error_when_loading_fails() {
